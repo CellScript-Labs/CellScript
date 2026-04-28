@@ -204,6 +204,7 @@ pub struct CreatePattern {
     pub binding: String,
     pub fields: Vec<(String, IrOperand)>,
     pub lock: Option<IrOperand>,
+    pub identity: IrIdentityPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -1429,7 +1430,14 @@ impl IrGenerator {
                 fields
             })
             .unwrap_or_default();
-        Some(CreatePattern { operation: operation.to_string(), ty: type_name.to_string(), binding: var.name.clone(), fields, lock })
+        Some(CreatePattern {
+            operation: operation.to_string(),
+            ty: type_name.to_string(),
+            binding: var.name.clone(),
+            fields,
+            lock,
+            identity: IrIdentityPolicy::None,
+        })
     }
 
     fn named_type_name_from_ir_type(ty: &IrType) -> Option<&str> {
@@ -2448,6 +2456,7 @@ impl IrGenerator {
             binding: dest.name.clone(),
             fields: lowered_fields,
             lock: lowered_lock,
+            identity: IrIdentityPolicy::None,
         };
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
         self.aggregate_fields.insert(dest.id, field_vars);
@@ -2552,14 +2561,15 @@ impl IrGenerator {
             None
         };
 
+        let identity = Self::lower_identity_policy(&cu.identity);
         let pattern = CreatePattern {
             operation: "create_unique".to_string(),
             ty: cu.ty.clone(),
             binding: dest.name.clone(),
             fields: lowered_fields,
             lock: lowered_lock,
+            identity: identity.clone(),
         };
-        let identity = Self::lower_identity_policy(&cu.identity);
         self.block_mut(blocks, active).instructions.push(IrInstruction::CreateUnique { dest: dest.clone(), pattern, identity });
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
@@ -2607,14 +2617,15 @@ impl IrGenerator {
             field_vars.insert(field_name.clone(), field_var);
         }
 
+        let identity = Self::lower_identity_policy(&ru.identity);
         let pattern = CreatePattern {
             operation: "replace_unique".to_string(),
             ty: ru.ty.clone(),
             binding: dest.name.clone(),
             fields: lowered_fields,
             lock: None,
+            identity: identity.clone(),
         };
-        let identity = Self::lower_identity_policy(&ru.identity);
         self.block_mut(blocks, active).instructions.push(IrInstruction::ReplaceUnique {
             dest: dest.clone(),
             operand: lowered_input.operand,

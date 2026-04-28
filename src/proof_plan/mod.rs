@@ -545,6 +545,14 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
         vec!["macro_expansion:transfer=consume-input+create-output".to_string()]
     } else if obligation.feature.starts_with("create-output:") {
         vec!["macro_expansion:create=create-output".to_string()]
+    } else if obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("create-unique-identity:") {
+        vec!["macro_expansion:create_unique=create-output+identity-anchor".to_string()]
+    } else if obligation.feature.starts_with("replace-unique-output:")
+        || obligation.feature.starts_with("replace-unique-input:")
+        || obligation.feature.starts_with("replace-unique-identity:")
+        || obligation.feature.starts_with("replace_unique-input:")
+    {
+        vec!["macro_expansion:replace_unique=consume-input+create-output+preserve-identity".to_string()]
     } else if obligation.feature.starts_with("claim-output:") || obligation.feature.starts_with("claim-input:") {
         vec!["macro_expansion:claim=consume-receipt+create-output".to_string()]
     } else if obligation.feature.starts_with("settle-output:") || obligation.feature.starts_with("settle-input:") {
@@ -651,7 +659,13 @@ fn group_cardinality(obligation: &VerifierObligationMetadata, scope_kind: &str) 
 
 fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'static str {
     let text = format!("{} {}", obligation.feature, obligation.detail).to_ascii_lowercase();
-    if text.contains("type_id") || text.contains("type-id") {
+    if text.contains("identity field(") || text.contains("field identity") {
+        "identity field"
+    } else if text.contains("script_args") || text.contains("script args") {
+        "identity script_args"
+    } else if text.contains("singleton_type") || text.contains("singleton type") {
+        "identity singleton_type"
+    } else if text.contains("type_id") || text.contains("type-id") {
         "identity ckb_type_id"
     } else if text.contains("destroy-output-scan") || text.contains("same type") || text.contains("typehash absence") {
         "destroy_singleton_type compatibility policy"

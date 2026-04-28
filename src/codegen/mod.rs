@@ -191,6 +191,16 @@ fn fixed_scalar_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
     }
 }
 
+fn identity_policy_label(identity: &IrIdentityPolicy) -> String {
+    match identity {
+        IrIdentityPolicy::None => "none".to_string(),
+        IrIdentityPolicy::CkbTypeId => "ckb_type_id".to_string(),
+        IrIdentityPolicy::Field(path) => format!("field({})", path),
+        IrIdentityPolicy::ScriptArgs => "script_args".to_string(),
+        IrIdentityPolicy::SingletonType => "singleton_type".to_string(),
+    }
+}
+
 /// Fixed-width types that fit in a single RISC-V 64-bit register (≤8 bytes).
 /// Used by transition formula verification which needs scalar add/sub.
 fn fixed_register_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
@@ -1697,6 +1707,10 @@ impl CodeGenerator {
                         self.operation_output_indices.insert(dest.id, output_index);
                         output_index += 1;
                     }
+                    IrInstruction::ReplaceUnique { dest, .. } => {
+                        self.record_verified_operation_output(body, output_index, dest, "replace_unique");
+                        output_index += 1;
+                    }
                     IrInstruction::Transfer { dest, .. } => {
                         self.record_verified_operation_output(body, output_index, dest, "transfer");
                         output_index += 1;
@@ -1968,10 +1982,10 @@ impl CodeGenerator {
         }
 
         // Simulated transfer/claim/settle output summaries are verified from
-        // the entry prelude. Real `create` expressions are verified at the
-        // source instruction so computed field values are already in slots.
+        // the entry prelude. Real create/unique expressions are verified at
+        // the source instruction so computed field values are already in slots.
         for (index, pattern) in body.create_set.iter().enumerate() {
-            if pattern.operation != "create" {
+            if matches!(pattern.operation.as_str(), "transfer" | "claim" | "settle") {
                 self.generate_create(pattern, index)?;
             }
         }
@@ -2658,7 +2672,9 @@ impl CodeGenerator {
                             next_cell_slot += 8;
                         }
                     }
-                    IrInstruction::Create { dest, .. } | IrInstruction::CreateUnique { dest, .. } => {
+                    IrInstruction::Create { dest, .. }
+                    | IrInstruction::CreateUnique { dest, .. }
+                    | IrInstruction::ReplaceUnique { dest, .. } => {
                         create_dest_outputs.insert(dest.id, create_index);
                         create_index += 1;
                     }
@@ -3018,6 +3034,150 @@ impl CodeGenerator {
             self.emit_epilogue();
             self.emit_label(&ok_label);
         }
+    }
+
+    fn emit_cell_field_hash_equality(
+        &mut self,
+        left_reason: &str,
+        left_source: u64,
+        left_index: usize,
+        right_reason: &str,
+        right_source: u64,
+        right_index: usize,
+        cell_field: u64,
+        field_name: &str,
+        detail: &str,
+        error: CellScriptRuntimeError,
+    ) {
+        let left_size_offset = self.runtime_scratch_size_offset();
+        let left_buffer_offset = self.runtime_scratch_buffer_offset();
+        let right_size_offset = self.runtime_scratch2_size_offset();
+        let right_buffer_offset = self.runtime_scratch2_buffer_offset();
+
+        self.emit_load_cell_by_field_syscall_to_offsets(
+            left_reason,
+            left_source,
+            left_index,
+            cell_field,
+            left_size_offset,
+            left_buffer_offset,
+            32,
+        );
+        self.emit_return_on_syscall_error(error);
+        self.emit_load_cell_by_field_syscall_to_offsets(
+            right_reason,
+            right_source,
+            right_index,
+            cell_field,
+            right_size_offset,
+            right_buffer_offset,
+            32,
+        );
+        self.emit_return_on_syscall_error(error);
+        self.emit_loaded_schema_exact_size_check(left_size_offset, 32, &format!("{} {}", left_reason, field_name));
+        self.emit_loaded_schema_exact_size_check(right_size_offset, 32, &format!("{} {}", right_reason, field_name));
+        self.emit(format!(
+            "# cellscript abi: verify {} {} {}#{} == {}#{} size=32",
+            detail,
+            field_name,
+            ckb_source_name(left_source),
+            left_index,
+            ckb_source_name(right_source),
+            right_index
+        ));
+        self.emit_sp_addi("a0", left_buffer_offset);
+        self.emit_sp_addi("a1", right_buffer_offset);
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        let ok_label = self.fresh_label("identity_hash_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_runtime_error_comment(error);
+        self.emit(format!("li a0, {}", error.code()));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+    }
+
+    fn emit_output_type_hash_present_check(&mut self, output_index: usize, context: &str) {
+        let size_offset = self.runtime_scratch2_size_offset();
+        let buffer_offset = self.runtime_scratch2_buffer_offset();
+        self.emit_load_cell_by_field_syscall_to_offsets(
+            context,
+            CKB_SOURCE_OUTPUT,
+            output_index,
+            CKB_CELL_FIELD_TYPE_HASH,
+            size_offset,
+            buffer_offset,
+            32,
+        );
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::TypeHashMismatch);
+        self.emit_loaded_schema_exact_size_check(size_offset, 32, context);
+        self.emit(format!("# cellscript abi: verify {} Output#{} TypeHash is present size=32", context, output_index));
+    }
+
+    fn emit_loaded_fixed_field_pointer_to_stack(
+        &mut self,
+        size_offset: usize,
+        buffer_offset: usize,
+        layout: &SchemaFieldLayout,
+        width: usize,
+        context: &str,
+        pointer_stack_offset: usize,
+    ) {
+        self.emit_loaded_schema_bounds_check(size_offset, layout.offset + width, context);
+        self.emit_sp_addi("t5", buffer_offset + layout.offset);
+        self.emit_stack_sd("t5", pointer_stack_offset);
+    }
+
+    fn emit_dynamic_fixed_field_pointer_to_stack(
+        &mut self,
+        size_offset: usize,
+        buffer_offset: usize,
+        layout: &SchemaFieldLayout,
+        field_count: usize,
+        width: usize,
+        context: &str,
+        pointer_stack_offset: usize,
+        len_stack_offset: usize,
+    ) {
+        self.emit_dynamic_table_field_span_to_stack(
+            size_offset,
+            buffer_offset,
+            layout.index,
+            field_count,
+            context,
+            pointer_stack_offset,
+            len_stack_offset,
+        );
+        self.emit_stack_ld("t0", len_stack_offset);
+        self.emit(format!("li t1, {}", width));
+        self.emit("sub t2, t0, t1");
+        let ok_label = self.fresh_label("identity_field_len_ok");
+        self.emit(format!("beqz t2, {}", ok_label));
+        self.emit_runtime_error_comment(CellScriptRuntimeError::DynamicFieldValueMismatch);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::DynamicFieldValueMismatch.code()));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+    }
+
+    fn emit_fixed_pointer_equality(
+        &mut self,
+        left_pointer_stack_offset: usize,
+        right_pointer_stack_offset: usize,
+        width: usize,
+        context: &str,
+        error: CellScriptRuntimeError,
+    ) {
+        self.emit(format!("# cellscript abi: verify {} size={}", context, width));
+        self.emit_stack_ld("a0", left_pointer_stack_offset);
+        self.emit_stack_ld("a1", right_pointer_stack_offset);
+        self.emit(format!("li a2, {}", width));
+        self.emit("call __cellscript_memcmp_fixed");
+        let ok_label = self.fresh_label("identity_field_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_runtime_error_comment(error);
+        self.emit(format!("li a0, {}", error.code()));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
     }
 
     fn should_emit_claim_witness_authorization_domain_check(&self, pattern: &CellPattern, var_id: usize) -> bool {
@@ -7805,7 +7965,8 @@ impl CodeGenerator {
 
     /// create
     fn emit_create(&mut self, dest: &IrVar, pattern: &CreatePattern) -> Result<()> {
-        self.generate_create(pattern, self.next_virtual_output)?;
+        let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
+        self.generate_create(pattern, output_index)?;
         self.emit(format!("# create {}", pattern.ty));
         for (field, value) in &pattern.fields {
             match value {
@@ -7818,23 +7979,269 @@ impl CodeGenerator {
         if pattern.lock.is_some() {
             self.emit("#   with_lock <expr>");
         }
-        self.emit(format!("li t0, {}", self.next_virtual_output));
+        self.emit(format!("li t0, {}", output_index));
         self.emit(format!("sd t0, {}(sp)", dest.id * 8));
-        self.next_virtual_output += 1;
+        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
+    }
+
+    fn emit_create_unique_identity_check(&mut self, output_index: usize, pattern: &CreatePattern, identity: &IrIdentityPolicy) {
+        self.emit(format!(
+            "# cellscript abi: create_unique identity policy {} for Output#{}",
+            identity_policy_label(identity),
+            output_index
+        ));
+        match identity {
+            IrIdentityPolicy::None => {}
+            IrIdentityPolicy::CkbTypeId => {
+                self.emit_output_type_hash_present_check(output_index, "create_unique_ckb_type_id_output_type_hash");
+            }
+            IrIdentityPolicy::Field(field) => {
+                self.emit_create_unique_field_identity_anchor(output_index, pattern, field);
+            }
+            IrIdentityPolicy::ScriptArgs => {
+                self.emit_cell_field_hash_equality(
+                    "create_unique_group_input_lock_hash",
+                    CKB_SOURCE_GROUP_INPUT,
+                    0,
+                    "create_unique_output_lock_hash",
+                    CKB_SOURCE_OUTPUT,
+                    output_index,
+                    CKB_CELL_FIELD_LOCK_HASH,
+                    "LockHash",
+                    "create_unique script_args identity anchor",
+                    CellScriptRuntimeError::LockHashPreservationMismatch,
+                );
+            }
+            IrIdentityPolicy::SingletonType => {
+                self.emit_cell_field_hash_equality(
+                    "create_unique_group_input_type_hash",
+                    CKB_SOURCE_GROUP_INPUT,
+                    0,
+                    "create_unique_output_type_hash",
+                    CKB_SOURCE_OUTPUT,
+                    output_index,
+                    CKB_CELL_FIELD_TYPE_HASH,
+                    "TypeHash",
+                    "create_unique singleton_type identity anchor",
+                    CellScriptRuntimeError::TypeHashMismatch,
+                );
+            }
+        }
+    }
+
+    fn emit_create_unique_field_identity_anchor(&mut self, output_index: usize, pattern: &CreatePattern, field: &str) {
+        let Some(layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(field)).cloned() else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because create_unique identity field {}.{} has no layout",
+                pattern.ty, field
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            return;
+        };
+        let Some(width) = layout_fixed_byte_width(&layout) else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because create_unique identity field {}.{} is not fixed-width",
+                pattern.ty, field
+            ));
+            self.emit_fail(CellScriptRuntimeError::DynamicFieldValueMismatch);
+            return;
+        };
+        let output_size_offset = self.runtime_scratch_size_offset();
+        let output_buffer_offset = self.runtime_scratch_buffer_offset();
+        self.emit_load_cell_data_syscall("create_unique_identity_field", CKB_SOURCE_OUTPUT, output_index);
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
+        let output_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let context = format!("create_unique identity field {}.{}", pattern.ty, field);
+        if self.type_fixed_sizes.contains_key(&pattern.ty) {
+            self.emit_loaded_fixed_field_pointer_to_stack(
+                output_size_offset,
+                output_buffer_offset,
+                &layout,
+                width,
+                &context,
+                output_pointer_offset,
+            );
+        } else if let Some(field_count) = self.type_layouts.get(&pattern.ty).map(|fields| fields.len()) {
+            self.emit_dynamic_fixed_field_pointer_to_stack(
+                output_size_offset,
+                output_buffer_offset,
+                &layout,
+                field_count,
+                width,
+                &context,
+                output_pointer_offset,
+                output_len_offset,
+            );
+        } else {
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            return;
+        }
+        self.emit(format!(
+            "# cellscript abi: create_unique field identity anchored by verified Output#{} {}.{} size={}",
+            output_index, pattern.ty, field, width
+        ));
+    }
+
+    fn emit_replace_unique_identity_check(
+        &mut self,
+        output_index: usize,
+        operand: &IrOperand,
+        pattern: &CreatePattern,
+        identity: &IrIdentityPolicy,
+    ) {
+        self.emit(format!(
+            "# cellscript abi: replace_unique identity policy {} for Output#{}",
+            identity_policy_label(identity),
+            output_index
+        ));
+        let input_index = match operand {
+            IrOperand::Var(var) => self.consume_indices.get(&var.id).copied().unwrap_or(0),
+            _ => 0,
+        };
+        match identity {
+            IrIdentityPolicy::None => {}
+            IrIdentityPolicy::CkbTypeId | IrIdentityPolicy::SingletonType => {
+                self.emit_cell_field_hash_equality(
+                    "replace_unique_input_type_hash",
+                    CKB_SOURCE_INPUT,
+                    input_index,
+                    "replace_unique_output_type_hash",
+                    CKB_SOURCE_OUTPUT,
+                    output_index,
+                    CKB_CELL_FIELD_TYPE_HASH,
+                    "TypeHash",
+                    "replace_unique type identity preservation",
+                    CellScriptRuntimeError::TypeHashMismatch,
+                );
+            }
+            IrIdentityPolicy::ScriptArgs => {
+                self.emit_cell_field_hash_equality(
+                    "replace_unique_input_lock_hash",
+                    CKB_SOURCE_INPUT,
+                    input_index,
+                    "replace_unique_output_lock_hash",
+                    CKB_SOURCE_OUTPUT,
+                    output_index,
+                    CKB_CELL_FIELD_LOCK_HASH,
+                    "LockHash",
+                    "replace_unique script_args identity preservation",
+                    CellScriptRuntimeError::LockHashPreservationMismatch,
+                );
+            }
+            IrIdentityPolicy::Field(field) => {
+                self.emit_replace_unique_field_identity_check(output_index, operand, pattern, field);
+            }
+        }
+    }
+
+    fn emit_replace_unique_field_identity_check(
+        &mut self,
+        output_index: usize,
+        operand: &IrOperand,
+        pattern: &CreatePattern,
+        field: &str,
+    ) {
+        let input_var = match operand {
+            IrOperand::Var(var) => var,
+            _ => {
+                self.emit("# cellscript abi: fail closed because replace_unique identity input is not a cell variable");
+                self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
+                return;
+            }
+        };
+        let (Some(input_size_offset), Some(input_buffer_offset)) =
+            (self.cell_buffer_size_offsets.get(&input_var.id).copied(), self.cell_buffer_offsets.get(&input_var.id).copied())
+        else {
+            self.emit("# cellscript abi: fail closed because replace_unique identity input cell data is unavailable");
+            self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
+            return;
+        };
+        let Some(layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(field)).cloned() else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because replace_unique identity field {}.{} has no layout",
+                pattern.ty, field
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            return;
+        };
+        let Some(width) = layout_fixed_byte_width(&layout) else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because replace_unique identity field {}.{} is not fixed-width",
+                pattern.ty, field
+            ));
+            self.emit_fail(CellScriptRuntimeError::DynamicFieldValueMismatch);
+            return;
+        };
+
+        let output_size_offset = self.runtime_scratch_size_offset();
+        let output_buffer_offset = self.runtime_scratch_buffer_offset();
+        self.emit_load_cell_data_syscall("replace_unique_identity_field_output", CKB_SOURCE_OUTPUT, output_index);
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
+        let input_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+        let input_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let output_pointer_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+        let output_len_offset = self.runtime_expr_temp_offset(3).expect("runtime temp slot 3");
+        let input_context = format!("replace_unique input identity field {}.{}", pattern.ty, field);
+        let output_context = format!("replace_unique output identity field {}.{}", pattern.ty, field);
+        if self.type_fixed_sizes.contains_key(&pattern.ty) {
+            self.emit_loaded_fixed_field_pointer_to_stack(
+                input_size_offset,
+                input_buffer_offset,
+                &layout,
+                width,
+                &input_context,
+                input_pointer_offset,
+            );
+            self.emit_loaded_fixed_field_pointer_to_stack(
+                output_size_offset,
+                output_buffer_offset,
+                &layout,
+                width,
+                &output_context,
+                output_pointer_offset,
+            );
+        } else if let Some(field_count) = self.type_layouts.get(&pattern.ty).map(|fields| fields.len()) {
+            self.emit_dynamic_fixed_field_pointer_to_stack(
+                input_size_offset,
+                input_buffer_offset,
+                &layout,
+                field_count,
+                width,
+                &input_context,
+                input_pointer_offset,
+                input_len_offset,
+            );
+            self.emit_dynamic_fixed_field_pointer_to_stack(
+                output_size_offset,
+                output_buffer_offset,
+                &layout,
+                field_count,
+                width,
+                &output_context,
+                output_pointer_offset,
+                output_len_offset,
+            );
+        } else {
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            return;
+        }
+        self.emit_fixed_pointer_equality(
+            input_pointer_offset,
+            output_pointer_offset,
+            width,
+            &format!("replace_unique identity field {}.{} Input == Output#{}", pattern.ty, field, output_index),
+            CellScriptRuntimeError::DynamicFieldValueMismatch,
+        );
     }
 
     /// create_unique
     fn emit_create_unique(&mut self, dest: &IrVar, pattern: &CreatePattern, identity: &IrIdentityPolicy) -> Result<()> {
-        self.generate_create(pattern, self.next_virtual_output)?;
-        let identity_label = match identity {
-            IrIdentityPolicy::None => "none",
-            IrIdentityPolicy::CkbTypeId => "ckb_type_id",
-            IrIdentityPolicy::Field(path) => path,
-            IrIdentityPolicy::ScriptArgs => "script_args",
-            IrIdentityPolicy::SingletonType => "singleton_type",
-        };
-        self.emit(format!("# create_unique {} identity={}", pattern.ty, identity_label));
+        let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
+        self.generate_create(pattern, output_index)?;
+        self.emit_create_unique_identity_check(output_index, pattern, identity);
+        self.emit(format!("# create_unique {} identity={}", pattern.ty, identity_policy_label(identity)));
         for (field, value) in &pattern.fields {
             match value {
                 IrOperand::Const(IrConst::U64(n)) => self.emit(format!("#   field {} = {}", field, n)),
@@ -7846,9 +8253,9 @@ impl CodeGenerator {
         if pattern.lock.is_some() {
             self.emit("#   with_lock <expr>");
         }
-        self.emit(format!("li t0, {}", self.next_virtual_output));
+        self.emit(format!("li t0, {}", output_index));
         self.emit(format!("sd t0, {}(sp)", dest.id * 8));
-        self.next_virtual_output += 1;
+        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
 
@@ -7860,14 +8267,8 @@ impl CodeGenerator {
         pattern: &CreatePattern,
         identity: &IrIdentityPolicy,
     ) -> Result<()> {
-        let identity_label = match identity {
-            IrIdentityPolicy::None => "none",
-            IrIdentityPolicy::CkbTypeId => "ckb_type_id",
-            IrIdentityPolicy::Field(path) => path,
-            IrIdentityPolicy::ScriptArgs => "script_args",
-            IrIdentityPolicy::SingletonType => "singleton_type",
-        };
-        self.emit(format!("# replace_unique {} identity={}", pattern.ty, identity_label));
+        let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
+        self.emit(format!("# replace_unique {} identity={}", pattern.ty, identity_policy_label(identity)));
         self.emit_operand_comment("input", operand);
         for (field, value) in &pattern.fields {
             match value {
@@ -7879,19 +8280,15 @@ impl CodeGenerator {
         }
         // replace_unique is a consume + create with identity preservation.
         // The output occupies a virtual output slot, similar to transfer.
-        self.generate_create(pattern, self.next_virtual_output)?;
+        self.generate_create(pattern, output_index)?;
+        self.emit_replace_unique_identity_check(output_index, operand, pattern, identity);
         if self.emit_verified_operation_output_handle(dest, "replace_unique") {
             return Ok(());
         }
-        if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: replace_unique output handle Output#{}", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
-            return Ok(());
-        }
-        self.emit("# cellscript abi: fail closed because replace_unique output relation is unknown");
-        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
+        self.emit(format!("# cellscript abi: replace_unique output handle Output#{}", output_index));
+        self.emit(format!("li t0, {}", output_index));
+        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
 

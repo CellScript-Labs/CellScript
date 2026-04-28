@@ -2296,11 +2296,20 @@ impl<'a> Parser<'a> {
         let kind = self.parse_name()?;
         match kind.as_str() {
             "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
+            "field" => {
+                self.expect(TokenKind::LParen)?;
+                let path = self.parse_name()?;
+                self.expect(TokenKind::RParen)?;
+                Ok(IdentityPolicy::Field(path))
+            }
             "script_args" => Ok(IdentityPolicy::ScriptArgs),
             "singleton_type" => Ok(IdentityPolicy::SingletonType),
             "none" => Ok(IdentityPolicy::None),
             other => Err(CompileError::new(
-                format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
+                format!(
+                    "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
+                    other
+                ),
                 self.current().span,
             )),
         }

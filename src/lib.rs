@@ -1780,7 +1780,7 @@ fn validate_ckb_output_data_create_set_metadata(
                     scope, name, index, binding.output_data_index
                 )));
             }
-        } else if profile_is_ckb && pattern.operation == "create" {
+        } else if profile_is_ckb && matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
             return Err(CompileError::without_span(format!(
                 "metadata {} '{}' create_set[{}] creates output '{}' but is missing ckb_output_data index binding",
                 scope, name, index, pattern.binding
@@ -1814,10 +1814,16 @@ fn validate_ckb_type_id_create_set_metadata(
                     scope, name, index
                 )));
             }
-            if pattern.operation != "create" {
+            if !matches!(pattern.operation.as_str(), "create" | "create_unique") {
                 return Err(CompileError::without_span(format!(
-                    "metadata {} '{}' create_set[{}] has ckb_type_id for non-create operation '{}'",
+                    "metadata {} '{}' create_set[{}] has ckb_type_id for unsupported operation '{}'",
                     scope, name, index, pattern.operation
+                )));
+            }
+            if pattern.operation == "create_unique" && pattern.identity_policy.as_deref() != Some("ckb_type_id") {
+                return Err(CompileError::without_span(format!(
+                    "metadata {} '{}' create_set[{}] has ckb_type_id but create_unique identity policy is {:?}",
+                    scope, name, index, pattern.identity_policy
                 )));
             }
             if ty.ckb_type_id.is_none() {
@@ -1860,6 +1866,17 @@ fn validate_ckb_type_id_create_set_metadata(
         } else if profile_is_ckb && pattern.operation == "create" && ty.ckb_type_id.is_some() {
             return Err(CompileError::without_span(format!(
                 "metadata {} '{}' create_set[{}] creates CKB TYPE_ID type '{}' but is missing ckb_type_id output plan",
+                scope, name, index, pattern.ty
+            )));
+        } else if profile_is_ckb && pattern.operation == "create_unique" && pattern.identity_policy.as_deref() == Some("ckb_type_id") {
+            if ty.ckb_type_id.is_none() {
+                return Err(CompileError::without_span(format!(
+                    "metadata {} '{}' create_set[{}] create_unique uses ckb_type_id identity but type '{}' has no ckb_type_id contract",
+                    scope, name, index, pattern.ty
+                )));
+            }
+            return Err(CompileError::without_span(format!(
+                "metadata {} '{}' create_set[{}] create_unique CKB TYPE_ID type '{}' is missing ckb_type_id output plan",
                 scope, name, index, pattern.ty
             )));
         }
@@ -2873,6 +2890,8 @@ pub struct CreatePatternMetadata {
     pub binding: String,
     pub fields: Vec<String>,
     pub has_lock: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ckb_output_data: Option<CkbOutputDataBindingMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5452,6 +5471,27 @@ fn body_transaction_resource_obligations(
                     }
                     output_index += 1;
                 }
+                ir::IrInstruction::CreateUnique { pattern, identity, .. } => {
+                    if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
+                        checks.push(check);
+                    }
+                    if let Some(check) = unique_identity_obligation("create_unique", &pattern.ty, &pattern.binding, identity) {
+                        checks.push(check);
+                    }
+                    output_index += 1;
+                }
+                ir::IrInstruction::ReplaceUnique { operand, pattern, identity, .. } => {
+                    if let Some(check) = operation_input_data_obligation(body, "replace_unique", operand) {
+                        checks.push(check);
+                    }
+                    if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
+                        checks.push(check);
+                    }
+                    if let Some(check) = unique_identity_obligation("replace_unique", &pattern.ty, &pattern.binding, identity) {
+                        checks.push(check);
+                    }
+                    output_index += 1;
+                }
                 ir::IrInstruction::Transfer { operand, .. } => {
                     if let Some(check) = operation_input_data_obligation(body, "transfer", operand) {
                         checks.push(check);
@@ -5620,9 +5660,10 @@ fn operation_input_data_obligation(
     let pattern = body.consume_set.iter().find(|pattern| pattern.operation == operation && pattern.binding == binding)?;
     pattern.type_hash?;
     let component = format!("{operation}-input-data");
+    let feature_operation = operation.replace('_', "-");
     Some(TransactionResourceObligation {
         category: "transaction-invariant",
-        feature: format!("{operation}-input:{}:{}", type_name, binding),
+        feature: format!("{feature_operation}-input:{}:{}", type_name, binding),
         status: "checked-runtime",
         detail: format!(
             "Compiler-emitted runtime verifier loads '{}' Input cell data for '{}' through LOAD_CELL Source::Input; {}=checked-runtime",
@@ -5653,7 +5694,7 @@ fn create_output_verification_obligation(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
 ) -> Option<TransactionResourceObligation> {
-    if pattern.operation != "create" {
+    if !matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
         return None;
     }
     let fields_checked = metadata_can_verify_create_output_fields(pattern, type_layouts, availability);
@@ -5665,25 +5706,58 @@ fn create_output_verification_obligation(
         None => "not-required",
     };
     let status = if fields_checked && lock_checked { "checked-runtime" } else { "runtime-required" };
+    let operation_feature = pattern.operation.replace('_', "-");
     Some(TransactionResourceObligation {
         category: "transaction-invariant",
-        feature: format!("create-output:{}:{}", pattern.ty, pattern.binding),
+        feature: format!("{}-output:{}:{}", operation_feature, pattern.ty, pattern.binding),
         status,
         detail: if status == "checked-runtime" {
             format!(
-                "Compiler-emitted runtime verifier checks create output '{}' bound to '{}' has verifier-covered fields{}; create-output-fields={}; create-output-lock={}",
+                "Compiler-emitted runtime verifier checks {} output '{}' bound to '{}' has verifier-covered fields{}; {}-output-fields={}; {}-output-lock={}",
+                pattern.operation,
                 pattern.ty,
                 pattern.binding,
                 if pattern.lock.is_some() { " and lock binding" } else { "" },
+                operation_feature,
                 fields_status,
+                operation_feature,
                 lock_status
             )
         } else {
             format!(
-                "Runtime verifier must prove create output '{}' bound to '{}' has verifier-covered fields and any explicit lock binding; create-output-fields={}; create-output-lock={}",
-                pattern.ty, pattern.binding, fields_status, lock_status
+                "Runtime verifier must prove {} output '{}' bound to '{}' has verifier-covered fields and any explicit lock binding; {}-output-fields={}; {}-output-lock={}",
+                pattern.operation, pattern.ty, pattern.binding, operation_feature, fields_status, operation_feature, lock_status
             )
         },
+    })
+}
+
+fn unique_identity_obligation(
+    operation: &'static str,
+    type_name: &str,
+    binding: &str,
+    identity: &ir::IrIdentityPolicy,
+) -> Option<TransactionResourceObligation> {
+    if matches!(identity, ir::IrIdentityPolicy::None) {
+        return None;
+    }
+    let identity_policy = metadata_identity_policy(identity).unwrap_or_else(|| "none".to_string());
+    let operation_feature = operation.replace('_', "-");
+    let local_boundary = match (operation, identity) {
+        ("create_unique", ir::IrIdentityPolicy::Field(_)) => {
+            "; global field uniqueness remains a builder/indexer obligation outside CKB-VM"
+        }
+        ("create_unique", ir::IrIdentityPolicy::CkbTypeId) => "; TYPE_ID uniqueness remains bound to the CKB TYPE_ID builder plan",
+        _ => "",
+    };
+    Some(TransactionResourceObligation {
+        category: "transaction-invariant",
+        feature: format!("{}-identity:{}:{}", operation_feature, type_name, identity_policy),
+        status: "checked-runtime",
+        detail: format!(
+            "Compiler-emitted runtime verifier checks {} identity policy '{}' for '{}' bound to '{}'; {}-identity=checked-runtime{}",
+            operation, identity_policy, type_name, binding, operation_feature, local_boundary
+        ),
     })
 }
 
@@ -6395,6 +6469,8 @@ fn operation_input_feature(feature: &str) -> Option<(&'static str, &str)> {
         Some(("destroy", binding))
     } else if let Some(binding) = feature.strip_prefix("claim-input:") {
         Some(("claim", binding))
+    } else if let Some(binding) = feature.strip_prefix("replace-unique-input:") {
+        Some(("replace_unique", binding))
     } else {
         feature.strip_prefix("settle-input:").map(|binding| ("settle", binding))
     }
@@ -6473,6 +6549,11 @@ fn transaction_runtime_input_requirements_from_obligations(
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
         let include_checked_create_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("create-output:");
+        let include_checked_unique_output = obligation.status == "checked-runtime"
+            && (obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("replace-unique-output:"));
+        let include_checked_unique_identity = obligation.status == "checked-runtime"
+            && (obligation.feature.starts_with("create-unique-identity:")
+                || obligation.feature.starts_with("replace-unique-identity:"));
         let include_checked_resource_conservation =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("resource-conservation:");
         let include_checked_claim_conditions =
@@ -6488,6 +6569,8 @@ fn transaction_runtime_input_requirements_from_obligations(
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
+                && !include_checked_unique_output
+                && !include_checked_unique_identity
                 && !include_checked_resource_conservation
                 && !include_checked_claim_conditions
                 && !include_checked_settle_finalization)
@@ -6676,6 +6759,62 @@ fn transaction_runtime_input_requirements_from_obligations(
                 }
                 _ => {}
             }
+        } else if let Some((operation, binding)) = obligation
+            .feature
+            .strip_prefix("create-unique-output:")
+            .map(|binding| ("create-unique", binding))
+            .or_else(|| obligation.feature.strip_prefix("replace-unique-output:").map(|binding| ("replace-unique", binding)))
+        {
+            let output_binding = binding.rsplit_once(':').map(|(_, binding)| binding).unwrap_or(binding);
+            let fields_key = format!("{operation}-output-fields");
+            let lock_key = format!("{operation}-output-lock");
+            let fields_status = obligation_detail_status(obligation, &fields_key).unwrap_or("runtime-required");
+            let lock_status = obligation_detail_status(obligation, &lock_key).unwrap_or("runtime-required");
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                &fields_key,
+                fields_status,
+                (fields_status == "runtime-required").then_some("unique output field verifier is incomplete for this output shape"),
+                (fields_status == "runtime-required").then_some("unique-output-verification-gap"),
+                "Output",
+                output_binding,
+                Some("fields"),
+                &format!("{operation}-output-field-verifier"),
+                None,
+            ));
+            if matches!(lock_status, "checked-runtime" | "runtime-required") {
+                requirements.push(transaction_runtime_input_requirement(
+                    obligation,
+                    &lock_key,
+                    lock_status,
+                    (lock_status == "runtime-required").then_some("unique output lock binding is not fully verifier-covered"),
+                    (lock_status == "runtime-required").then_some("unique-output-lock-verification-gap"),
+                    "Output",
+                    output_binding,
+                    Some("lock_hash"),
+                    &format!("{operation}-output-lock-hash-32"),
+                    Some(32),
+                ));
+            }
+        } else if let Some((operation, binding)) = obligation
+            .feature
+            .strip_prefix("create-unique-identity:")
+            .map(|binding| ("create-unique", binding))
+            .or_else(|| obligation.feature.strip_prefix("replace-unique-identity:").map(|binding| ("replace-unique", binding)))
+        {
+            let output_binding = binding.split(':').next().unwrap_or(binding);
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                &format!("{operation}-identity"),
+                "checked-runtime",
+                None,
+                None,
+                "Output",
+                output_binding,
+                Some("identity"),
+                &format!("{operation}-identity-verifier"),
+                None,
+            ));
         } else if let Some(binding) = obligation.feature.strip_prefix("linear-collection:") {
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
@@ -9979,6 +10118,34 @@ fn body_fail_closed_runtime_features(
                 ir::IrInstruction::Create { .. } => {
                     output_index += 1;
                 }
+                ir::IrInstruction::CreateUnique { dest, pattern, identity } => {
+                    if !metadata_output_operation_is_verifier_covered(
+                        body,
+                        output_index,
+                        "create_unique",
+                        dest,
+                        type_layouts,
+                        &prelude_availability,
+                    ) || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                    {
+                        features.insert("create-unique-expression".to_string());
+                    }
+                    output_index += 1;
+                }
+                ir::IrInstruction::ReplaceUnique { dest, pattern, identity, .. } => {
+                    if !metadata_output_operation_is_verifier_covered(
+                        body,
+                        output_index,
+                        "replace_unique",
+                        dest,
+                        type_layouts,
+                        &prelude_availability,
+                    ) || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                    {
+                        features.insert("replace-unique-expression".to_string());
+                    }
+                    output_index += 1;
+                }
                 ir::IrInstruction::Transfer { dest, .. } => {
                     if !metadata_output_operation_is_verifier_covered(
                         body,
@@ -10049,6 +10216,23 @@ fn metadata_output_operation_is_verifier_covered(
             && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
             && metadata_can_verify_output_lock(pattern, availability)
     })
+}
+
+fn metadata_unique_identity_policy_is_executable(
+    pattern: &ir::CreatePattern,
+    identity: &ir::IrIdentityPolicy,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    match identity {
+        ir::IrIdentityPolicy::None
+        | ir::IrIdentityPolicy::CkbTypeId
+        | ir::IrIdentityPolicy::ScriptArgs
+        | ir::IrIdentityPolicy::SingletonType => true,
+        ir::IrIdentityPolicy::Field(field) => type_layouts
+            .get(pattern.ty.as_str())
+            .and_then(|fields| fields.get(field))
+            .is_some_and(|layout| metadata_layout_fixed_byte_width(layout).is_some()),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -10218,7 +10402,9 @@ fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                     }
                 }
-                ir::IrInstruction::Create { dest, .. } => {
+                ir::IrInstruction::Create { dest, .. }
+                | ir::IrInstruction::CreateUnique { dest, .. }
+                | ir::IrInstruction::ReplaceUnique { dest, .. } => {
                     let output_index = availability.created_output_vars.len();
                     availability.created_output_vars.insert(dest.id, output_index);
                 }
@@ -11207,6 +11393,19 @@ fn body_ckb_runtime_features(
     if !body.create_set.is_empty() {
         features.insert("verify-output-cell".to_string());
     }
+    if body.create_set.iter().any(|pattern| matches!(pattern.identity, ir::IrIdentityPolicy::Field(_))) {
+        features.insert("verify-unique-identity-field".to_string());
+    }
+    if body.create_set.iter().any(|pattern| matches!(pattern.identity, ir::IrIdentityPolicy::ScriptArgs)) {
+        features.insert("load-identity-lock-hash".to_string());
+    }
+    if body
+        .create_set
+        .iter()
+        .any(|pattern| matches!(pattern.identity, ir::IrIdentityPolicy::CkbTypeId | ir::IrIdentityPolicy::SingletonType))
+    {
+        features.insert("load-identity-type-hash".to_string());
+    }
     if !body.mutate_set.is_empty() {
         features.insert("mutate-input-cell".to_string());
         features.insert("verify-mutate-output-cell".to_string());
@@ -11559,6 +11758,7 @@ fn body_ckb_runtime_accesses(
             binding: pattern.binding.clone(),
         });
     }
+    accesses.extend(body_unique_identity_runtime_accesses(body));
     for pattern in &body.mutate_set {
         accesses.push(CkbRuntimeAccessMetadata {
             operation: "mutate-input".to_string(),
@@ -11600,6 +11800,94 @@ fn body_ckb_runtime_accesses(
         }
     }
     accesses
+}
+
+fn body_unique_identity_runtime_accesses(body: &ir::IrBody) -> Vec<CkbRuntimeAccessMetadata> {
+    let mut accesses = Vec::new();
+    let mut output_index = 0usize;
+    let mut input_index = 0usize;
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::Consume { .. } => {
+                    input_index += 1;
+                }
+                ir::IrInstruction::Create { .. } => {
+                    output_index += 1;
+                }
+                ir::IrInstruction::CreateUnique { pattern, identity, .. } => {
+                    push_create_unique_identity_accesses(&mut accesses, output_index, pattern, identity);
+                    output_index += 1;
+                }
+                ir::IrInstruction::ReplaceUnique { pattern, identity, .. } => {
+                    push_replace_unique_identity_accesses(&mut accesses, input_index, output_index, pattern, identity);
+                    input_index += 1;
+                    output_index += 1;
+                }
+                ir::IrInstruction::Transfer { .. } | ir::IrInstruction::Claim { .. } | ir::IrInstruction::Settle { .. } => {
+                    input_index += 1;
+                    output_index += 1;
+                }
+                ir::IrInstruction::Destroy { .. } => {
+                    input_index += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    accesses
+}
+
+fn push_create_unique_identity_accesses(
+    accesses: &mut Vec<CkbRuntimeAccessMetadata>,
+    output_index: usize,
+    pattern: &ir::CreatePattern,
+    identity: &ir::IrIdentityPolicy,
+) {
+    match identity {
+        ir::IrIdentityPolicy::ScriptArgs => {
+            accesses.push(identity_runtime_access("create_unique-identity-lock_hash", "GroupInput", 0, &pattern.binding));
+            accesses.push(identity_runtime_access("create_unique-identity-lock_hash", "Output", output_index, &pattern.binding));
+        }
+        ir::IrIdentityPolicy::SingletonType => {
+            accesses.push(identity_runtime_access("create_unique-identity-type_hash", "GroupInput", 0, &pattern.binding));
+            accesses.push(identity_runtime_access("create_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+        }
+        ir::IrIdentityPolicy::CkbTypeId => {
+            accesses.push(identity_runtime_access("create_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+        }
+        ir::IrIdentityPolicy::Field(_) | ir::IrIdentityPolicy::None => {}
+    }
+}
+
+fn push_replace_unique_identity_accesses(
+    accesses: &mut Vec<CkbRuntimeAccessMetadata>,
+    input_index: usize,
+    output_index: usize,
+    pattern: &ir::CreatePattern,
+    identity: &ir::IrIdentityPolicy,
+) {
+    match identity {
+        ir::IrIdentityPolicy::ScriptArgs => {
+            accesses.push(identity_runtime_access("replace_unique-identity-lock_hash", "Input", input_index, &pattern.binding));
+            accesses.push(identity_runtime_access("replace_unique-identity-lock_hash", "Output", output_index, &pattern.binding));
+        }
+        ir::IrIdentityPolicy::CkbTypeId | ir::IrIdentityPolicy::SingletonType => {
+            accesses.push(identity_runtime_access("replace_unique-identity-type_hash", "Input", input_index, &pattern.binding));
+            accesses.push(identity_runtime_access("replace_unique-identity-type_hash", "Output", output_index, &pattern.binding));
+        }
+        ir::IrIdentityPolicy::Field(_) | ir::IrIdentityPolicy::None => {}
+    }
+}
+
+fn identity_runtime_access(operation: &str, source: &str, index: usize, binding: &str) -> CkbRuntimeAccessMetadata {
+    CkbRuntimeAccessMetadata {
+        operation: operation.to_string(),
+        syscall: "LOAD_CELL_BY_FIELD".to_string(),
+        source: source.to_string(),
+        index,
+        binding: binding.to_string(),
+    }
 }
 
 fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
@@ -11716,7 +12004,21 @@ fn scheduler_access_is_cell_state_access(access: &CkbRuntimeAccessMetadata) -> b
     matches!(access.source.as_str(), "Input" | "CellDep" | "Output")
         && matches!(
             access.operation.as_str(),
-            "consume" | "transfer" | "destroy" | "claim" | "settle" | "read_ref" | "create" | "mutate-input" | "mutate-output"
+            "consume"
+                | "transfer"
+                | "destroy"
+                | "claim"
+                | "settle"
+                | "read_ref"
+                | "create"
+                | "create_unique"
+                | "replace_unique"
+                | "create_unique-identity-lock_hash"
+                | "create_unique-identity-type_hash"
+                | "replace_unique-identity-lock_hash"
+                | "replace_unique-identity-type_hash"
+                | "mutate-input"
+                | "mutate-output"
         )
 }
 
@@ -12695,6 +12997,7 @@ fn create_pattern_metadata(
         binding: pattern.binding.clone(),
         fields: pattern.fields.iter().map(|(field, _)| field.clone()).collect(),
         has_lock: pattern.lock.is_some(),
+        identity_policy: metadata_identity_policy(&pattern.identity),
         ckb_output_data: ckb_output_data_binding_metadata(pattern, output_index, target_profile),
         ckb_type_id: ckb_type_id_output_metadata(pattern, output_index, type_defs, target_profile),
     }
@@ -12705,7 +13008,7 @@ fn ckb_output_data_binding_metadata(
     output_index: usize,
     target_profile: TargetProfile,
 ) -> Option<CkbOutputDataBindingMetadata> {
-    if target_profile != TargetProfile::Ckb || pattern.operation != "create" {
+    if target_profile != TargetProfile::Ckb || !matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
         return None;
     }
 
@@ -12725,7 +13028,10 @@ fn ckb_type_id_output_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
     target_profile: TargetProfile,
 ) -> Option<CkbTypeIdOutputMetadata> {
-    if target_profile != TargetProfile::Ckb || pattern.operation != "create" {
+    if target_profile != TargetProfile::Ckb || !matches!(pattern.operation.as_str(), "create" | "create_unique") {
+        return None;
+    }
+    if pattern.operation == "create_unique" && !matches!(pattern.identity, ir::IrIdentityPolicy::CkbTypeId) {
         return None;
     }
     let type_def = type_defs.get(&pattern.ty)?;
@@ -23220,6 +23526,210 @@ action mint(amount: u64) -> Token {
         let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token type metadata");
 
         assert_eq!(token.identity_policy.as_deref(), Some("script_args"));
+    }
+
+    #[test]
+    fn compile_create_unique_field_identity_emits_runtime_anchor() {
+        let program = r#"
+module audit::create_unique_field_runtime
+
+resource NFT has store
+    identity(field(token_id))
+{
+    token_id: u64,
+    owner: Address
+}
+
+action mint(token_id: u64, owner: Address) -> NFT {
+    create_unique<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let create = result.metadata.actions[0].create_set.first().expect("create_unique metadata");
+
+        assert_eq!(create.operation, "create_unique");
+        assert_eq!(create.identity_policy.as_deref(), Some("field(token_id)"));
+        assert!(create.ckb_output_data.is_some(), "create_unique output must carry CKB output-data index evidence");
+        assert!(
+            result
+                .metadata
+                .runtime
+                .verifier_obligations
+                .iter()
+                .any(|obligation| obligation.feature == "create-unique-identity:NFT:field(token_id)"
+                    && obligation.detail.contains("global field uniqueness remains")),
+            "missing create_unique field identity proof obligation"
+        );
+        assert!(asm.contains("create_unique identity policy field(token_id)"), "missing identity policy runtime marker:\n{}", asm);
+        assert!(asm.contains("create_unique field identity anchored"), "missing field identity output anchor:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_replace_unique_field_identity_compares_input_and_output() {
+        let program = r#"
+module audit::replace_unique_field_runtime
+
+resource NFT has store
+    identity(field(token_id))
+{
+    token_id: u64,
+    owner: Address
+}
+
+action rotate(old: NFT, owner: Address) -> NFT {
+    replace_unique<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let create = result.metadata.actions[0].create_set.first().expect("replace_unique metadata");
+
+        assert_eq!(create.operation, "replace_unique");
+        assert_eq!(create.identity_policy.as_deref(), Some("field(token_id)"));
+        assert!(create.ckb_output_data.is_some(), "replace_unique output must carry CKB output-data index evidence");
+        assert!(
+            result
+                .metadata
+                .runtime
+                .verifier_obligations
+                .iter()
+                .any(|obligation| obligation.feature == "replace-unique-identity:NFT:field(token_id)"
+                    && obligation.status == "checked-runtime"),
+            "missing replace_unique field identity proof obligation"
+        );
+        assert!(asm.contains("replace_unique identity policy field(token_id)"), "missing identity policy runtime marker:\n{}", asm);
+        assert!(
+            asm.contains("replace_unique identity field NFT.token_id Input == Output#0"),
+            "missing input/output field identity comparison:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_unique_script_args_and_singleton_identity_emit_hash_checks() {
+        let create_script_args_program = r#"
+module audit::create_unique_script_args_runtime
+
+resource Token has store
+    identity(script_args)
+{
+    amount: u64
+}
+
+action mint(amount: u64) -> Token {
+    create_unique<Token>(identity = script_args) { amount: amount }
+}
+"#;
+        let create_script_args = compile(
+            create_script_args_program,
+            CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+        )
+        .unwrap();
+        let create_script_args_asm = String::from_utf8(create_script_args.artifact_bytes.clone()).unwrap();
+        assert!(
+            create_script_args.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+                access.operation == "create_unique-identity-lock_hash"
+                    && access.syscall == "LOAD_CELL_BY_FIELD"
+                    && access.source == "GroupInput"
+                    && access.index == 0
+            }),
+            "missing create_unique script_args identity runtime access evidence"
+        );
+        assert!(
+            create_script_args_asm.contains("create_unique script_args identity anchor LockHash GroupInput#0 == Output#0"),
+            "missing create_unique script_args lock-hash anchor:\n{}",
+            create_script_args_asm
+        );
+
+        let script_args_program = r#"
+module audit::unique_script_args_runtime
+
+resource Token has store
+    identity(script_args)
+{
+    amount: u64
+}
+
+action replace(old: Token, amount: u64) -> Token {
+    replace_unique<Token>(identity = script_args) old { amount: amount }
+}
+"#;
+        let script_args =
+            compile(script_args_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+                .unwrap();
+        let script_args_asm = String::from_utf8(script_args.artifact_bytes.clone()).unwrap();
+        assert!(
+            script_args.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+                access.operation == "replace_unique-identity-lock_hash"
+                    && access.syscall == "LOAD_CELL_BY_FIELD"
+                    && access.source == "Input"
+                    && access.index == 0
+            }),
+            "missing script_args identity runtime access evidence"
+        );
+        assert!(
+            script_args_asm.contains("replace_unique script_args identity preservation LockHash Input#0 == Output#0"),
+            "missing script_args lock-hash preservation check:\n{}",
+            script_args_asm
+        );
+
+        let singleton_program = r#"
+module audit::unique_singleton_runtime
+
+resource Config has store
+    identity(singleton_type)
+{
+    value: u64
+}
+
+action replace(old: Config, value: u64) -> Config {
+    replace_unique<Config>(identity = singleton_type) old { value: value }
+}
+"#;
+        let singleton =
+            compile(singleton_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+                .unwrap();
+        let singleton_asm = String::from_utf8(singleton.artifact_bytes.clone()).unwrap();
+        assert!(
+            singleton.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+                access.operation == "replace_unique-identity-type_hash"
+                    && access.syscall == "LOAD_CELL_BY_FIELD"
+                    && access.source == "Output"
+                    && access.index == 0
+            }),
+            "missing singleton identity runtime access evidence"
+        );
+        assert!(
+            singleton_asm.contains("replace_unique type identity preservation TypeHash Input#0 == Output#0"),
+            "missing singleton type-hash preservation check:\n{}",
+            singleton_asm
+        );
+    }
+
+    #[test]
+    fn compile_rejects_dynamic_unique_identity_field() {
+        let program = r#"
+module audit::dynamic_identity_field
+
+resource Note has store
+    identity(field(memo))
+{
+    memo: Vec<u8>
+}
+
+action mint(memo: Vec<u8>) -> Note {
+    create_unique<Note>(identity = field(memo)) { memo: memo }
+}
+"#;
+
+        let err =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("identity field 'Note.memo' must be fixed-width"), "unexpected error: {}", err.message);
     }
 
     #[test]

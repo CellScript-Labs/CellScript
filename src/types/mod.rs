@@ -1154,6 +1154,10 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn identity_static_width(ty: &Type) -> Option<usize> {
+        Self::lock_args_static_width(ty)
+    }
+
     fn validate_callable_param_reference_shape(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
         let nested_reference = match &param.ty {
             Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_reference(inner),
@@ -1896,32 +1900,29 @@ impl<'a> TypeChecker<'a> {
                 Ok(settle_ty)
             }
             Expr::CreateUnique(cu) => {
-                // Identity-aware create: type-checks like create with identity validation
-                let ty = Type::Named(cu.ty.clone());
-                if !matches!(&cu.identity, IdentityPolicy::CkbTypeId | IdentityPolicy::None) {
-                    return Err(CompileError::new(
-                        format!("create_unique only supports ckb_type_id identity, got {:?}", cu.identity),
-                        cu.span,
-                    ));
-                }
+                self.require_create_target_cell_backed(&cu.ty, cu.span)?;
+                self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
+                self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
                 if let Some(lock) = &cu.lock {
                     let lock_ty = self.infer_expr(env, lock)?;
                     if !Self::is_address_like_type(&lock_ty) {
                         return Err(CompileError::new("lock target must be address-like", cu.span));
                     }
                 }
-                Ok(ty)
+                Ok(Type::Named(cu.ty.clone()))
             }
             Expr::ReplaceUnique(ru) => {
-                // Identity-aware replace: type-checks like consume + create
                 let (input_ty, name) = self.require_named_linear_cell_operand(env, &ru.expr, "replace_unique", ru.span)?;
-                env.consume(&name)?;
-                if !matches!(&ru.identity, IdentityPolicy::CkbTypeId | IdentityPolicy::None) {
+                let output_ty = Type::Named(ru.ty.clone());
+                if !self.types_equal(&input_ty, &output_ty) {
                     return Err(CompileError::new(
-                        format!("replace_unique only supports ckb_type_id identity, got {:?}", ru.identity),
+                        format!("replace_unique output type '{}' must match consumed input type {:?}", ru.ty, input_ty),
                         ru.span,
                     ));
                 }
+                self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
+                self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
+                env.consume(&name)?;
                 Ok(input_ty)
             }
             Expr::Assert(assert_expr) => {
@@ -2184,6 +2185,36 @@ impl<'a> TypeChecker<'a> {
         }
 
         Ok(())
+    }
+
+    fn validate_unique_identity_policy(&self, type_name: &str, identity: &IdentityPolicy, span: Span, operation: &str) -> Result<()> {
+        match identity {
+            IdentityPolicy::None | IdentityPolicy::CkbTypeId | IdentityPolicy::ScriptArgs | IdentityPolicy::SingletonType => Ok(()),
+            IdentityPolicy::Field(field) => {
+                let Some(expected_fields) = self.resolve_named_type_fields(type_name) else {
+                    return Err(CompileError::new(
+                        format!("{} identity field target type '{}' has no declared fields", operation, type_name),
+                        span,
+                    ));
+                };
+                let Some(field_ty) = expected_fields.get(field) else {
+                    return Err(CompileError::new(
+                        format!("{} identity field '{}' does not exist on '{}'", operation, field, type_name),
+                        span,
+                    ));
+                };
+                if Self::identity_static_width(field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "{} identity field '{}.{}' must be fixed-width so CKB runtime can compare it",
+                            operation, type_name, field
+                        ),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+        }
     }
 
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {
