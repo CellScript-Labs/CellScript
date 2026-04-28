@@ -32,7 +32,7 @@ builder assumptions, and enforcement gaps explicit in source and metadata.
 | Runtime-obligation policy gate | Implemented | `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan gaps, including declared invariants whose coverage is still metadata-only. |
 | Lock-group transaction risk diagnostics | Implemented | ProofPlan records warn when a `lock_group` verifier scans transaction-wide views, because only inputs sharing that lock trigger the verifier. |
 | Protocol macro provenance | Implemented | ProofPlan coverage records include macro provenance for selected compiler-recognized flows such as `transfer`, `create`, `claim`, `settle`, `consume`, `destroy`, and pool protocol metadata. |
-| Cell identity and TYPE_ID lifecycle | Implemented | `IdentityPolicy` enum (`none`, `ckb_type_id`, `field(path)`, `script_args`, `singleton_type`) is a first-class AST/IR/codegen primitive. `create_unique<T>(identity = ...)` and `replace_unique<T>(identity = ...)` lower through full pipeline with identity-aware RISC-V emission. `IrInstruction::CreateUnique` and `IrInstruction::ReplaceUnique` carry identity metadata. `TypeMetadata.identity_policy` field exposes the policy in compiled JSON metadata. |
+| Cell identity and TYPE_ID lifecycle | Implemented with executable TYPE_ID boundary | `IdentityPolicy` enum (`none`, `ckb_type_id`, `field(path)`, `script_args`, `singleton_type`) is a first-class type metadata primitive. `TypeMetadata.identity_policy` exposes the policy in compiled JSON metadata. `create_unique<T>(identity = ckb_type_id)` and `replace_unique<T>(identity = ckb_type_id)` lower through the executable pipeline with identity-aware IR/codegen records; non-TYPE_ID identity policies are currently declarative metadata until executable verifier semantics are added. |
 | Explicit destruction policies | Implemented | `DestructionPolicy` enum (`Default`, `SingletonType`, `Unique`, `Instance`, `BurnAmount`) replaces bare `destroy`. Parser supports `destroy_singleton_type(cell)`, `destroy_unique(cell, identity = type_id)`, `destroy_instance(cell, identity_field = id)`, and `burn_amount(cell, field = amount)`. `IrInstruction::Destroy` carries `policy: IrDestructionPolicy` through IR and codegen. |
 | Kernel/protocol primitive split | Implemented | AST `Capability` extended with `Create`, `Consume`, `Replace`, `Burn`, `Relock`, `RetargetType`, `ReadRef`. New capabilities are context-sensitive identifiers in `has ...` clauses. `create_unique`/`replace_unique` are identity-aware lifecycle forms distinct from bare `create`/`transfer`. |
 | Capability vocabulary reset | Implemented | Strict mode (`--primitive-strict=0.15`) rejects `has transfer` and `has destroy` with diagnostic CS0150/CS0156. Compatibility mode (`--primitive-compat=0.14`) accepts legacy vocabulary. `Capability::is_protocol_verb()` and `Capability::kernel_effects()` classify capabilities for migration. |
@@ -54,6 +54,10 @@ builder assumptions, and enforcement gaps explicit in source and metadata.
   bool fields are rejected for aggregate relation targets.
 - `assert_sum(...) <= assert_sum(...)` records a relation check in ProofPlan, but
   it does not yet generate an output-scan verifier.
+- `identity(field(...))`, `identity(script_args)`, and
+  `identity(singleton_type)` are metadata policies today. Executable
+  `create_unique`/`replace_unique` support is limited to `ckb_type_id` and
+  `none` so the compiler does not imply an unenforced CKB authorization rule.
 - Protocol macro provenance is audit metadata. It records how recognized source
   effects map to consume/create/write-intent shapes; it is not a replacement for
   builder-backed CKB transaction evidence.
