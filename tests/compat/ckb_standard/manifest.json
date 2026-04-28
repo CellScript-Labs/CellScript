@@ -1,0 +1,76 @@
+{
+  "schema": "cellscript-ckb-standard-compat-v0.16",
+  "status": "implemented-fixture-suite",
+  "suites": [
+    {
+      "name": "sudt",
+      "script_args_layout": "owner lock hash in args",
+      "witness_layout": "standard lock witness passthrough",
+      "molecule_data_layout": "little-endian amount",
+      "accepted_fixtures": ["sudt-transfer-ok"],
+      "rejected_fixtures": ["sudt-over-mint-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "xudt",
+      "script_args_layout": "owner lock hash plus extension args",
+      "witness_layout": "extension witness passthrough",
+      "molecule_data_layout": "xUDT amount plus extension data",
+      "accepted_fixtures": ["xudt-transfer-ok"],
+      "rejected_fixtures": ["xudt-extension-policy-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "acp",
+      "script_args_layout": "owner lock hash and minimal CKB policy",
+      "witness_layout": "owner lock witness",
+      "molecule_data_layout": "account cell data passthrough",
+      "accepted_fixtures": ["acp-deposit-ok"],
+      "rejected_fixtures": ["acp-unauthorized-withdraw-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "cheque",
+      "script_args_layout": "sender and receiver lock hashes",
+      "witness_layout": "sender/receiver spend witness",
+      "molecule_data_layout": "cheque cell data passthrough",
+      "accepted_fixtures": ["cheque-claim-ok"],
+      "rejected_fixtures": ["cheque-wrong-receiver-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "omnilock",
+      "script_args_layout": "auth flags plus identity args",
+      "witness_layout": "omnilock-compatible lock field",
+      "molecule_data_layout": "lock-only pattern",
+      "accepted_fixtures": ["omnilock-owner-ok"],
+      "rejected_fixtures": ["omnilock-wrong-auth-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "nervosdao-since",
+      "script_args_layout": "DAO deposit owner args",
+      "witness_layout": "DAO withdraw witness passthrough",
+      "molecule_data_layout": "epoch/since header fixtures",
+      "accepted_fixtures": ["dao-since-mature-ok"],
+      "rejected_fixtures": ["dao-since-immature-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    },
+    {
+      "name": "type-id",
+      "script_args_layout": "TYPE_ID args from first input and output index",
+      "witness_layout": "none beyond entry ABI",
+      "molecule_data_layout": "typed output data",
+      "accepted_fixtures": ["type-id-create-ok"],
+      "rejected_fixtures": ["type-id-duplicate-reject"],
+      "cycle_envelope": "tracked-by-acceptance-report",
+      "script_reference_metadata": "required"
+    }
+  ]
+}

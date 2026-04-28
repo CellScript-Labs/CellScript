@@ -55,7 +55,7 @@ Each release answers a specific question:
 | v0.13 release scope | Beta released; implementation scope closed. | [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md), [v0.13 release tracker](../docs/CELLSCRIPT_0_13_TODOLIST.md), [v0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
 | v0.14 release scope | Implementation branch is feature-complete for the current CKB semantic-completeness beta scope. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes draft](../docs/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | v0.15 release scope | Implemented P0; P1 is partial. The branch adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, cell identity, destruction policies, capability reset, and macro provenance. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
-| v0.16 release scope | Draft. Formal semantics, standard compatibility, transaction validation/solving, deployment governance, and audit tooling are planned after v0.15 completion. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md) |
+| v0.16 release scope | Implemented on `cellscript-0.16`. Adds operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md) |
@@ -72,7 +72,7 @@ Each release answers a specific question:
 | v0.13 | Performance and Expressiveness | "Write less, run faster." | Beta released; scope closed |
 | v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse." | Feature-complete beta branch |
 | v0.15 | Scoped Invariants and Covenant ProofPlan | "Show when constraints run, what they read, and who they protect." | P0 complete; P1 partial |
-| v0.16 | Formal Semantics and Production Tooling | "Prove, validate, deploy, and audit." | Draft |
+| v0.16 | Formal Semantics and Production Tooling | "Prove, validate, deploy, and audit." | Implemented on `cellscript-0.16` |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or

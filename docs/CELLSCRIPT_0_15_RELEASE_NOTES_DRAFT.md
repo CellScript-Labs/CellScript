@@ -93,8 +93,9 @@ the verifier.
 primitive policy:
 
 ```cellscript
-resource Token has store {
+resource Token has store
     identity(ckb_type_id)
+{
     amount: u64
 }
 ```
@@ -222,18 +223,21 @@ gaps, including declared invariants whose coverage is still metadata-only.
 ### Type Declaration Identity
 
 ```cellscript
-resource Token has store {
+resource Token has store
     identity(ckb_type_id)      // CKB TYPE_ID
+{
     amount: u64
 }
 
-shared OracleData {
+shared OracleData
     identity(script_args)       // Script.args identity
+{
     value: u64
 }
 
-resource NFT has store {
+resource NFT has store
     identity(field(token_id))   // Field-based identity
+{
     token_id: [u8; 32]
     owner: Address
 }

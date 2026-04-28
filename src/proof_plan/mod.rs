@@ -1,5 +1,7 @@
 //! Covenant ProofPlan metadata for CKB trigger/scope/coverage auditing.
 
+pub mod soundness;
+
 use crate::ast::{AggregateInvariantKind, AggregateRelation, ParamSource};
 use crate::ir::{self, IrInstruction};
 use crate::{CkbRuntimeAccessMetadata, PoolPrimitiveMetadata, VerifierObligationMetadata};

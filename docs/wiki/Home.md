@@ -25,6 +25,7 @@ After that, the wiki moves outward:
 - packages make builds repeatable;
 - the CKB profile chooses the chain-facing runtime rules;
 - metadata explains the artifact;
+- v0.16 assurance commands explain ProofPlan soundness and builder assumptions;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;
 - bundled examples show the style in real contracts.
@@ -82,6 +83,8 @@ That is why the language has:
   are visible in source;
 - metadata sidecars and ProofPlan records that describe schema, ABI,
   constraints, runtime requirements, and verifier obligations.
+- builder assumption records and transaction-shape validation for pre-signing
+  review.
 
 The wiki uses the same rule throughout: if something is only compiler evidence,
 it is described as compiler evidence. If something needs a builder-backed CKB

@@ -111,6 +111,9 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `schema`
 - `runtime`
 - `verifier_obligations`
+- `runtime.proof_plan`
+- `runtime.proof_plan_soundness`
+- `runtime.builder_assumptions`
 - `constraints`
 - `runtime_error_registry`
 - `constraints.artifact`
@@ -128,6 +131,34 @@ When reviewing a contract, ask simple questions first:
 - which Cells are consumed or created;
 - which runtime obligations remain;
 - which CKB profile assumptions are recorded.
+
+## v0.16 Assurance Checks
+
+CellScript 0.16 adds a checked assurance layer over ProofPlan metadata:
+
+```bash
+cellc explain-proof src/main.cell --json
+cellc explain-assumptions src/main.cell --json
+cellc validate-tx --against build/main.elf.meta.json tx.json --json
+```
+
+`runtime.proof_plan_soundness` tells you whether verifier obligations and
+ProofPlan records agree. `--primitive-strict=0.16` rejects metadata-only or
+runtime-required ProofPlan gaps.
+
+`runtime.builder_assumptions` is the machine-readable contract for transaction
+builders. `validate-tx` checks a transaction JSON shape against that contract
+before signing. This is still pre-chain evidence: dry-run, capacity, cycles, and
+commit checks remain required for production claims.
+
+Additional 0.16 reports are available for audit and deployment workflows:
+
+```bash
+cellc solve-tx src/main.cell --json
+cellc deploy-plan src/main.cell --json
+cellc proof-diff old.meta.json new.meta.json --json
+cellc audit-bundle src/main.cell --output target/audit
+```
 
 ## Suggested Compiler CI Gate
 

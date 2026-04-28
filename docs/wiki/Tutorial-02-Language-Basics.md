@@ -122,19 +122,22 @@ A persistent declaration can name the identity policy that later lifecycle
 forms must preserve:
 
 ```cellscript
-resource NFT has store, create, replace {
+resource NFT has store, create, replace
     identity(field(token_id))
+{
     token_id: [u8; 32]
     owner: Address
 }
 
-resource ScriptBoundToken has store, create, replace {
+resource ScriptBoundToken has store, create, replace
     identity(script_args)
+{
     amount: u64
 }
 
-shared Config has store, replace {
+shared Config has store, replace
     identity(singleton_type)
+{
     value: u64
 }
 ```

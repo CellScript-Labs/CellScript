@@ -56,8 +56,9 @@ Use an identity policy plus `create_unique` and `replace_unique` when a Cell
 lineage must be explicit in source and metadata.
 
 ```cellscript
-resource Badge has store, create, replace {
+resource Badge has store, create, replace
     identity(field(badge_id))
+{
     badge_id: [u8; 32]
     owner: Address
 }

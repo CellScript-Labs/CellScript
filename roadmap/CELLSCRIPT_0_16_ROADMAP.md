@@ -1,10 +1,31 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Draft
+**Status**: Implemented on `cellscript-0.16`
 **Scope**: Formal Semantics, Standard Compatibility, and Production Tooling
 **Dependencies**: v0.13, v0.14, and v0.15 complete
 
 ---
+
+## Implementation Status
+
+The `cellscript-0.16` branch implements the release as an assurance/tooling
+track:
+
+| Area | Status | Artifact |
+|---|---|---|
+| Formal operational semantics | Implemented | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md` and `tests/v0_16.rs` conformance checks |
+| ProofPlan soundness checks | Implemented | `proof_plan::soundness`, `runtime.proof_plan_soundness`, and `--primitive-strict=0.16` enforcement |
+| Standard CKB compatibility suite | Implemented as fixture manifest | `tests/compat/ckb_standard/manifest.json` covers sUDT, xUDT, ACP, Cheque, Omnilock, NervosDAO since/epoch, and Type ID fixture expectations |
+| Builder assumption contract | Implemented | `runtime.builder_assumptions` and `cellc explain-assumptions` |
+| Transaction validation | Implemented | `cellc validate-tx --against metadata.json tx.json` |
+| Transaction solver | Implemented as deterministic metadata solver template | `cellc solve-tx` |
+| Deployment governance | Implemented as reproducible JSON plans | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` |
+| Audit/debug UX | Implemented as metadata reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` |
+| Stdlib release track | Fixture-gated | Stable marking is tied to compatibility fixtures and audit bundles |
+
+Boundary: v0.16 does not claim full formal verification. The branch implements
+mechanically checked metadata soundness and transaction-shape validation, while
+local CKB dry-run/commit evidence remains the production acceptance layer.
 
 ## Goal
 

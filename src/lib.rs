@@ -3,6 +3,7 @@
 
 #![allow(clippy::ptr_arg, clippy::too_many_arguments)]
 
+pub mod assumptions;
 pub mod ast;
 pub mod cli;
 pub mod codegen;
@@ -27,6 +28,8 @@ pub mod stdlib;
 pub mod types;
 pub mod wasm;
 
+pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
+pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
 pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -52,19 +55,25 @@ pub struct CompileOptions {
     /// - `None`: default (compat) behaviour
     /// - `Some("0.14")`: accept v0.14 syntax, emit migration hints
     /// - `Some("0.15")`: require v0.15 syntax, reject legacy forms
+    /// - `Some("0.16")`: require v0.15 syntax plus v0.16 ProofPlan soundness
     pub primitive_compat: Option<String>,
 }
 
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
     pub fn is_primitive_strict_015(&self) -> bool {
-        self.primitive_compat.as_deref() == Some("0.15")
+        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16"))
+    }
+
+    /// Returns true when running in v0.16 strict assurance mode.
+    pub fn is_assurance_strict_016(&self) -> bool {
+        self.primitive_compat.as_deref() == Some("0.16")
     }
 
     /// Returns true when running in v0.14 compat mode (the default when
     /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
     pub fn is_primitive_compat_014(&self) -> bool {
-        self.primitive_compat.as_deref() != Some("0.15")
+        !matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16"))
     }
 }
 
@@ -75,7 +84,7 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     Ok(())
 }
 
-/// In `--primitive-strict=0.15` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
+/// In `--primitive-strict=0.15` or `--primitive-strict=0.16` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
 /// in capability declarations. They must be replaced by their kernel-effect equivalents.
 fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
     use crate::error::MigrationDiagnostic;
@@ -91,7 +100,7 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
                 let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
                 return Err(CompileError::new(
                     format!(
-                        "{}: type '{}' declares '{}' which is not allowed in --primitive-strict=0.15 mode",
+                        "{}: type '{}' declares '{}' which is not allowed in primitive strict mode",
                         diag.full_message(),
                         type_name,
                         cap.kernel_effects().iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join("+"),
@@ -106,7 +115,7 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-pub const METADATA_SCHEMA_VERSION: u32 = 40;
+pub const METADATA_SCHEMA_VERSION: u32 = 41;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -598,6 +607,10 @@ pub struct RuntimeMetadata {
     pub verifier_obligations: Vec<VerifierObligationMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proof_plan: Vec<ProofPlanMetadata>,
+    #[serde(default)]
+    pub proof_plan_soundness: ProofPlanSoundnessReport,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builder_assumptions: Vec<BuilderAssumptionMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_instantiations: Vec<CollectionInstantiationMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -771,6 +784,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
     validate_source_metadata(metadata)?;
+    crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
     Ok(())
 }
@@ -3210,6 +3224,11 @@ fn compile_ast_with_build(
     let artifact_hash = ckb_blake2b256(&artifact_bytes);
     bind_artifact_metadata(&mut metadata, &artifact_bytes, &artifact_hash);
     bind_constraints_metadata(&mut metadata, &artifact_bytes, artifact_format, target_profile, ir, &codegen_options)?;
+    metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
+    metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, options.is_assurance_strict_016());
+    if options.is_assurance_strict_016() {
+        crate::proof_plan::soundness::validate_metadata(&metadata, true)?;
+    }
 
     let result = CompileResult { artifact_bytes, artifact_format, artifact_hash, metadata, ast: ast.clone() };
     result.validate()?;
@@ -3702,7 +3721,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
         _ => None,
     }));
     let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
-    CompileMetadata {
+    let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         compiler_version: VERSION.to_string(),
         module: ir.name.clone(),
@@ -3750,6 +3769,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             ckb_runtime_accesses,
             verifier_obligations,
             proof_plan,
+            proof_plan_soundness: ProofPlanSoundnessReport::default(),
+            builder_assumptions: Vec::new(),
             collection_instantiations,
             transaction_runtime_input_requirements,
             pool_primitives,
@@ -4010,7 +4031,10 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             })
             .collect(),
         debug_info_sections: Vec::new(),
-    }
+    };
+    metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
+    metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, false);
+    metadata
 }
 
 fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir::IrModule> {

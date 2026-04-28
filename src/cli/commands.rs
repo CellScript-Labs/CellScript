@@ -16,7 +16,7 @@ use ckb_vm::{
     SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
 };
 use colored::Colorize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -40,8 +40,19 @@ pub enum Command {
     Explain(ExplainArgs),
     ExplainProfile(ExplainProfileArgs),
     ExplainProof(ExplainProofArgs),
+    ExplainAssumptions(ExplainAssumptionsArgs),
     ExplainGenerics(ExplainGenericsArgs),
     OptReport(OptReportArgs),
+    ProofDiff(ProofDiffArgs),
+    Profile(ProfileArgs),
+    TraceTx(TraceTxArgs),
+    AuditBundle(AuditBundleArgs),
+    ValidateTx(ValidateTxArgs),
+    SolveTx(SolveTxArgs),
+    DeployPlan(DeployPlanArgs),
+    VerifyDeploy(VerifyDeployArgs),
+    DiffDeploy(DiffDeployArgs),
+    LockDeps(LockDepsArgs),
     ActionBuild(ActionBuildArgs),
     /// Encode generated entry wrapper witness bytes
     EntryWitness(EntryWitnessArgs),
@@ -225,6 +236,14 @@ pub struct ExplainProofArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct ExplainAssumptionsArgs {
+    pub input: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct ExplainGenericsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
@@ -238,6 +257,85 @@ pub struct OptReportArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct ProofDiffArgs {
+    pub old: PathBuf,
+    pub new: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ProfileArgs {
+    pub input: Option<PathBuf>,
+    pub entry: Option<String>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct TraceTxArgs {
+    pub against: PathBuf,
+    pub tx: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuditBundleArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ValidateTxArgs {
+    pub against: PathBuf,
+    pub tx: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SolveTxArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct DeployPlanArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct VerifyDeployArgs {
+    pub plan: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct DiffDeployArgs {
+    pub old: PathBuf,
+    pub new: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct LockDepsArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
 }
 
 #[derive(Debug, Default)]
@@ -334,8 +432,19 @@ impl CommandExecutor {
             Command::Explain(args) => Self::explain(args),
             Command::ExplainProfile(args) => Self::explain_profile(args),
             Command::ExplainProof(args) => Self::explain_proof(args),
+            Command::ExplainAssumptions(args) => Self::explain_assumptions(args),
             Command::ExplainGenerics(args) => Self::explain_generics(args),
             Command::OptReport(args) => Self::opt_report(args),
+            Command::ProofDiff(args) => Self::proof_diff(args),
+            Command::Profile(args) => Self::profile(args),
+            Command::TraceTx(args) => Self::trace_tx(args),
+            Command::AuditBundle(args) => Self::audit_bundle(args),
+            Command::ValidateTx(args) => Self::validate_tx(args),
+            Command::SolveTx(args) => Self::solve_tx(args),
+            Command::DeployPlan(args) => Self::deploy_plan(args),
+            Command::VerifyDeploy(args) => Self::verify_deploy(args),
+            Command::DiffDeploy(args) => Self::diff_deploy(args),
+            Command::LockDeps(args) => Self::lock_deps(args),
             Command::ActionBuild(args) => Self::action_build(args),
             Command::EntryWitness(args) => Self::entry_witness(args),
             Command::VerifyArtifact(args) => Self::verify_artifact(args),
@@ -1421,6 +1530,219 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn explain_assumptions(args: ExplainAssumptionsArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let assumptions = result.metadata.runtime.builder_assumptions.clone();
+        let summary = serde_json::json!({
+            "status": "ok",
+            "module": result.metadata.module,
+            "target_profile": result.metadata.target_profile.name,
+            "assumption_count": assumptions.len(),
+            "proof_plan_soundness": result.metadata.runtime.proof_plan_soundness,
+            "builder_assumptions": assumptions,
+        });
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Builder assumptions for module `{}`", result.metadata.module);
+            println!("  Assumptions: {}", summary["assumption_count"]);
+            println!("  ProofPlan soundness: {}", summary["proof_plan_soundness"]["status"].as_str().unwrap_or("unknown"));
+            for assumption in result.metadata.runtime.builder_assumptions {
+                println!("  - {} [{}] {}", assumption.assumption_id, assumption.kind, assumption.feature);
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_tx(args: ValidateTxArgs) -> Result<()> {
+        let metadata = read_metadata_json(&args.against)?;
+        let tx = read_json_value(&args.tx)?;
+        let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
+        let summary = serde_json::json!({
+            "status": report.status,
+            "metadata": args.against.display().to_string(),
+            "tx": args.tx.display().to_string(),
+            "validation": report,
+        });
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Transaction validation: {}", summary["status"].as_str().unwrap_or("unknown"));
+        }
+        if summary["status"] == "failed" {
+            return Err(crate::error::CompileError::without_span("transaction violates builder assumptions"));
+        }
+        Ok(())
+    }
+
+    fn solve_tx(args: SolveTxArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let template = transaction_solver_template(&result.metadata);
+        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
+        Ok(())
+    }
+
+    fn deploy_plan(args: DeployPlanArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let plan = deployment_plan_json(&result.metadata);
+        write_or_print_json(args.output.as_ref(), &plan, args.json, "Deployment plan generated")?;
+        Ok(())
+    }
+
+    fn verify_deploy(args: VerifyDeployArgs) -> Result<()> {
+        let plan = read_json_value(&args.plan)?;
+        let violations = verify_deploy_plan_json(&plan);
+        let summary = serde_json::json!({
+            "status": if violations.is_empty() { "ok" } else { "failed" },
+            "plan": args.plan.display().to_string(),
+            "violations": violations,
+        });
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Deploy plan verification: {}", summary["status"].as_str().unwrap_or("unknown"));
+        }
+        if summary["status"] == "failed" {
+            return Err(crate::error::CompileError::without_span("deploy plan verification failed"));
+        }
+        Ok(())
+    }
+
+    fn diff_deploy(args: DiffDeployArgs) -> Result<()> {
+        let old = read_json_value(&args.old)?;
+        let new = read_json_value(&args.new)?;
+        let diff = json_diff_report("deploy", &old, &new);
+        print_or_text_json(args.json, &diff, "Deploy diff")?;
+        Ok(())
+    }
+
+    fn lock_deps(args: LockDepsArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let lock = dependency_lock_json(&result.metadata);
+        write_or_print_json(args.output.as_ref(), &lock, args.json, "Dependency lock generated")?;
+        Ok(())
+    }
+
+    fn proof_diff(args: ProofDiffArgs) -> Result<()> {
+        let old = read_metadata_json(&args.old)?;
+        let new = read_metadata_json(&args.new)?;
+        let diff = proof_diff_report(&old, &new);
+        print_or_text_json(args.json, &diff, "Proof diff")?;
+        Ok(())
+    }
+
+    fn profile(args: ProfileArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let report = profile_report_json(&result.metadata, args.entry.as_deref());
+        print_or_text_json(args.json, &report, "Profile")?;
+        Ok(())
+    }
+
+    fn trace_tx(args: TraceTxArgs) -> Result<()> {
+        let metadata = read_metadata_json(&args.against)?;
+        let tx = read_json_value(&args.tx)?;
+        let validation = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
+        let trace = trace_tx_report_json(&metadata, &validation);
+        if args.json {
+            print_json(&trace)?;
+        } else {
+            println!("Transaction trace: {}", trace["status"].as_str().unwrap_or("unknown"));
+        }
+        if validation.status == "failed" {
+            return Err(crate::error::CompileError::without_span("transaction trace found builder assumption violations"));
+        }
+        Ok(())
+    }
+
+    fn audit_bundle(args: AuditBundleArgs) -> Result<()> {
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let output = args.output.unwrap_or_else(|| PathBuf::from("target/cellscript-audit-bundle"));
+        std::fs::create_dir_all(&output)?;
+        let bundle = audit_bundle_json(&result.metadata);
+        let json_path = output.join("audit-bundle.json");
+        let html_path = output.join("index.html");
+        std::fs::write(
+            &json_path,
+            serde_json::to_string_pretty(&bundle)
+                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize audit bundle: {}", error)))?,
+        )?;
+        std::fs::write(&html_path, audit_bundle_html(&bundle))?;
+        let summary = serde_json::json!({
+            "status": "ok",
+            "output": output.display().to_string(),
+            "json": json_path.display().to_string(),
+            "html": html_path.display().to_string(),
+        });
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Audit bundle generated");
+            println!("  JSON: {}", json_path.display());
+            println!("  HTML: {}", html_path.display());
+        }
+        Ok(())
+    }
+
     fn explain_generics(args: ExplainGenericsArgs) -> Result<()> {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
@@ -1825,6 +2147,7 @@ impl CommandExecutor {
                 deny_fail_closed: args.deny_fail_closed,
                 deny_ckb_runtime: args.deny_ckb_runtime,
                 deny_runtime_obligations: args.deny_runtime_obligations,
+                primitive_compat: args.primitive_compat,
                 ..CheckArgs::default()
             },
         )?;
@@ -2310,6 +2633,334 @@ struct RegistryCredential {
     token: String,
 }
 
+fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result<crate::CompileResult> {
+    let input_path = input.cloned().unwrap_or_else(|| PathBuf::from("."));
+    let input = Utf8Path::from_path(&input_path)
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
+    compile_path(input, options)
+}
+
+fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", path.display(), error))
+    })?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", path.display(), error)))
+}
+
+fn read_json_value(path: &Path) -> Result<serde_json::Value> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read JSON '{}': {}", path.display(), error)))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
+}
+
+fn print_json(value: &serde_json::Value) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
+    println!("{}", json);
+    Ok(())
+}
+
+fn write_or_print_json(output: Option<&PathBuf>, value: &serde_json::Value, json_stdout: bool, label: &str) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
+    if let Some(output_path) = output {
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(output_path, json)?;
+        if json_stdout {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "ok",
+                    "output": output_path.display().to_string(),
+                }))
+                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?
+            );
+        } else {
+            println!("{}", label.green());
+            println!("  Output: {}", output_path.display());
+        }
+    } else {
+        println!("{}", json);
+    }
+    Ok(())
+}
+
+fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Result<()> {
+    if json {
+        print_json(value)
+    } else {
+        println!("{}: {}", label, value["status"].as_str().unwrap_or("ok"));
+        Ok(())
+    }
+}
+
+fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
+    let assumptions = &metadata.runtime.builder_assumptions;
+    let requires_inputs = assumptions.iter().any(|assumption| !assumption.required_inputs.is_empty());
+    let requires_outputs = assumptions.iter().any(|assumption| !assumption.required_outputs.is_empty());
+    let requires_cell_deps = assumptions.iter().any(|assumption| !assumption.required_cell_deps.is_empty());
+    let witness_fields = assumptions
+        .iter()
+        .flat_map(|assumption| assumption.required_witness_fields.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let evidence = assumptions
+        .iter()
+        .filter(|assumption| {
+            matches!(
+                assumption.kind.as_str(),
+                "create_unique_global_uniqueness"
+                    | "type_id_builder_plan"
+                    | "metadata_only_gap"
+                    | "runtime_required_proof_plan"
+                    | "lock_group_transaction_scope"
+                    | "capacity_policy"
+            )
+        })
+        .map(|assumption| {
+            serde_json::json!({
+                "assumption_id": assumption.assumption_id,
+                "kind": assumption.kind,
+                "status": "required",
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "status": "ok",
+        "solver": "cellscript-v0.16-metadata-solver",
+        "module": metadata.module,
+        "target_profile": metadata.target_profile.name,
+        "transaction_template": {
+            "version": 0,
+            "inputs": if requires_inputs { serde_json::json!([{"source": "builder-selected"}]) } else { serde_json::json!([]) },
+            "outputs": if requires_outputs { serde_json::json!([{"source": "proof-plan-output"}]) } else { serde_json::json!([]) },
+            "cell_deps": if requires_cell_deps { serde_json::json!([{"source": "metadata-script-reference"}]) } else { serde_json::json!([]) },
+            "witnesses": if witness_fields.is_empty() { serde_json::json!([]) } else { serde_json::json!([{"fields": witness_fields}]) },
+            "builder_assumption_evidence": evidence,
+        },
+        "signing_manifest": {
+            "policy": "explicit-witness-no-implicit-signer",
+            "required_witness_fields": witness_fields,
+        },
+        "builder_assumptions": assumptions,
+    })
+}
+
+fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
+    let ckb = metadata.constraints.ckb.as_ref();
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-deploy-plan-v0.16",
+        "module": metadata.module,
+        "compiler_version": metadata.compiler_version,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "artifact": {
+            "format": metadata.artifact_format,
+            "hash": metadata.artifact_hash,
+            "size_bytes": metadata.artifact_size_bytes,
+        },
+        "target_profile": metadata.target_profile,
+        "code_cell_manifest": {
+            "hash_type": ckb.map(|c| c.declared_type_id_hash_type.as_str()).unwrap_or("type"),
+            "capacity_policy": ckb.map(|c| c.capacity_policy_surface.as_str()).unwrap_or("unknown"),
+        },
+        "dep_group_manifest": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest).unwrap_or(serde_json::Value::Null)),
+        "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
+        "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
+        "builder_assumptions": metadata.runtime.builder_assumptions,
+    })
+}
+
+fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
+    if plan.get("schema").and_then(serde_json::Value::as_str) != Some("cellscript-deploy-plan-v0.16") {
+        violations.push("schema must be cellscript-deploy-plan-v0.16".to_string());
+    }
+    if plan.pointer("/artifact/format").is_none() {
+        violations.push("artifact.format is required".to_string());
+    }
+    if plan.get("target_profile").is_none() {
+        violations.push("target_profile is required".to_string());
+    }
+    if plan.get("proof_plan_soundness").is_none() {
+        violations.push("proof_plan_soundness is required".to_string());
+    }
+    violations
+}
+
+fn dependency_lock_json(metadata: &CompileMetadata) -> serde_json::Value {
+    let ckb = metadata.constraints.ckb.as_ref();
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-dependency-lock-v0.16",
+        "module": metadata.module,
+        "artifact_hash": metadata.artifact_hash,
+        "cell_deps": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest.declared_cell_deps).unwrap_or(serde_json::Value::Null)),
+        "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
+    })
+}
+
+fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json::Value {
+    let old_map = proof_plan_map(&old.runtime.proof_plan);
+    let new_map = proof_plan_map(&new.runtime.proof_plan);
+    let old_keys = old_map.keys().cloned().collect::<BTreeSet<_>>();
+    let new_keys = new_map.keys().cloned().collect::<BTreeSet<_>>();
+    let added = new_keys.difference(&old_keys).cloned().collect::<Vec<_>>();
+    let removed = old_keys.difference(&new_keys).cloned().collect::<Vec<_>>();
+    let changed = old_keys.intersection(&new_keys).filter(|key| old_map.get(*key) != new_map.get(*key)).cloned().collect::<Vec<_>>();
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-proof-diff-v0.16",
+        "old_module": old.module,
+        "new_module": new.module,
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+    })
+}
+
+fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::Value> {
+    plans
+        .iter()
+        .map(|plan| {
+            (
+                format!("{}:{}:{}", plan.origin, plan.feature, plan.status),
+                serde_json::json!({
+                    "trigger": plan.trigger,
+                    "scope": plan.scope,
+                    "reads": plan.reads,
+                    "coverage": plan.coverage,
+                    "codegen_coverage_status": plan.codegen_coverage_status,
+                    "on_chain_checked": plan.on_chain_checked,
+                }),
+            )
+        })
+        .collect()
+}
+
+fn json_diff_report(kind: &str, old: &serde_json::Value, new: &serde_json::Value) -> serde_json::Value {
+    let changed =
+        ["/artifact/hash", "/artifact/size_bytes", "/target_profile/name", "/proof_plan_soundness/status", "/metadata_schema_version"]
+            .iter()
+            .filter(|pointer| old.pointer(pointer) != new.pointer(pointer))
+            .map(|pointer| {
+                serde_json::json!({
+                    "path": pointer,
+                    "old": old.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+                    "new": new.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .collect::<Vec<_>>();
+    serde_json::json!({
+        "status": "ok",
+        "schema": format!("cellscript-{}-diff-v0.16", kind),
+        "changed": changed,
+    })
+}
+
+fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde_json::Value {
+    let actions = metadata
+        .actions
+        .iter()
+        .filter(|action| entry.is_none_or(|entry| action.name == entry))
+        .map(|action| {
+            serde_json::json!({
+                "kind": "action",
+                "name": action.name,
+                "estimated_cycles": action.estimated_cycles,
+                "proof_plan_records": action.proof_plan.len(),
+                "runtime_accesses": action.ckb_runtime_accesses.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let locks = metadata
+        .locks
+        .iter()
+        .filter(|lock| entry.is_none_or(|entry| lock.name == entry))
+        .map(|lock| {
+            serde_json::json!({
+                "kind": "lock",
+                "name": lock.name,
+                "estimated_cycles": null,
+                "proof_plan_records": lock.proof_plan.len(),
+                "runtime_accesses": lock.ckb_runtime_accesses.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-profile-v0.16",
+        "module": metadata.module,
+        "entry": entry,
+        "actions": actions,
+        "locks": locks,
+        "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
+    })
+}
+
+fn trace_tx_report_json(metadata: &CompileMetadata, validation: &crate::TxValidationReport) -> serde_json::Value {
+    serde_json::json!({
+        "status": validation.status,
+        "schema": "cellscript-tx-trace-v0.16",
+        "module": metadata.module,
+        "steps": metadata.runtime.builder_assumptions.iter().map(|assumption| {
+            serde_json::json!({
+                "assumption_id": assumption.assumption_id,
+                "kind": assumption.kind,
+                "origin": assumption.origin,
+                "feature": assumption.feature,
+                "checked": validation.checked_assumptions.contains(&assumption.assumption_id),
+            })
+        }).collect::<Vec<_>>(),
+        "validation": validation,
+    })
+}
+
+fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-audit-bundle-v0.16",
+        "module": metadata.module,
+        "compiler_version": metadata.compiler_version,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "target_profile": metadata.target_profile,
+        "proof_plan": metadata.runtime.proof_plan,
+        "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
+        "builder_assumptions": metadata.runtime.builder_assumptions,
+        "constraints": metadata.constraints,
+        "actions": metadata.actions.iter().map(|action| serde_json::json!({
+            "name": action.name,
+            "estimated_cycles": action.estimated_cycles,
+            "proof_plan_records": action.proof_plan.len(),
+            "runtime_accesses": action.ckb_runtime_accesses.len(),
+        })).collect::<Vec<_>>(),
+        "locks": metadata.locks.iter().map(|lock| serde_json::json!({
+            "name": lock.name,
+            "proof_plan_records": lock.proof_plan.len(),
+            "runtime_accesses": lock.ckb_runtime_accesses.len(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn audit_bundle_html(bundle: &serde_json::Value) -> String {
+    let module = bundle.get("module").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+    let status = bundle.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+    format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>CellScript Audit Bundle</title>\
+         <h1>CellScript Audit Bundle</h1><p>Module: {}</p><p>ProofPlan soundness: {}</p>\
+         <pre>{}</pre>",
+        module,
+        status,
+        serde_json::to_string_pretty(bundle).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
 fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Value {
     let record_count = proof_plan.len();
     let on_chain_checked_count = proof_plan.iter().filter(|plan| plan.on_chain_checked).count();
@@ -2661,6 +3312,14 @@ fn validate_expected_target_profile(actual: &str, expected: Option<&str>) -> Res
 
 fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) -> Result<()> {
     let mut violations = Vec::new();
+
+    if args.primitive_compat.as_deref() == Some("0.16") {
+        if let Err(error) = crate::proof_plan::soundness::validate_metadata(metadata, true) {
+            violations.push(error.message);
+        }
+    } else if metadata.runtime.proof_plan_soundness.status == "failed" {
+        violations.push(format!("ProofPlan soundness failed: {} issue(s)", metadata.runtime.proof_plan_soundness.issue_count));
+    }
 
     if args.production || args.deny_fail_closed {
         if !metadata.constraints.failures.is_empty() {
@@ -3746,7 +4405,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3879,7 +4538,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3952,6 +4611,14 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON ProofPlan")),
             )
             .subcommand(
+                ClapCommand::new("explain-assumptions")
+                    .about("Explain v0.16 builder assumptions derived from ProofPlan metadata")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
                 ClapCommand::new("explain-generics")
                     .about("Explain checked bounded generic collection instantiations")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
@@ -3972,6 +4639,85 @@ impl CliParser {
                     )
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb")),
+            )
+            .subcommand(
+                ClapCommand::new("proof-diff")
+                    .about("Diff ProofPlan semantics between two metadata files")
+                    .arg(Arg::new("old").value_name("OLD_METADATA").required(true))
+                    .arg(Arg::new("new").value_name("NEW_METADATA").required(true))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("profile")
+                    .about("Emit v0.16 cycle/profile summary per action, lock, and ProofPlan record")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("entry").long("entry").value_name("NAME").help("Limit profile to one action or lock"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("trace-tx")
+                    .about("Trace a transaction JSON against v0.16 builder assumptions")
+                    .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
+                    .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("audit-bundle")
+                    .about("Generate a v0.16 audit bundle linking metadata, ProofPlan, assumptions, and profile data")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output directory"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("validate-tx")
+                    .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
+                    .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
+                    .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("solve-tx")
+                    .about("Emit a deterministic v0.16 transaction template from metadata and builder assumptions")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("deploy-plan")
+                    .about("Emit a reproducible v0.16 deployment plan")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON deploy plan"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("verify-deploy")
+                    .about("Verify a v0.16 deployment plan schema")
+                    .arg(Arg::new("plan").value_name("DEPLOY_PLAN").required(true))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("diff-deploy")
+                    .about("Diff two v0.16 deployment plans")
+                    .arg(Arg::new("old").value_name("OLD_DEPLOY_PLAN").required(true))
+                    .arg(Arg::new("new").value_name("NEW_DEPLOY_PLAN").required(true))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("lock-deps")
+                    .about("Emit a v0.16 dependency lock from deployment metadata")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write dependency lock JSON"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("action").about("Plan and explain action-level transaction builder inputs").subcommand(
@@ -4089,7 +4835,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -4266,6 +5012,12 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
+            Some(("explain-assumptions", m)) => Command::ExplainAssumptions(ExplainAssumptionsArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
@@ -4277,6 +5029,65 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+            }),
+            Some(("proof-diff", m)) => Command::ProofDiff(ProofDiffArgs {
+                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old metadata"),
+                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new metadata"),
+                json: m.get_flag("json"),
+            }),
+            Some(("profile", m)) => Command::Profile(ProfileArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                entry: m.get_one::<String>("entry").cloned(),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
+                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                json: m.get_flag("json"),
+            }),
+            Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
+                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                json: m.get_flag("json"),
+            }),
+            Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("verify-deploy", m)) => Command::VerifyDeploy(VerifyDeployArgs {
+                plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
+                json: m.get_flag("json"),
+            }),
+            Some(("diff-deploy", m)) => Command::DiffDeploy(DiffDeployArgs {
+                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
+                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
+                json: m.get_flag("json"),
+            }),
+            Some(("lock-deps", m)) => Command::LockDeps(LockDepsArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
             }),
             Some(("action", m)) => match m.subcommand() {
                 Some(("build", build)) => Command::ActionBuild(ActionBuildArgs {

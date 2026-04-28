@@ -107,8 +107,9 @@ When a type declares an identity policy, use the identity-aware lifecycle forms
 for creation and replacement:
 
 ```cellscript
-resource NFT has store, create, replace {
+resource NFT has store, create, replace
     identity(field(token_id))
+{
     token_id: [u8; 32]
     owner: Address
 }
