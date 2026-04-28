@@ -1366,6 +1366,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Destroy(destroy) => self.validate_spawn_ipc_fd_usage_expr(&destroy.expr, state)?,
             Expr::Claim(claim) => self.validate_spawn_ipc_fd_usage_expr(&claim.receipt, state)?,
             Expr::Settle(settle) => self.validate_spawn_ipc_fd_usage_expr(&settle.expr, state)?,
+            Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
             Expr::Assert(assert_expr) => {
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.condition, state)?;
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.message, state)?;
@@ -1894,6 +1895,35 @@ impl<'a> TypeChecker<'a> {
                 env.consume(&name)?;
                 Ok(settle_ty)
             }
+            Expr::CreateUnique(cu) => {
+                // Identity-aware create: type-checks like create with identity validation
+                let ty = Type::Named(cu.ty.clone());
+                if !matches!(&cu.identity, IdentityPolicy::CkbTypeId | IdentityPolicy::None) {
+                    return Err(CompileError::new(
+                        format!("create_unique only supports ckb_type_id identity, got {:?}", cu.identity),
+                        cu.span,
+                    ));
+                }
+                if let Some(lock) = &cu.lock {
+                    let lock_ty = self.infer_expr(env, lock)?;
+                    if !Self::is_address_like_type(&lock_ty) {
+                        return Err(CompileError::new("lock target must be address-like", cu.span));
+                    }
+                }
+                Ok(ty)
+            }
+            Expr::ReplaceUnique(ru) => {
+                // Identity-aware replace: type-checks like consume + create
+                let (input_ty, name) = self.require_named_linear_cell_operand(env, &ru.expr, "replace_unique", ru.span)?;
+                env.consume(&name)?;
+                if !matches!(&ru.identity, IdentityPolicy::CkbTypeId | IdentityPolicy::None) {
+                    return Err(CompileError::new(
+                        format!("replace_unique only supports ckb_type_id identity, got {:?}", ru.identity),
+                        ru.span,
+                    ));
+                }
+                Ok(input_ty)
+            }
             Expr::Assert(assert_expr) => {
                 let cond_ty = self.infer_expr(env, &assert_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
@@ -2229,6 +2259,8 @@ impl<'a> TypeChecker<'a> {
             Expr::ReadRef(_) => Some("read_ref"),
             Expr::Claim(_) => Some("claim"),
             Expr::Settle(_) => Some("settle"),
+            Expr::CreateUnique(_) => Some("create_unique"),
+            Expr::ReplaceUnique(_) => Some("replace_unique"),
             _ => None,
         };
 
@@ -2497,7 +2529,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Cast(cast) => self.mark_expr_as_moved(env, &cast.expr),
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
-            Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) => Ok(()),
+            Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
             Expr::Require(require_expr) => self.mark_expr_as_moved(env, &require_expr.condition),
             Expr::If(if_expr) => {
@@ -3633,6 +3665,8 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::ReadRef(read_ref) => read_ref.span,
         Expr::Claim(claim) => claim.span,
         Expr::Settle(settle) => settle.span,
+        Expr::CreateUnique(cu) => cu.span,
+        Expr::ReplaceUnique(ru) => ru.span,
         Expr::Assert(assert_expr) => assert_expr.span,
         Expr::Require(require_expr) => require_expr.span,
         Expr::Block(stmts) => stmts.last().map(stmt_span).unwrap_or_default(),
@@ -3796,6 +3830,13 @@ fn capability_name(capability: Capability) -> &'static str {
         Capability::Store => "store",
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
+        Capability::Create => "create",
+        Capability::Consume => "consume",
+        Capability::Replace => "replace",
+        Capability::Burn => "burn",
+        Capability::Relock => "relock",
+        Capability::RetargetType => "retarget_type",
+        Capability::ReadRef => "read_ref",
     }
 }
 

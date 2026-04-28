@@ -26,6 +26,7 @@ pub enum Item {
 pub struct ResourceDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
@@ -37,6 +38,7 @@ pub struct ResourceDef {
 pub struct SharedDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
@@ -48,6 +50,7 @@ pub struct SharedDef {
 pub struct ReceiptDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub claim_output: Option<Type>,
@@ -115,9 +118,35 @@ pub struct Lifecycle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
+    // v0.14 compat capabilities
     Store,
     Transfer,
     Destroy,
+    // v0.15 kernel effect capabilities
+    Create,
+    Consume,
+    Replace,
+    Burn,
+    Relock,
+    RetargetType,
+    ReadRef,
+}
+
+impl Capability {
+    /// Returns true if this capability is a v0.14-era protocol verb
+    /// that is not allowed in `--primitive-strict=0.15` mode.
+    pub fn is_protocol_verb(self) -> bool {
+        matches!(self, Self::Transfer | Self::Destroy)
+    }
+
+    /// Map a protocol capability to its kernel effect equivalents.
+    pub fn kernel_effects(self) -> Vec<Capability> {
+        match self {
+            Self::Transfer => vec![Self::Replace, Self::Relock],
+            Self::Destroy => vec![Self::Consume, Self::Burn],
+            other => vec![other],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +347,8 @@ pub enum Expr {
     ReadRef(ReadRefExpr),
     Claim(ClaimExpr),
     Settle(SettleExpr),
+    CreateUnique(CreateUniqueExpr),
+    ReplaceUnique(ReplaceUniqueExpr),
     Assert(AssertExpr),
     Require(RequireExpr),
     Block(Vec<Stmt>),
@@ -426,9 +457,45 @@ pub struct TransferExpr {
     pub span: Span,
 }
 
+/// Cell identity policy for resource/shared/receipt declarations.
+/// In v0.15, identity is a first-class primitive policy across
+/// create, replace, and destroy flows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum IdentityPolicy {
+    /// No identity tracking (default)
+    #[default]
+    None,
+    /// CKB TYPE_ID based identity
+    CkbTypeId,
+    /// Field-based identity (e.g., identity field(id))
+    Field(String),
+    /// Script args based identity
+    ScriptArgs,
+    /// Singleton type identity (one cell per type script)
+    SingletonType,
+}
+
+/// Destruction policy for the `destroy` expression.
+/// In v0.15, bare `destroy` is deprecated in favor of explicit policies
+/// that specify how the verifier proves destruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DestructionPolicy {
+    /// Bare `destroy cell` — legacy v0.14 compat, same as SingletonType
+    Default,
+    /// `destroy_singleton_type(cell)` — proves absence of same-TypeHash output
+    SingletonType,
+    /// `destroy_unique(cell, identity = type_id)` — uses TYPE_ID to identify cell
+    Unique { identity: String },
+    /// `destroy_instance(cell, identity_field = id)` — identifies by specific field
+    Instance { identity_field: String },
+    /// `burn_amount(cell, field = amount)` — proves quantity delta, not output absence
+    BurnAmount { field: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct DestroyExpr {
     pub expr: Box<Expr>,
+    pub policy: DestructionPolicy,
     pub span: Span,
 }
 
@@ -521,4 +588,26 @@ pub enum EffectClass {
 pub struct SchedulerHint {
     pub parallelizable: bool,
     pub estimated_cycles: u64,
+}
+
+/// `create_unique<T>(identity = ckb_type_id) { ... } with_lock(addr)`
+/// Identity-aware cell creation that enforces TYPE_ID or other identity rules.
+#[derive(Debug, Clone)]
+pub struct CreateUniqueExpr {
+    pub ty: String,
+    pub fields: Vec<(String, Expr)>,
+    pub lock: Option<Box<Expr>>,
+    pub identity: IdentityPolicy,
+    pub span: Span,
+}
+
+/// `replace_unique<T>(identity = ckb_type_id) { ... }`
+/// Identity-aware cell replacement that enforces identity preservation.
+#[derive(Debug, Clone)]
+pub struct ReplaceUniqueExpr {
+    pub expr: Box<Expr>,
+    pub ty: String,
+    pub fields: Vec<(String, Expr)>,
+    pub identity: IdentityPolicy,
+    pub span: Span,
 }

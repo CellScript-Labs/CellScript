@@ -71,6 +71,7 @@ pub struct BuildArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -156,6 +157,7 @@ pub struct CheckArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -275,6 +277,7 @@ pub struct VerifyArtifactArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -354,6 +357,7 @@ impl CommandExecutor {
             debug: false,
             target: args.target.clone(),
             target_profile: args.target_profile.clone(),
+            primitive_compat: args.primitive_compat.clone(),
         };
         if args.entry_action.is_some() && args.entry_lock.is_some() {
             return Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"));
@@ -451,7 +455,17 @@ impl CommandExecutor {
         test_inputs.sort();
 
         if test_inputs.is_empty() {
-            compile_path(".", CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None })?;
+            compile_path(
+                ".",
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: None,
+                    primitive_compat: None,
+                },
+            )?;
             if args.json {
                 let summary = serde_json::json!({
                     "status": "ok",
@@ -494,7 +508,14 @@ impl CommandExecutor {
             let expectation = read_test_expectation(input)?;
             let result = compile_path(
                 utf8,
-                CompileOptions { opt_level: 0, output: None, debug: false, target: expectation.target.clone(), target_profile: None },
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: expectation.target.clone(),
+                    target_profile: None,
+                    primitive_compat: None,
+                },
             )
             .and_then(|result| {
                 let policy_args = expectation.check_args();
@@ -593,8 +614,10 @@ impl CommandExecutor {
 
     fn generate_docs(args: &DocArgs) -> Result<PathBuf> {
         let modules = load_modules_for_input(".")?;
-        let compile_result =
-            compile_path(".", CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None })?;
+        let compile_result = compile_path(
+            ".",
+            CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None, primitive_compat: None },
+        )?;
         let mut generator = DocGenerator::new(args.output_format);
         for module in &modules {
             generator.add_module(&module.ast);
@@ -930,6 +953,7 @@ impl CommandExecutor {
                     debug: false,
                     target: target.map(str::to_string),
                     target_profile: compile_target_profile.clone(),
+                    primitive_compat: args.primitive_compat.clone(),
                 },
             )?;
             validate_check_policy(&result.metadata, &args)?;
@@ -1020,7 +1044,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let json = serde_json::to_string_pretty(&result.metadata)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize metadata: {}", error)))?;
@@ -1047,8 +1078,14 @@ impl CommandExecutor {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        let options =
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile };
+        let options = CompileOptions {
+            opt_level: 0,
+            output: None,
+            debug: false,
+            target: args.target,
+            target_profile: args.target_profile,
+            primitive_compat: None,
+        };
         let result = match (args.entry_action.as_deref(), args.entry_lock.as_deref()) {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
@@ -1081,7 +1118,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
         let entry_constraints = result
@@ -1174,7 +1218,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
 
         let actions = result
@@ -1332,7 +1383,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let proof_plan = result.metadata.runtime.proof_plan;
 
@@ -1369,7 +1427,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let instantiations = result.metadata.runtime.collection_instantiations;
 
@@ -1423,6 +1488,7 @@ impl CommandExecutor {
                     debug: false,
                     target: args.target.clone(),
                     target_profile: args.target_profile.clone(),
+                    primitive_compat: None,
                 },
             )?;
             rows.push(serde_json::json!({
@@ -1540,6 +1606,7 @@ impl CommandExecutor {
                 debug: false,
                 target: args.target,
                 target_profile: args.target_profile.or_else(|| Some("ckb".to_string())),
+                primitive_compat: None,
             },
         )?;
 
@@ -1627,7 +1694,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
 
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
@@ -1837,7 +1911,14 @@ impl CommandExecutor {
         let opt_level = if args.release { 3 } else { 0 };
         let compile_result = compile_path(
             ".",
-            CompileOptions { opt_level, output: None, debug: false, target: Some("riscv64-elf".to_string()), target_profile: None },
+            CompileOptions {
+                opt_level,
+                output: None,
+                debug: false,
+                target: Some("riscv64-elf".to_string()),
+                target_profile: None,
+                primitive_compat: None,
+            },
         );
 
         if args.simulate {
@@ -2528,6 +2609,7 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         deny_fail_closed: args.deny_fail_closed,
         deny_ckb_runtime: args.deny_ckb_runtime,
         deny_runtime_obligations: args.deny_runtime_obligations,
+        primitive_compat: args.primitive_compat.clone(),
     })
 }
 
@@ -2967,6 +3049,7 @@ impl CompileTestExpectation {
             deny_fail_closed: self.deny_fail_closed,
             deny_ckb_runtime: self.deny_ckb_runtime,
             deny_runtime_obligations: self.deny_runtime_obligations,
+            primitive_compat: None,
         }
     }
 }
@@ -3650,6 +3733,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations before writing artifacts"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3769,6 +3866,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3965,6 +4076,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -4020,6 +4145,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 ..Default::default()
             }),
             Some(("test", m)) => Command::Test(TestArgs {
@@ -4083,6 +4212,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 features: Vec::new(),
             }),
             Some(("metadata", m)) => Command::Metadata(MetadataArgs {
@@ -4179,6 +4312,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
             }),
             Some(("run", m)) => Command::Run(RunArgs {
                 args: m.get_many::<String>("args").map(|values| values.cloned().collect()).unwrap_or_default(),
@@ -4199,6 +4336,17 @@ impl CliParser {
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
             _ => unreachable!(),
         }
+    }
+}
+
+/// Resolve --primitive-compat and --primitive-strict into a single version string.
+/// --primitive-strict=X takes precedence and sets strict mode.
+/// --primitive-compat=X sets compat mode.
+fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
+    if strict.is_some() {
+        strict
+    } else {
+        compat
     }
 }
 

@@ -203,6 +203,7 @@ fn main() {
         debug: cli.debug,
         target: cli.target,
         target_profile: cli.target_profile,
+        primitive_compat: None,
     };
 
     if cli.entry_action.is_some() && cli.entry_lock.is_some() {

@@ -366,6 +366,10 @@ impl SimulateInterpreter {
                 self.trace.push(TraceEvent::Settle { description: value.to_string() });
                 Ok(SimValue::Simulated { ty: "settled".to_string(), description: "settle".to_string() })
             }
+            Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {
+                self.has_cell_ops = true;
+                Ok(SimValue::Simulated { ty: "unique".to_string(), description: "identity-aware".to_string() })
+            }
             Expr::Assert(assert) => {
                 let cond = self.eval_expr(&assert.condition)?;
                 let msg = self.eval_expr(&assert.message)?;

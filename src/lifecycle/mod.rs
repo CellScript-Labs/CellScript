@@ -276,6 +276,7 @@ impl LifecycleChecker {
             Expr::Settle(settle) => {
                 self.validate_expr(&settle.expr)?;
             }
+            Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
             Expr::Binary(bin) => {
                 self.validate_expr(&bin.left)?;
                 self.validate_expr(&bin.right)?;
@@ -462,6 +463,7 @@ fn collect_lifecycle_expr_context(specs: &HashMap<String, LifecycleSpec>, contex
         Expr::Destroy(destroy) => collect_lifecycle_expr_context(specs, context, &destroy.expr),
         Expr::Claim(claim) => collect_lifecycle_expr_context(specs, context, &claim.receipt),
         Expr::Settle(settle) => collect_lifecycle_expr_context(specs, context, &settle.expr),
+        Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
         Expr::Assert(assert_expr) => {
             collect_lifecycle_expr_context(specs, context, &assert_expr.condition);
             collect_lifecycle_expr_context(specs, context, &assert_expr.message);
@@ -582,6 +584,7 @@ fn validate_lifecycle_expr(specs: &HashMap<String, LifecycleSpec>, context: &Act
         Expr::Destroy(destroy) => validate_lifecycle_expr(specs, context, &destroy.expr),
         Expr::Claim(claim) => validate_lifecycle_expr(specs, context, &claim.receipt),
         Expr::Settle(settle) => validate_lifecycle_expr(specs, context, &settle.expr),
+        Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
         Expr::Assert(assert_expr) => {
             validate_lifecycle_expr(specs, context, &assert_expr.condition)?;
             validate_lifecycle_expr(specs, context, &assert_expr.message)

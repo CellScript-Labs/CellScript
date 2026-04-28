@@ -1693,6 +1693,10 @@ impl CodeGenerator {
                         self.operation_output_indices.insert(dest.id, output_index);
                         output_index += 1;
                     }
+                    IrInstruction::CreateUnique { dest, .. } => {
+                        self.operation_output_indices.insert(dest.id, output_index);
+                        output_index += 1;
+                    }
                     IrInstruction::Transfer { dest, .. } => {
                         self.record_verified_operation_output(body, output_index, dest, "transfer");
                         output_index += 1;
@@ -2302,7 +2306,7 @@ impl CodeGenerator {
             IrInstruction::Transfer { dest, operand, to } => {
                 self.emit_transfer(dest, operand, to)?;
             }
-            IrInstruction::Destroy { operand } => {
+            IrInstruction::Destroy { operand, policy: _ } => {
                 self.emit_destroy(operand)?;
             }
             IrInstruction::Claim { dest, receipt } => {
@@ -2310,6 +2314,12 @@ impl CodeGenerator {
             }
             IrInstruction::Settle { dest, operand } => {
                 self.emit_settle(dest, operand)?;
+            }
+            IrInstruction::CreateUnique { dest, pattern, identity } => {
+                self.emit_create_unique(dest, pattern, identity)?;
+            }
+            IrInstruction::ReplaceUnique { dest, operand, pattern, identity } => {
+                self.emit_replace_unique(dest, operand, pattern, identity)?;
             }
         }
         Ok(())
@@ -2648,7 +2658,7 @@ impl CodeGenerator {
                             next_cell_slot += 8;
                         }
                     }
-                    IrInstruction::Create { dest, .. } => {
+                    IrInstruction::Create { dest, .. } | IrInstruction::CreateUnique { dest, .. } => {
                         create_dest_outputs.insert(dest.id, create_index);
                         create_index += 1;
                     }
@@ -5701,6 +5711,8 @@ impl CodeGenerator {
             | IrInstruction::Length { dest, .. }
             | IrInstruction::TypeHash { dest, .. }
             | IrInstruction::Create { dest, .. }
+            | IrInstruction::CreateUnique { dest, .. }
+            | IrInstruction::ReplaceUnique { dest, .. }
             | IrInstruction::Claim { dest, .. }
             | IrInstruction::ReadRef { dest, .. } => self.record_var(dest, max_var_id),
             IrInstruction::CollectionNew { dest, capacity, .. } => {
@@ -5733,7 +5745,9 @@ impl CodeGenerator {
                     self.record_operand(arg, max_var_id);
                 }
             }
-            IrInstruction::Consume { operand } | IrInstruction::Destroy { operand } => self.record_operand(operand, max_var_id),
+            IrInstruction::Consume { operand } | IrInstruction::Destroy { operand, policy: _ } => {
+                self.record_operand(operand, max_var_id)
+            }
             IrInstruction::Settle { dest, operand } => {
                 self.record_var(dest, max_var_id);
                 self.record_operand(operand, max_var_id)
@@ -7810,6 +7824,77 @@ impl CodeGenerator {
         Ok(())
     }
 
+    /// create_unique
+    fn emit_create_unique(&mut self, dest: &IrVar, pattern: &CreatePattern, identity: &IrIdentityPolicy) -> Result<()> {
+        self.generate_create(pattern, self.next_virtual_output)?;
+        let identity_label = match identity {
+            IrIdentityPolicy::None => "none",
+            IrIdentityPolicy::CkbTypeId => "ckb_type_id",
+            IrIdentityPolicy::Field(path) => path,
+            IrIdentityPolicy::ScriptArgs => "script_args",
+            IrIdentityPolicy::SingletonType => "singleton_type",
+        };
+        self.emit(format!("# create_unique {} identity={}", pattern.ty, identity_label));
+        for (field, value) in &pattern.fields {
+            match value {
+                IrOperand::Const(IrConst::U64(n)) => self.emit(format!("#   field {} = {}", field, n)),
+                IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("#   field {} = {}", field, b)),
+                IrOperand::Var(var) => self.emit(format!("#   field {} <- {}", field, var.name)),
+                _ => self.emit(format!("#   field {} <- <value>", field)),
+            }
+        }
+        if pattern.lock.is_some() {
+            self.emit("#   with_lock <expr>");
+        }
+        self.emit(format!("li t0, {}", self.next_virtual_output));
+        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.next_virtual_output += 1;
+        Ok(())
+    }
+
+    /// replace_unique
+    fn emit_replace_unique(
+        &mut self,
+        dest: &IrVar,
+        operand: &IrOperand,
+        pattern: &CreatePattern,
+        identity: &IrIdentityPolicy,
+    ) -> Result<()> {
+        let identity_label = match identity {
+            IrIdentityPolicy::None => "none",
+            IrIdentityPolicy::CkbTypeId => "ckb_type_id",
+            IrIdentityPolicy::Field(path) => path,
+            IrIdentityPolicy::ScriptArgs => "script_args",
+            IrIdentityPolicy::SingletonType => "singleton_type",
+        };
+        self.emit(format!("# replace_unique {} identity={}", pattern.ty, identity_label));
+        self.emit_operand_comment("input", operand);
+        for (field, value) in &pattern.fields {
+            match value {
+                IrOperand::Const(IrConst::U64(n)) => self.emit(format!("#   field {} = {}", field, n)),
+                IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("#   field {} = {}", field, b)),
+                IrOperand::Var(var) => self.emit(format!("#   field {} <- {}", field, var.name)),
+                _ => self.emit(format!("#   field {} <- <value>", field)),
+            }
+        }
+        // replace_unique is a consume + create with identity preservation.
+        // The output occupies a virtual output slot, similar to transfer.
+        self.generate_create(pattern, self.next_virtual_output)?;
+        if self.emit_verified_operation_output_handle(dest, "replace_unique") {
+            return Ok(());
+        }
+        if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
+            self.emit(format!("# cellscript abi: replace_unique output handle Output#{}", output_index));
+            self.emit(format!("li t0, {}", output_index));
+            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+            return Ok(());
+        }
+        self.emit("# cellscript abi: fail closed because replace_unique output relation is unknown");
+        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
+        Ok(())
+    }
+
     /// transfer
     fn emit_transfer(&mut self, dest: &IrVar, operand: &IrOperand, to: &IrOperand) -> Result<()> {
         self.emit("# transfer");
@@ -8260,8 +8345,9 @@ fn consumed_operand_var(instruction: &IrInstruction) -> Option<&IrVar> {
     let operand = match instruction {
         IrInstruction::Consume { operand }
         | IrInstruction::Transfer { operand, .. }
-        | IrInstruction::Destroy { operand }
-        | IrInstruction::Settle { operand, .. } => operand,
+        | IrInstruction::Destroy { operand, .. }
+        | IrInstruction::Settle { operand, .. }
+        | IrInstruction::ReplaceUnique { operand, .. } => operand,
         IrInstruction::Claim { receipt, .. } => receipt,
         _ => return None,
     };

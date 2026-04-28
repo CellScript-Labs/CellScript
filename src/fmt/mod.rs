@@ -370,10 +370,41 @@ impl Formatter {
             }
             Expr::Consume(consume) => format!("consume {}", self.format_expr(&consume.expr)),
             Expr::Transfer(transfer) => format!("transfer {} to {}", self.format_expr(&transfer.expr), self.format_expr(&transfer.to)),
-            Expr::Destroy(destroy) => format!("destroy {}", self.format_expr(&destroy.expr)),
+            Expr::Destroy(destroy) => match &destroy.policy {
+                DestructionPolicy::Default => format!("destroy {}", self.format_expr(&destroy.expr)),
+                DestructionPolicy::SingletonType => format!("destroy_singleton_type({})", self.format_expr(&destroy.expr)),
+                DestructionPolicy::Unique { identity } => {
+                    format!("destroy_unique({}, identity = {})", self.format_expr(&destroy.expr), identity)
+                }
+                DestructionPolicy::Instance { identity_field } => {
+                    format!("destroy_instance({}, identity_field = {})", self.format_expr(&destroy.expr), identity_field)
+                }
+                DestructionPolicy::BurnAmount { field } => {
+                    format!("burn_amount({}, field = {})", self.format_expr(&destroy.expr), field)
+                }
+            },
             Expr::ReadRef(read_ref) => format!("read_ref<{}>()", read_ref.ty),
             Expr::Claim(claim) => format!("claim {}", self.format_expr(&claim.receipt)),
             Expr::Settle(settle) => format!("settle {}", self.format_expr(&settle.expr)),
+            Expr::CreateUnique(cu) => {
+                let fields = cu.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
+                let mut rendered =
+                    format!("create_unique<{}>(identity = {}) {{ {} }}", cu.ty, format_identity_policy(&cu.identity), fields);
+                if let Some(lock) = &cu.lock {
+                    rendered.push_str(&format!(" with_lock({})", self.format_expr(lock)));
+                }
+                rendered
+            }
+            Expr::ReplaceUnique(ru) => {
+                let fields = ru.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
+                format!(
+                    "replace_unique<{}>(identity = {}) {} {{ {} }}",
+                    ru.ty,
+                    format_identity_policy(&ru.identity),
+                    self.format_expr(&ru.expr),
+                    fields
+                )
+            }
             Expr::Assert(assert_expr) => {
                 format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
@@ -444,6 +475,23 @@ fn format_capability(capability: &Capability) -> &'static str {
         Capability::Store => "store",
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
+        Capability::Create => "create",
+        Capability::Consume => "consume",
+        Capability::Replace => "replace",
+        Capability::Burn => "burn",
+        Capability::Relock => "relock",
+        Capability::RetargetType => "retarget_type",
+        Capability::ReadRef => "read_ref",
+    }
+}
+
+fn format_identity_policy(policy: &IdentityPolicy) -> &'static str {
+    match policy {
+        IdentityPolicy::None => "none",
+        IdentityPolicy::CkbTypeId => "ckb_type_id",
+        IdentityPolicy::Field(_) => "field",
+        IdentityPolicy::ScriptArgs => "script_args",
+        IdentityPolicy::SingletonType => "singleton_type",
     }
 }
 

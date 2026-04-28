@@ -17,8 +17,8 @@ pub enum TokenKind {
     Lock,       // lock
     Has,        // has
     Store,      // store
-    Transfer,   // transfer
-    Destroy,    // destroy
+    Transfer,   // transfer (capability context)
+    Destroy,    // destroy (capability context)
     If,         // if
     Else,       // else
     For,        // for

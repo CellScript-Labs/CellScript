@@ -48,11 +48,58 @@ pub struct CompileOptions {
     pub target: Option<String>,
     /// Target chain/profile. Only CKB is supported.
     pub target_profile: Option<String>,
+    /// Primitive compatibility mode.
+    /// - `None`: default (compat) behaviour
+    /// - `Some("0.14")`: accept v0.14 syntax, emit migration hints
+    /// - `Some("0.15")`: require v0.15 syntax, reject legacy forms
+    pub primitive_compat: Option<String>,
+}
+
+impl CompileOptions {
+    /// Returns true when running in v0.15 strict primitive mode.
+    pub fn is_primitive_strict_015(&self) -> bool {
+        self.primitive_compat.as_deref() == Some("0.15")
+    }
+
+    /// Returns true when running in v0.14 compat mode (the default when
+    /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
+    pub fn is_primitive_compat_014(&self) -> bool {
+        self.primitive_compat.as_deref() != Some("0.15")
+    }
 }
 
 fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
+    }
+    Ok(())
+}
+
+/// In `--primitive-strict=0.15` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
+/// in capability declarations. They must be replaced by their kernel-effect equivalents.
+fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
+    use crate::error::MigrationDiagnostic;
+    for item in &module.items {
+        let (capabilities, type_name, span) = match item {
+            ast::Item::Resource(r) => (&r.capabilities, r.name.as_str(), r.span),
+            ast::Item::Shared(s) => (&s.capabilities, s.name.as_str(), s.span),
+            ast::Item::Receipt(r) => (&r.capabilities, r.name.as_str(), r.span),
+            _ => continue,
+        };
+        for cap in capabilities {
+            if cap.is_protocol_verb() {
+                let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
+                return Err(CompileError::new(
+                    format!(
+                        "{}: type '{}' declares '{}' which is not allowed in --primitive-strict=0.15 mode",
+                        diag.full_message(),
+                        type_name,
+                        cap.kernel_effects().iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join("+"),
+                    ),
+                    span,
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -2252,6 +2299,8 @@ pub struct TypeMetadata {
     pub fields: Vec<FieldMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub molecule_schema: Option<MoleculeSchemaMetadata>,
+    #[serde(default, skip_serializing_if = "is_default_identity_policy")]
+    pub identity_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3057,6 +3106,11 @@ fn compile_ast_with_build(
     let target_profile = TargetProfile::from_options(options, build)?;
     target_profile.ensure_compile_supported()?;
     let artifact_format = ArtifactFormat::from_target(resolve_target(options, build))?;
+
+    // 2.5. Primitive compat/strict mode: reject v0.14 protocol verbs in strict mode
+    if options.is_primitive_strict_015() {
+        check_primitive_strict_015(ast)?;
+    };
 
     // 3. Type check
     if let Some((resolver, module_name)) = resolver {
@@ -4235,7 +4289,7 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
                 collect_operand_named_types(field, used_types);
             }
         }
-        ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand } => {
+        ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand, .. } => {
             collect_operand_named_types(operand, used_types);
         }
         ir::IrInstruction::Create { dest, pattern } => {
@@ -4246,6 +4300,24 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
             }
             if let Some(lock) = &pattern.lock {
                 collect_operand_named_types(lock, used_types);
+            }
+        }
+        ir::IrInstruction::CreateUnique { dest, pattern, identity: _ } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            used_types.insert(pattern.ty.clone());
+            for (_, operand) in &pattern.fields {
+                collect_operand_named_types(operand, used_types);
+            }
+            if let Some(lock) = &pattern.lock {
+                collect_operand_named_types(lock, used_types);
+            }
+        }
+        ir::IrInstruction::ReplaceUnique { dest, operand, pattern, identity: _ } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(operand, used_types);
+            used_types.insert(pattern.ty.clone());
+            for (_, field_operand) in &pattern.fields {
+                collect_operand_named_types(field_operand, used_types);
             }
         }
     }
@@ -5313,7 +5385,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
                         });
                     }
                 }
-                ir::IrInstruction::Destroy { operand } => {
+                ir::IrInstruction::Destroy { operand, .. } => {
                     if let Some(type_name) = operand_named_type_name(operand) {
                         checks.push(StaticResourceOperationCheck {
                             feature: format!("destroy:{}", type_name),
@@ -5414,7 +5486,7 @@ fn body_transaction_resource_obligations(
                     }
                     output_index += 1;
                 }
-                ir::IrInstruction::Destroy { operand } => {
+                ir::IrInstruction::Destroy { operand, .. } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
                         checks.push(check);
                     }
@@ -6498,7 +6570,7 @@ fn transaction_runtime_input_requirements_from_obligations(
                 (absence_status == "runtime-required").then_some("output-scan-gap"),
                 "Output",
                 binding,
-                Some("type_hash-absence"),
+                Some("ckb_type_script_hash-absence"),
                 "destroy-output-scan-type-id",
                 None,
             ));
@@ -7372,8 +7444,8 @@ fn body_pool_primitive_metadata(
         let runtime_input_requirements =
             pool_runtime_input_requirements(name, "mutation-invariants", body, params, &checked_protocol_components);
         let mut checked_components = vec![
-            "type_hash-preservation=checked-runtime".to_string(),
-            "lock_hash-preservation=checked-runtime".to_string(),
+            "ckb_type_script_hash-preservation=checked-runtime".to_string(),
+            "ckb_lock_script_hash-preservation=checked-runtime".to_string(),
             format!("field-equality={}", field_equality_status),
             format!("field-transition={}", field_transition_status),
         ];
@@ -9591,7 +9663,7 @@ fn body_consumed_named_types(body: &ir::IrBody) -> BTreeSet<String> {
             let operand = match instruction {
                 ir::IrInstruction::Consume { operand }
                 | ir::IrInstruction::Transfer { operand, .. }
-                | ir::IrInstruction::Destroy { operand }
+                | ir::IrInstruction::Destroy { operand, .. }
                 | ir::IrInstruction::Settle { operand, .. } => Some(operand),
                 ir::IrInstruction::Claim { receipt, .. } => Some(receipt),
                 _ => None,
@@ -9920,7 +9992,7 @@ fn body_fail_closed_runtime_features(
                     }
                     output_index += 1;
                 }
-                ir::IrInstruction::Destroy { operand } => {
+                ir::IrInstruction::Destroy { operand, .. } => {
                     if !is_executable_destroy(operand) {
                         features.insert("destroy-expression".to_string());
                     }
@@ -11417,7 +11489,7 @@ fn consumed_schema_var_id(instruction: &ir::IrInstruction) -> Option<usize> {
     let operand = match instruction {
         ir::IrInstruction::Consume { operand }
         | ir::IrInstruction::Transfer { operand, .. }
-        | ir::IrInstruction::Destroy { operand }
+        | ir::IrInstruction::Destroy { operand, .. }
         | ir::IrInstruction::Settle { operand, .. } => operand,
         ir::IrInstruction::Claim { receipt, .. } => receipt,
         _ => return None,
@@ -11774,6 +11846,7 @@ fn type_metadata(
         encoded_size: type_encoded_size(type_def, type_defs),
         fields: type_def.fields.iter().map(|field| field_metadata(field, type_defs)).collect(),
         molecule_schema: type_molecule_schema_metadata(type_def, type_defs),
+        identity_policy: metadata_identity_policy(&type_def.identity),
     }
 }
 
@@ -12199,8 +12272,29 @@ fn metadata_capability_name(capability: &crate::ast::Capability) -> String {
         crate::ast::Capability::Store => "store",
         crate::ast::Capability::Transfer => "transfer",
         crate::ast::Capability::Destroy => "destroy",
+        crate::ast::Capability::Create => "create",
+        crate::ast::Capability::Consume => "consume",
+        crate::ast::Capability::Replace => "replace",
+        crate::ast::Capability::Burn => "burn",
+        crate::ast::Capability::Relock => "relock",
+        crate::ast::Capability::RetargetType => "retarget_type",
+        crate::ast::Capability::ReadRef => "read_ref",
     }
     .to_string()
+}
+
+fn is_default_identity_policy(value: &Option<String>) -> bool {
+    value.as_ref().is_none_or(|s| s == "none")
+}
+
+fn metadata_identity_policy(policy: &ir::IrIdentityPolicy) -> Option<String> {
+    match policy {
+        ir::IrIdentityPolicy::None => None,
+        ir::IrIdentityPolicy::CkbTypeId => Some("ckb_type_id".to_string()),
+        ir::IrIdentityPolicy::Field(path) => Some(format!("field({})", path)),
+        ir::IrIdentityPolicy::ScriptArgs => Some("script_args".to_string()),
+        ir::IrIdentityPolicy::SingletonType => Some("singleton_type".to_string()),
+    }
 }
 
 fn lifecycle_transition_metadata(states: &[String]) -> Vec<LifecycleTransitionMetadata> {
@@ -17504,7 +17598,7 @@ action activate(ticket: Ticket) -> Ticket {
                 && requirement.status == "checked-runtime"
                 && requirement.component == "destroy-output-absence"
                 && requirement.source == "Output"
-                && requirement.field.as_deref() == Some("type_hash-absence")
+                && requirement.field.as_deref() == Some("ckb_type_script_hash-absence")
                 && requirement.abi == "destroy-output-scan-type-id"
                 && requirement.blocker.is_none()
                 && requirement.blocker_class.is_none()
@@ -23012,6 +23106,120 @@ struct TokenSnapshot {
         let err = compile(program, CompileOptions::default()).unwrap_err();
 
         assert!(err.message.contains("duplicate type_id 'cellscript::asset::Token:v1'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_identity_ckb_type_id_emits_metadata() {
+        let program = r#"
+module audit::identity_type_id
+
+resource Token has store
+    identity(ckb_type_id)
+{
+    amount: u64
+}
+
+action mint(amount: u64) -> Token {
+    create Token { amount: amount }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token type metadata");
+
+        assert_eq!(token.identity_policy.as_deref(), Some("ckb_type_id"));
+    }
+
+    #[test]
+    fn compile_identity_none_is_default_and_hidden() {
+        let program = r#"
+module audit::identity_none
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(amount: u64) -> Token {
+    create Token { amount: amount }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token type metadata");
+
+        assert_eq!(token.identity_policy, None, "identity_policy should be None (default) and hidden in metadata");
+    }
+
+    #[test]
+    fn compile_identity_field_emits_path() {
+        let program = r#"
+module audit::identity_field
+
+resource NFT has store
+    identity(field(token_id))
+{
+    token_id: u64,
+    owner: Address
+}
+
+action mint(token_id: u64, owner: Address) -> NFT {
+    create NFT { token_id: token_id, owner: owner }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let nft = result.metadata.types.iter().find(|ty| ty.name == "NFT").expect("NFT type metadata");
+
+        assert_eq!(nft.identity_policy.as_deref(), Some("field(token_id)"));
+    }
+
+    #[test]
+    fn compile_identity_singleton_type_emits_metadata() {
+        let program = r#"
+module audit::identity_singleton
+
+resource Config has store
+    identity(singleton_type)
+{
+    value: u64
+}
+
+action init(value: u64) -> Config {
+    create Config { value: value }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let config = result.metadata.types.iter().find(|ty| ty.name == "Config").expect("Config type metadata");
+
+        assert_eq!(config.identity_policy.as_deref(), Some("singleton_type"));
+    }
+
+    #[test]
+    fn compile_identity_script_args_emits_metadata() {
+        let program = r#"
+module audit::identity_script_args
+
+resource Token has store
+    identity(script_args)
+{
+    amount: u64
+}
+
+action mint(amount: u64) -> Token {
+    create Token { amount: amount }
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token type metadata");
+
+        assert_eq!(token.identity_policy.as_deref(), Some("script_args"));
     }
 
     #[test]

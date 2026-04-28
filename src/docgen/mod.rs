@@ -939,6 +939,13 @@ fn format_capability(capability: &Capability) -> &'static str {
         Capability::Store => "store",
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
+        Capability::Create => "create",
+        Capability::Consume => "consume",
+        Capability::Replace => "replace",
+        Capability::Burn => "burn",
+        Capability::Relock => "relock",
+        Capability::RetargetType => "retarget_type",
+        Capability::ReadRef => "read_ref",
     }
 }
 

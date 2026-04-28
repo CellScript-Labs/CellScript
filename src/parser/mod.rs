@@ -20,6 +20,7 @@ struct PendingAttrs {
 struct TypePolicyDecls {
     default_hash_type: Option<HashTypeDecl>,
     capacity_floor: Option<CapacityFloorDecl>,
+    identity: Option<IdentityPolicy>,
 }
 
 impl<'a> Parser<'a> {
@@ -205,6 +206,35 @@ impl<'a> Parser<'a> {
                             }
                             TokenKind::Destroy | TokenKind::DestroyKw => {
                                 caps.push(Capability::Destroy);
+                                self.advance();
+                            }
+                            TokenKind::Create => {
+                                caps.push(Capability::Create);
+                                self.advance();
+                            }
+                            TokenKind::Consume => {
+                                caps.push(Capability::Consume);
+                                self.advance();
+                            }
+                            TokenKind::ReadRef => {
+                                caps.push(Capability::ReadRef);
+                                self.advance();
+                            }
+                            // v0.15 context-sensitive capability keywords (identifiers)
+                            TokenKind::Identifier(s) if s == "replace" => {
+                                caps.push(Capability::Replace);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "burn" => {
+                                caps.push(Capability::Burn);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "relock" => {
+                                caps.push(Capability::Relock);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "retarget_type" => {
+                                caps.push(Capability::RetargetType);
                                 self.advance();
                             }
                             _ => {
@@ -520,6 +550,7 @@ impl<'a> Parser<'a> {
         Ok(ResourceDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             capabilities,
@@ -545,6 +576,7 @@ impl<'a> Parser<'a> {
         Ok(SharedDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             capabilities,
@@ -589,6 +621,7 @@ impl<'a> Parser<'a> {
         Ok(ReceiptDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             claim_output,
@@ -669,6 +702,12 @@ impl<'a> Parser<'a> {
                     }
                     policy.capacity_floor = Some(self.parse_capacity_floor_decl()?);
                 }
+                "identity" => {
+                    if policy.identity.is_some() {
+                        return Err(crate::error::CompileError::new("duplicate identity declaration", self.current().span));
+                    }
+                    policy.identity = Some(self.parse_identity_decl()?);
+                }
                 _ => break,
             }
         }
@@ -712,6 +751,50 @@ impl<'a> Parser<'a> {
             return Err(crate::error::CompileError::new("capacity floor must be greater than zero shannons", start_span));
         }
         Ok(CapacityFloorDecl { shannons, span: start_span })
+    }
+
+    fn parse_identity_decl(&mut self) -> Result<IdentityPolicy> {
+        self.advance(); // consume "identity"
+        if self.check(&TokenKind::LParen) {
+            self.advance();
+            let kind = self.parse_name()?;
+            let policy = match kind.as_str() {
+                "ckb_type_id" => IdentityPolicy::CkbTypeId,
+                "field" => {
+                    self.expect(TokenKind::LParen)?;
+                    let path = self.parse_name()?;
+                    self.expect(TokenKind::RParen)?;
+                    IdentityPolicy::Field(path)
+                }
+                "script_args" => IdentityPolicy::ScriptArgs,
+                "singleton_type" => IdentityPolicy::SingletonType,
+                "none" => IdentityPolicy::None,
+                other => {
+                    return Err(crate::error::CompileError::new(
+                        format!(
+                            "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
+                            other
+                        ),
+                        self.current().span,
+                    ));
+                }
+            };
+            self.expect(TokenKind::RParen)?;
+            Ok(policy)
+        } else {
+            // `identity ckb_type_id` without parens
+            let kind = self.parse_name()?;
+            match kind.as_str() {
+                "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
+                "script_args" => Ok(IdentityPolicy::ScriptArgs),
+                "singleton_type" => Ok(IdentityPolicy::SingletonType),
+                "none" => Ok(IdentityPolicy::None),
+                other => Err(crate::error::CompileError::new(
+                    format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
+                    self.current().span,
+                )),
+            }
+        }
     }
 
     fn parse_const(&mut self) -> Result<ConstDef> {
@@ -785,6 +868,35 @@ impl<'a> Parser<'a> {
                     }
                     TokenKind::Destroy | TokenKind::DestroyKw => {
                         caps.push(Capability::Destroy);
+                        self.advance();
+                    }
+                    TokenKind::Create => {
+                        caps.push(Capability::Create);
+                        self.advance();
+                    }
+                    TokenKind::Consume => {
+                        caps.push(Capability::Consume);
+                        self.advance();
+                    }
+                    TokenKind::ReadRef => {
+                        caps.push(Capability::ReadRef);
+                        self.advance();
+                    }
+                    // v0.15 context-sensitive capability keywords (identifiers)
+                    TokenKind::Identifier(s) if s == "replace" => {
+                        caps.push(Capability::Replace);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "burn" => {
+                        caps.push(Capability::Burn);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "relock" => {
+                        caps.push(Capability::Relock);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "retarget_type" => {
+                        caps.push(Capability::RetargetType);
                         self.advance();
                     }
                     _ => break,
@@ -1858,6 +1970,16 @@ impl<'a> Parser<'a> {
             TokenKind::Require => self.parse_require(),
             _ if self.ident_like_name().is_some() => {
                 let name = self.parse_name_path()?;
+                // v0.15 destruction policy forms (context-sensitive identifiers)
+                match name.as_str() {
+                    "destroy_singleton_type" => return self.parse_destroy_singleton_type(),
+                    "destroy_unique" => return self.parse_destroy_unique(),
+                    "destroy_instance" => return self.parse_destroy_instance(),
+                    "burn_amount" => return self.parse_burn_amount(),
+                    "create_unique" => return self.parse_create_unique_expr(),
+                    "replace_unique" => return self.parse_replace_unique_expr(),
+                    _ => {}
+                }
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
                     self.parse_struct_init(name)
                 } else {
@@ -2004,13 +2126,207 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::DestroyKw)?;
 
+        // Check for v0.15 destruction policy forms:
+        //   destroy_singleton_type(cell)
+        //   destroy_unique(cell, identity = type_id)
+        //   destroy_instance(cell, identity_field = id)
+        //   burn_amount(cell, field = amount)
+        //   bare: destroy cell  (legacy compat → Default policy)
+        let policy = if self.check(&TokenKind::LParen) {
+            return Err(CompileError::new(
+                "expected cell expression after destroy; for policy-specific forms use destroy_singleton_type, destroy_unique, destroy_instance, or burn_amount",
+                self.current().span,
+            ));
+        } else {
+            DestructionPolicy::Default
+        };
+
         let expr = self.parse_expr()?;
 
         let end_span = self.current().span;
         Ok(Expr::Destroy(DestroyExpr {
             expr: Box::new(expr),
+            policy,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
+    }
+
+    fn parse_destroy_singleton_type(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_singleton_type"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::SingletonType,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_destroy_unique(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_unique"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let identity = self.parse_named_arg("identity")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::Unique { identity },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_destroy_instance(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_instance"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let identity_field = self.parse_named_arg("identity_field")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::Instance { identity_field },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_burn_amount(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "burn_amount"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let field = self.parse_named_arg("field")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::BurnAmount { field },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    /// Parse a named argument like `identity = type_id` or `field = amount`.
+    fn parse_named_arg(&mut self, expected_name: &str) -> Result<String> {
+        let name = self.parse_name()?;
+        if name != expected_name {
+            return Err(CompileError::new(
+                format!("expected named argument '{}', got '{}'", expected_name, name),
+                self.current().span,
+            ));
+        }
+        self.expect(TokenKind::Eq)?;
+        let value = self.parse_name()?;
+        Ok(value)
+    }
+
+    fn parse_create_unique_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "create_unique"
+        self.expect(TokenKind::Lt)?;
+        let ty = Self::render_type(&self.parse_type()?);
+        self.expect(TokenKind::Gt)?;
+        self.expect(TokenKind::LParen)?;
+        let identity = self.parse_identity_policy_from_args()?;
+        self.expect(TokenKind::RParen)?;
+
+        let fields = self.parse_field_init_list()?;
+
+        let lock = if self.ident_like_name().as_deref() == Some("with_lock") {
+            self.advance();
+            self.expect(TokenKind::LParen)?;
+            let lock_expr = self.parse_expr()?;
+            self.expect(TokenKind::RParen)?;
+            Some(Box::new(lock_expr))
+        } else {
+            None
+        };
+
+        let end_span = self.current().span;
+        Ok(Expr::CreateUnique(CreateUniqueExpr {
+            ty,
+            fields,
+            lock,
+            identity,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_replace_unique_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "replace_unique"
+        self.expect(TokenKind::Lt)?;
+        let ty = Self::render_type(&self.parse_type()?);
+        self.expect(TokenKind::Gt)?;
+        self.expect(TokenKind::LParen)?;
+        let identity = self.parse_identity_policy_from_args()?;
+        self.expect(TokenKind::RParen)?;
+
+        let expr = self.parse_expr()?;
+
+        let fields = self.parse_field_init_list()?;
+
+        let end_span = self.current().span;
+        Ok(Expr::ReplaceUnique(ReplaceUniqueExpr {
+            expr: Box::new(expr),
+            ty,
+            fields,
+            identity,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_identity_policy_from_args(&mut self) -> Result<IdentityPolicy> {
+        let name = self.parse_name()?;
+        if name != "identity" {
+            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), self.current().span));
+        }
+        self.expect(TokenKind::Eq)?;
+        let kind = self.parse_name()?;
+        match kind.as_str() {
+            "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
+            "script_args" => Ok(IdentityPolicy::ScriptArgs),
+            "singleton_type" => Ok(IdentityPolicy::SingletonType),
+            "none" => Ok(IdentityPolicy::None),
+            other => Err(CompileError::new(
+                format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
+                self.current().span,
+            )),
+        }
+    }
+
+    fn parse_field_init_list(&mut self) -> Result<Vec<(String, Expr)>> {
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let name = self.parse_name_path()?;
+            if self.check(&TokenKind::Colon) {
+                self.advance();
+                let value = self.parse_expr()?;
+                fields.push((name, value));
+            } else {
+                // Field shorthand: `amount` means `amount: amount`
+                fields.push((name.clone(), Expr::Identifier(name)));
+            }
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(fields)
     }
 
     fn parse_read_ref_expr(&mut self) -> Result<Expr> {
