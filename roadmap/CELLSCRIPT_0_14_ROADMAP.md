@@ -1,6 +1,7 @@
 # CellScript v0.14 Roadmap
 
-**Status**: Draft (Pending Team Review)
+**Status**: Feature-complete beta scope
+**Updated**: 2026-04-28
 **Scope**: CKB Semantic Completeness, Source/Witness Ergonomics, and Bounded Verifier Composition
 **Dependencies**: v0.13 released (bounded value-vector helpers, zero-cost abstractions, CLI ergonomics)
 
@@ -613,7 +614,7 @@ cargo run -p cellscript -- explain-profile ckb
 
 **v0.12 proved CellScript can compile production-grade cell contracts.**
 **v0.13 proved CellScript runs efficiently with strong developer ergonomics.**
-**v0.14 will prove CellScript exposes bounded verifier composition, and the target-profile model is formally complete.**
+**v0.14 proves CellScript exposes bounded verifier composition, and the target-profile model is formally complete for the current beta scope.**
 
 v0.14 delivers:
 
@@ -635,5 +636,5 @@ v0.14 delivers:
 ---
 
 *Document End.*
-*Status: Draft (Pending Team Review)*
+*Status: Feature-complete beta scope*
 *Prerequisites*: [CELLSCRIPT_0_13_ROADMAP.md](CELLSCRIPT_0_13_ROADMAP.md), [CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md](../docs/CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md)

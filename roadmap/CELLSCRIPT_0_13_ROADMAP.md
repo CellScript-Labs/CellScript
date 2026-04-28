@@ -1,6 +1,7 @@
 # CellScript v0.13 Roadmap
 
-**Status**: Release-gate draft (review findings integrated)
+**Status**: Beta released; implementation scope closed
+**Updated**: 2026-04-28
 **Scope**: Zero-cost Abstractions, Bounded Collection Runtime Gaps, CLI Ergonomics
 **Dependencies**: v0.12 released (CKB production closure)
 **Live TODO**: [CELLSCRIPT_0_13_TODOLIST.md](../docs/CELLSCRIPT_0_13_TODOLIST.md)
@@ -807,5 +808,5 @@ From `CELLSCRIPT_0_12_COMPREHENSIVE_PLAN.md` Section 6:
 
 *Document End.*  
 *Author: AI Code Audit Assistant*  
-*Status: Draft (Pending Team Review)*  
+*Status: Beta released; implementation scope closed*
 *Audit Sources*: CLI_ERGONOMICS_AND_BLAKE2B_AUDIT.md, CELLSCRIPT_0_12_COMPREHENSIVE_PLAN.md
