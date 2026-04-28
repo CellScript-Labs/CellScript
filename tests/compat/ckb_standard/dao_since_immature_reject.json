@@ -1,0 +1,25 @@
+{
+  "schema": "cellscript-ckb-fixture-v0.16",
+  "suite": "nervosdao-since",
+  "fixture_name": "dao-since-immature-reject",
+  "status": "rejected",
+  "description": "NervosDAO withdrawal attempt before since epoch matures",
+  "transaction_shape": {
+    "version": 0,
+    "inputs": [
+      { "type": "dao-deposit-cell", "capacity_shannons": 102000000000, "lock_script": "dao-owner-lock", "type_script": "dao-type-script", "data": "dao-deposit-data", "witness": "dao-withdraw-witness" }
+    ],
+    "outputs": [
+      { "type": "dao-withdraw-cell", "capacity_shannons": 102000000000, "lock_script": "dao-owner-lock", "type_script": null, "data": "0x" }
+    ],
+    "cell_deps": [{ "dep_type": "code", "name": "dao-type-script-dep" }, { "dep_type": "header", "name": "immature-epoch-header" }],
+    "header_deps": ["immature-epoch-header"]
+  },
+  "expected_behavior": { "script_exit_code": 1, "rejection_reason": "since_not_mature: current_epoch < required_epoch", "cycle_envelope": "within-dao-standard-envelope" },
+  "script_args_layout": { "field": "dao_deposit_owner_args", "size_bytes": 32, "encoding": "blake2b256-of-owner-lock" },
+  "witness_layout": { "field": "dao_withdraw_witness", "source": "SignatureEntry", "passthrough": true },
+  "molecule_data_layout": { "field": "epoch_since_header", "encoding": "u64-since-epoch-encoding" },
+  "metadata_expectation": { "proof_plan": { "trigger": "type_group", "scope": "group", "reads": ["group_input", "header_dep"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": ["dao-header-dep-available"], "codegen_coverage_status": "covered" },
+  "cycle_report": { "estimated": "within-dao-standard-envelope", "source": "acceptance-report" },
+  "capacity_report": { "occupied_capacity_shannons": 102000000000, "tx_size_bytes_estimate": 600, "source": "acceptance-report" }
+}

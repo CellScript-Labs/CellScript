@@ -1,0 +1,18 @@
+{
+  "name": "limit_order_underpayment",
+  "scenario": "limit_order",
+  "expected": "fail",
+  "expected_reason": "limit_order_underpayment",
+  "model_level_only": true,
+  "data": {
+    "input_ckb": 1000,
+    "input_udt": 0,
+    "output_ckb": 900,
+    "output_udt": 50,
+    "input_udt_type_hash": "asset-a",
+    "output_udt_type_hash": "asset-a",
+    "ckb_multiplier": 1,
+    "udt_multiplier": 1,
+    "ckb_min_match": 64
+  }
+}

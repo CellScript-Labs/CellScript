@@ -1,0 +1,25 @@
+{
+  "schema": "cellscript-ckb-fixture-v0.16",
+  "suite": "type-id",
+  "fixture_name": "type-id-duplicate-reject",
+  "status": "rejected",
+  "description": "TYPE_ID duplicate: two outputs share the same Type ID args",
+  "transaction_shape": {
+    "version": 0,
+    "inputs": [
+      { "type": "any-cell", "capacity_shannons": 6200000000, "lock_script": "creator-lock", "type_script": null, "data": "0x", "witness": "entry-abi-witness" }
+    ],
+    "outputs": [
+      { "type": "type-id-cell-a", "capacity_shannons": 6200000000, "lock_script": "creator-lock", "type_script": "type-id-script-args-X", "data": "typed-output-data-a" },
+      { "type": "type-id-cell-b", "capacity_shannons": 6200000000, "lock_script": "creator-lock", "type_script": "type-id-script-args-X", "data": "typed-output-data-b" }
+    ],
+    "cell_deps": [{ "dep_type": "code", "name": "type-id-script-dep" }]
+  },
+  "expected_behavior": { "script_exit_code": 1, "rejection_reason": "duplicate_type_id: at-most-one-input-and-one-output-per-type-id-group", "cycle_envelope": "within-type-id-standard-envelope" },
+  "script_args_layout": { "field": "type_id_args", "size_bytes": 32, "encoding": "blake2b256(first_input_out_point-tx-hash-and-output-index)" },
+  "witness_layout": { "field": "none_beyond_entry_abi", "source": "None", "passthrough": false },
+  "molecule_data_layout": { "field": "typed_output_data", "encoding": "user-defined-type-data" },
+  "metadata_expectation": { "proof_plan": { "trigger": "type_group", "scope": "group", "reads": ["group_input", "group_output"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": ["type_id_builder_plan"], "codegen_coverage_status": "covered" },
+  "cycle_report": { "estimated": "within-type-id-standard-envelope", "source": "acceptance-report" },
+  "capacity_report": { "occupied_capacity_shannons": 12400000000, "tx_size_bytes_estimate": 500, "source": "acceptance-report" }
+}

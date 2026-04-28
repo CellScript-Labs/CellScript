@@ -2,9 +2,10 @@
 
 Status: v0.16 mechanically precise assurance spec.
 
-This document defines the executable subset that v0.16 checks against compiler
-metadata. It is intentionally operational: every rule maps to AST/type-checker
-behavior, IR effects, ProofPlan records, or builder assumptions.
+This document defines the checked metadata subset that v0.16 validates against
+compiler metadata. It is intentionally operational: every rule maps to
+AST/type-checker behavior, IR effects, ProofPlan records, or builder
+assumptions.
 
 ## Judgments
 
@@ -18,8 +19,8 @@ T |- tx against assumptions => ok | reject
 ```
 
 `E` is the expression environment. `S` is the linear resource state and Cell
-effect log. `M` is compile metadata. `T` is a transaction JSON shape consumed by
-`cellc validate-tx`.
+effect log. `M` is compile metadata. `T` is a transaction JSON shape plus
+schema-bound evidence consumed by `cellc validate-tx`.
 
 ## Expression Evaluation
 
@@ -179,7 +180,8 @@ failure_mode
 ```
 
 `cellc explain-assumptions` emits this schema. `cellc validate-tx --against
-metadata.json tx.json` checks a concrete transaction shape before signing.
+metadata.json tx.json` checks a concrete transaction shape and requires
+schema-bound evidence objects for non-structural assumptions before signing.
 
 ## Conformance Fixtures
 
@@ -188,6 +190,6 @@ The conformance tests live in `tests/v0_16.rs` and
 
 - ProofPlan soundness metadata is emitted and passes for checked runtime cases;
 - `--primitive-strict=0.16` rejects metadata-only ProofPlan gaps;
-- builder assumption evidence is required by `validate-tx`;
+- schema-bound builder assumption evidence is required by `validate-tx`;
 - the standard CKB compatibility suite names accepted and rejected fixtures for
   sUDT, xUDT, ACP, Cheque, Omnilock, NervosDAO since/epoch, and Type ID.

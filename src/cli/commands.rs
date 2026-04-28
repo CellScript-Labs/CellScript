@@ -2700,15 +2700,103 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
 
 fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
     let assumptions = &metadata.runtime.builder_assumptions;
-    let requires_inputs = assumptions.iter().any(|assumption| !assumption.required_inputs.is_empty());
-    let requires_outputs = assumptions.iter().any(|assumption| !assumption.required_outputs.is_empty());
-    let requires_cell_deps = assumptions.iter().any(|assumption| !assumption.required_cell_deps.is_empty());
+    let ckb = metadata.constraints.ckb.as_ref();
+
+    // Cell selection: derive input requirements from actions and ProofPlan
+    let mut input_slots = Vec::new();
+    let mut output_slots = Vec::new();
+    let mut dep_slots = Vec::new();
+    let mut witness_slots = Vec::new();
+
+    // Build input slots from consume/consume_set patterns in actions
+    for action in &metadata.actions {
+        for plan in &action.proof_plan {
+            if plan.reads.iter().any(|r| r == "input" || r == "group_input") {
+                input_slots.push(serde_json::json!({
+                    "source": "proof-plan-input",
+                    "scope_kind": "action",
+                    "scope_name": action.name,
+                    "feature": plan.feature,
+                    "required_reads": plan.reads.iter().filter(|r| **r == "input" || **r == "group_input").cloned().collect::<Vec<_>>(),
+                }));
+            }
+        }
+    }
+
+    // Build output slots from create/create_set patterns
+    for action in &metadata.actions {
+        for plan in &action.proof_plan {
+            if plan.reads.iter().any(|r| r == "output" || r == "group_output") {
+                output_slots.push(serde_json::json!({
+                    "source": "proof-plan-output",
+                    "scope_kind": "action",
+                    "scope_name": action.name,
+                    "feature": plan.feature,
+                    "required_reads": plan.reads.iter().filter(|r| **r == "output" || **r == "group_output").cloned().collect::<Vec<_>>(),
+                }));
+            }
+        }
+    }
+
+    // Build lock input/output slots
+    for lock in &metadata.locks {
+        for plan in &lock.proof_plan {
+            if plan.reads.iter().any(|r| r == "input" || r == "group_input") {
+                input_slots.push(serde_json::json!({
+                    "source": "proof-plan-input",
+                    "scope_kind": "lock",
+                    "scope_name": lock.name,
+                    "feature": plan.feature,
+                    "required_reads": plan.reads.iter().filter(|r| **r == "input" || **r == "group_input").cloned().collect::<Vec<_>>(),
+                }));
+            }
+            if plan.reads.iter().any(|r| r == "output" || r == "group_output") {
+                output_slots.push(serde_json::json!({
+                    "source": "proof-plan-output",
+                    "scope_kind": "lock",
+                    "scope_name": lock.name,
+                    "feature": plan.feature,
+                    "required_reads": plan.reads.iter().filter(|r| **r == "output" || **r == "group_output").cloned().collect::<Vec<_>>(),
+                }));
+            }
+        }
+    }
+
+    // Dep resolution from CKB constraints
+    if let Some(ckb_constraints) = ckb {
+        for dep in &ckb_constraints.dep_group_manifest.declared_cell_deps {
+            dep_slots.push(serde_json::json!({
+                "source": "metadata-script-reference",
+                "name": dep.name,
+                "dep_type": dep.dep_type,
+                "hash_type": dep.hash_type,
+            }));
+        }
+        for script_ref in &ckb_constraints.script_references {
+            dep_slots.push(serde_json::json!({
+                "source": "metadata-script-reference",
+                "name": script_ref.name,
+                "scope": script_ref.scope,
+                "purpose": script_ref.purpose,
+            }));
+        }
+    }
+
+    // Witness placement from builder assumptions
     let witness_fields = assumptions
         .iter()
         .flat_map(|assumption| assumption.required_witness_fields.iter().cloned())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    if !witness_fields.is_empty() {
+        witness_slots.push(serde_json::json!({
+            "source": "builder-assumption-witness-fields",
+            "fields": witness_fields,
+        }));
+    }
+
+    // Evidence requirements
     let evidence = assumptions
         .iter()
         .filter(|assumption| {
@@ -2726,29 +2814,72 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             serde_json::json!({
                 "assumption_id": assumption.assumption_id,
                 "kind": assumption.kind,
-                "status": "required",
+                "origin": assumption.origin,
+                "feature": assumption.feature,
+                "proof_plan_status": assumption.proof_plan_status,
+                "detail": assumption.detail,
+                "evidence_schema": {
+                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Fee/change planning from CKB constraints
+    let fee_planning = ckb
+        .map(|c| {
+            serde_json::json!({
+                "capacity_planning_required": c.capacity_planning_required,
+                "capacity_policy": c.capacity_policy_surface,
+                "created_output_count": c.created_output_count,
+                "mutated_output_count": c.mutated_output_count,
+                "occupied_capacity_evidence": c.capacity_evidence_contract.measured_occupied_capacity_shannons,
+                "tx_size_bytes": c.tx_size_bytes,
+            })
+        })
+        .unwrap_or(serde_json::json!(null));
+
+    // Deterministic signing manifest
+    let signature_requests = metadata
+        .locks
+        .iter()
+        .map(|lock| {
+            serde_json::json!({
+                "lock_name": lock.name,
+                "witness_index": format!("lock:{}:witness_0", lock.name),
+                "signature_policy": "explicit-witness-no-implicit-signer",
             })
         })
         .collect::<Vec<_>>();
 
     serde_json::json!({
-        "status": "ok",
-        "solver": "cellscript-v0.16-metadata-solver",
+        "status": "template",
+        "solver": "cellscript-v0.16-transaction-template-emitter",
         "module": metadata.module,
         "target_profile": metadata.target_profile.name,
-        "transaction_template": {
+        "transaction_plan": {
             "version": 0,
-            "inputs": if requires_inputs { serde_json::json!([{"source": "builder-selected"}]) } else { serde_json::json!([]) },
-            "outputs": if requires_outputs { serde_json::json!([{"source": "proof-plan-output"}]) } else { serde_json::json!([]) },
-            "cell_deps": if requires_cell_deps { serde_json::json!([{"source": "metadata-script-reference"}]) } else { serde_json::json!([]) },
-            "witnesses": if witness_fields.is_empty() { serde_json::json!([]) } else { serde_json::json!([{"fields": witness_fields}]) },
-            "builder_assumption_evidence": evidence,
+            "inputs": input_slots,
+            "outputs": output_slots,
+            "cell_deps": dep_slots,
+            "witnesses": witness_slots,
+            "header_deps": ckb.map(|c| if c.uses_header_epoch { vec!["epoch-header"] } else { vec![] }).unwrap_or_default(),
+            "builder_assumption_evidence_requirements": evidence,
         },
+        "fee_change_plan": fee_planning,
         "signing_manifest": {
             "policy": "explicit-witness-no-implicit-signer",
-            "required_witness_fields": witness_fields,
+            "signature_requests": signature_requests,
         },
         "builder_assumptions": assumptions,
+        "limitations": [
+            "template only: does not perform live cell selection",
+            "template only: does not resolve concrete deps/header deps",
+            "template only: does not calculate fee/change or occupied capacity",
+            "template only: does not place final witnesses or signatures",
+            "CKB dry-run required for production acceptance"
+        ],
     })
 }
 
@@ -2785,11 +2916,26 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
     if plan.pointer("/artifact/format").is_none() {
         violations.push("artifact.format is required".to_string());
     }
+    match plan.pointer("/artifact/hash").and_then(serde_json::Value::as_str) {
+        Some(hash) if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => {}
+        Some(_) => violations.push("artifact.hash must be a canonical 32-byte lowercase hex hash".to_string()),
+        None => violations.push("artifact.hash is required".to_string()),
+    }
+    match plan.pointer("/artifact/size_bytes").and_then(serde_json::Value::as_u64) {
+        Some(size) if size > 0 => {}
+        Some(_) => violations.push("artifact.size_bytes must be greater than zero".to_string()),
+        None => violations.push("artifact.size_bytes is required".to_string()),
+    }
     if plan.get("target_profile").is_none() {
         violations.push("target_profile is required".to_string());
     }
-    if plan.get("proof_plan_soundness").is_none() {
-        violations.push("proof_plan_soundness is required".to_string());
+    match plan.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
+        Some("passed") => {}
+        Some(status) => violations.push(format!("proof_plan_soundness.status must be passed, got {status}")),
+        None => violations.push("proof_plan_soundness.status is required".to_string()),
+    }
+    if plan.get("builder_assumptions").is_none() {
+        violations.push("builder_assumptions is required".to_string());
     }
     violations
 }
@@ -2923,6 +3069,94 @@ fn trace_tx_report_json(metadata: &CompileMetadata, validation: &crate::TxValida
 }
 
 fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
+    // Source-to-codegen mapping: link ProofPlan records to source spans, IR effects, and codegen coverage
+    let source_to_codegen = metadata
+        .runtime
+        .proof_plan
+        .iter()
+        .map(|plan| {
+            serde_json::json!({
+                "origin": plan.origin,
+                "feature": plan.feature,
+                "status": plan.status,
+                "source_span": plan.source_span.as_ref().map(|span| serde_json::json!({
+                    "start": span.start,
+                    "end": span.end,
+                    "line": span.line,
+                    "column": span.column,
+                })).unwrap_or(serde_json::Value::Null),
+                "trigger": plan.trigger,
+                "scope": plan.scope,
+                "codegen_coverage_status": plan.codegen_coverage_status,
+                "on_chain_checked": plan.on_chain_checked,
+                "ir_effect_class": match plan.category.as_str() {
+                    "cell-access" => "cell-read-write",
+                    "transaction-invariant" => "transaction-scan",
+                    "declared-invariant" => "metadata-only-invariant",
+                    "aggregate-invariant" => "aggregate-check",
+                    "pool-primitive" => "pool-operation",
+                    _ => "unknown",
+                },
+                "reads": plan.reads,
+                "coverage": plan.coverage,
+                "builder_assumptions": plan.builder_assumptions,
+                "diagnostics": plan.diagnostics.iter().map(|diag| serde_json::json!({
+                    "severity": diag.severity,
+                    "message": diag.message,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Action-level source-to-IR-to-codegen trace
+    let action_traces = metadata
+        .actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "name": action.name,
+                "estimated_cycles": action.estimated_cycles,
+                "proof_plan_records": action.proof_plan.len(),
+                "proof_plan_source_mappings": action.proof_plan.iter().map(|plan| serde_json::json!({
+                    "origin": plan.origin,
+                    "feature": plan.feature,
+                    "source_span": plan.source_span,
+                    "codegen_coverage_status": plan.codegen_coverage_status,
+                })).collect::<Vec<_>>(),
+                "runtime_accesses": action.ckb_runtime_accesses.iter().map(|access| serde_json::json!({
+                    "source": access.source,
+                    "operation": access.operation,
+                    "index": access.index,
+                    "binding": access.binding,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    // Lock-level source-to-codegen trace
+    let lock_traces = metadata
+        .locks
+        .iter()
+        .map(|lock| {
+            serde_json::json!({
+                "name": lock.name,
+                "proof_plan_records": lock.proof_plan.len(),
+                "proof_plan_source_mappings": lock.proof_plan.iter().map(|plan| serde_json::json!({
+                    "origin": plan.origin,
+                    "feature": plan.feature,
+                    "source_span": plan.source_span,
+                    "codegen_coverage_status": plan.codegen_coverage_status,
+                })).collect::<Vec<_>>(),
+                "runtime_accesses": lock.ckb_runtime_accesses.iter().map(|access| serde_json::json!({
+                    "source": access.source,
+                    "operation": access.operation,
+                    "index": access.index,
+                    "binding": access.binding,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+
     serde_json::json!({
         "status": "ok",
         "schema": "cellscript-audit-bundle-v0.16",
@@ -2930,21 +3164,16 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
         "target_profile": metadata.target_profile,
+        "source_to_codegen": source_to_codegen,
         "proof_plan": metadata.runtime.proof_plan,
         "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
         "builder_assumptions": metadata.runtime.builder_assumptions,
         "constraints": metadata.constraints,
-        "actions": metadata.actions.iter().map(|action| serde_json::json!({
-            "name": action.name,
-            "estimated_cycles": action.estimated_cycles,
-            "proof_plan_records": action.proof_plan.len(),
-            "runtime_accesses": action.ckb_runtime_accesses.len(),
-        })).collect::<Vec<_>>(),
-        "locks": metadata.locks.iter().map(|lock| serde_json::json!({
-            "name": lock.name,
-            "proof_plan_records": lock.proof_plan.len(),
-            "runtime_accesses": lock.ckb_runtime_accesses.len(),
-        })).collect::<Vec<_>>(),
+        "actions": action_traces,
+        "locks": lock_traces,
+        "source_units": metadata.source_units,
+        "lowering": metadata.lowering,
+        "debug_info_sections": metadata.debug_info_sections,
     })
 }
 
@@ -4699,7 +4928,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("verify-deploy")
-                    .about("Verify a v0.16 deployment plan schema")
+                    .about("Verify a v0.16 deployment plan schema and local integrity fields")
                     .arg(Arg::new("plan").value_name("DEPLOY_PLAN").required(true))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )

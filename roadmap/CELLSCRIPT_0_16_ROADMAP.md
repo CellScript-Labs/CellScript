@@ -1,35 +1,40 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Implemented on `cellscript-0.16`
-**Scope**: Formal Semantics, Standard Compatibility, and Production Tooling
+**Status**: Implemented for the scoped `cellscript-0.16` release
+**Scope**: Metadata Semantics, Descriptive Standard Compatibility, and Production Tooling Skeleton
 **Dependencies**: v0.13, v0.14, and v0.15 complete
 
 ---
 
 ## Implementation Status
 
-The `cellscript-0.16` branch implements the release as an assurance/tooling
-track:
+The `cellscript-0.16` branch implements the scoped metadata-assurance release.
+It does not claim full production transaction solving, CKB VM compatibility
+execution, stable protocol stdlib implementations, or formal verification.
+Those items are explicitly deferred to 0.17.
 
-| Area | Status | Artifact |
-|---|---|---|
-| Formal operational semantics | Implemented | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md` and `tests/v0_16.rs` conformance checks |
-| ProofPlan soundness checks | Implemented | `proof_plan::soundness`, `runtime.proof_plan_soundness`, and `--primitive-strict=0.16` enforcement |
-| Standard CKB compatibility suite | Implemented as fixture manifest | `tests/compat/ckb_standard/manifest.json` covers sUDT, xUDT, ACP, Cheque, Omnilock, NervosDAO since/epoch, and Type ID fixture expectations |
-| Builder assumption contract | Implemented | `runtime.builder_assumptions` and `cellc explain-assumptions` |
-| Transaction validation | Implemented | `cellc validate-tx --against metadata.json tx.json` |
-| Transaction solver | Implemented as deterministic metadata solver template | `cellc solve-tx` |
-| Deployment governance | Implemented as reproducible JSON plans | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` |
-| Audit/debug UX | Implemented as metadata reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` |
-| Stdlib release track | Fixture-gated | Stable marking is tied to compatibility fixtures and audit bundles |
+| Area | 0.16 Status | Artifact | Deferred To 0.17 |
+|---|---|---|---|
+| Operational semantics | Implemented as mechanically precise prose plus conformance tests | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md` and `tests/v0_16.rs` | Machine-checked/formal proof backend |
+| ProofPlan soundness checks | Implemented as fail-closed metadata consistency checker | `proof_plan::soundness`, `runtime.proof_plan_soundness`, and `--primitive-strict=0.16` enforcement | Formal invariant proof and source-to-assembly coverage |
+| Standard CKB compatibility suite | Implemented as descriptive fixture suite | `tests/compat/ckb_standard/manifest.json` and descriptive fixture files | Executable CKB VM accepted/rejected runner |
+| Builder assumption contract | Implemented | `runtime.builder_assumptions`, `cellc explain-assumptions`, schema-bound `validate-tx` evidence | Full CKB transaction semantic validation |
+| Transaction validation | Implemented as pre-signing structural/schema-bound evidence check | `cellc validate-tx --against metadata.json tx.json` | CKB dry-run-backed fixture validation |
+| Transaction solving | Implemented as deterministic template emitter | `cellc solve-tx` emits requirements, not a final transaction | Real solver with cell selection, deps, fees, witnesses, dry-run |
+| Deployment governance | Implemented as local manifest/schema/integrity tooling | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` | On-chain deployment verification |
+| Audit/debug UX | Implemented as metadata/IR reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` | Full CellScript-to-RISC-V source maps |
+| Stdlib release track | Implemented as schema stubs only | `src/stdlib/ckb_protocols/*` descriptors marked `schema-stub` | ABI-compatible protocol stdlib implementations and executable coverage |
 
-Boundary: v0.16 does not claim full formal verification. The branch implements
-mechanically checked metadata soundness and transaction-shape validation, while
-local CKB dry-run/commit evidence remains the production acceptance layer.
+Boundary: v0.16 does not claim full formal verification or production CKB
+protocol equivalence. The branch implements metadata consistency checking,
+schema-bound builder evidence, descriptive fixtures, local deployment integrity
+checks, and transaction template generation. CKB VM execution, real transaction
+solving, and protocol stdlib implementation are 0.17 scope.
 
 ## Goal
 
-v0.16 turns the v0.15 semantic audit layer into production-grade assurance.
+v0.16 turns the v0.15 semantic audit layer into a scoped metadata-assurance
+tooling release.
 
 v0.15 makes CKB invariants visible:
 
@@ -40,12 +45,14 @@ v0.15 makes CKB invariants visible:
 - on-chain checked obligations
 - builder assumptions
 
-v0.16 answers the next questions:
+v0.16 answers the next questions within compiler metadata and local tooling:
 
-- Can we prove the invariant model is sound?
-- Can CellScript match standard CKB contract behavior, ABI/layout, error behavior, and cycle envelopes where needed?
-- Can wallets/builders/indexers honor the assumptions emitted by the compiler?
-- Can developers debug, audit, deploy, and upgrade contracts without relying on ad hoc tooling?
+- Can the compiler reject ProofPlan records that overstate their own metadata?
+- Can CellScript describe standard CKB contract ABI/layout expectations as
+  deterministic fixtures?
+- Can wallets/builders/indexers receive stable, schema-bound builder assumptions?
+- Can developers inspect deploy plans, proof diffs, profiles, tx traces, and
+  audit bundles before moving to CKB VM evidence?
 
 ---
 
@@ -76,17 +83,19 @@ Do not re-plan v0.15:
 
 ---
 
-## P0
+## P0: 0.16 Release Scope
 
 ### 1. Formal Operational Semantics
 
 **Problem**
 
-CellScript will have a rich invariant model after v0.15, but the language still lacks a formal semantics for resource states, cell effects, script triggers, scopes, and ProofPlan obligations.
+CellScript has a rich invariant model after v0.15, but the language needs a
+precise compiler-facing semantics for resource states, cell effects, script
+triggers, scopes, and ProofPlan obligations.
 
 **Change**
 
-Publish a machine-checkable or mechanically precise semantics for:
+Publish mechanically precise semantics for:
 
 - expression evaluation
 - linear resource state transitions
@@ -100,15 +109,14 @@ Publish a machine-checkable or mechanically precise semantics for:
 **Artifacts**
 
 - `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md`
-- formal small-step or big-step rules
-- executable reference checker for selected rules
+- small-step/big-step style rules in prose notation
 - conformance fixtures linked to compiler tests
 
 **Acceptance**
 
-- every v0.15 ProofPlan field has a formal meaning
+- every v0.15 ProofPlan field has a documented meaning
 - resource state rules match type checker behavior
-- trigger/scope/coverage examples have expected formal outcomes
+- trigger/scope/coverage examples have expected conformance outcomes
 - compiler tests include spec conformance fixtures
 
 ---
@@ -117,28 +125,31 @@ Publish a machine-checkable or mechanically precise semantics for:
 
 **Problem**
 
-`ProofPlan` is auditable metadata, not a proof. v0.16 must verify that ProofPlan obligations match emitted code and cannot overstate enforcement.
+`ProofPlan` is auditable metadata, not a proof. v0.16 must verify that
+ProofPlan obligations do not overstate their own metadata coverage or diverge
+between local action/function/lock metadata and `runtime.proof_plan`.
 
 **Change**
 
 Add soundness checks:
 
 ```text
-source invariant
+source/runtime obligation
   -> ProofPlan obligation
-  -> IR operation
-  -> codegen check
   -> metadata coverage record
+  -> builder assumption boundary
 ```
 
 Add an internal checker that rejects:
 
 - metadata-only obligations in strict mode
-- missing emitted checks
-- mismatched source views
+- checked records whose codegen coverage metadata is not `covered`
+- mismatched local/runtime trigger, scope, reads, coverage, assumptions, detail,
+  or codegen coverage records
 - incorrect group cardinality coverage
 - unchecked builder assumptions marked as on-chain
 - stale ProofPlan records after optimization
+- verifier obligations without a matching category, feature, status, and detail
 
 **Code Areas**
 
@@ -150,17 +161,19 @@ Add an internal checker that rejects:
 
 **Acceptance**
 
-- strict mode fails if ProofPlan and emitted code diverge
-- optimization cannot remove checks without updating ProofPlan
-- negative tests mutate metadata/codegen coverage and are rejected
+- strict mode fails for metadata-only/runtime-required ProofPlan gaps
+- local/runtime ProofPlan mutations are rejected
+- checked records cannot carry coverage gaps or unchecked builder assumptions
 
 ---
 
-### 3. Standard CKB Contract Compatibility Suite
+### 3. Descriptive Standard CKB Contract Compatibility Suite
 
 **Problem**
 
-CellScript can express CKB-native semantics, but it still needs fixture-level compatibility with standard CKB scripts and ecosystem conventions.
+CellScript needs a deterministic description of standard CKB script layouts
+and expected accepted/rejected transaction shapes before 0.17 adds executable
+CKB VM compatibility.
 
 **Change**
 
@@ -174,7 +187,7 @@ Create compatibility suites for:
 - NervosDAO-style epoch/since fixtures
 - Type ID
 
-Each suite must cover:
+Each descriptive suite must cover:
 
 - script args layout
 - witness layout
@@ -188,14 +201,15 @@ Each suite must cover:
 
 - `tests/compat/ckb_standard/`
 - fixture transactions
-- expected metadata snapshots
-- cycle reports
+- metadata expectation snapshots
+- cycle and capacity report envelopes
 
 **Acceptance**
 
-- CellScript fixtures match standard script behavior for accepted/rejected cases
-- metadata exposes exact script args/witness/data assumptions
-- incompatibilities are documented as intentional and profile-gated
+- manifest names accepted and rejected fixtures for each suite
+- fixture files parse and expose transaction shape, expected behavior,
+  script args, witness, Molecule data, metadata, cycle, and capacity fields
+- no behavioural equivalence is claimed until 0.17 executable runner coverage
 
 ---
 
@@ -212,6 +226,9 @@ Define a builder assumption schema:
 ```text
 assumption_id
 kind
+origin
+feature
+proof_plan_status
 required_inputs
 required_outputs
 required_cell_deps
@@ -227,60 +244,59 @@ Add validation APIs:
 
 - `cellc explain-assumptions`
 - `cellc validate-tx --against metadata.json tx.json`
-- SDK assumption validator
 
 **Acceptance**
 
 - every builder assumption has a stable schema record
-- generated transaction templates include assumption IDs
-- validation rejects transactions that violate assumptions before signing
+- generated transaction templates include evidence requirements
+- validation rejects missing, bare, or malformed schema-bound evidence before
+  signing
 
 ---
 
-## P1
+## P1: 0.16 Tooling Skeleton
 
-### 5. Transaction Solver
+### 5. Transaction Template Emitter
 
 **Problem**
 
-Builder templates are not enough. Real applications need a solver for cell selection, capacity, fees, change outputs, witness placement, dep resolution, and multi-party signing flows.
+0.16 needs a deterministic handoff artifact for builders. A real transaction
+solver with cell selection, dep resolution, fee/change planning, witness
+placement, and dry-run validation is 0.17 scope.
 
 **Change**
 
-Add a transaction solver that consumes:
+Add a transaction template emitter that consumes:
 
 - action metadata
 - ProofPlan
 - builder assumptions
-- available cells
-- signing policy
 - target profile
 
-Solver responsibilities:
+Template responsibilities:
 
-- cell selection
-- dep resolution
-- output planning
-- occupied capacity calculation
-- fee/change planning
-- witness placement
-- signature request manifest
-- dry-run validation
+- list required input/output/dep/header/witness slots from metadata
+- surface schema-bound builder assumption evidence requirements
+- emit fee/change metadata that a builder must satisfy
+- emit a deterministic signing manifest skeleton
+- state limitations explicitly in JSON output
 
 **Acceptance**
 
-- solver can build transactions for all bundled examples
-- solver emits a deterministic signing manifest
-- solver validates builder assumptions before finalization
-- failure messages point to missing cells, deps, witnesses, or capacity
+- `cellc solve-tx` emits a deterministic template, not a final transaction
+- output uses `status: "template"` and names concrete limitations
+- evidence output is requirements-only and cannot be mistaken for satisfied
+  builder evidence
 
 ---
 
-### 6. Deployment and Upgrade Governance
+### 6. Local Deployment and Upgrade Governance
 
 **Problem**
 
-CKB deployment is a governance problem: code cells, dep groups, hash types, Type ID, audit labels, and version locks need a stable workflow.
+CKB deployment is a governance problem: code cells, dep groups, hash types,
+Type ID, audit labels, and version locks need a stable local manifest workflow.
+On-chain deployment verification is 0.17 scope.
 
 **Change**
 
@@ -290,9 +306,8 @@ Add deployment governance artifacts:
 - dep group manifest
 - version lock file
 - audit hash record
-- upgrade policy
-- rollback policy
-- script reference registry entry
+- local upgrade diff
+- script reference metadata
 
 Add commands:
 
@@ -305,9 +320,13 @@ cellc lock-deps
 
 **Acceptance**
 
-- deployments are reproducible from manifests
-- upgrade diffs identify script hash, args, data layout, and ProofPlan changes
-- registry entries include audit status and compatibility range
+- deploy plans include artifact hash/size, target profile, dep group metadata,
+  script references, ProofPlan soundness, and builder assumptions
+- `verify-deploy` rejects malformed local plan schema, noncanonical artifact
+  hashes, zero artifact sizes, failed ProofPlan soundness, and missing builder
+  assumption sections
+- upgrade diffs identify artifact, target profile, ProofPlan soundness, and
+  metadata schema changes
 
 ---
 
@@ -315,16 +334,18 @@ cellc lock-deps
 
 **Problem**
 
-`explain-proof` is necessary but not enough for production audits. Developers need traceable source-to-code, proof diff, cycle, and transaction execution views.
+`explain-proof` is necessary but not enough for production audits. 0.16 adds
+metadata-level traceability before 0.17 adds full source-to-RISC-V and CKB
+execution views.
 
 **Change**
 
 Add audit tooling:
 
-- source maps from CellScript to RISC-V assembly
+- metadata/IR-level source-to-codegen mapping
 - proof diff between versions
 - cycle profiler per invariant/check
-- tx trace viewer
+- tx assumption trace viewer
 - coverage report for invariants and assumptions
 - HTML audit bundle
 
@@ -340,21 +361,24 @@ cellc audit-bundle
 
 **Acceptance**
 
-- audit bundle links source spans, ProofPlan obligations, emitted code, and metadata
+- audit bundle links source spans, ProofPlan obligations, metadata, IR effect
+  classes, and codegen coverage status
 - proof diff highlights changed trigger/scope/coverage semantics
-- cycle profiler identifies the most expensive generated checks
+- cycle profiler emits deterministic metadata-level estimates
 
 ---
 
-### 8. Standard Library Release Track
+### 8. Standard Library Schema Track
 
 **Problem**
 
-v0.16 should not make the standard library the main language milestone, but the compatibility suite needs curated library modules for common patterns.
+v0.16 should not make the standard library the main language milestone. It
+ships descriptor stubs for standard CKB protocols so the compatibility suite
+and future 0.17 implementations have stable names and metadata shapes.
 
 **Change**
 
-Ship audited stdlib modules as wrappers over v0.15 scoped invariants:
+Ship schema descriptors for:
 
 - `std::sudt`
 - `std::xudt`
@@ -365,19 +389,20 @@ Ship audited stdlib modules as wrappers over v0.15 scoped invariants:
 
 Rules:
 
-- stdlib modules must expose ProofPlan
-- no hidden builder assumptions
-- compatibility fixtures required before marking stable
+- modules must be marked `schema-stub`, not `stable`
+- descriptors must expose ProofPlan trigger/scope/reads and builder
+  assumptions
+- compatibility fixture references must be explicit
 
 **Acceptance**
 
-- each stable stdlib module has compatibility fixtures
-- module docs include trigger/scope/coverage explanation
-- audit bundle generated for each module
+- descriptor modules exist for the listed protocols
+- tests reject marking the descriptors stable before implementation coverage
+- no descriptor is represented as production-ready
 
 ---
 
-## P2
+## Deferred Beyond 0.16
 
 ### 9. Advanced Linear Collections
 
@@ -433,16 +458,40 @@ Explore one or more backends:
 
 ---
 
+### 11. 0.17 Production-Completeness Tracks
+
+The following are deliberately not 0.16 release gates. They move to
+`docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
+
+- executable CKB VM compatibility fixtures;
+- iCKB-style differential testing;
+- full transaction solver with live cell selection and dry-run;
+- ABI-compatible CKB protocol stdlib implementations;
+- source-to-RISC-V/assembly source maps;
+- on-chain deployment verification;
+- executable aggregate invariant lowering.
+
+---
+
 ## Release Gates
 
-v0.16 cannot ship until:
+v0.16 can ship when the scoped metadata/tooling release satisfies:
 
 - operational semantics document covers resource state, cell effects, triggers, scopes, and ProofPlan
-- ProofPlan soundness checker is mandatory in strict mode
-- standard CKB compatibility suites cover accepted and rejected fixtures
-- builder assumption schema is stable
-- `cellc validate-tx` checks builder assumptions against a transaction
-- transaction solver builds all bundled examples
-- deployment manifests are reproducible
-- audit bundle links source, ProofPlan, emitted code, metadata, and cycles
-- stdlib stable modules have compatibility fixtures and audit bundles
+- ProofPlan soundness checker is mandatory in strict mode and rejects
+  local/runtime ProofPlan drift
+- standard CKB compatibility suites provide descriptive accepted/rejected
+  fixture shapes
+- builder assumption schema is stable and `validate-tx` rejects missing,
+  bare, or malformed schema-bound evidence
+- `solve-tx` emits a deterministic template with explicit limitations and
+  evidence requirements
+- deployment manifests are reproducible and `verify-deploy` rejects malformed
+  local integrity fields
+- audit bundle links source spans, ProofPlan, metadata, IR effect classes, and
+  codegen coverage status
+- CKB protocol stdlib descriptors are explicitly marked `schema-stub`, not
+  `stable`
+- `cargo fmt --all`, `cargo check --locked -p cellscript --all-targets`,
+  `cargo test --locked -p cellscript`, `cargo clippy --locked -p cellscript
+  --all-targets -- -D warnings`, and `git diff --check` pass

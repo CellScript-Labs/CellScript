@@ -1,0 +1,15 @@
+{
+  "name": "wrong_owner",
+  "scenario": "owned_owner",
+  "expected": "fail",
+  "expected_reason": "wrong_owner",
+  "model_level_only": true,
+  "data": {
+    "owned_index": 2,
+    "owner_cell_owned_index": 2,
+    "owner": "owner-a",
+    "claimed_owner": "owner-b",
+    "withdrawal_request": true,
+    "empty_args": true
+  }
+}

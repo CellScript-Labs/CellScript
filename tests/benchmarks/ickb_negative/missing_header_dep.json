@@ -1,0 +1,23 @@
+{
+  "name": "missing_header_dep",
+  "scenario": "deposit_phase_2",
+  "expected": "fail",
+  "expected_reason": "missing_header_dep",
+  "model_level_only": true,
+  "data": {
+    "input_udt": 0,
+    "output_udt": 10000000000000,
+    "xudt_binding": "ickb_logic_hash+owner_mode_input_type",
+    "header_deps_present": false,
+    "cell_deps": ["ickb_logic", "xudt", "dao"],
+    "input_receipts": [
+      {
+        "id": "receipt-a",
+        "quantity": 1,
+        "amount": 10000000000000,
+        "accumulated_rate": 10000000000000000
+      }
+    ],
+    "input_deposits": []
+  }
+}

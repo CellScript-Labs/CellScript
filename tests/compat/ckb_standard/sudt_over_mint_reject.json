@@ -1,0 +1,78 @@
+{
+  "schema": "cellscript-ckb-fixture-v0.16",
+  "suite": "sudt",
+  "fixture_name": "sudt-over-mint-reject",
+  "status": "rejected",
+  "description": "sUDT transfer where output amount exceeds input amount, violating conservation",
+  "transaction_shape": {
+    "version": 0,
+    "inputs": [
+      {
+        "type": "sudt-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "owner-lock-hash-in-args",
+        "type_script": "sudt-type-script",
+        "data": "0xe8030000000000000000000000000000",
+        "data_layout": "little-endian-u128-amount=1000",
+        "witness": "owner-lock-signature"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "sudt-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "recipient-lock",
+        "type_script": "sudt-type-script",
+        "data": "0xd0070000000000000000000000000000",
+        "data_layout": "little-endian-u128-amount=2000"
+      }
+    ],
+    "cell_deps": [
+      {
+        "dep_type": "code",
+        "name": "sudt-type-script-dep"
+      }
+    ]
+  },
+  "expected_behavior": {
+    "script_exit_code": 1,
+    "rejection_reason": "output_amount > input_amount; conservation violated",
+    "cycle_envelope": "within-sudt-standard-envelope"
+  },
+  "script_args_layout": {
+    "field": "owner_lock_hash",
+    "size_bytes": 32,
+    "encoding": "blake2b256-of-owner-lock-script"
+  },
+  "witness_layout": {
+    "field": "owner_lock_witness",
+    "source": "SignatureEntry",
+    "passthrough": true
+  },
+  "molecule_data_layout": {
+    "field": "amount",
+    "size_bytes": 16,
+    "encoding": "little-endian-u128"
+  },
+  "metadata_expectation": {
+    "proof_plan": {
+      "trigger": "type_group",
+      "scope": "group",
+      "reads": ["group_input", "group_output"],
+      "coverage": "covered",
+      "on_chain_checked": true
+    },
+    "builder_assumptions": [],
+    "codegen_coverage_status": "covered"
+  },
+  "cycle_report": {
+    "estimated": "within-sudt-standard-envelope",
+    "source": "acceptance-report",
+    "note": "rejection consumes fewer cycles than acceptance"
+  },
+  "capacity_report": {
+    "occupied_capacity_shannons": 6200000000,
+    "tx_size_bytes_estimate": 400,
+    "source": "acceptance-report"
+  }
+}

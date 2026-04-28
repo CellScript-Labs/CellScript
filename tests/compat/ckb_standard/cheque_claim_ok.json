@@ -1,0 +1,24 @@
+{
+  "schema": "cellscript-ckb-fixture-v0.16",
+  "suite": "cheque",
+  "fixture_name": "cheque-claim-ok",
+  "status": "accepted",
+  "description": "Cheque cell claimed by correct receiver with matching lock",
+  "transaction_shape": {
+    "version": 0,
+    "inputs": [
+      { "type": "cheque-cell", "capacity_shannons": 6200000000, "lock_script": "cheque-lock", "type_script": "cheque-type-script", "data": "cheque-cell-data", "witness": "receiver-spend-witness" }
+    ],
+    "outputs": [
+      { "type": "sudt-cell", "capacity_shannons": 6200000000, "lock_script": "receiver-lock", "type_script": "sudt-type-script", "data": "claimed-amount" }
+    ],
+    "cell_deps": [{ "dep_type": "code", "name": "cheque-type-script-dep" }, { "dep_type": "code", "name": "sudt-type-script-dep" }]
+  },
+  "expected_behavior": { "script_exit_code": 0, "conservation": "receiver-claims-amount", "cycle_envelope": "within-cheque-standard-envelope" },
+  "script_args_layout": { "field": "sender_and_receiver_lock_hashes", "size_bytes": 64, "encoding": "32-byte-sender-hash + 32-byte-receiver-hash" },
+  "witness_layout": { "field": "sender_receiver_spend_witness", "source": "SignatureEntry", "passthrough": true },
+  "molecule_data_layout": { "field": "cheque_cell_data", "encoding": "passthrough" },
+  "metadata_expectation": { "proof_plan": { "trigger": "lock_group", "scope": "group", "reads": ["group_input", "group_output", "witness"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": [], "codegen_coverage_status": "covered" },
+  "cycle_report": { "estimated": "within-cheque-standard-envelope", "source": "acceptance-report" },
+  "capacity_report": { "occupied_capacity_shannons": 6200000000, "tx_size_bytes_estimate": 420, "source": "acceptance-report" }
+}

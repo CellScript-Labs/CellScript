@@ -4,10 +4,15 @@ Status: implementation branch draft for `cellscript-0.16`.
 
 Updated: 2026-04-28.
 
-CellScript 0.16 turns the v0.15 ProofPlan audit surface into an assurance
-toolchain. The release adds operational semantics, ProofPlan soundness checks,
-stable builder assumption metadata, transaction-shape validation, deployment
-and audit reports, and a standard CKB compatibility fixture suite.
+CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
+assurance toolchain. The release adds operational semantics, ProofPlan
+soundness checks, stable builder assumption metadata, transaction-shape
+validation, deployment and audit reports, standard CKB compatibility
+descriptive fixtures, and CKB stdlib protocol module schema stubs.
+
+Production-completeness items such as executable CKB VM fixture execution,
+full transaction solving, source-to-assembly maps, and protocol stdlib
+implementations are deliberately deferred to 0.17.
 
 ## Highlights
 
@@ -18,6 +23,9 @@ meaning of expression evaluation, linear resource states, branch merge rules,
 Cell effects, triggers, scopes, ProofPlan fields, and builder assumptions.
 
 Conformance is tied to `tests/v0_16.rs`.
+
+**Note**: The semantics document is mechanically precise prose with rule
+notation, not an executable/formally verified reference.
 
 ### ProofPlan Soundness
 
@@ -36,6 +44,8 @@ The checker rejects:
 - local action/function/lock ProofPlan records that diverge from
   `runtime.proof_plan`;
 - metadata-only/runtime-required gaps in `--primitive-strict=0.16` mode.
+
+**Note**: This is a metadata consistency checker, not a formal proof.
 
 ### Builder Assumption Contract
 
@@ -65,6 +75,12 @@ failure_mode
 
 `cellc explain-assumptions --json` prints the schema for a source package.
 
+**Note**: `validate-tx` performs structural and schema-bound evidence
+validation, not full CKB transaction semantic verification. Non-structural
+assumption evidence must bind to the assumption id, kind, origin, feature, and
+ProofPlan status and include a non-empty evidence payload, but CKB dry-run
+remains the production acceptance layer.
+
 ### Transaction Validation
 
 New command:
@@ -78,12 +94,27 @@ signing. Non-structural assumptions such as global uniqueness, TYPE_ID builder
 plans, lock-group transaction-scope assumptions, and capacity evidence require
 explicit `builder_assumption_evidence`.
 
-### Production Tooling
+### Transaction Template Emitter
+
+```bash
+cellc solve-tx
+```
+
+The transaction template emitter derives input/output/dep slot requirements
+from ProofPlan records, surfaces CKB dependency metadata, reports fee/change
+metadata from CKB constraints, and emits a signing manifest skeleton with
+per-lock signature request requirements.
+
+**Note**: This is a deterministic template emitter, not a runtime cell
+selector or final solver. Builders must still perform concrete cell selection,
+dep/header resolution, fee/change planning, occupied-capacity calculation,
+witness placement, signing, and CKB dry-run.
+
+### Metadata Tooling
 
 0.16 adds metadata-driven commands:
 
 ```bash
-cellc solve-tx
 cellc deploy-plan
 cellc verify-deploy
 cellc diff-deploy
@@ -94,9 +125,14 @@ cellc trace-tx
 cellc audit-bundle
 ```
 
-These commands produce deterministic JSON reports. They do not replace local CKB
-dry-run/commit evidence; they make assumptions and diffs explicit before that
-stage.
+These commands produce deterministic JSON reports. The audit bundle now
+includes `source_to_codegen` mapping that links ProofPlan records to source
+spans, IR effect classes, and codegen coverage status, along with action/lock
+traces that include per-entry source-to-IR-to-codegen mappings and runtime
+access details.
+
+**Note**: Source-to-codegen mapping is at the metadata/IR level. Full
+CellScript-to-RISC-V assembly source maps are not yet available.
 
 ### Standard Compatibility Suite
 
@@ -108,6 +144,34 @@ tests/compat/ckb_standard/manifest.json
 
 It covers fixture expectations for sUDT, xUDT, ACP, Cheque,
 Omnilock-compatible locks, NervosDAO since/epoch behavior, and Type ID.
+
+Each suite has descriptive fixture files with transaction shapes,
+expected behavior, script args/witness/molecule data layouts, metadata
+expectations, cycle report envelopes, and capacity reports.
+
+**Note**: These are descriptive fixtures, not executable test runners.
+No test harness validates accepted/rejected cases against CKB or the
+compiler. CKB dry-run remains the acceptance mechanism.
+
+### CKB Standard Library Protocol Module Stubs
+
+0.16 adds schema stubs for CKB stdlib protocol modules:
+
+- `std::sudt` — Simple UDT transfer and mint
+- `std::xudt` — eXtensible UDT transfer
+- `std::type_id` — TYPE_ID cell identity creation
+- `std::htlc` — Hash Time-Locked Contract claim (preimage/timelock)
+- `std::cheque` — Cheque claim and refund
+- `std::acp` — Anyone-Can-Pay deposit and withdraw
+
+Each module declares ProofPlan trigger/scope/reads, builder assumptions,
+compatibility fixture references, and `schema-stub` status via
+`CkbStdlibModule`/`ProtocolFunction` descriptors.
+
+**Note**: These are schema stubs only — no CellScript source
+implementations, no assembly generation, no ProofPlan pipeline integration,
+and no test coverage. A future release must implement the modules before
+they can be used in production contracts.
 
 ## Compatibility
 
@@ -126,10 +190,43 @@ cargo check --locked -p cellscript --all-targets
 git diff --check
 ```
 
-Full gate remains:
+Full scoped 0.16 gate:
 
 ```bash
 cargo fmt --all
+cargo check --locked -p cellscript --all-targets
 cargo test --locked -p cellscript
-bash scripts/cellscript_ckb_release_gate.sh production
+cargo clippy --locked -p cellscript --all-targets -- -D warnings
+git diff --check
 ```
+
+## Deferred To 0.17
+
+The following items are outside the scoped 0.16 release and are tracked by
+`docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
+
+- executable CKB VM accepted/rejected fixture runner;
+- full CKB transaction semantic validation and dry-run-backed fixture verdicts;
+- real transaction solver with cell selection, dep/header resolution,
+  occupied-capacity calculation, fee/change planning, witness placement,
+  signing, and dry-run;
+- on-chain deployment verification;
+- full CellScript-to-RISC-V/assembly source maps;
+- ABI-compatible `std::sudt`, `std::xudt`, `std::type_id`, `std::htlc`,
+  `std::cheque`, `std::acp`, and DAO helpers;
+- executable aggregate invariant lowering and iCKB differential tests;
+- formal verification backend exploration.
+
+The following 0.16 boundaries remain intentional:
+
+- operational semantics are mechanically precise prose plus conformance tests,
+  not a formal proof;
+- ProofPlan soundness is a metadata consistency checker, not a formal proof of
+  invariant soundness;
+- standard CKB compatibility fixtures are descriptive, not executable
+  equivalence tests;
+- `validate-tx` is structural and schema-bound evidence validation, not full CKB
+  transaction semantic validation;
+- `solve-tx` is a deterministic template emitter, not a final solver;
+- CKB stdlib protocol modules are `schema-stub`, not production-ready modules;
+- CKB dry-run/commit evidence remains the production acceptance layer

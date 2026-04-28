@@ -83,8 +83,8 @@ That is why the language has:
   are visible in source;
 - metadata sidecars and ProofPlan records that describe schema, ABI,
   constraints, runtime requirements, and verifier obligations.
-- builder assumption records and transaction-shape validation for pre-signing
-  review.
+- builder assumption records and schema-bound transaction-shape validation for
+  pre-signing review.
 
 The wiki uses the same rule throughout: if something is only compiler evidence,
 it is described as compiler evidence. If something needs a builder-backed CKB

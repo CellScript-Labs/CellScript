@@ -1,0 +1,76 @@
+{
+  "schema": "cellscript-ckb-fixture-v0.16",
+  "suite": "xudt",
+  "fixture_name": "xudt-extension-policy-reject",
+  "status": "rejected",
+  "description": "xUDT transfer where extension policy is violated (e.g. lockup extension rejects transfer)",
+  "transaction_shape": {
+    "version": 0,
+    "inputs": [
+      {
+        "type": "xudt-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "owner-lock",
+        "type_script": "xudt-type-script-with-lockup-extension",
+        "data": "0x0000000000000000",
+        "data_layout": "xudt-amount-plus-extension-data",
+        "witness": "extension-witness-lockup-active"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "xudt-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "recipient-lock",
+        "type_script": "xudt-type-script-with-lockup-extension",
+        "data": "0x0000000000000000",
+        "data_layout": "xudt-amount-plus-extension-data"
+      }
+    ],
+    "cell_deps": [
+      { "dep_type": "code", "name": "xudt-type-script-dep" },
+      { "dep_type": "code", "name": "xudt-lockup-extension-dep" }
+    ]
+  },
+  "expected_behavior": {
+    "script_exit_code": 1,
+    "rejection_reason": "extension_policy_violated: lockup period not expired",
+    "cycle_envelope": "within-xudt-standard-envelope"
+  },
+  "script_args_layout": {
+    "field": "owner_lock_hash_plus_extension_args",
+    "size_bytes": 34,
+    "encoding": "32-byte-lock-hash + 2-byte-extension-flags"
+  },
+  "witness_layout": {
+    "field": "extension_witness",
+    "source": "ExtensionEntry",
+    "passthrough": true
+  },
+  "molecule_data_layout": {
+    "field": "amount_and_extension",
+    "size_bytes": 16,
+    "encoding": "little-endian-u128-amount-followed-by-extension-data"
+  },
+  "metadata_expectation": {
+    "proof_plan": {
+      "trigger": "type_group",
+      "scope": "group",
+      "reads": ["group_input", "group_output", "witness"],
+      "coverage": "covered",
+      "on_chain_checked": true
+    },
+    "builder_assumptions": ["extension-dep-available"],
+    "codegen_coverage_status": "covered"
+  },
+  "cycle_report": {
+    "estimated": "within-xudt-standard-envelope",
+    "source": "acceptance-report",
+    "note": "rejection at extension check"
+  },
+  "capacity_report": {
+    "occupied_capacity_shannons": 6200000000,
+    "tx_size_bytes_estimate": 450,
+    "source": "acceptance-report"
+  }
+}

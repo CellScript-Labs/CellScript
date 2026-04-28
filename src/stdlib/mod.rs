@@ -1,3 +1,4 @@
+pub mod ckb_protocols;
 pub mod collections;
 
 use crate::{ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};

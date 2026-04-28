@@ -44,6 +44,12 @@ pub struct TxValidationViolation {
     pub message: String,
 }
 
+enum EvidenceValidation {
+    Valid,
+    Missing,
+    Invalid(String),
+}
+
 pub fn builder_assumptions_from_metadata(metadata: &CompileMetadata) -> Vec<BuilderAssumptionMetadata> {
     let mut assumptions = Vec::new();
     let mut seen = BTreeSet::new();
@@ -128,7 +134,6 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
     let output_count = json_array_len(tx, "outputs");
     let cell_dep_count = json_array_len(tx, "cell_deps");
     let witness_count = json_array_len(tx, "witnesses");
-    let evidence = assumption_evidence_ids(tx);
     let mut violations = Vec::new();
     let mut checked_assumptions = Vec::new();
 
@@ -146,12 +151,18 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
         if !assumption.required_witness_fields.is_empty() && witness_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no witnesses required by this assumption");
         }
-        if requires_explicit_evidence(&assumption.kind) && !evidence.contains(&assumption.assumption_id) {
-            push_violation(
-                &mut violations,
-                assumption,
-                "missing builder_assumption_evidence entry for this non-structural assumption",
-            );
+        if requires_explicit_evidence(&assumption.kind) {
+            match validate_assumption_evidence(tx, assumption) {
+                EvidenceValidation::Valid => {}
+                EvidenceValidation::Missing => {
+                    push_violation(
+                        &mut violations,
+                        assumption,
+                        "missing builder_assumption_evidence entry for this non-structural assumption",
+                    );
+                }
+                EvidenceValidation::Invalid(message) => push_violation(&mut violations, assumption, &message),
+            }
         }
     }
 
@@ -237,37 +248,117 @@ fn json_array_len(tx: &Value, key: &str) -> usize {
     tx.get(key).and_then(Value::as_array).map_or(0, Vec::len)
 }
 
-fn assumption_evidence_ids(tx: &Value) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
+fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
+    let mut invalid = None;
     for key in ["builder_assumption_evidence", "builder_assumptions"] {
         let Some(value) = tx.get(key) else { continue };
         match value {
             Value::Array(items) => {
                 for item in items {
-                    match item {
-                        Value::String(id) => {
-                            out.insert(id.clone());
+                    match validate_evidence_item(item, None, assumption) {
+                        EvidenceValidation::Valid => return EvidenceValidation::Valid,
+                        EvidenceValidation::Missing => {}
+                        EvidenceValidation::Invalid(message) => {
+                            invalid.get_or_insert(message);
                         }
-                        Value::Object(object) => {
-                            if let Some(id) = object.get("assumption_id").and_then(Value::as_str) {
-                                out.insert(id.to_string());
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
             Value::Object(object) => {
-                for (id, value) in object {
-                    if value.as_bool().unwrap_or(true) {
-                        out.insert(id.clone());
+                if let Some(value) = object.get(&assumption.assumption_id) {
+                    match validate_evidence_item(value, Some(&assumption.assumption_id), assumption) {
+                        EvidenceValidation::Valid => return EvidenceValidation::Valid,
+                        EvidenceValidation::Missing => {}
+                        EvidenceValidation::Invalid(message) => {
+                            invalid.get_or_insert(message);
+                        }
+                    }
+                }
+                match validate_evidence_item(value, None, assumption) {
+                    EvidenceValidation::Valid => return EvidenceValidation::Valid,
+                    EvidenceValidation::Missing => {}
+                    EvidenceValidation::Invalid(message) => {
+                        invalid.get_or_insert(message);
                     }
                 }
             }
             _ => {}
         }
     }
-    out
+    invalid.map(EvidenceValidation::Invalid).unwrap_or(EvidenceValidation::Missing)
+}
+
+fn validate_evidence_item(item: &Value, map_key: Option<&str>, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
+    match item {
+        Value::String(id) if id == &assumption.assumption_id => EvidenceValidation::Invalid(
+            "builder_assumption_evidence must be an object with assumption_id, kind, origin, feature, proof_plan_status, and evidence payload"
+                .to_string(),
+        ),
+        Value::Object(object) => validate_evidence_object(object, map_key, assumption),
+        Value::Bool(true) if map_key == Some(assumption.assumption_id.as_str()) => EvidenceValidation::Invalid(
+            "builder_assumption_evidence map values must be evidence objects, not booleans".to_string(),
+        ),
+        _ => EvidenceValidation::Missing,
+    }
+}
+
+fn validate_evidence_object(
+    object: &serde_json::Map<String, Value>,
+    map_key: Option<&str>,
+    assumption: &BuilderAssumptionMetadata,
+) -> EvidenceValidation {
+    let id = object.get("assumption_id").and_then(Value::as_str).or(map_key);
+    let Some(id) = id else {
+        return EvidenceValidation::Missing;
+    };
+    if id != assumption.assumption_id {
+        return if map_key == Some(assumption.assumption_id.as_str()) {
+            EvidenceValidation::Invalid("builder_assumption_evidence object assumption_id does not match its map key".to_string())
+        } else {
+            EvidenceValidation::Missing
+        };
+    }
+
+    let mut mismatches = Vec::new();
+    push_evidence_mismatch(&mut mismatches, object, "kind", &assumption.kind);
+    push_evidence_mismatch(&mut mismatches, object, "origin", &assumption.origin);
+    push_evidence_mismatch(&mut mismatches, object, "feature", &assumption.feature);
+
+    let status = object.get("proof_plan_status").or_else(|| object.get("status")).and_then(Value::as_str).unwrap_or("");
+    if status != assumption.proof_plan_status {
+        mismatches
+            .push(format!("proof_plan_status must be '{}' for assumption {}", assumption.proof_plan_status, assumption.assumption_id));
+    }
+
+    let has_payload = object.get("evidence").is_some_and(non_empty_evidence_payload)
+        || object.get("payload").is_some_and(non_empty_evidence_payload);
+    if !has_payload {
+        mismatches
+            .push(format!("builder_assumption_evidence for {} must include non-empty evidence or payload", assumption.assumption_id));
+    }
+
+    if mismatches.is_empty() {
+        EvidenceValidation::Valid
+    } else {
+        EvidenceValidation::Invalid(mismatches.join("; "))
+    }
+}
+
+fn push_evidence_mismatch(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, field: &str, expected: &str) {
+    match object.get(field).and_then(Value::as_str) {
+        Some(actual) if actual == expected => {}
+        _ => mismatches.push(format!("{field} must be '{expected}'")),
+    }
+}
+
+fn non_empty_evidence_payload(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) => true,
+        Value::String(text) => !text.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(object) => !object.is_empty(),
+    }
 }
 
 fn requires_explicit_evidence(kind: &str) -> bool {

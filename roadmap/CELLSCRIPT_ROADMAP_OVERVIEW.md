@@ -41,9 +41,10 @@ Each release answers a specific question:
 - **v0.15** — *Is the safety boundary auditable?* Model scoped invariants,
   covenant triggers, coverage, builder assumptions, identity lifecycle, and
   ProofPlan output without hiding lock/type semantics.
-- **v0.16** — *Can we trust it in production?* Add formal semantics, ProofPlan
-  soundness checks, standard CKB compatibility suites, transaction solving,
-  deployment governance, and audit tooling.
+- **v0.16** — *Can we audit the assumptions before production evidence?* Add
+  metadata semantics, ProofPlan soundness checks, descriptive standard CKB
+  compatibility suites, transaction templates, deployment governance, and
+  audit tooling.
 
 ---
 
@@ -55,7 +56,7 @@ Each release answers a specific question:
 | v0.13 release scope | Beta released; implementation scope closed. | [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md), [v0.13 release tracker](../docs/CELLSCRIPT_0_13_TODOLIST.md), [v0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
 | v0.14 release scope | Implementation branch is feature-complete for the current CKB semantic-completeness beta scope. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes draft](../docs/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | v0.15 release scope | Implemented P0; P1 is partial. The branch adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, cell identity, destruction policies, capability reset, and macro provenance. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
-| v0.16 release scope | Implemented on `cellscript-0.16`. Adds operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
+| v0.16 release scope | Implemented for the scoped `cellscript-0.16` metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md) |
@@ -72,7 +73,7 @@ Each release answers a specific question:
 | v0.13 | Performance and Expressiveness | "Write less, run faster." | Beta released; scope closed |
 | v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse." | Feature-complete beta branch |
 | v0.15 | Scoped Invariants and Covenant ProofPlan | "Show when constraints run, what they read, and who they protect." | P0 complete; P1 partial |
-| v0.16 | Formal Semantics and Production Tooling | "Prove, validate, deploy, and audit." | Implemented on `cellscript-0.16` |
+| v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Implemented for scoped `cellscript-0.16` release |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or
@@ -719,14 +720,16 @@ v0.15 cannot ship until:
 
 ---
 
-## 8. v0.16 — Formal Semantics and Production Tooling
+## 8. v0.16 — Metadata Assurance and Production Tooling Skeleton
 
-**Status**: Draft.
+**Status**: Implemented for scoped release.
 
-**Theme**: Turn the v0.15 semantic audit layer into production-grade assurance.
+**Theme**: Turn the v0.15 semantic audit layer into metadata assurance and
+deterministic local tooling. Production-completeness work moves to v0.17.
 
-v0.16 does not re-open v0.13 bounded collections, v0.14 CKB surface exposure, or
-v0.15 invariant syntax. It validates and operationalizes those models.
+v0.16 does not re-open v0.13 bounded collections, v0.14 CKB surface exposure,
+or v0.15 invariant syntax. It validates and operationalizes those models at
+the compiler metadata/tooling layer.
 
 ### 8.1 Formal Operational Semantics
 
@@ -749,28 +752,27 @@ Expected artifacts:
 
 ### 8.2 ProofPlan Soundness Checks
 
-Strict mode must validate the chain:
+Strict mode validates the metadata chain:
 
 ```text
-source invariant
+source/runtime obligation
   -> ProofPlan obligation
-  -> IR operation
-  -> codegen check
   -> metadata coverage record
+  -> builder assumption boundary
 ```
 
 Rejected cases:
 
-- metadata-only obligations marked as on-chain checked;
-- stale ProofPlan records after optimization;
-- mismatched Source views;
+- metadata-only/runtime-required gaps in strict mode;
+- local/runtime ProofPlan record drift;
+- mismatched trigger, scope, reads, coverage, assumptions, detail, or codegen
+  coverage;
 - unchecked builder assumptions;
-- missing emitted checks;
-- coverage records that do not match generated verifier behavior.
+- checked records whose codegen coverage metadata is not `covered`.
 
 ### 8.3 Standard CKB Contract Compatibility Suite
 
-Compatibility fixtures should cover:
+Descriptive compatibility fixtures cover:
 
 - sUDT / xUDT;
 - ACP;
@@ -784,9 +786,9 @@ Each suite should include:
 - script args;
 - witness layout;
 - Molecule layout;
-- accepted transactions;
-- rejected transactions;
-- cycles;
+- accepted transaction shapes;
+- rejected transaction shapes;
+- cycle report envelopes;
 - script reference metadata;
 - capacity and transaction-size evidence where relevant.
 
@@ -813,49 +815,45 @@ cellc explain-assumptions
 cellc validate-tx --against metadata.json tx.json
 ```
 
-`validate-tx` must check builder assumptions against concrete transaction
-structure before signing or submission.
+`validate-tx` checks transaction shape and schema-bound builder evidence before
+signing or submission. It is not full CKB transaction semantic validation.
 
-### 8.5 Transaction Solver
+### 8.5 Transaction Template Emitter
 
-The solver builds transaction candidates from compiler metadata:
+`cellc solve-tx` emits a deterministic template from compiler metadata:
 
-- cell selection;
-- dep resolution;
-- output planning;
-- occupied-capacity checks;
-- fee and change planning;
-- witness placement;
-- signing manifests;
-- dry-run validation.
+- required input/output/dep/header/witness slots;
+- builder assumption evidence requirements;
+- fee/change metadata that builders must satisfy;
+- signing manifest skeleton;
+- explicit limitations.
 
-The solver is production tooling, not a substitute for explicit language
-semantics. It consumes the compiler's obligations instead of inventing hidden
-ones.
+It is not a final solver. Live cell selection, concrete deps, fee/change,
+witness placement, signing, and dry-run move to v0.17.
 
 ### 8.6 Deployment Governance and Audit UX
 
-Deployment artifacts:
+Local deployment artifacts:
 
 - code cell manifest;
 - dep group manifest;
 - version lock file;
 - audit hash record;
-- upgrade policy;
-- script reference registry entry.
+- local upgrade diff;
+- script reference metadata.
 
 Audit tooling:
 
-- source maps;
+- metadata/IR-level source-to-codegen mapping;
 - proof diff;
 - cycle profiler per invariant/check;
-- transaction trace viewer;
-- HTML audit bundle linking source, ProofPlan, generated code, metadata, and
-  cycles.
+- transaction assumption trace viewer;
+- HTML audit bundle linking source, ProofPlan, metadata, IR effect classes, and
+  codegen coverage.
 
-### 8.7 Standard Library Release Track
+### 8.7 Standard Library Schema Track
 
-Stable stdlib modules require compatibility fixtures and audit bundles:
+v0.16 ships schema stubs, not stable protocol stdlib implementations:
 
 - `std::sudt`;
 - `std::xudt`;
@@ -866,18 +864,21 @@ Stable stdlib modules require compatibility fixtures and audit bundles:
 
 ### 8.8 v0.16 Release Gates
 
-v0.16 cannot ship until:
+v0.16 can ship when:
 
 - operational semantics covers resource state, cell effects, triggers, scopes,
   and ProofPlan;
 - ProofPlan soundness checker is mandatory in strict mode;
-- standard CKB compatibility suites cover accepted and rejected fixtures;
+- standard CKB compatibility suites cover descriptive accepted and rejected
+  fixture shapes;
 - builder assumption schema is stable;
-- `cellc validate-tx` checks builder assumptions against a transaction;
-- transaction solver builds all bundled examples;
-- deployment manifests are reproducible;
-- audit bundle links source, ProofPlan, emitted code, metadata, and cycles;
-- stdlib stable modules have compatibility fixtures and audit bundles.
+- `cellc validate-tx` rejects missing, bare, or malformed schema-bound builder
+  evidence;
+- `cellc solve-tx` emits a deterministic template with explicit limitations;
+- deployment manifests are reproducible and locally verified for integrity;
+- audit bundle links source, ProofPlan, metadata, IR effect classes, and codegen
+  coverage;
+- stdlib protocol descriptors are marked `schema-stub`, not `stable`.
 
 ---
 
@@ -1039,10 +1040,11 @@ assumptions. Identity and destruction policies become explicit. The capability
 vocabulary moves from protocol verbs to kernel effects, with compat and strict
 migration paths.
 
-**v0.16**: CellScript turns visible semantics into production assurance. It
-checks ProofPlan soundness, validates transactions against builder assumptions
-before signing, ships CKB compatibility fixtures, and produces audit bundles
-that link source, proof, generated code, metadata, and cycles.
+**v0.16**: CellScript turns visible semantics into scoped metadata assurance.
+It checks ProofPlan soundness, validates transaction shapes against
+schema-bound builder assumptions before signing, ships descriptive CKB
+compatibility fixtures, and produces audit bundles that link source, proof,
+metadata, IR effect classes, and codegen coverage.
 
 ---
 
@@ -1080,11 +1082,11 @@ that link source, proof, generated code, metadata, and cycles.
 | Destruction policy | `destroy_singleton_type`, `destroy_instance`, `burn_amount` | v0.15 |
 | Capability reset | `create`, `consume`, `replace`, `burn`, `relock`, `retarget_type`, `read_ref` | v0.15 |
 | Formal semantics | operational semantics spec and conformance fixtures | v0.16 |
-| Proof soundness | ProofPlan-to-code coverage checker | v0.16 |
-| Standard compatibility | CKB standard script fixture suites | v0.16 |
-| Transaction validation | `cellc validate-tx` | v0.16 |
-| Transaction solving | `cellc solve-tx` | v0.16 |
-| Deployment governance | deploy plan, dep locks, proof diff, audit bundle | v0.16 |
+| Proof soundness | ProofPlan metadata consistency checker | v0.16 |
+| Standard compatibility | descriptive CKB standard script fixture suites | v0.16 |
+| Transaction validation | schema-bound `cellc validate-tx` | v0.16 |
+| Transaction templates | `cellc solve-tx` template emitter | v0.16 |
+| Deployment governance | local deploy plan, dep locks, proof diff, audit bundle | v0.16 |
 
 ---
 

@@ -148,13 +148,14 @@ runtime-required ProofPlan gaps.
 
 `runtime.builder_assumptions` is the machine-readable contract for transaction
 builders. `validate-tx` checks a transaction JSON shape against that contract
+and requires schema-bound evidence objects for non-structural assumptions
 before signing. This is still pre-chain evidence: dry-run, capacity, cycles, and
 commit checks remain required for production claims.
 
 Additional 0.16 reports are available for audit and deployment workflows:
 
 ```bash
-cellc solve-tx src/main.cell --json
+cellc solve-tx src/main.cell --json   # emits a template, not a final transaction
 cellc deploy-plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit

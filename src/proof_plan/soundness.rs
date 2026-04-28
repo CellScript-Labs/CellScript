@@ -41,11 +41,13 @@ pub fn check_metadata(metadata: &CompileMetadata, strict: bool) -> ProofPlanSoun
         );
     }
 
-    let proof_index =
-        proof_plan.iter().map(|plan| (obligation_key(&plan.category, &plan.feature, &plan.status), plan)).collect::<BTreeMap<_, _>>();
+    let proof_index = proof_plan
+        .iter()
+        .map(|plan| (obligation_key(&plan.category, &plan.feature, &plan.status, &plan.detail), plan))
+        .collect::<BTreeMap<_, _>>();
 
     for obligation in obligations {
-        let key = obligation_key(&obligation.category, &obligation.feature, &obligation.status);
+        let key = obligation_key(&obligation.category, &obligation.feature, &obligation.status, &obligation.detail);
         if !proof_index.contains_key(&key) {
             push_issue(
                 &mut issues,
@@ -53,7 +55,7 @@ pub fn check_metadata(metadata: &CompileMetadata, strict: bool) -> ProofPlanSoun
                 "PP0002",
                 &obligation.scope,
                 &obligation.feature,
-                "runtime verifier obligation has no matching ProofPlan record with the same category, feature, and status",
+                "runtime verifier obligation has no matching ProofPlan record with the same category, feature, status, and detail",
             );
         }
     }
@@ -181,22 +183,36 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
 }
 
 fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut Vec<ProofPlanSoundnessIssue>) {
-    let runtime_keys = metadata.runtime.proof_plan.iter().map(plan_key).collect::<BTreeSet<_>>();
-    let mut local_keys = BTreeSet::new();
+    let mut runtime_by_identity = BTreeMap::<String, Vec<&ProofPlanMetadata>>::new();
+    for plan in &metadata.runtime.proof_plan {
+        runtime_by_identity.entry(plan_identity_key(plan)).or_default().push(plan);
+    }
+    let runtime_identities = runtime_by_identity.keys().cloned().collect::<BTreeSet<_>>();
+    let runtime_full = metadata.runtime.proof_plan.iter().map(plan_full_key).collect::<BTreeSet<_>>();
+
+    let mut local_by_identity = BTreeMap::<String, Vec<&ProofPlanMetadata>>::new();
 
     for action in &metadata.actions {
-        local_keys.extend(action.proof_plan.iter().map(plan_key));
+        for plan in &action.proof_plan {
+            local_by_identity.entry(plan_identity_key(plan)).or_default().push(plan);
+        }
     }
     for function in &metadata.functions {
-        local_keys.extend(function.proof_plan.iter().map(plan_key));
+        for plan in &function.proof_plan {
+            local_by_identity.entry(plan_identity_key(plan)).or_default().push(plan);
+        }
     }
     for lock in &metadata.locks {
-        local_keys.extend(lock.proof_plan.iter().map(plan_key));
+        for plan in &lock.proof_plan {
+            local_by_identity.entry(plan_identity_key(plan)).or_default().push(plan);
+        }
     }
+    let local_identities = local_by_identity.keys().cloned().collect::<BTreeSet<_>>();
+    let local_full = local_by_identity.values().flat_map(|plans| plans.iter().copied()).map(plan_full_key).collect::<BTreeSet<_>>();
 
-    for key in &local_keys {
-        if !runtime_keys.contains(key) {
-            let (origin, feature, status) = split_plan_key(key);
+    for key in &local_identities {
+        if !runtime_identities.contains(key) {
+            let (origin, feature, status) = split_plan_identity_key(key);
             push_issue(
                 issues,
                 "error",
@@ -205,15 +221,28 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                 feature,
                 &format!("local ProofPlan record with status '{}' is missing from runtime.proof_plan", status),
             );
+        } else if let Some(plans) = local_by_identity.get(key) {
+            for plan in plans {
+                if !runtime_full.contains(&plan_full_key(plan)) {
+                    push_issue(
+                        issues,
+                        "error",
+                        "PP0403",
+                        &plan.origin,
+                        &plan.feature,
+                        "local ProofPlan record differs from runtime.proof_plan in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
+                    );
+                }
+            }
         }
     }
 
-    for key in runtime_keys {
-        let (origin, feature, status) = split_plan_key(&key);
+    for key in runtime_identities {
+        let (origin, feature, status) = split_plan_identity_key(&key);
         if origin.starts_with("invariant:") {
             continue;
         }
-        if !local_keys.contains(&key) {
+        if !local_identities.contains(&key) {
             push_issue(
                 issues,
                 "error",
@@ -222,21 +251,38 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                 feature,
                 &format!("runtime ProofPlan record with status '{}' is missing from local action/function/lock metadata", status),
             );
+        } else if let Some(plans) = runtime_by_identity.get(&key) {
+            for plan in plans {
+                if !local_full.contains(&plan_full_key(plan)) {
+                    push_issue(
+                        issues,
+                        "error",
+                        "PP0404",
+                        &plan.origin,
+                        &plan.feature,
+                        "runtime ProofPlan record differs from local action/function/lock metadata in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
+                    );
+                }
+            }
         }
     }
 }
 
-fn obligation_key(category: &str, feature: &str, status: &str) -> String {
-    format!("{category}\u{1f}{feature}\u{1f}{status}")
+fn obligation_key(category: &str, feature: &str, status: &str, detail: &str) -> String {
+    format!("{category}\u{1f}{feature}\u{1f}{status}\u{1f}{detail}")
 }
 
-fn plan_key(plan: &ProofPlanMetadata) -> String {
+fn plan_identity_key(plan: &ProofPlanMetadata) -> String {
     format!("{}\u{1f}{}\u{1f}{}", plan.origin, plan.feature, plan.status)
 }
 
-fn split_plan_key(key: &str) -> (&str, &str, &str) {
+fn split_plan_identity_key(key: &str) -> (&str, &str, &str) {
     let mut parts = key.split('\u{1f}');
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""))
+}
+
+fn plan_full_key(plan: &ProofPlanMetadata) -> String {
+    serde_json::to_string(plan).unwrap_or_else(|_| format!("{plan:?}"))
 }
 
 fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &str, origin: &str, feature: &str, message: &str) {
@@ -251,5 +297,5 @@ fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &
 
 #[allow(dead_code)]
 fn _obligation_debug_key(obligation: &VerifierObligationMetadata) -> String {
-    obligation_key(&obligation.category, &obligation.feature, &obligation.status)
+    obligation_key(&obligation.category, &obligation.feature, &obligation.status, &obligation.detail)
 }

@@ -1,0 +1,15 @@
+{
+  "schema": "cellscript-ickb-diff-matrix-v0",
+  "mode": "MODEL_LEVEL_ONLY",
+  "rows": [
+    {"scenario": "valid deposit phase 1", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
+    {"scenario": "valid mint from receipt", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
+    {"scenario": "duplicate receipt", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
+    {"scenario": "amount inflation", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
+    {"scenario": "wrong owner", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
+    {"scenario": "wrong xUDT args", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
+    {"scenario": "immature redeem", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
+    {"scenario": "valid limit order", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
+    {"scenario": "limit order underpayment", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"}
+  ]
+}

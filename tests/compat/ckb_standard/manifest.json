@@ -1,6 +1,6 @@
 {
   "schema": "cellscript-ckb-standard-compat-v0.16",
-  "status": "implemented-fixture-suite",
+  "status": "fixture-suite-with-transaction-shapes",
   "suites": [
     {
       "name": "sudt",
@@ -9,6 +9,10 @@
       "molecule_data_layout": "little-endian amount",
       "accepted_fixtures": ["sudt-transfer-ok"],
       "rejected_fixtures": ["sudt-over-mint-reject"],
+      "fixture_files": {
+        "sudt-transfer-ok": "sudt_transfer_ok.json",
+        "sudt-over-mint-reject": "sudt_over_mint_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -19,6 +23,10 @@
       "molecule_data_layout": "xUDT amount plus extension data",
       "accepted_fixtures": ["xudt-transfer-ok"],
       "rejected_fixtures": ["xudt-extension-policy-reject"],
+      "fixture_files": {
+        "xudt-transfer-ok": "xudt_transfer_ok.json",
+        "xudt-extension-policy-reject": "xudt_extension_policy_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -29,6 +37,10 @@
       "molecule_data_layout": "account cell data passthrough",
       "accepted_fixtures": ["acp-deposit-ok"],
       "rejected_fixtures": ["acp-unauthorized-withdraw-reject"],
+      "fixture_files": {
+        "acp-deposit-ok": "acp_deposit_ok.json",
+        "acp-unauthorized-withdraw-reject": "acp_unauthorized_withdraw_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -39,6 +51,10 @@
       "molecule_data_layout": "cheque cell data passthrough",
       "accepted_fixtures": ["cheque-claim-ok"],
       "rejected_fixtures": ["cheque-wrong-receiver-reject"],
+      "fixture_files": {
+        "cheque-claim-ok": "cheque_claim_ok.json",
+        "cheque-wrong-receiver-reject": "cheque_wrong_receiver_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -49,6 +65,10 @@
       "molecule_data_layout": "lock-only pattern",
       "accepted_fixtures": ["omnilock-owner-ok"],
       "rejected_fixtures": ["omnilock-wrong-auth-reject"],
+      "fixture_files": {
+        "omnilock-owner-ok": "omnilock_owner_ok.json",
+        "omnilock-wrong-auth-reject": "omnilock_wrong_auth_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -59,6 +79,10 @@
       "molecule_data_layout": "epoch/since header fixtures",
       "accepted_fixtures": ["dao-since-mature-ok"],
       "rejected_fixtures": ["dao-since-immature-reject"],
+      "fixture_files": {
+        "dao-since-mature-ok": "dao_since_mature_ok.json",
+        "dao-since-immature-reject": "dao_since_immature_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     },
@@ -69,6 +93,10 @@
       "molecule_data_layout": "typed output data",
       "accepted_fixtures": ["type-id-create-ok"],
       "rejected_fixtures": ["type-id-duplicate-reject"],
+      "fixture_files": {
+        "type-id-create-ok": "type_id_create_ok.json",
+        "type-id-duplicate-reject": "type_id_duplicate_reject.json"
+      },
       "cycle_envelope": "tracked-by-acceptance-report",
       "script_reference_metadata": "required"
     }

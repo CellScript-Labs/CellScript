@@ -1,0 +1,159 @@
+module cellscript::benchmarks::ickb_limit_order
+
+resource LimitOrder has store, destroy {
+    ckb_amount: u128
+    udt_amount: u128
+    udt_type_hash: Hash
+    ckb_to_udt_ckb_mul: u128
+    ckb_to_udt_udt_mul: u128
+    udt_to_ckb_ckb_mul: u128
+    udt_to_ckb_udt_mul: u128
+    ckb_min_match: u128
+    master_index: u64
+    owner: Address
+}
+
+resource OrderMaster has store, destroy {
+    order_index: u64
+    owner: Address
+}
+
+action mint_order(
+    ckb_amount: u128,
+    udt_amount: u128,
+    udt_type_hash: Hash,
+    ckb_to_udt_ckb_mul: u128,
+    ckb_to_udt_udt_mul: u128,
+    udt_to_ckb_ckb_mul: u128,
+    udt_to_ckb_udt_mul: u128,
+    ckb_min_match: u128,
+    order_index: u64,
+    master_index: u64,
+    owner: Address
+) -> (LimitOrder, OrderMaster) {
+    assert_invariant(valid_ratio(ckb_to_udt_ckb_mul, ckb_to_udt_udt_mul), "bad ckb to udt")
+    assert_invariant(valid_ratio(udt_to_ckb_ckb_mul, udt_to_ckb_udt_mul), "bad udt to ckb")
+    assert_invariant(
+        ckb_to_udt_ckb_mul > 0 || udt_to_ckb_ckb_mul > 0,
+        "both ratios disabled"
+    )
+    assert_invariant(ckb_min_match > 0, "zero min match")
+    assert_invariant(order_index != master_index, "master overlap")
+
+    let order = create LimitOrder {
+        ckb_amount,
+        udt_amount,
+        udt_type_hash,
+        ckb_to_udt_ckb_mul,
+        ckb_to_udt_udt_mul,
+        udt_to_ckb_ckb_mul,
+        udt_to_ckb_udt_mul,
+        ckb_min_match,
+        master_index,
+        owner
+    } with_lock(owner)
+
+    let master = create OrderMaster {
+        order_index,
+        owner
+    } with_lock(owner)
+
+    (order, master)
+}
+
+action fulfill_ckb_to_udt(
+    order: LimitOrder,
+    new_ckb_amount: u128,
+    new_udt_amount: u128,
+    owner: Address
+) -> LimitOrder {
+    assert_invariant(order.ckb_to_udt_ckb_mul > 0, "ckb to udt disabled")
+    assert_invariant(new_ckb_amount < order.ckb_amount, "no ckb paid out")
+    assert_invariant(new_udt_amount >= order.udt_amount, "udt decreased")
+
+    let old_value = order.ckb_amount * order.ckb_to_udt_ckb_mul +
+        order.udt_amount * order.ckb_to_udt_udt_mul
+    let new_value = new_ckb_amount * order.ckb_to_udt_ckb_mul +
+        new_udt_amount * order.ckb_to_udt_udt_mul
+
+    assert_invariant(new_value >= old_value, "decreasing value")
+    assert_invariant(
+        new_ckb_amount == 0 || order.ckb_amount >= new_ckb_amount + order.ckb_min_match,
+        "insufficient match"
+    )
+
+    consume order
+
+    create LimitOrder {
+        ckb_amount: new_ckb_amount,
+        udt_amount: new_udt_amount,
+        udt_type_hash: order.udt_type_hash,
+        ckb_to_udt_ckb_mul: order.ckb_to_udt_ckb_mul,
+        ckb_to_udt_udt_mul: order.ckb_to_udt_udt_mul,
+        udt_to_ckb_ckb_mul: order.udt_to_ckb_ckb_mul,
+        udt_to_ckb_udt_mul: order.udt_to_ckb_udt_mul,
+        ckb_min_match: order.ckb_min_match,
+        master_index: order.master_index,
+        owner
+    } with_lock(owner)
+}
+
+action fulfill_udt_to_ckb(
+    order: LimitOrder,
+    new_ckb_amount: u128,
+    new_udt_amount: u128,
+    owner: Address
+) -> LimitOrder {
+    assert_invariant(order.udt_to_ckb_ckb_mul > 0, "udt to ckb disabled")
+    assert_invariant(new_udt_amount < order.udt_amount, "no udt paid out")
+    assert_invariant(new_ckb_amount >= order.ckb_amount, "ckb decreased")
+
+    let old_value = order.ckb_amount * order.udt_to_ckb_ckb_mul +
+        order.udt_amount * order.udt_to_ckb_udt_mul
+    let new_value = new_ckb_amount * order.udt_to_ckb_ckb_mul +
+        new_udt_amount * order.udt_to_ckb_udt_mul
+
+    assert_invariant(new_value >= old_value, "decreasing value")
+    assert_invariant(
+        new_udt_amount == 0 ||
+            order.udt_amount * order.udt_to_ckb_udt_mul >=
+                new_udt_amount * order.udt_to_ckb_udt_mul +
+                    order.ckb_min_match * order.udt_to_ckb_ckb_mul,
+        "insufficient match"
+    )
+
+    consume order
+
+    create LimitOrder {
+        ckb_amount: new_ckb_amount,
+        udt_amount: new_udt_amount,
+        udt_type_hash: order.udt_type_hash,
+        ckb_to_udt_ckb_mul: order.ckb_to_udt_ckb_mul,
+        ckb_to_udt_udt_mul: order.ckb_to_udt_udt_mul,
+        udt_to_ckb_ckb_mul: order.udt_to_ckb_ckb_mul,
+        udt_to_ckb_udt_mul: order.udt_to_ckb_udt_mul,
+        ckb_min_match: order.ckb_min_match,
+        master_index: order.master_index,
+        owner
+    } with_lock(owner)
+}
+
+action cancel_order(order: LimitOrder, master: OrderMaster, owner: Address) {
+    assert_invariant(order.owner == owner, "wrong owner")
+    assert_invariant(master.owner == owner, "wrong master owner")
+
+    consume order
+    consume master
+}
+
+fn valid_ratio(ckb_mul: u128, udt_mul: u128) -> bool {
+    (ckb_mul == 0 && udt_mul == 0) || (ckb_mul > 0 && udt_mul > 0)
+}
+
+lock order_owner(order: protected LimitOrder, claimed_owner: witness Address) -> bool {
+    require order.owner == claimed_owner
+}
+
+// TODO(ickb-benchmark): CellScript has no native C256 checked arithmetic type,
+// no first-class OutPoint/MetaPoint relation, and no script-role primitive for
+// "same script as lock in the order cell and as type in the master cell".

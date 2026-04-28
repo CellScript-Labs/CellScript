@@ -1,0 +1,63 @@
+module cellscript::benchmarks::ickb_owned_owner
+
+resource OwnedWithdrawal has store, destroy {
+    request_epoch: u64
+    maturity_epoch: u64
+    owner: Address
+    owned_index: u64
+}
+
+resource OwnerCell has store, destroy {
+    owner: Address
+    owned_index: u64
+    owner_index: u64
+}
+
+action mint_owned_owner(
+    request_epoch: u64,
+    maturity_epoch: u64,
+    owner: Address,
+    owned_index: u64,
+    owner_index: u64
+) -> (OwnedWithdrawal, OwnerCell) {
+    assert_invariant(maturity_epoch > request_epoch, "invalid maturity")
+    assert_invariant(owned_index != owner_index, "same index")
+
+    let owned = create OwnedWithdrawal {
+        request_epoch,
+        maturity_epoch,
+        owner,
+        owned_index
+    } with_lock(owner)
+
+    let owner_cell = create OwnerCell {
+        owner,
+        owned_index,
+        owner_index
+    } with_lock(owner)
+
+    (owned, owner_cell)
+}
+
+action melt_owned_owner(
+    owned: OwnedWithdrawal,
+    owner_cell: OwnerCell,
+    claimed_owner: Address
+) {
+    assert_invariant(owner_cell.owner == claimed_owner, "wrong owner")
+    assert_invariant(owned.owner == owner_cell.owner, "owner mismatch")
+    assert_invariant(owned.owned_index == owner_cell.owned_index, "owned mismatch")
+
+    consume owned
+    consume owner_cell
+}
+
+lock owned_unlock(owned: protected OwnedWithdrawal, owner_cell: protected OwnerCell) -> bool {
+    require owned.owner == owner_cell.owner
+    require owned.owned_index == owner_cell.owned_index
+}
+
+// TODO(ickb-benchmark): original Owned-Owner uses a signed little-endian i32
+// relative distance and validates lock/type roles across inputs and outputs.
+// Current CellScript has unsigned integer types only and no direct source-index
+// or role-introspection expression.

@@ -1,0 +1,14 @@
+{
+  "name": "valid_owned_owner_unlock",
+  "scenario": "owned_owner",
+  "expected": "pass",
+  "model_level_only": true,
+  "data": {
+    "owned_index": 2,
+    "owner_cell_owned_index": 2,
+    "owner": "owner-a",
+    "claimed_owner": "owner-a",
+    "withdrawal_request": true,
+    "empty_args": true
+  }
+}
