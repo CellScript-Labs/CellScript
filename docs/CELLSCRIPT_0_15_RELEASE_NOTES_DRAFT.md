@@ -27,9 +27,9 @@ and reads:
 invariant udt_amount_non_increase {
     trigger: type_group
     scope: group
-    reads: group_inputs<Token>, group_outputs<Token>
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
 
-    assert sum(group_outputs<Token>.amount) <= sum(group_inputs<Token>.amount)
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 }
 ```
 
@@ -49,8 +49,8 @@ relations:
 assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 assert_conserved(Token.amount, scope = group)
 assert_delta(Token.amount, delta, scope = selected_cells)
-assert_distinct(outputs<NFT>.id, scope = transaction)
-assert_singleton(type_id, scope = group)
+assert_distinct(outputs<NFT>.token_id, scope = transaction)
+assert_singleton(Config.config_id, scope = group)
 ```
 
 Aggregate fields must resolve to fixed-width integer or fixed-byte schema
@@ -77,6 +77,9 @@ Runtime, action, function, and lock metadata expose ProofPlan records with:
 `cellc explain-proof` prints trigger/scope/reads/coverage/on-chain status in
 human-readable and JSON output.
 
+`ScriptArgs` and `lock_args` provenance is reported under `reads.lock_args`,
+not `reads.witness`; witness remains reserved for transaction witness data.
+
 `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan
 gaps, including declared invariants whose coverage is still metadata-only.
 
@@ -98,27 +101,41 @@ resource Token has store {
 
 Supported identity policies:
 
-| Policy | Meaning |
-|--------|---------|
-| `identity none` | No identity tracking (default, backward compatible) |
-| `identity ckb_type_id` | CKB TYPE_ID: derived from first input + output index |
-| `identity field(path)` | Field-based identity within the data payload |
-| `identity script_args` | Identity derived from `Script.args` |
-| `identity singleton_type` | Singleton type — at most one live instance |
+| Policy | Meaning | 0.15 executable boundary |
+|--------|---------|--------------------------|
+| `identity none` | No identity tracking (default, backward compatible) | No identity verifier is emitted |
+| `identity ckb_type_id` | CKB TYPE_ID: derived from first input + output index | `create_unique` requires a TYPE_ID output plan; `replace_unique` preserves TypeHash |
+| `identity field(path)` | Fixed-width field identity within the data payload | `create_unique` anchors the output field bytes; `replace_unique` compares input/output field bytes |
+| `identity script_args` | Identity derived from the executing script args | `create_unique` anchors the output LockHash; `replace_unique` preserves LockHash |
+| `identity singleton_type` | Singleton type identity | `create_unique` anchors the output TypeHash; `replace_unique` preserves TypeHash |
 
 Identity-aware lifecycle forms:
 
 ```cellscript
 // Identity-aware creation
-create_unique<Token>(identity = ckb_type_id) { amount: 100 } with_lock(recipient)
+let minted = create_unique<Token>(identity = ckb_type_id) {
+    amount: 100
+} with_lock(recipient)
 
 // Identity-aware replacement (consumes input, preserves identity)
-replace_unique<Token>(identity = ckb_type_id) { amount: old.amount - 50 } with_lock(recipient)
+let updated = replace_unique<Token>(identity = ckb_type_id) old {
+    amount: old.amount - 50
+}
 ```
 
 `IrInstruction::CreateUnique` and `IrInstruction::ReplaceUnique` carry
 identity metadata through the full compile pipeline. `TypeMetadata.identity_policy`
 exposes the policy in compiled JSON metadata (hidden when `none`).
+
+`replace_unique` has the syntax
+`replace_unique<T>(identity = policy) input_cell { ... }`; the input operand is
+required because the verifier compares the consumed Cell with the replacement
+output. It does not take a `with_lock(...)` clause.
+
+For non-TYPE_ID `create_unique` policies, 0.15 emits local runtime anchors for
+the created output. Global uniqueness for field-, script-args-, and
+singleton-type creation is still a builder/indexer responsibility outside the
+CKB-VM execution scope.
 
 ### Explicit Destruction Policies
 
@@ -232,10 +249,21 @@ let token = create_unique<Token>(identity = ckb_type_id) {
     amount: 100
 } with_lock(recipient)
 
-// replace_unique — identity-aware replacement (consumes input)
-let updated = replace_unique<Token>(identity = ckb_type_id) {
+// create_unique with a field identity
+let nft = create_unique<NFT>(identity = field(token_id)) {
+    token_id,
+    owner
+} with_lock(owner)
+
+// replace_unique - identity-aware replacement (consumes input)
+let updated = replace_unique<Token>(identity = ckb_type_id) token {
     amount: token.amount - 10
-} with_lock(recipient)
+}
+
+let moved = replace_unique<NFT>(identity = field(token_id)) nft {
+    token_id: nft.token_id,
+    owner: new_owner
+}
 ```
 
 ### Destruction Policy Forms
@@ -270,17 +298,17 @@ resource Token has store, create, consume, replace, burn, relock { ... }
 invariant conservation {
     trigger: type_group
     scope: group
-    reads: group_inputs<Token>, group_outputs<Token>
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
 
-    assert sum(group_outputs<Token>.amount) == sum(group_inputs<Token>.amount)
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
 }
 
 invariant no_duplicate_nft {
     trigger: type_group
     scope: transaction
-    reads: outputs<NFT>
+    reads: outputs<NFT>.token_id
 
-    assert distinct(outputs<NFT>.token_id)
+    assert_distinct(outputs<NFT>.token_id, scope = transaction)
 }
 ```
 
@@ -297,6 +325,10 @@ invariant no_duplicate_nft {
 - removal of claim/receipt name heuristics;
 - explicit mutation cardinality forms;
 - `shared` as a scheduler policy library;
+- non-TYPE_ID global uniqueness proof for `create_unique(field(...))`,
+  `create_unique(script_args)`, and `create_unique(singleton_type)`; 0.15
+  emits local runtime anchors and requires builders/indexers to enforce global
+  uniqueness;
 - full ProofPlan soundness checks (v0.16 scope).
 
 ## Verification
@@ -329,9 +361,10 @@ bash scripts/ckb_cellscript_acceptance.sh
 CellScript 0.15 makes CKB safety boundaries explicit instead of hiding
 lock/type differences. Scoped invariants declare when the verifier runs, what
 it reads, and which cells it protects. Cell identity is now a first-class
-primitive with `create_unique`/`replace_unique` lifecycle forms. Destruction
-policies make it explicit whether you are proving output absence, identity
-continuation, or quantity delta. The capability vocabulary has been reset
-from protocol verbs to kernel effects, with a compat/strict migration path.
-Covenant ProofPlan metadata and `cellc explain-proof` give auditors a
-complete trigger/scope/reads/coverage/on-chain view.
+primitive with `create_unique`/`replace_unique` lifecycle forms and runtime
+identity anchors/preservation checks. Destruction policies make it explicit
+whether you are proving output absence, identity continuation, or quantity
+delta. The capability vocabulary has been reset from protocol verbs to kernel
+effects, with a compat/strict migration path. Covenant ProofPlan metadata and
+`cellc explain-proof` give auditors a complete
+trigger/scope/reads/coverage/on-chain view.

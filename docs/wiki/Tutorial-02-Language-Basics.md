@@ -12,6 +12,7 @@ A typical `.cell` file contains:
 - one `module` declaration;
 - persistent declarations such as `resource`, `shared`, and `receipt`;
 - optional ordinary `struct`, `enum`, and `const` declarations;
+- optional top-level `invariant` declarations;
 - executable `action` entries;
 - executable `lock` entries.
 
@@ -98,7 +99,7 @@ Use `resource` for linear Cell-backed assets. If your protocol should not be
 able to duplicate or silently drop a value, it probably belongs in a resource.
 
 ```cellscript
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -107,6 +108,40 @@ resource Token has store, transfer, destroy {
 Resources are linear values. When an action receives one, the action must say
 where it goes: consume it, create a replacement, transfer it, return it, claim
 it, settle it, or destroy it.
+
+CellScript 0.15 resets `has ...` clauses from protocol verbs to kernel effects.
+New strict-mode declarations should use capabilities such as `create`,
+`consume`, `replace`, `burn`, `relock`, `retarget_type`, and `read_ref`.
+The older `transfer` and `destroy` capability words are accepted only through
+the `--primitive-compat=0.14` migration path; `--primitive-strict=0.15`
+rejects them in type declarations.
+
+## Identity Policies
+
+A persistent declaration can name the identity policy that later lifecycle
+forms must preserve:
+
+```cellscript
+resource NFT has store, create, replace {
+    identity(field(token_id))
+    token_id: [u8; 32]
+    owner: Address
+}
+
+resource ScriptBoundToken has store, create, replace {
+    identity(script_args)
+    amount: u64
+}
+
+shared Config has store, replace {
+    identity(singleton_type)
+    value: u64
+}
+```
+
+Supported policies are `ckb_type_id`, `field(name)`, `script_args`, and
+`singleton_type`. Omitting the declaration is the default `identity none`.
+Fields used for `identity(field(...))` must be fixed-width schema fields.
 
 ## Shared State
 
@@ -158,6 +193,29 @@ action transfer_token(token: Token, to: Address) -> Token {
 
 Read this as a Cell transition: spend one token input, then create a replacement
 token output under a new lock.
+
+## Scoped Invariants
+
+CellScript 0.15 adds top-level invariant declarations. They are deliberately
+explicit about the verifier trigger, the protected scope, and the CKB views
+they read:
+
+```cellscript
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+}
+```
+
+Supported triggers are `explicit_entry`, `lock_group`, and `type_group`.
+Supported scopes are `selected_cells`, `group`, and `transaction`.
+Aggregate primitives such as `assert_sum`, `assert_conserved`,
+`assert_delta`, `assert_distinct`, and `assert_singleton` are recorded in
+ProofPlan metadata in 0.15; executable aggregate lowering is still a later
+milestone.
 
 ## Locks
 

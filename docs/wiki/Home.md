@@ -4,7 +4,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-04-27.
+Last updated: 2026-04-28.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -16,7 +16,9 @@ learn what each layer proves, and what it does not prove yet.
 
 If CellScript is new to you, read the tutorials in order. The first three
 chapters are about the language. They explain how a `.cell` file is shaped, how
-resources move, and why effects such as `consume` and `create` are explicit.
+resources move, why effects such as `consume` and `create` are explicit, and
+how v0.15 syntax makes identity policies, scoped invariants, and primitive
+capabilities visible.
 
 After that, the wiki moves outward:
 
@@ -72,12 +74,14 @@ That is why the language has:
 - `resource`, `shared`, and `receipt` for persistent Cell-backed values;
 - explicit effects such as `consume`, `create`, `read_ref`, `transfer`,
   `destroy`, `claim`, and `settle`;
+- identity-aware lifecycle forms such as `create_unique` and `replace_unique`;
+- scoped `invariant` declarations with explicit trigger, scope, and reads;
 - `action` entries for type-script style state transitions;
 - `lock` entries for spend-boundary predicates;
 - `protected`, `witness`, and `require` so lock source data and failure points
   are visible in source;
-- metadata sidecars that describe schema, ABI, constraints, runtime
-  requirements, and verifier obligations.
+- metadata sidecars and ProofPlan records that describe schema, ABI,
+  constraints, runtime requirements, and verifier obligations.
 
 The wiki uses the same rule throughout: if something is only compiler evidence,
 it is described as compiler evidence. If something needs a builder-backed CKB

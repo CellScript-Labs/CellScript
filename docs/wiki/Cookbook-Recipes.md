@@ -50,6 +50,38 @@ action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
 The field shorthand `amount` means `amount: amount`. The `with_lock(to)` part is
 the lock on the created output Cell.
 
+## Recipe: Mint And Replace A Unique Cell
+
+Use an identity policy plus `create_unique` and `replace_unique` when a Cell
+lineage must be explicit in source and metadata.
+
+```cellscript
+resource Badge has store, create, replace {
+    identity(field(badge_id))
+    badge_id: [u8; 32]
+    owner: Address
+}
+
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+    create_unique<Badge>(identity = field(badge_id)) {
+        badge_id,
+        owner
+    } with_lock(owner)
+}
+
+action move_badge(badge: Badge, new_owner: Address) -> Badge {
+    replace_unique<Badge>(identity = field(badge_id)) badge {
+        badge_id: badge.badge_id,
+        owner: new_owner
+    }
+}
+```
+
+`replace_unique` consumes the named input before the field initializer block.
+For `field(...)`, the generated verifier compares the fixed-width identity field
+between input and output. Global uniqueness of field identities still needs
+builder or indexer evidence.
+
 ## Recipe: Replace State Instead Of Updating In Place
 
 Use `&mut` when the source should read like mutation, but remember the CKB model:
@@ -63,6 +95,21 @@ action bump_nonce(wallet: &mut Wallet) {
 
 When reviewing this pattern, inspect metadata and builder evidence for the
 replacement-output obligations. Do not treat it as account storage.
+
+## Recipe: Choose A Destruction Policy
+
+Use the destruction form that says what the verifier should prove:
+
+```cellscript
+destroy_singleton_type(config)
+destroy_unique(asset, identity = type_id)
+destroy_instance(badge, identity_field = badge_id)
+burn_amount(token, field = amount)
+```
+
+In `--primitive-strict=0.15` mode, bare `destroy value` is rejected. Keep the
+policy explicit so reviewers can distinguish output absence, identity
+consumption, instance consumption, and quantity burn.
 
 ## Recipe: Write An Honest Lock Predicate
 
