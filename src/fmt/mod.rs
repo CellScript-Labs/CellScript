@@ -678,6 +678,7 @@ fn format_type(ty: &Type) -> String {
         Type::U8 => "u8".to_string(),
         Type::U16 => "u16".to_string(),
         Type::U32 => "u32".to_string(),
+        Type::I32 => "i32".to_string(),
         Type::U64 => "u64".to_string(),
         Type::U128 => "u128".to_string(),
         Type::Bool => "bool".to_string(),

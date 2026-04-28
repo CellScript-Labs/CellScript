@@ -45,6 +45,49 @@ action add(x: u64, y: u64) -> u64 {
 }
 
 #[test]
+fn cellc_verify_ckb_fixtures_accepts_standard_manifest() {
+    let manifest =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("compat").join("ckb_standard").join("manifest.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-ckb-fixtures").arg(&manifest).arg("--json").output().unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["manifest_schema"], "cellscript-ckb-standard-compat-v0.16");
+    assert_eq!(report["execution_level"], "MODEL");
+    assert_eq!(report["ckb_vm_execution"], false);
+    assert_eq!(report["issue_count"], 0);
+    assert!(report["fixture_count"].as_u64().unwrap() >= 14);
+    assert!(report["manifest_hash"].as_str().is_some_and(|hash| hash.len() == 64));
+}
+
+#[test]
+fn cellc_verify_ckb_fixtures_rejects_invalid_manifest_claim() {
+    let manifest_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("compat").join("ckb_standard").join("manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["schema"] = serde_json::Value::String("wrong-schema".to_string());
+
+    let dir = tempfile::tempdir().unwrap();
+    let invalid = dir.path().join("invalid-fixture-manifest.json");
+    std::fs::write(&invalid, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-ckb-fixtures").arg(&invalid).arg("--json").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
+    assert!(issues.contains("manifest schema must be cellscript-ckb-standard-compat-v0.16"), "{issues}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("CKB fixture manifest failed model verification"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn cellc_constraints_subcommand_surfaces_ckb_deployment_manifest() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

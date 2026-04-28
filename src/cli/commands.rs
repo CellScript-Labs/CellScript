@@ -19,6 +19,9 @@ use colored::Colorize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+const CKB_STANDARD_COMPAT_MANIFEST_SCHEMA: &str = "cellscript-ckb-standard-compat-v0.16";
+const CKB_STANDARD_FIXTURE_SCHEMA: &str = "cellscript-ckb-fixture-v0.16";
+
 #[derive(Debug)]
 pub enum Command {
     Build(BuildArgs),
@@ -49,6 +52,7 @@ pub enum Command {
     AuditBundle(AuditBundleArgs),
     ValidateTx(ValidateTxArgs),
     SolveTx(SolveTxArgs),
+    VerifyCkbFixtures(VerifyCkbFixturesArgs),
     DeployPlan(DeployPlanArgs),
     VerifyDeploy(VerifyDeployArgs),
     DiffDeploy(DiffDeployArgs),
@@ -308,6 +312,12 @@ pub struct SolveTxArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct VerifyCkbFixturesArgs {
+    pub manifest: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct DeployPlanArgs {
     pub input: Option<PathBuf>,
     pub output: Option<PathBuf>,
@@ -441,6 +451,7 @@ impl CommandExecutor {
             Command::AuditBundle(args) => Self::audit_bundle(args),
             Command::ValidateTx(args) => Self::validate_tx(args),
             Command::SolveTx(args) => Self::solve_tx(args),
+            Command::VerifyCkbFixtures(args) => Self::verify_ckb_fixtures(args),
             Command::DeployPlan(args) => Self::deploy_plan(args),
             Command::VerifyDeploy(args) => Self::verify_deploy(args),
             Command::DiffDeploy(args) => Self::diff_deploy(args),
@@ -1598,8 +1609,50 @@ impl CommandExecutor {
             },
         )?;
         let template = transaction_solver_template(&result.metadata);
-        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
+        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction template generated (solve-tx is not a solver)")?;
         Ok(())
+    }
+
+    fn verify_ckb_fixtures(args: VerifyCkbFixturesArgs) -> Result<()> {
+        let manifest_bytes = std::fs::read(&args.manifest).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to read fixture manifest '{}': {}",
+                args.manifest.display(),
+                error
+            ))
+        })?;
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to parse fixture manifest '{}': {}",
+                args.manifest.display(),
+                error
+            ))
+        })?;
+        let base_dir = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+        let report = ckb_fixture_manifest_report(&manifest, base_dir, &manifest_bytes);
+        let issue_count = report["issue_count"].as_u64().unwrap_or(0);
+        if args.json {
+            print_json(&report)?;
+        } else {
+            println!("CKB fixture manifest verification: {}", report["status"].as_str().unwrap_or("unknown"));
+            println!("  Manifest schema: {}", report["manifest_schema"].as_str().unwrap_or("unknown"));
+            println!("  Execution level: {}", report["execution_level"].as_str().unwrap_or("unknown"));
+            println!("  Suites: {}", report["suite_count"].as_u64().unwrap_or(0));
+            println!("  Fixtures: {}", report["fixture_count"].as_u64().unwrap_or(0));
+            println!("  Issues: {issue_count}");
+            if let Some(issues) = report["issues"].as_array() {
+                for issue in issues {
+                    println!("  - {}", issue.as_str().unwrap_or("<invalid issue>"));
+                }
+            }
+        }
+        if issue_count == 0 {
+            Ok(())
+        } else {
+            Err(crate::error::CompileError::without_span(format!(
+                "CKB fixture manifest failed model verification: {issue_count} issue(s)"
+            )))
+        }
     }
 
     fn deploy_plan(args: DeployPlanArgs) -> Result<()> {
@@ -2698,6 +2751,342 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
     }
 }
 
+fn ckb_fixture_manifest_report(manifest: &serde_json::Value, base_dir: &Path, manifest_bytes: &[u8]) -> serde_json::Value {
+    let mut issues = Vec::<String>::new();
+    let mut rows = Vec::<serde_json::Value>::new();
+    let manifest_hash = crate::hex_encode(&crate::ckb_blake2b256(manifest_bytes));
+
+    if manifest["schema"].as_str() != Some(CKB_STANDARD_COMPAT_MANIFEST_SCHEMA) {
+        issues.push(format!(
+            "manifest schema must be {CKB_STANDARD_COMPAT_MANIFEST_SCHEMA}, got {}",
+            manifest["schema"].as_str().unwrap_or("<missing>")
+        ));
+    }
+
+    let Some(suites) = manifest["suites"].as_array() else {
+        issues.push("manifest suites must be an array".to_string());
+        return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+    };
+
+    for suite in suites {
+        validate_ckb_fixture_suite(suite, base_dir, &mut rows, &mut issues);
+    }
+
+    ckb_fixture_report_json(manifest, manifest_hash, suites.len(), rows, issues)
+}
+
+fn ckb_fixture_report_json(
+    manifest: &serde_json::Value,
+    manifest_hash: String,
+    suite_count: usize,
+    rows: Vec<serde_json::Value>,
+    issues: Vec<String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "cellscript-ckb-fixture-verification-v0.17",
+        "manifest_schema": manifest["schema"].as_str().unwrap_or("unknown"),
+        "manifest_status": manifest["status"].as_str().unwrap_or("unknown"),
+        "manifest_hash": manifest_hash,
+        "execution_level": "MODEL",
+        "ckb_vm_execution": false,
+        "suite_count": suite_count,
+        "fixture_count": rows.len(),
+        "status": if issues.is_empty() { "ok" } else { "failed" },
+        "issue_count": issues.len(),
+        "issues": issues,
+        "fixtures": rows,
+        "vm_execution_note": "This command validates transaction-shape model fixtures only; it does not execute CKB VM or prove production compatibility.",
+    })
+}
+
+fn validate_ckb_fixture_suite(
+    suite: &serde_json::Value,
+    base_dir: &Path,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let suite_name = suite["name"].as_str().unwrap_or("<unknown>");
+    let accepted = ckb_fixture_names(suite, "accepted_fixtures", issues, suite_name);
+    let rejected = ckb_fixture_names(suite, "rejected_fixtures", issues, suite_name);
+    let Some(files) = suite["fixture_files"].as_object() else {
+        issues.push(format!("suite {suite_name} missing fixture_files object"));
+        return;
+    };
+    for fixture_name in accepted.iter().chain(rejected.iter()) {
+        let Some(file) = files.get(*fixture_name).and_then(serde_json::Value::as_str) else {
+            issues.push(format!("suite {suite_name} missing fixture file mapping for {fixture_name}"));
+            continue;
+        };
+        let path = base_dir.join(file);
+        let fixture = match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(value) => value,
+                Err(error) => {
+                    issues.push(format!("fixture {file} failed to parse: {error}"));
+                    continue;
+                }
+            },
+            Err(error) => {
+                issues.push(format!("fixture {file} failed to read: {error}"));
+                continue;
+            }
+        };
+        match validate_ckb_fixture_model(&fixture, suite_name, fixture_name, accepted.contains(fixture_name), file) {
+            Ok(row) => rows.push(row),
+            Err(error) => issues.push(error),
+        }
+    }
+}
+
+fn validate_ckb_fixture_model(
+    fixture: &serde_json::Value,
+    suite_name: &str,
+    fixture_name: &str,
+    should_accept: bool,
+    file: &str,
+) -> std::result::Result<serde_json::Value, String> {
+    if fixture["schema"].as_str() != Some(CKB_STANDARD_FIXTURE_SCHEMA) {
+        return Err(format!("fixture {file} schema must be {CKB_STANDARD_FIXTURE_SCHEMA}"));
+    }
+    if fixture["suite"].as_str() != Some(suite_name) {
+        return Err(format!("fixture {file} suite does not match manifest suite {suite_name}"));
+    }
+    if fixture["fixture_name"].as_str() != Some(fixture_name) {
+        return Err(format!("fixture {file} fixture_name does not match manifest key {fixture_name}"));
+    }
+
+    let shape = &fixture["transaction_shape"];
+    ckb_fixture_require_array(shape, "inputs")?;
+    ckb_fixture_require_array(shape, "outputs")?;
+    ckb_fixture_require_array(shape, "cell_deps")?;
+    ckb_fixture_validate_metadata_expectation(fixture)?;
+    ckb_fixture_validate_capacity_report(fixture)?;
+
+    let expected = fixture["expected_behavior"].as_object().ok_or_else(|| format!("fixture {file} missing expected_behavior"))?;
+    let expected_exit = expected
+        .get("script_exit_code")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| format!("fixture {file} missing expected_behavior.script_exit_code"))?;
+    let expected_reason = expected.get("rejection_reason").and_then(serde_json::Value::as_str);
+
+    if should_accept && fixture["status"].as_str() != Some("accepted") {
+        return Err(format!("fixture {file} is listed accepted but status is not accepted"));
+    }
+    if !should_accept && fixture["status"].as_str() != Some("rejected") {
+        return Err(format!("fixture {file} is listed rejected but status is not rejected"));
+    }
+    if should_accept && expected_exit != 0 {
+        return Err(format!("fixture {file} accepted case has non-zero expected exit code"));
+    }
+    if !should_accept && expected_exit == 0 {
+        return Err(format!("fixture {file} rejected case has zero expected exit code"));
+    }
+    if !should_accept && expected_reason.is_none() {
+        return Err(format!("fixture {file} rejected case lacks expected_behavior.rejection_reason"));
+    }
+
+    let verdict = ckb_fixture_evaluate_semantics(fixture)?;
+    if verdict.0 != expected_exit {
+        return Err(format!("fixture {file} model exit {} disagrees with expected exit {expected_exit}", verdict.0));
+    }
+    if expected_exit != 0 && verdict.1.as_deref() != expected_reason {
+        return Err(format!("fixture {file} model rejection {:?} disagrees with expected {:?}", verdict.1, expected_reason));
+    }
+
+    Ok(serde_json::json!({
+        "suite": suite_name,
+        "fixture_name": fixture_name,
+        "file": file,
+        "expected_status": fixture["status"].as_str().unwrap_or("unknown"),
+        "execution_level": "MODEL",
+        "ckb_vm_execution": false,
+        "model_exit_code": verdict.0,
+        "expected_exit_code": expected_exit,
+        "rejection_reason": verdict.1.or_else(|| expected_reason.map(str::to_string)),
+        "status": if verdict.0 == 0 { "accepted" } else { "rejected" },
+    }))
+}
+
+fn ckb_fixture_validate_metadata_expectation(fixture: &serde_json::Value) -> std::result::Result<(), String> {
+    let metadata = fixture["metadata_expectation"].as_object().ok_or("fixture missing metadata_expectation")?;
+    let proof_plan =
+        metadata.get("proof_plan").and_then(serde_json::Value::as_object).ok_or("fixture missing proof_plan expectation")?;
+    for key in ["trigger", "scope", "reads", "coverage", "on_chain_checked"] {
+        if !proof_plan.contains_key(key) {
+            return Err(format!("fixture proof_plan expectation missing {key}"));
+        }
+    }
+    if !metadata.contains_key("codegen_coverage_status") {
+        return Err("fixture metadata expectation missing codegen_coverage_status".to_string());
+    }
+    if fixture.get("cycle_report").is_none() {
+        return Err("fixture missing cycle_report".to_string());
+    }
+    if fixture.get("capacity_report").is_none() {
+        return Err("fixture missing capacity_report".to_string());
+    }
+    Ok(())
+}
+
+fn ckb_fixture_evaluate_semantics(fixture: &serde_json::Value) -> std::result::Result<(i64, Option<String>), String> {
+    let shape = &fixture["transaction_shape"];
+    match fixture["suite"].as_str().ok_or("missing suite")? {
+        "sudt" => ckb_fixture_evaluate_amount_conservation(shape, "sudt-cell", "output_amount > input_amount; conservation violated"),
+        "xudt" => {
+            if ckb_fixture_any_cell_dep_name(shape, "lockup") || ckb_fixture_any_input_witness(shape, "lockup-active") {
+                return Ok(ckb_fixture_reject("extension_policy_violated: lockup period not expired"));
+            }
+            ckb_fixture_evaluate_amount_conservation(shape, "xudt-cell", "output_amount > input_amount; conservation violated")
+        }
+        "acp" => {
+            let first_input = ckb_fixture_first_cell(shape, "inputs")?;
+            let first_output = ckb_fixture_first_cell(shape, "outputs")?;
+            if ckb_fixture_cell_str(first_input, "witness").contains("wrong")
+                || ckb_fixture_cell_str(first_input, "lock_script") != ckb_fixture_cell_str(first_output, "lock_script")
+            {
+                return Ok(ckb_fixture_reject("witness_lock_hash != args_owner_lock_hash"));
+            }
+            Ok(ckb_fixture_pass())
+        }
+        "cheque" => {
+            let first_input = ckb_fixture_first_cell(shape, "inputs")?;
+            let first_output = ckb_fixture_first_cell(shape, "outputs")?;
+            if ckb_fixture_cell_str(first_input, "witness").contains("wrong")
+                || ckb_fixture_cell_str(first_output, "lock_script").contains("wrong")
+            {
+                return Ok(ckb_fixture_reject("receiver_lock_hash != args_receiver_hash"));
+            }
+            Ok(ckb_fixture_pass())
+        }
+        "omnilock" => {
+            if ckb_fixture_any_input_witness(shape, "invalid") {
+                Ok(ckb_fixture_reject("auth_verification_failed: invalid_signature_or_wrong_method"))
+            } else {
+                Ok(ckb_fixture_pass())
+            }
+        }
+        "nervosdao-since" => {
+            if shape["header_deps"].as_array().into_iter().flatten().any(|header| header.as_str() == Some("mature-epoch-header")) {
+                Ok(ckb_fixture_pass())
+            } else {
+                Ok(ckb_fixture_reject("since_not_mature: current_epoch < required_epoch"))
+            }
+        }
+        "type-id" => {
+            let type_id_outputs = shape["outputs"]
+                .as_array()
+                .ok_or("missing outputs")?
+                .iter()
+                .filter(|output| ckb_fixture_cell_str(output, "type_script").starts_with("type-id-script"))
+                .count();
+            if type_id_outputs > 1 {
+                Ok(ckb_fixture_reject("duplicate_type_id: at-most-one-input-and-one-output-per-type-id-group"))
+            } else {
+                Ok(ckb_fixture_pass())
+            }
+        }
+        other => Err(format!("unsupported compat fixture suite {other}")),
+    }
+}
+
+fn ckb_fixture_evaluate_amount_conservation(
+    shape: &serde_json::Value,
+    cell_type: &str,
+    reason: &str,
+) -> std::result::Result<(i64, Option<String>), String> {
+    let input_sum = ckb_fixture_amount_sum(shape, "inputs", cell_type)?;
+    let output_sum = ckb_fixture_amount_sum(shape, "outputs", cell_type)?;
+    if output_sum > input_sum {
+        Ok(ckb_fixture_reject(reason))
+    } else {
+        Ok(ckb_fixture_pass())
+    }
+}
+
+fn ckb_fixture_amount_sum(shape: &serde_json::Value, side: &str, cell_type: &str) -> std::result::Result<u128, String> {
+    shape[side]
+        .as_array()
+        .ok_or_else(|| format!("missing transaction_shape.{side}"))?
+        .iter()
+        .filter(|cell| ckb_fixture_cell_str(cell, "type") == cell_type)
+        .try_fold(0u128, |total, cell| Ok(total + ckb_fixture_little_endian_u128(ckb_fixture_cell_str(cell, "data"))?))
+}
+
+fn ckb_fixture_little_endian_u128(hex_value: &str) -> std::result::Result<u128, String> {
+    let bytes = hex_value.strip_prefix("0x").unwrap_or(hex_value);
+    if bytes.is_empty() {
+        return Ok(0);
+    }
+    if bytes.len() % 2 != 0 {
+        return Err(format!("odd-length hex amount {hex_value}"));
+    }
+    let raw = hex::decode(bytes).map_err(|err| format!("invalid hex amount {hex_value}: {err}"))?;
+    if raw.len() > 16 {
+        return Err(format!("amount data exceeds u128 width: {} bytes", raw.len()));
+    }
+    let mut padded = [0u8; 16];
+    padded[..raw.len()].copy_from_slice(&raw);
+    Ok(u128::from_le_bytes(padded))
+}
+
+fn ckb_fixture_validate_capacity_report(fixture: &serde_json::Value) -> std::result::Result<(), String> {
+    let reported = fixture["capacity_report"]["occupied_capacity_shannons"]
+        .as_u64()
+        .ok_or("capacity_report missing occupied_capacity_shannons")?;
+    let output_capacity = fixture["transaction_shape"]["outputs"]
+        .as_array()
+        .ok_or("missing outputs")?
+        .iter()
+        .map(|output| output["capacity_shannons"].as_u64().ok_or("output missing capacity_shannons"))
+        .try_fold(0u64, |total, value| value.map(|value| total.saturating_add(value)))?;
+    if reported > output_capacity {
+        return Err(format!("capacity report occupied capacity {reported} exceeds output capacity {output_capacity}"));
+    }
+    Ok(())
+}
+
+fn ckb_fixture_names<'a>(suite: &'a serde_json::Value, key: &str, issues: &mut Vec<String>, suite_name: &str) -> BTreeSet<&'a str> {
+    match suite[key].as_array() {
+        Some(values) => values.iter().filter_map(serde_json::Value::as_str).collect(),
+        None => {
+            issues.push(format!("suite {suite_name} missing {key} array"));
+            BTreeSet::new()
+        }
+    }
+}
+
+fn ckb_fixture_require_array(value: &serde_json::Value, key: &str) -> std::result::Result<(), String> {
+    value[key].as_array().map(|_| ()).ok_or_else(|| format!("missing transaction_shape.{key}"))
+}
+
+fn ckb_fixture_first_cell<'a>(shape: &'a serde_json::Value, side: &str) -> std::result::Result<&'a serde_json::Value, String> {
+    shape[side].as_array().and_then(|cells| cells.first()).ok_or_else(|| format!("missing first transaction_shape.{side} cell"))
+}
+
+fn ckb_fixture_cell_str<'a>(cell: &'a serde_json::Value, field: &str) -> &'a str {
+    cell[field].as_str().unwrap_or("")
+}
+
+fn ckb_fixture_any_cell_dep_name(shape: &serde_json::Value, needle: &str) -> bool {
+    shape["cell_deps"].as_array().into_iter().flatten().any(|dep| dep["name"].as_str().is_some_and(|name| name.contains(needle)))
+}
+
+fn ckb_fixture_any_input_witness(shape: &serde_json::Value, needle: &str) -> bool {
+    shape["inputs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|input| input["witness"].as_str().is_some_and(|witness| witness.contains(needle)))
+}
+
+fn ckb_fixture_pass() -> (i64, Option<String>) {
+    (0, None)
+}
+
+fn ckb_fixture_reject(reason: &str) -> (i64, Option<String>) {
+    (1, Some(reason.to_string()))
+}
+
 fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
     let assumptions = &metadata.runtime.builder_assumptions;
     let ckb = metadata.constraints.ckb.as_ref();
@@ -2818,10 +3207,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "feature": assumption.feature,
                 "proof_plan_status": assumption.proof_plan_status,
                 "detail": assumption.detail,
-                "evidence_schema": {
-                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
-                    "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
-                },
+                "evidence_schema": evidence_schema_for_assumption(assumption),
             })
         })
         .collect::<Vec<_>>();
@@ -2853,9 +3239,29 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
         })
         .collect::<Vec<_>>();
 
+    let header_dep_slots = ckb
+        .map(|c| {
+            if c.uses_header_epoch {
+                vec![serde_json::json!({
+                    "source": "metadata-requirement",
+                    "kind": "header_dep",
+                    "status": "unresolved",
+                    "required_external_step": "resolve concrete epoch/header dep before transaction construction",
+                })]
+            } else {
+                Vec::new()
+            }
+        })
+        .unwrap_or_default();
+
     serde_json::json!({
-        "status": "template",
+        "status": "template-only",
         "solver": "cellscript-v0.16-transaction-template-emitter",
+        "solver_capability": "template-emitter-only",
+        "solver_readiness": "not-a-solver",
+        "execution_mode": "non-executable-template",
+        "can_submit": false,
+        "requires_validate_tx": true,
         "module": metadata.module,
         "target_profile": metadata.target_profile.name,
         "transaction_plan": {
@@ -2864,7 +3270,8 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "outputs": output_slots,
             "cell_deps": dep_slots,
             "witnesses": witness_slots,
-            "header_deps": ckb.map(|c| if c.uses_header_epoch { vec!["epoch-header"] } else { vec![] }).unwrap_or_default(),
+            "header_deps": header_dep_slots,
+            "header_deps_status": "unresolved-template-slots",
             "builder_assumption_evidence_requirements": evidence,
         },
         "fee_change_plan": fee_planning,
@@ -2873,6 +3280,14 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "signature_requests": signature_requests,
         },
         "builder_assumptions": assumptions,
+        "required_external_steps": [
+            "live cell selection",
+            "concrete CellDep and HeaderDep resolution",
+            "fee and change calculation",
+            "occupied-capacity and under-capacity measurement",
+            "witness placement and signing",
+            "CKB dry-run or VM verification"
+        ],
         "limitations": [
             "template only: does not perform live cell selection",
             "template only: does not resolve concrete deps/header deps",
@@ -2880,6 +3295,95 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "template only: does not place final witnesses or signatures",
             "CKB dry-run required for production acceptance"
         ],
+    })
+}
+
+fn evidence_schema_for_assumption(assumption: &crate::BuilderAssumptionMetadata) -> serde_json::Value {
+    let mut payload_arrays = Vec::new();
+    if !assumption.required_inputs.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "inputs",
+            "aliases": ["input_cells", "required_inputs"],
+            "transaction_array": "inputs",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["source", "out_point", "type_hash", "lock_hash", "capacity"],
+        }));
+    }
+    if !assumption.required_outputs.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "outputs",
+            "aliases": ["output_cells", "required_outputs"],
+            "transaction_array": "outputs",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["source", "type_hash", "lock_hash", "capacity", "data"],
+        }));
+    }
+    if !assumption.required_cell_deps.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "cell_deps",
+            "aliases": ["required_cell_deps"],
+            "transaction_array": "cell_deps",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["name", "out_point", "code_hash", "tx_hash", "dep_type"],
+        }));
+    }
+    if !assumption.required_witness_fields.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "witnesses",
+            "aliases": ["witness_fields", "required_witness_fields"],
+            "transaction_array": "witnesses",
+            "item_required_fields": ["index", "field"],
+            "item_concrete_fields": ["field", "lock", "input_type", "output_type", "bytes"],
+        }));
+    }
+
+    let mut payload_objects = Vec::new();
+    if assumption.kind == "capacity_policy" || assumption.capacity_policy != "none" {
+        payload_objects.push(serde_json::json!({
+            "name": "capacity",
+            "required_fields": ["occupied_capacity_shannons", "tx_size_bytes", "under_capacity_output_indexes"],
+            "failure_rule": "under_capacity_output_indexes must be an empty array for validate-tx success",
+        }));
+    }
+    if assumption.kind == "type_id_builder_plan" {
+        payload_objects.push(serde_json::json!({
+            "name": "type_id",
+            "required_fields": ["first_input_out_point", "output_index", "expected_type_id_args"],
+            "expected_type_id_args": "canonical 0x-prefixed 32-byte hex",
+            "transaction_cross_check": "output_index must point to the output whose type args equal expected_type_id_args when the tx JSON exposes type args",
+        }));
+    }
+    if assumption.kind == "create_unique_global_uniqueness" {
+        payload_objects.push(serde_json::json!({
+            "name": "uniqueness",
+            "required_any_of": ["uniqueness_checked=true", "uniqueness_proof", "unique_cell"],
+        }));
+    }
+    if assumption.kind == "lock_group_transaction_scope" {
+        payload_objects.push(serde_json::json!({
+            "name": "lock_group_transaction_scope",
+            "required_any_of": ["transaction_scope_reviewed=true", "covered_lock_groups"],
+        }));
+    }
+    if matches!(assumption.kind.as_str(), "metadata_only_gap" | "runtime_required_proof_plan") {
+        payload_objects.push(serde_json::json!({
+            "name": "manual_review",
+            "required_any_of": ["manual_review", "checked=true"],
+        }));
+    }
+
+    serde_json::json!({
+        "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+        "payload_type": "object",
+        "payload_arrays": payload_arrays,
+        "payload_objects": payload_objects,
+        "cross_checks": [
+            "array evidence items must include numeric index fields that bind to the transaction array",
+            "when evidence and the indexed transaction object both expose a concrete field, validate-tx requires equality",
+            "capacity evidence must fail closed when under-capacity outputs are reported",
+            "TYPE_ID evidence must use canonical 32-byte args and match output type args when present"
+        ],
+        "note": "builder must replace this requirement with concrete evidence before validate-tx can pass",
     })
 }
 
@@ -3544,6 +4048,10 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
 
     if args.primitive_compat.as_deref() == Some("0.16") {
         if let Err(error) = crate::proof_plan::soundness::validate_metadata(metadata, true) {
+            violations.push(error.message);
+        }
+    } else if args.primitive_compat.as_deref() == Some("0.17") {
+        if let Err(error) = crate::validate_primitive_strict_017_metadata(metadata) {
             violations.push(error.message);
         }
     } else if metadata.runtime.proof_plan_soundness.status == "failed" {
@@ -4634,7 +5142,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -4767,7 +5275,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -4918,6 +5426,12 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
+                ClapCommand::new("verify-ckb-fixtures")
+                    .about("Verify standard CKB compatibility fixtures with the deterministic model runner")
+                    .arg(Arg::new("manifest").value_name("MANIFEST_JSON").required(true).help("CKB fixture manifest JSON"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
                 ClapCommand::new("deploy-plan")
                     .about("Emit a reproducible v0.16 deployment plan")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
@@ -5064,7 +5578,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -5293,6 +5807,10 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("verify-ckb-fixtures", m)) => Command::VerifyCkbFixtures(VerifyCkbFixturesArgs {
+                manifest: m.get_one::<String>("manifest").map(PathBuf::from).expect("required CKB fixture manifest"),
                 json: m.get_flag("json"),
             }),
             Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {

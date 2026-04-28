@@ -1,6 +1,6 @@
 module cellscript::benchmarks::ickb_limit_order
 
-resource LimitOrder has store, destroy {
+resource LimitOrder has store, create, consume {
     ckb_amount: u128
     udt_amount: u128
     udt_type_hash: Hash
@@ -13,7 +13,7 @@ resource LimitOrder has store, destroy {
     owner: Address
 }
 
-resource OrderMaster has store, destroy {
+resource OrderMaster has store, create, consume {
     order_index: u64
     owner: Address
 }
@@ -29,8 +29,10 @@ action mint_order(
     ckb_min_match: u128,
     order_index: u64,
     master_index: u64,
+    master_relative_distance: i32,
     owner: Address
 ) -> (LimitOrder, OrderMaster) {
+    ckb::require_current_script_args_empty()
     assert_invariant(valid_ratio(ckb_to_udt_ckb_mul, ckb_to_udt_udt_mul), "bad ckb to udt")
     assert_invariant(valid_ratio(udt_to_ckb_ckb_mul, udt_to_ckb_udt_mul), "bad udt to ckb")
     assert_invariant(
@@ -39,6 +41,13 @@ action mint_order(
     )
     assert_invariant(ckb_min_match > 0, "zero min match")
     assert_invariant(order_index != master_index, "master overlap")
+    ckb::require_metapoint_relative(
+        source::output(order_index),
+        source::output(master_index),
+        master_relative_distance
+    )
+    ckb::require_lock_type_metapoint_pairs(source::output(0), master_relative_distance)
+    ckb::require_lock_type_metapoint_pairs_from_i32_data(source::output(0), 52)
 
     let order = create LimitOrder {
         ckb_amount,
@@ -67,19 +76,31 @@ action fulfill_ckb_to_udt(
     new_udt_amount: u128,
     owner: Address
 ) -> LimitOrder {
+    ckb::require_current_script_args_empty()
+    let role = ckb::current_role()
+    let order_capacity = ckb::cell_capacity(source::group_input(0))
+    assert_invariant(role == 2, "order fulfilment must run as type script")
+    assert_invariant(order_capacity > 0, "missing order input")
     assert_invariant(order.ckb_to_udt_ckb_mul > 0, "ckb to udt disabled")
     assert_invariant(new_ckb_amount < order.ckb_amount, "no ckb paid out")
     assert_invariant(new_udt_amount >= order.udt_amount, "udt decreased")
 
-    let old_value = order.ckb_amount * order.ckb_to_udt_ckb_mul +
-        order.udt_amount * order.ckb_to_udt_udt_mul
-    let new_value = new_ckb_amount * order.ckb_to_udt_ckb_mul +
-        new_udt_amount * order.ckb_to_udt_udt_mul
-
-    assert_invariant(new_value >= old_value, "decreasing value")
+    c256::require_sum2_products_lte(
+        order.ckb_amount, order.ckb_to_udt_ckb_mul,
+        order.udt_amount, order.ckb_to_udt_udt_mul,
+        new_ckb_amount, order.ckb_to_udt_ckb_mul,
+        new_udt_amount, order.ckb_to_udt_udt_mul
+    )
     assert_invariant(
         new_ckb_amount == 0 || order.ckb_amount >= new_ckb_amount + order.ckb_min_match,
         "insufficient match"
+    )
+    ckb::require_lock_match_master_out_point_pairs_from_data(
+        source::input(0),
+        source::output(0),
+        16,
+        20,
+        52
     )
 
     consume order
@@ -104,22 +125,34 @@ action fulfill_udt_to_ckb(
     new_udt_amount: u128,
     owner: Address
 ) -> LimitOrder {
+    ckb::require_current_script_args_empty()
+    let role = ckb::current_role()
+    let order_capacity = ckb::cell_capacity(source::group_input(0))
+    assert_invariant(role == 2, "order fulfilment must run as type script")
+    assert_invariant(order_capacity > 0, "missing order input")
     assert_invariant(order.udt_to_ckb_ckb_mul > 0, "udt to ckb disabled")
     assert_invariant(new_udt_amount < order.udt_amount, "no udt paid out")
     assert_invariant(new_ckb_amount >= order.ckb_amount, "ckb decreased")
 
-    let old_value = order.ckb_amount * order.udt_to_ckb_ckb_mul +
-        order.udt_amount * order.udt_to_ckb_udt_mul
-    let new_value = new_ckb_amount * order.udt_to_ckb_ckb_mul +
-        new_udt_amount * order.udt_to_ckb_udt_mul
-
-    assert_invariant(new_value >= old_value, "decreasing value")
+    c256::require_sum2_products_lte(
+        order.ckb_amount, order.udt_to_ckb_ckb_mul,
+        order.udt_amount, order.udt_to_ckb_udt_mul,
+        new_ckb_amount, order.udt_to_ckb_ckb_mul,
+        new_udt_amount, order.udt_to_ckb_udt_mul
+    )
     assert_invariant(
         new_udt_amount == 0 ||
             order.udt_amount * order.udt_to_ckb_udt_mul >=
                 new_udt_amount * order.udt_to_ckb_udt_mul +
                     order.ckb_min_match * order.udt_to_ckb_ckb_mul,
         "insufficient match"
+    )
+    ckb::require_lock_match_master_out_point_pairs_from_data(
+        source::input(0),
+        source::output(0),
+        16,
+        20,
+        52
     )
 
     consume order
@@ -139,6 +172,7 @@ action fulfill_udt_to_ckb(
 }
 
 action cancel_order(order: LimitOrder, master: OrderMaster, owner: Address) {
+    ckb::require_current_script_args_empty()
     assert_invariant(order.owner == owner, "wrong owner")
     assert_invariant(master.owner == owner, "wrong master owner")
 
@@ -151,9 +185,18 @@ fn valid_ratio(ckb_mul: u128, udt_mul: u128) -> bool {
 }
 
 lock order_owner(order: protected LimitOrder, claimed_owner: witness Address) -> bool {
+    ckb::require_current_script_args_empty()
+    require ckb::current_role() == 1
     require order.owner == claimed_owner
 }
 
-// TODO(ickb-benchmark): CellScript has no native C256 checked arithmetic type,
-// no first-class OutPoint/MetaPoint relation, and no script-role primitive for
-// "same script as lock in the order cell and as type in the master cell".
+// TODO(ickb-benchmark): CellScript now has executable C256 product-sum
+// requirement helpers for the core price-conservation check and a pairwise
+// MetaPoint relative-distance helper for mint-time order/master linkage. It
+// also has executable current-script lock-only/type-only pair cardinality for
+// fixed-distance mint paths and an i32-data-offset bridge for the original
+// mint action's master-distance bytes. Match paths can now require lock-only
+// order cells to preserve the same master OutPoint when outputs encode
+// Action::Match with absolute master bytes. It still has no first-class C256
+// value type, native protocol-specific MetaPoint map, or full Script object
+// for "same script as lock in the order cell and as type in the master cell".

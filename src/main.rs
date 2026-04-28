@@ -95,6 +95,7 @@ fn main() {
                     | "audit-bundle"
                     | "validate-tx"
                     | "solve-tx"
+                    | "verify-ckb-fixtures"
                     | "deploy-plan"
                     | "verify-deploy"
                     | "diff-deploy"

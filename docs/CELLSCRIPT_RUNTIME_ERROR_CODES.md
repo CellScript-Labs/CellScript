@@ -45,11 +45,25 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 23 | `destroy-invalid-operand` | A destroy operation reached codegen with an invalid or unsupported operand. | This indicates an unsupported lowering path; inspect compiler metadata blockers. |
 | 24 | `collection-runtime-unsupported` | A runtime collection helper shape is not supported by the current backend. | Avoid advertising this collection helper as production-ready until support is implemented. |
 | 25 | `entry-witness-abi-invalid` | Entry witness payload layout, width, or parameter ABI placement was invalid. | Inspect `cellc constraints` or `cellc abi` output for parameter slots and witness byte layout. |
+| 26 | `ckb-source-view-invalid` | A CKB SourceView value was malformed or used with an incompatible source-specific helper. | Pass a SourceView produced by the matching `source::*` helper and keep indexes in range. |
+| 27 | `header-dep-missing` | A required HeaderDep source view was absent or could not be bound to the requested header. | Add the required header dep and bind it to the input/deposit whose DAO data is read. |
+| 28 | `dao-field-malformed` | A loaded DAO header or cell field did not match the expected encoded layout. | Check DAO header bytes, accumulated-rate width, and deposit/withdrawal cell data layout. |
+| 29 | `script-role-mismatch` | The script was used in a lock/type role that violates the declared invariant. | Check whether the script is deployed and invoked as the expected lock or type script. |
+| 30 | `xudt-binding-mismatch` | An xUDT type args, owner-mode, or amount binding check failed. | Check xUDT type args, owner-mode flags, input type hash, and token data layout. |
+| 31 | `aggregate-amount-mismatch` | A lowered aggregate/C256 accounting equality or inequality check failed. | Compare generated aggregate inputs/outputs and inspect overflow or exact-equality assumptions. |
 | 32 | `dynamic-field-value-mismatch` | A dynamic Molecule field value did not match the expected verifier source. | Check dynamic Molecule field encoding and the value source used by the verifier. |
+| 33 | `out-point-mismatch` | A loaded input OutPoint field did not match the expected transaction lineage. | Check the input OutPoint tx hash/index and the expected lineage binding. |
+| 34 | `script-field-malformed` | A loaded CKB Script field did not match the expected Molecule Script layout. | Check the lock/type Script Molecule encoding, args length, and whether the cell actually has that script field. |
+| 35 | `dao-header-lineage-mismatch` | The DAO field loaded from an input's committed block header did not match the supplied HeaderDep. | Bind the HeaderDep to the exact input/deposit header used for DAO accumulated-rate accounting. |
+| 36 | `dao-maturity-violation` | The DAO input since value was below the required maturity lower bound. | Check the withdrawal request since value and ensure the consumed DAO input has reached the required maturity. |
+| 37 | `ckb-since-malformed` | A CKB since value or requested since constructor argument was malformed. | Check since flags, metric type, epoch number/index/length bounds, and index < length. |
+| 38 | `script-args-mismatch` | A loaded CKB Script args field did not match the expected args policy. | Check lock/type script args and whether this protocol path requires empty script args. |
+| 39 | `metapoint-mismatch` | A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance. | Check the paired input OutPoints or output indexes and the signed relative-distance field. |
+| 40 | `metapoint-cardinality-mismatch` | A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation. | Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `26` through `31`, and values above `32` are currently reserved.
+- Code `6` and values above `40` are currently reserved.

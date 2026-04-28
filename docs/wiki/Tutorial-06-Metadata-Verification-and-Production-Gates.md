@@ -144,22 +144,31 @@ cellc validate-tx --against build/main.elf.meta.json tx.json --json
 
 `runtime.proof_plan_soundness` tells you whether verifier obligations and
 ProofPlan records agree. `--primitive-strict=0.16` rejects metadata-only or
-runtime-required ProofPlan gaps.
+runtime-required ProofPlan gaps. The soundness key includes origin/scope,
+category, feature, status, and detail; local and runtime ProofPlan records are
+compared by full semantic content, including trigger, reads, coverage, and
+source spans.
 
 `runtime.builder_assumptions` is the machine-readable contract for transaction
-builders. `validate-tx` checks a transaction JSON shape against that contract
-and requires schema-bound evidence objects for non-structural assumptions
-before signing. This is still pre-chain evidence: dry-run, capacity, cycles, and
-commit checks remain required for production claims.
+builders. `validate-tx` checks a transaction JSON shape against that contract,
+rejects bare evidence tokens, and requires indexed evidence objects for
+non-structural assumptions before signing. Evidence indexes are range-checked
+against the transaction, and concrete fields such as outpoints, hashes,
+capacity, dep metadata, witness bytes, and TYPE_ID args must match when present.
+This is still pre-chain evidence: dry-run, capacity, cycles, and commit checks
+remain required for production claims.
 
 Additional 0.16 reports are available for audit and deployment workflows:
 
 ```bash
-cellc solve-tx src/main.cell --json   # emits a template, not a final transaction
+cellc solve-tx src/main.cell --json   # emits can_submit=false template output
 cellc deploy-plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
+
+For the review-finding closure matrix, see
+`docs/0.17/review_findings_closure.md`.
 
 ## Suggested Compiler CI Gate
 

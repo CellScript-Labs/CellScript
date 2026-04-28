@@ -38,11 +38,18 @@ runtime.proof_plan_soundness
 The checker rejects:
 
 - verifier obligations with no matching ProofPlan record;
+- verifier obligations whose matching ProofPlan record differs in origin,
+  scope, category, feature, status, or detail;
+- duplicate ProofPlan obligation keys;
 - on-chain checked records whose codegen coverage is not `covered`;
 - runtime-required records marked as on-chain checked;
 - `lock_args` provenance mixed into witness reads;
 - local action/function/lock ProofPlan records that diverge from
-  `runtime.proof_plan`;
+  `runtime.proof_plan`, including changed trigger, scope, reads, coverage,
+  assumptions, detail, or codegen coverage;
+- checked records without concrete reads, coverage, checked-obligation labels,
+  or valid source spans when source-declared;
+- cell-access records whose source class and reads disagree;
 - metadata-only/runtime-required gaps in `--primitive-strict=0.16` mode.
 
 **Note**: This is a metadata consistency checker, not a formal proof.
@@ -75,11 +82,16 @@ failure_mode
 
 `cellc explain-assumptions --json` prints the schema for a source package.
 
-**Note**: `validate-tx` performs structural and schema-bound evidence
-validation, not full CKB transaction semantic verification. Non-structural
-assumption evidence must bind to the assumption id, kind, origin, feature, and
-ProofPlan status and include a non-empty evidence payload, but CKB dry-run
-remains the production acceptance layer.
+**Note**: `validate-tx` performs structural, schema-bound, and
+transaction-bound evidence validation, not full CKB transaction semantic
+verification. Non-structural assumption evidence must bind to the assumption
+id, kind, origin, feature, and ProofPlan status and include a typed evidence
+payload. Bare evidence tokens are rejected. Required cell/output/dep/witness
+payload items must include indexes that are range-checked against the
+transaction shape. When evidence and the indexed transaction object both expose
+a concrete field such as outpoint, lock hash, type hash, capacity, dep metadata,
+witness bytes, or TYPE_ID args, the values must match. CKB dry-run remains the
+production acceptance layer.
 
 ### Transaction Validation
 
@@ -103,12 +115,17 @@ cellc solve-tx
 The transaction template emitter derives input/output/dep slot requirements
 from ProofPlan records, surfaces CKB dependency metadata, reports fee/change
 metadata from CKB constraints, and emits a signing manifest skeleton with
-per-lock signature request requirements.
+per-lock signature request requirements. It also emits a machine-readable
+`evidence_schema` for each builder assumption so downstream builders know the
+required indexed payload arrays, concrete fields, TYPE_ID fields, capacity
+checks, and manual-review evidence.
 
 **Note**: This is a deterministic template emitter, not a runtime cell
-selector or final solver. Builders must still perform concrete cell selection,
-dep/header resolution, fee/change planning, occupied-capacity calculation,
-witness placement, signing, and CKB dry-run.
+selector or final solver. Output is explicitly labelled `template-only`,
+`template-emitter-only`, `non-executable-template`, and `can_submit=false`.
+Builders must still perform concrete cell selection, dep/header resolution,
+fee/change planning, occupied-capacity calculation, witness placement, signing,
+and CKB dry-run.
 
 ### Metadata Tooling
 
@@ -149,11 +166,11 @@ Each suite has descriptive fixture files with transaction shapes,
 expected behavior, script args/witness/molecule data layouts, metadata
 expectations, cycle report envelopes, and capacity reports.
 
-**Note**: These are descriptive fixtures, not executable test runners.
-No test harness validates accepted/rejected cases against CKB or the
-compiler. CKB dry-run remains the acceptance mechanism.
+**Note**: These are descriptive fixtures in the scoped 0.16 release. The 0.17
+branch adds a deterministic model verifier for the same fixture family, but it
+still does not execute CKB VM. CKB dry-run remains the acceptance mechanism.
 
-### CKB Standard Library Protocol Module Stubs
+### CKB Standard Library Protocol Module Descriptors
 
 0.16 adds schema stubs for CKB stdlib protocol modules:
 
@@ -165,13 +182,21 @@ compiler. CKB dry-run remains the acceptance mechanism.
 - `std::acp` — Anyone-Can-Pay deposit and withdraw
 
 Each module declares ProofPlan trigger/scope/reads, builder assumptions,
-compatibility fixture references, and `schema-stub` status via
+compatibility fixture references, and non-stable `schema-stub` status via
 `CkbStdlibModule`/`ProtocolFunction` descriptors.
 
 **Note**: These are schema stubs only — no CellScript source
 implementations, no assembly generation, no ProofPlan pipeline integration,
 and no test coverage. A future release must implement the modules before
 they can be used in production contracts.
+
+### Review Finding Closure
+
+The 0.17 branch hardens the scoped 0.16 implementation against the review
+findings for ProofPlan key coarseness, weak `validate-tx` evidence, premature
+stdlib stability labels, and `solve-tx` solver overclaiming. See
+`docs/0.17/review_findings_closure.md` for the exact closure matrix, tests, and
+remaining boundaries.
 
 ## Compatibility
 
@@ -225,8 +250,9 @@ The following 0.16 boundaries remain intentional:
   invariant soundness;
 - standard CKB compatibility fixtures are descriptive, not executable
   equivalence tests;
-- `validate-tx` is structural and schema-bound evidence validation, not full CKB
-  transaction semantic validation;
+- `validate-tx` is structural, schema-bound, and transaction-bound evidence
+  validation, not full CKB transaction semantic validation;
 - `solve-tx` is a deterministic template emitter, not a final solver;
-- CKB stdlib protocol modules are `schema-stub`, not production-ready modules;
+- CKB stdlib protocol modules are non-stable `schema-stub` descriptors, not
+  production-ready modules;
 - CKB dry-run/commit evidence remains the production acceptance layer

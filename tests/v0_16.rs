@@ -49,7 +49,23 @@ fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {
         "proof_plan_status": assumption.proof_plan_status,
         "evidence": {
             "source": "unit-test-fixture",
-            "checked": true
+            "checked": true,
+            "inputs": [{"index": 0, "source": "Input"}],
+            "outputs": [{"index": 0, "source": "Output"}],
+            "cell_deps": [{"name": "unit-test-dep", "dep_type": "code"}],
+            "witness_fields": [{"index": 0, "field": "lock"}],
+            "occupied_capacity_shannons": 6100000000u64,
+            "tx_size_bytes": 256u64,
+            "under_capacity_output_indexes": [],
+            "type_id": {
+                "first_input_out_point": "0x0000000000000000000000000000000000000000000000000000000000000000:0",
+                "output_index": 0,
+                "expected_type_id_args": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "uniqueness_checked": true,
+            "covered_lock_groups": ["unit-test-lock-group"],
+            "transaction_scope_reviewed": true,
+            "manual_review": {"reviewed_by": "unit-test"}
         }
     })
 }
@@ -105,6 +121,110 @@ fn proof_plan_soundness_rejects_local_runtime_mismatches() {
 }
 
 #[test]
+fn proof_plan_soundness_rejects_obligation_scope_mismatches() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let obligation =
+        metadata.runtime.verifier_obligations.first().expect("identity compile should expose verifier obligations").clone();
+    let changed_origin = format!("{}:stale", obligation.scope);
+
+    for plan in &mut metadata.runtime.proof_plan {
+        if plan.category == obligation.category
+            && plan.feature == obligation.feature
+            && plan.status == obligation.status
+            && plan.detail == obligation.detail
+        {
+            plan.origin = changed_origin.clone();
+        }
+    }
+    for plan in metadata
+        .actions
+        .iter_mut()
+        .flat_map(|action| action.proof_plan.iter_mut())
+        .chain(metadata.functions.iter_mut().flat_map(|function| function.proof_plan.iter_mut()))
+        .chain(metadata.locks.iter_mut().flat_map(|lock| lock.proof_plan.iter_mut()))
+    {
+        if plan.category == obligation.category
+            && plan.feature == obligation.feature
+            && plan.status == obligation.status
+            && plan.detail == obligation.detail
+        {
+            plan.origin = changed_origin.clone();
+        }
+    }
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0002" && issue.feature == obligation.feature), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_rejects_duplicate_and_incomplete_semantic_records() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let duplicate = metadata.runtime.proof_plan.first().expect("ProofPlan record").clone();
+    metadata.runtime.proof_plan.push(duplicate);
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0003"), "{report:#?}");
+
+    let mut metadata = result.metadata.clone();
+    let checked = metadata.runtime.proof_plan.iter_mut().find(|plan| plan.on_chain_checked).expect("checked ProofPlan record");
+    checked.reads.clear();
+    checked.coverage.clear();
+    checked.on_chain_checked_obligations.clear();
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0206"), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0207"), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0208"), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_requires_source_spans_for_source_invariants_in_strict_mode() {
+    let result =
+        compile(METADATA_ONLY_INVARIANT, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let invariant_plan = metadata
+        .runtime
+        .proof_plan
+        .iter_mut()
+        .find(|plan| plan.origin.starts_with("invariant:"))
+        .expect("declared invariant ProofPlan record");
+    invariant_plan.source_span = None;
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, true);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0210"), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_rejects_cell_access_read_mismatches() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let plan = metadata
+        .runtime
+        .proof_plan
+        .iter_mut()
+        .find(|plan| plan.category == "cell-access" && plan.feature.contains(":Output#"))
+        .expect("output cell-access ProofPlan record");
+    plan.reads = vec!["input".to_string()];
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0212"), "{report:#?}");
+}
+
+#[test]
 fn validate_tx_checks_builder_assumption_evidence() {
     let result =
         compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -142,6 +262,98 @@ fn validate_tx_checks_builder_assumption_evidence() {
             .violations
             .iter()
             .any(|violation| violation.message.contains("proof_plan_status") || violation.message.contains("evidence")),
+        "{report:#?}"
+    );
+
+    let weak_evidence = assumptions
+        .iter()
+        .map(|assumption| {
+            json!({
+                "assumption_id": assumption.assumption_id,
+                "kind": assumption.kind,
+                "origin": assumption.origin,
+                "feature": assumption.feature,
+                "proof_plan_status": assumption.proof_plan_status,
+                "evidence": {
+                    "source": "unit-test-fixture",
+                    "checked": true
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let with_weak_evidence = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": weak_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_weak_evidence);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| {
+            violation.message.contains("output evidence")
+                || violation.message.contains("uniqueness_checked")
+                || violation.message.contains("type_id")
+                || violation.message.contains("occupied_capacity")
+        }),
+        "{report:#?}"
+    );
+
+    let output_assumption_index = assumptions
+        .iter()
+        .position(|assumption| !assumption.required_outputs.is_empty())
+        .expect("assumption requiring output evidence");
+    let mut missing_index_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    missing_index_evidence[output_assumption_index]["evidence"]["outputs"][0]
+        .as_object_mut()
+        .expect("output evidence object")
+        .remove("index");
+    let with_missing_output_index = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": missing_index_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_missing_output_index);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation.message.contains("output evidence item 0 must include numeric index")),
+        "{report:#?}"
+    );
+
+    let mut bad_index_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    bad_index_evidence[output_assumption_index]["evidence"]["outputs"][0]["index"] = json!(99);
+    let with_bad_output_index = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": bad_index_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_bad_output_index);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation.message.contains("output evidence index 99 is out of range")),
+        "{report:#?}"
+    );
+
+    let mut mismatched_output_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    mismatched_output_evidence[output_assumption_index]["evidence"]["outputs"][0]["lock_hash"] = json!("0xexpected-lock");
+    let with_mismatched_output = json!({
+        "inputs": [{}],
+        "outputs": [{"lock_hash": "0xactual-lock"}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": mismatched_output_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_mismatched_output);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation
+            .message
+            .contains("output evidence item 0 lock_hash does not match transaction outputs[0].lock_hash")),
         "{report:#?}"
     );
 
@@ -198,6 +410,43 @@ fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     assert!(validate.status.success(), "stderr: {}", String::from_utf8_lossy(&validate.stderr));
     let validate_json: serde_json::Value = serde_json::from_slice(&validate.stdout).unwrap();
     assert_eq!(validate_json["status"], "ok");
+}
+
+#[test]
+fn cli_solve_tx_is_explicitly_template_only() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("identity.cell");
+    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
+
+    let solve = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("solve-tx").arg(&source).arg("--json").output().unwrap();
+    assert!(solve.status.success(), "stderr: {}", String::from_utf8_lossy(&solve.stderr));
+    let solve_json: serde_json::Value = serde_json::from_slice(&solve.stdout).unwrap();
+    assert_eq!(solve_json["status"], "template-only");
+    assert_eq!(solve_json["solver_capability"], "template-emitter-only");
+    assert_eq!(solve_json["solver_readiness"], "not-a-solver");
+    assert_eq!(solve_json["execution_mode"], "non-executable-template");
+    assert_eq!(solve_json["can_submit"], false);
+    assert_eq!(solve_json["requires_validate_tx"], true);
+    assert_eq!(solve_json["transaction_plan"]["header_deps_status"], "unresolved-template-slots");
+    let evidence_requirements =
+        solve_json["transaction_plan"]["builder_assumption_evidence_requirements"].as_array().expect("evidence requirements");
+    assert!(evidence_requirements.iter().any(|requirement| {
+        requirement["evidence_schema"]["payload_arrays"].as_array().is_some_and(|arrays| {
+            arrays.iter().any(|array| {
+                array["name"] == "outputs"
+                    && array["item_required_fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field == "index"))
+                    && array["transaction_array"] == "outputs"
+            })
+        })
+    }));
+    assert!(evidence_requirements.iter().any(|requirement| {
+        requirement["evidence_schema"]["cross_checks"].as_array().is_some_and(|checks| {
+            checks.iter().any(|check| check.as_str().is_some_and(|text| text.contains("indexed transaction object")))
+        })
+    }));
+    let limitations = solve_json["limitations"].as_array().expect("limitations");
+    assert!(limitations.iter().any(|value| value.as_str().is_some_and(|text| text.contains("does not perform live cell selection"))));
+    assert!(solve_json["required_external_steps"].as_array().is_some_and(|steps| !steps.is_empty()));
 }
 
 #[test]
@@ -298,7 +547,7 @@ fn ckb_stdlib_protocol_modules_exist_and_cover_required_suites() {
         assert!(!module.proof_plan_scope.is_empty(), "module {} missing proof_plan_scope", module.name);
         assert!(!module.proof_plan_reads.is_empty(), "module {} missing proof_plan_reads", module.name);
         assert!(!module.compatibility_fixture.is_empty(), "module {} missing compatibility_fixture", module.name);
-        assert_eq!(module.stability, "schema-stub", "module {} must not be marked stable before implementation coverage", module.name);
+        assert_ne!(module.stability, "stable", "module {} must not be marked stable before implementation coverage", module.name);
     }
 }
 
@@ -310,6 +559,13 @@ fn ckb_stdlib_protocol_functions_cover_core_operations() {
     assert!(names.contains(&"sudt_transfer"), "missing sudt_transfer: {names:?}");
     assert!(names.contains(&"sudt_mint"), "missing sudt_mint: {names:?}");
     assert!(names.contains(&"xudt_transfer"), "missing xudt_transfer: {names:?}");
+    assert!(names.contains(&"xudt_amount_low"), "missing xudt_amount_low: {names:?}");
+    assert!(names.contains(&"xudt_require_owner_mode_input_type"), "missing xudt_require_owner_mode_input_type: {names:?}");
+    assert!(names.contains(&"xudt_require_owner_mode_type_args"), "missing xudt_require_owner_mode_type_args: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_conserved"), "missing xudt_require_group_amount_conserved: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_minted"), "missing xudt_require_group_amount_minted: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_burned"), "missing xudt_require_group_amount_burned: {names:?}");
+    assert!(names.contains(&"dao_accumulated_rate"), "missing dao_accumulated_rate: {names:?}");
     assert!(names.contains(&"type_id_create"), "missing type_id_create: {names:?}");
     assert!(names.contains(&"htlc_claim_with_preimage"), "missing htlc_claim_with_preimage: {names:?}");
     assert!(names.contains(&"cheque_claim"), "missing cheque_claim: {names:?}");

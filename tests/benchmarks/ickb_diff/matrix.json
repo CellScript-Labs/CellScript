@@ -1,15 +1,115 @@
 {
-  "schema": "cellscript-ickb-diff-matrix-v0",
+  "schema": "cellscript-ickb-diff-matrix-v1",
   "mode": "MODEL_LEVEL_ONLY",
+  "equivalence_status": "NOT_PROVEN",
+  "production_equivalence_claim": false,
+  "equivalence_evidence": null,
+  "required_evidence_for_equivalence": [
+    "original_ickb_repo_commit",
+    "original_ickb_script_binary_sha256",
+    "cellscript_source_commit",
+    "generated_cellscript_artifact_sha256",
+    "ckb_vm_or_testtool_version",
+    "transaction_fixture_manifest_sha256",
+    "identical_inputs_outputs_cell_deps_header_deps_witnesses",
+    "original_and_cellscript_exit_codes",
+    "named_failure_mode_for_rejects",
+    "cycle_and_tx_size_measurements",
+    "per_row_execution_objects",
+    "pass_fail_status_matches",
+    "transaction_context_hashes",
+    "capacity_and_fee_measurements"
+  ],
   "rows": [
-    {"scenario": "valid deposit phase 1", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
-    {"scenario": "valid mint from receipt", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
-    {"scenario": "duplicate receipt", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
-    {"scenario": "amount inflation", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
-    {"scenario": "wrong owner", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
-    {"scenario": "wrong xUDT args", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
-    {"scenario": "immature redeem", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"},
-    {"scenario": "valid limit order", "original_ickb_expected": "pass", "cellscript_expected": "pass", "result": "model-pass"},
-    {"scenario": "limit order underpayment", "original_ickb_expected": "fail", "cellscript_expected": "fail", "result": "model-pass"}
+    {
+      "scenario": "valid deposit phase 1",
+      "original_ickb_expected": "pass",
+      "cellscript_expected": "pass",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": null
+    },
+    {
+      "scenario": "valid mint from receipt",
+      "original_ickb_expected": "pass",
+      "cellscript_expected": "pass",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": null
+    },
+    {
+      "scenario": "duplicate receipt",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "duplicate_receipt"
+    },
+    {
+      "scenario": "amount inflation",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "amount_inflation"
+    },
+    {
+      "scenario": "wrong owner",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "wrong_owner"
+    },
+    {
+      "scenario": "wrong xUDT args",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "wrong_xudt_binding"
+    },
+    {
+      "scenario": "immature redeem",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "immature_redeem"
+    },
+    {
+      "scenario": "valid limit order",
+      "original_ickb_expected": "pass",
+      "cellscript_expected": "pass",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": null
+    },
+    {
+      "scenario": "limit order underpayment",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "model-pass",
+      "evidence_level": "MODEL",
+      "ckb_vm_execution": false,
+      "original_ickb_executed": false,
+      "failure_mode": "limit_order_underpayment"
+    }
   ]
 }

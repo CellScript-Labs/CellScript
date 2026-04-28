@@ -195,7 +195,9 @@ pub fn audit_module(ir: &IrModule) -> WasmCompileReport {
 
 pub fn ir_type_to_wasm(ty: &IrType) -> WasmValType {
     match ty {
-        IrType::U8 | IrType::U16 | IrType::U32 | IrType::Bool | IrType::Unit | IrType::Address | IrType::Hash => WasmValType::I32,
+        IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::Bool | IrType::Unit | IrType::Address | IrType::Hash => {
+            WasmValType::I32
+        }
         IrType::U64 | IrType::U128 => WasmValType::I64,
         IrType::Array(_, _) | IrType::Tuple(_) | IrType::Named(_) | IrType::Ref(_) | IrType::MutRef(_) => WasmValType::I64,
     }

@@ -30,7 +30,21 @@ pub enum CellScriptRuntimeError {
     DestroyInvalidOperand = 23,
     CollectionRuntimeUnsupported = 24,
     EntryWitnessAbiInvalid = 25,
+    CkbSourceViewInvalid = 26,
+    HeaderDepMissing = 27,
+    DaoFieldMalformed = 28,
+    ScriptRoleMismatch = 29,
+    XudtBindingMismatch = 30,
+    AggregateAmountMismatch = 31,
     DynamicFieldValueMismatch = 32,
+    OutPointMismatch = 33,
+    ScriptFieldMalformed = 34,
+    DaoHeaderLineageMismatch = 35,
+    DaoMaturityViolation = 36,
+    CkbSinceMalformed = 37,
+    ScriptArgsMismatch = 38,
+    MetaPointMismatch = 39,
+    MetaPointCardinalityMismatch = 40,
 }
 
 impl CellScriptRuntimeError {
@@ -64,7 +78,21 @@ impl CellScriptRuntimeError {
             Self::DestroyInvalidOperand => "destroy-invalid-operand",
             Self::CollectionRuntimeUnsupported => "collection-runtime-unsupported",
             Self::EntryWitnessAbiInvalid => "entry-witness-abi-invalid",
+            Self::CkbSourceViewInvalid => "ckb-source-view-invalid",
+            Self::HeaderDepMissing => "header-dep-missing",
+            Self::DaoFieldMalformed => "dao-field-malformed",
+            Self::ScriptRoleMismatch => "script-role-mismatch",
+            Self::XudtBindingMismatch => "xudt-binding-mismatch",
+            Self::AggregateAmountMismatch => "aggregate-amount-mismatch",
             Self::DynamicFieldValueMismatch => "dynamic-field-value-mismatch",
+            Self::OutPointMismatch => "out-point-mismatch",
+            Self::ScriptFieldMalformed => "script-field-malformed",
+            Self::DaoHeaderLineageMismatch => "dao-header-lineage-mismatch",
+            Self::DaoMaturityViolation => "dao-maturity-violation",
+            Self::CkbSinceMalformed => "ckb-since-malformed",
+            Self::ScriptArgsMismatch => "script-args-mismatch",
+            Self::MetaPointMismatch => "metapoint-mismatch",
+            Self::MetaPointCardinalityMismatch => "metapoint-cardinality-mismatch",
         }
     }
 
@@ -94,7 +122,27 @@ impl CellScriptRuntimeError {
             Self::DestroyInvalidOperand => "A destroy operation reached codegen with an invalid or unsupported operand.",
             Self::CollectionRuntimeUnsupported => "A runtime collection helper shape is not supported by the current backend.",
             Self::EntryWitnessAbiInvalid => "Entry witness payload layout, width, or parameter ABI placement was invalid.",
+            Self::CkbSourceViewInvalid => "A CKB SourceView value was malformed or used with an incompatible source-specific helper.",
+            Self::HeaderDepMissing => "A required HeaderDep source view was absent or could not be bound to the requested header.",
+            Self::DaoFieldMalformed => "A loaded DAO header or cell field did not match the expected encoded layout.",
+            Self::ScriptRoleMismatch => "The script was used in a lock/type role that violates the declared invariant.",
+            Self::XudtBindingMismatch => "An xUDT type args, owner-mode, or amount binding check failed.",
+            Self::AggregateAmountMismatch => "A lowered aggregate/C256 accounting equality or inequality check failed.",
             Self::DynamicFieldValueMismatch => "A dynamic Molecule field value did not match the expected verifier source.",
+            Self::OutPointMismatch => "A loaded input OutPoint field did not match the expected transaction lineage.",
+            Self::ScriptFieldMalformed => "A loaded CKB Script field did not match the expected Molecule Script layout.",
+            Self::DaoHeaderLineageMismatch => {
+                "The DAO field loaded from an input's committed block header did not match the supplied HeaderDep."
+            }
+            Self::DaoMaturityViolation => "The DAO input since value was below the required maturity lower bound.",
+            Self::CkbSinceMalformed => "A CKB since value or requested since constructor argument was malformed.",
+            Self::ScriptArgsMismatch => "A loaded CKB Script args field did not match the expected args policy.",
+            Self::MetaPointMismatch => {
+                "A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance."
+            }
+            Self::MetaPointCardinalityMismatch => {
+                "A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation."
+            }
         }
     }
 
@@ -138,7 +186,31 @@ impl CellScriptRuntimeError {
             Self::EntryWitnessAbiInvalid => {
                 "Inspect cellc constraints or cellc abi output for parameter slots and witness byte layout."
             }
+            Self::CkbSourceViewInvalid => "Pass a SourceView produced by the matching source::* helper and keep indexes in range.",
+            Self::HeaderDepMissing => "Add the required header dep and bind it to the input/deposit whose DAO data is read.",
+            Self::DaoFieldMalformed => "Check DAO header bytes, accumulated-rate width, and deposit/withdrawal cell data layout.",
+            Self::ScriptRoleMismatch => "Check whether the script is deployed and invoked as the expected lock or type script.",
+            Self::XudtBindingMismatch => "Check xUDT type args, owner-mode flags, input type hash, and token data layout.",
+            Self::AggregateAmountMismatch => {
+                "Compare generated aggregate inputs/outputs and inspect overflow or exact-equality assumptions."
+            }
             Self::DynamicFieldValueMismatch => "Check dynamic Molecule field encoding and the value source used by the verifier.",
+            Self::OutPointMismatch => "Check the input OutPoint tx hash/index and the expected lineage binding.",
+            Self::ScriptFieldMalformed => {
+                "Check the lock/type Script Molecule encoding, args length, and whether the cell actually has that script field."
+            }
+            Self::DaoHeaderLineageMismatch => {
+                "Bind the HeaderDep to the exact input/deposit header used for DAO accumulated-rate accounting."
+            }
+            Self::DaoMaturityViolation => {
+                "Check the withdrawal request since value and ensure the consumed DAO input has reached the required maturity."
+            }
+            Self::CkbSinceMalformed => "Check since flags, metric type, epoch number/index/length bounds, and index < length.",
+            Self::ScriptArgsMismatch => "Check lock/type script args and whether this protocol path requires empty script args.",
+            Self::MetaPointMismatch => "Check the paired input OutPoints or output indexes and the signed relative-distance field.",
+            Self::MetaPointCardinalityMismatch => {
+                "Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell."
+            }
         }
     }
 
@@ -168,7 +240,21 @@ impl CellScriptRuntimeError {
             23 => Some(Self::DestroyInvalidOperand),
             24 => Some(Self::CollectionRuntimeUnsupported),
             25 => Some(Self::EntryWitnessAbiInvalid),
+            26 => Some(Self::CkbSourceViewInvalid),
+            27 => Some(Self::HeaderDepMissing),
+            28 => Some(Self::DaoFieldMalformed),
+            29 => Some(Self::ScriptRoleMismatch),
+            30 => Some(Self::XudtBindingMismatch),
+            31 => Some(Self::AggregateAmountMismatch),
             32 => Some(Self::DynamicFieldValueMismatch),
+            33 => Some(Self::OutPointMismatch),
+            34 => Some(Self::ScriptFieldMalformed),
+            35 => Some(Self::DaoHeaderLineageMismatch),
+            36 => Some(Self::DaoMaturityViolation),
+            37 => Some(Self::CkbSinceMalformed),
+            38 => Some(Self::ScriptArgsMismatch),
+            39 => Some(Self::MetaPointMismatch),
+            40 => Some(Self::MetaPointCardinalityMismatch),
             _ => None,
         }
     }
@@ -207,7 +293,21 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::DestroyInvalidOperand,
     CellScriptRuntimeError::CollectionRuntimeUnsupported,
     CellScriptRuntimeError::EntryWitnessAbiInvalid,
+    CellScriptRuntimeError::CkbSourceViewInvalid,
+    CellScriptRuntimeError::HeaderDepMissing,
+    CellScriptRuntimeError::DaoFieldMalformed,
+    CellScriptRuntimeError::ScriptRoleMismatch,
+    CellScriptRuntimeError::XudtBindingMismatch,
+    CellScriptRuntimeError::AggregateAmountMismatch,
     CellScriptRuntimeError::DynamicFieldValueMismatch,
+    CellScriptRuntimeError::OutPointMismatch,
+    CellScriptRuntimeError::ScriptFieldMalformed,
+    CellScriptRuntimeError::DaoHeaderLineageMismatch,
+    CellScriptRuntimeError::DaoMaturityViolation,
+    CellScriptRuntimeError::CkbSinceMalformed,
+    CellScriptRuntimeError::ScriptArgsMismatch,
+    CellScriptRuntimeError::MetaPointMismatch,
+    CellScriptRuntimeError::MetaPointCardinalityMismatch,
 ];
 
 pub fn runtime_error_info(error: CellScriptRuntimeError) -> CellScriptRuntimeErrorInfo {

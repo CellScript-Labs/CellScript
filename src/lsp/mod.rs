@@ -417,11 +417,159 @@ impl LspServer {
                     ("header_epoch_start_block_number", "ckb::header_epoch_start_block_number()"),
                     ("header_epoch_length", "ckb::header_epoch_length()"),
                     ("input_since", "ckb::input_since()"),
+                    ("since_epoch_absolute", "ckb::since_epoch_absolute(${1:number}, ${2:index}, ${3:length})"),
+                    ("since_epoch_relative", "ckb::since_epoch_relative(${1:number}, ${2:index}, ${3:length})"),
+                    ("current_role", "ckb::current_role()"),
+                    ("current_script_hash", "ckb::current_script_hash()"),
+                    ("cell_capacity", "ckb::cell_capacity(${1:source::group_input(0)})"),
+                    ("cell_occupied_capacity", "ckb::cell_occupied_capacity(${1:source::group_input(0)})"),
+                    ("cell_unoccupied_capacity", "ckb::cell_unoccupied_capacity(${1:source::group_input(0)})"),
+                    ("cell_output_index", "ckb::cell_output_index(${1:source::group_output(0)})"),
+                    ("input_out_point_index", "ckb::input_out_point_index(${1:source::group_input(0)})"),
+                    ("input_out_point_tx_hash_low", "ckb::input_out_point_tx_hash_low(${1:source::group_input(0)})"),
+                    ("cell_lock_hash_low", "ckb::cell_lock_hash_low(${1:source::group_input(0)})"),
+                    ("cell_type_hash_low", "ckb::cell_type_hash_low(${1:source::group_input(0)})"),
+                    ("require_cell_lock_hash", "ckb::require_cell_lock_hash(${1:source::group_input(0)}, ${2:expected_lock_hash})"),
+                    ("require_cell_type_hash", "ckb::require_cell_type_hash(${1:source::group_input(0)}, ${2:expected_type_hash})"),
+                    ("require_current_script_args_empty", "ckb::require_current_script_args_empty()"),
+                    ("require_cell_lock_args_empty", "ckb::require_cell_lock_args_empty(${1:source::group_input(0)})"),
+                    ("require_cell_type_args_empty", "ckb::require_cell_type_args_empty(${1:source::group_input(0)})"),
+                    (
+                        "require_cell_lock_args_hash",
+                        "ckb::require_cell_lock_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_cell_type_args_hash",
+                        "ckb::require_cell_type_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_input_out_point_tx_hash",
+                        "ckb::require_input_out_point_tx_hash(${1:source::group_input(0)}, ${2:expected_tx_hash})",
+                    ),
+                    (
+                        "require_input_out_point",
+                        "ckb::require_input_out_point(${1:source::group_input(0)}, ${2:expected_tx_hash}, ${3:expected_index})",
+                    ),
+                    (
+                        "require_metapoint_relative",
+                        "ckb::require_metapoint_relative(${1:source::group_input(0)}, ${2:source::group_input(1)}, ${3:relative_distance})",
+                    ),
+                    (
+                        "require_lock_type_metapoint_pairs",
+                        "ckb::require_lock_type_metapoint_pairs(${1:source::input(0)}, ${2:relative_distance})",
+                    ),
+                    (
+                        "require_type_lock_metapoint_pairs",
+                        "ckb::require_type_lock_metapoint_pairs(${1:source::input(0)}, ${2:relative_distance})",
+                    ),
+                    (
+                        "require_lock_type_metapoint_pairs_from_i32_data",
+                        "ckb::require_lock_type_metapoint_pairs_from_i32_data(${1:source::input(0)}, ${2:distance_offset})",
+                    ),
+                    (
+                        "require_type_lock_metapoint_pairs_from_i32_data",
+                        "ckb::require_type_lock_metapoint_pairs_from_i32_data(${1:source::input(0)}, ${2:distance_offset})",
+                    ),
+                    (
+                        "require_lock_match_master_out_point_pairs_from_data",
+                        "ckb::require_lock_match_master_out_point_pairs_from_data(${1:source::input(0)}, ${2:source::output(0)}, ${3:action_offset}, ${4:tx_hash_offset}, ${5:index_offset})",
+                    ),
+                    ("cell_data_size", "ckb::cell_data_size(${1:source::group_input(0)})"),
                 ] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Function,
                         detail: Some(format!("ckb::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
+            "dao" => {
+                for (name, insert) in [
+                    ("accumulated_rate", "dao::accumulated_rate(${1:source::header_dep(0)})"),
+                    ("input_accumulated_rate", "dao::input_accumulated_rate(${1:source::group_input(0)})"),
+                    ("has_dao_type", "dao::has_dao_type(${1:source::group_input(0)})"),
+                    ("is_deposit_data", "dao::is_deposit_data(${1:source::group_input(0)})"),
+                    ("is_withdrawal_request_data", "dao::is_withdrawal_request_data(${1:source::group_input(0)})"),
+                    (
+                        "require_header_dep_for_input",
+                        "dao::require_header_dep_for_input(${1:source::group_input(0)}, ${2:source::header_dep(0)})",
+                    ),
+                    (
+                        "require_input_since_at_least",
+                        "dao::require_input_since_at_least(${1:source::group_input(0)}, ${2:required_since})",
+                    ),
+                    (
+                        "require_input_relative_epoch_since_at_least",
+                        "dao::require_input_relative_epoch_since_at_least(${1:source::group_input(0)}, ${2:number}, ${3:index}, ${4:length})",
+                    ),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("dao::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
+            "c256" => {
+                for (name, insert) in [
+                    (
+                        "require_product_lte",
+                        "c256::require_product_lte(${1:left_amount}, ${2:left_multiplier}, ${3:right_amount}, ${4:right_multiplier})",
+                    ),
+                    (
+                        "require_product_eq",
+                        "c256::require_product_eq(${1:left_amount}, ${2:left_multiplier}, ${3:right_amount}, ${4:right_multiplier})",
+                    ),
+                    (
+                        "require_sum2_products_lte",
+                        "c256::require_sum2_products_lte(${1:left_amount_a}, ${2:left_multiplier_a}, ${3:left_amount_b}, ${4:left_multiplier_b}, ${5:right_amount_a}, ${6:right_multiplier_a}, ${7:right_amount_b}, ${8:right_multiplier_b})",
+                    ),
+                    (
+                        "require_sum2_products_eq",
+                        "c256::require_sum2_products_eq(${1:left_amount_a}, ${2:left_multiplier_a}, ${3:left_amount_b}, ${4:left_multiplier_b}, ${5:right_amount_a}, ${6:right_multiplier_a}, ${7:right_amount_b}, ${8:right_multiplier_b})",
+                    ),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("c256::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
+            "xudt" => {
+                for (name, insert) in [
+                    ("amount_low", "xudt::amount_low(${1:source::group_input(0)})"),
+                    ("amount_high", "xudt::amount_high(${1:source::group_input(0)})"),
+                    ("owner_mode_input_type_hash", "xudt::owner_mode_input_type_hash(${1:source::group_input(0)})"),
+                    (
+                        "require_owner_mode_input_type",
+                        "xudt::require_owner_mode_input_type(${1:source::group_input(0)}, ${2:expected_type_hash})",
+                    ),
+                    (
+                        "require_owner_mode_type_args",
+                        "xudt::require_owner_mode_type_args(${1:source::group_input(0)}, ${2:owner_hash}, ${3:2147483648})",
+                    ),
+                    (
+                        "require_owner_mode_type_args_current_script",
+                        "xudt::require_owner_mode_type_args_current_script(${1:source::group_input(0)}, ${2:2147483648})",
+                    ),
+                    ("require_group_amount_conserved", "xudt::require_group_amount_conserved()"),
+                    ("require_group_amount_minted", "xudt::require_group_amount_minted(${1:delta})"),
+                    ("require_group_amount_burned", "xudt::require_group_amount_burned(${1:delta})"),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("xudt::{}", name)),
                         documentation: None,
                         insert_text: Some(insert.to_string()),
                     });
@@ -1696,6 +1844,7 @@ fn type_to_string(ty: &Type) -> String {
         Type::U8 => "u8".to_string(),
         Type::U16 => "u16".to_string(),
         Type::U32 => "u32".to_string(),
+        Type::I32 => "i32".to_string(),
         Type::U64 => "u64".to_string(),
         Type::U128 => "u128".to_string(),
         Type::Bool => "bool".to_string(),
@@ -2104,6 +2253,11 @@ mod tests {
 
         let ckb = server.member_completions("file:///test.cell", "ckb");
         assert!(ckb.iter().any(|item| item.label == "input_since"));
+        assert!(ckb.iter().any(|item| item.label == "since_epoch_relative"));
+        assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_empty"));
+
+        let dao = server.member_completions("file:///test.cell", "dao");
+        assert!(dao.iter().any(|item| item.label == "require_input_relative_epoch_since_at_least"));
     }
 
     #[test]

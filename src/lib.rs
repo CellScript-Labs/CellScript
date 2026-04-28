@@ -56,13 +56,14 @@ pub struct CompileOptions {
     /// - `Some("0.14")`: accept v0.14 syntax, emit migration hints
     /// - `Some("0.15")`: require v0.15 syntax, reject legacy forms
     /// - `Some("0.16")`: require v0.15 syntax plus v0.16 ProofPlan soundness
+    /// - `Some("0.17")`: require v0.15 syntax plus v0.17 CKB source/ProofPlan gates
     pub primitive_compat: Option<String>,
 }
 
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
     pub fn is_primitive_strict_015(&self) -> bool {
-        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16"))
+        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17"))
     }
 
     /// Returns true when running in v0.16 strict assurance mode.
@@ -70,10 +71,15 @@ impl CompileOptions {
         self.primitive_compat.as_deref() == Some("0.16")
     }
 
+    /// Returns true when running in v0.17 strict CKB source mode.
+    pub fn is_ckb_source_strict_017(&self) -> bool {
+        self.primitive_compat.as_deref() == Some("0.17")
+    }
+
     /// Returns true when running in v0.14 compat mode (the default when
     /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
     pub fn is_primitive_compat_014(&self) -> bool {
-        !matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16"))
+        !matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17"))
     }
 }
 
@@ -81,10 +87,110 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
     }
+    if let Some(mode) = options.primitive_compat.as_deref() {
+        match mode {
+            "0.14" | "0.15" | "0.16" | "0.17" => {}
+            other => {
+                return Err(CompileError::without_span(format!(
+                    "unsupported primitive compatibility mode '{}'; expected 0.14, 0.15, 0.16, or 0.17",
+                    other
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
-/// In `--primitive-strict=0.15` or `--primitive-strict=0.16` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
+pub(crate) fn validate_primitive_strict_017_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let xudt_group_amount_helpers = available_xudt_group_amount_helpers(metadata);
+    let gaps = metadata
+        .runtime
+        .proof_plan
+        .iter()
+        .filter_map(|plan| {
+            if !matches!(plan.category.as_str(), "declared-invariant" | "aggregate-invariant") {
+                return None;
+            }
+            if strict_017_runtime_helper_gap_is_discharged(plan, &xudt_group_amount_helpers) {
+                return None;
+            }
+            let rejects_metadata_only = plan.status == "runtime-required" || plan.codegen_coverage_status == "gap:metadata-only";
+            let rejects_missing_runtime_helper = plan.codegen_coverage_status == "gap:runtime-helper-required";
+            if rejects_metadata_only || rejects_missing_runtime_helper {
+                let detail = if rejects_missing_runtime_helper {
+                    let required = strict_017_required_runtime_helpers(plan);
+                    if required.is_empty() {
+                        "0.17 strict mode requires matching runtime-helper-required coverage in generated runtime accesses".to_string()
+                    } else {
+                        format!("0.17 strict mode requires matching {} coverage in generated runtime accesses", required.join(", "))
+                    }
+                } else {
+                    "0.17 strict mode rejects metadata-only declared/aggregate invariant gaps".to_string()
+                };
+                Some(format!("PP0170 {}:{} - {}", plan.origin, plan.feature, detail))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if gaps.is_empty() {
+        Ok(())
+    } else {
+        Err(CompileError::without_span(format!("0.17 CKB source strict check failed:\n  - {}", gaps.join("\n  - "))))
+    }
+}
+
+fn available_xudt_group_amount_helpers(metadata: &CompileMetadata) -> BTreeSet<&'static str> {
+    let mut helpers = BTreeSet::new();
+    for access in &metadata.runtime.ckb_runtime_accesses {
+        if access.syscall != "LOAD_CELL_DATA" || access.source != "GroupInput/GroupOutput" {
+            continue;
+        }
+        match access.operation.as_str() {
+            "xudt-group-amount-conservation" => {
+                helpers.insert("xudt::require_group_amount_conserved");
+            }
+            "xudt-group-amount-minted-delta" => {
+                helpers.insert("xudt::require_group_amount_minted");
+            }
+            "xudt-group-amount-burned-delta" => {
+                helpers.insert("xudt::require_group_amount_burned");
+            }
+            _ => {}
+        }
+    }
+    helpers
+}
+
+fn strict_017_required_runtime_helpers(plan: &ProofPlanMetadata) -> Vec<String> {
+    let mut helpers = BTreeSet::new();
+    for coverage in &plan.coverage {
+        if let Some(helper) = coverage.strip_prefix("runtime_helper:") {
+            helpers.insert(format!("runtime-helper-required:{helper}"));
+        }
+    }
+    for check in &plan.input_output_relation_checks {
+        if let Some((_, helper)) = check.split_once("runtime-helper-required:") {
+            helpers.insert(format!("runtime-helper-required:{helper}"));
+        }
+    }
+    helpers.into_iter().collect()
+}
+
+fn strict_017_runtime_helper_gap_is_discharged(
+    plan: &ProofPlanMetadata,
+    available_xudt_group_amount_helpers: &BTreeSet<&'static str>,
+) -> bool {
+    plan.codegen_coverage_status == "gap:runtime-helper-required"
+        && available_xudt_group_amount_helpers.iter().any(|helper| {
+            let coverage_label = format!("runtime_helper:{helper}");
+            let relation_label = format!("runtime-helper-required:{helper}");
+            plan.coverage.iter().any(|coverage| coverage == &coverage_label)
+                || plan.input_output_relation_checks.iter().any(|check| check.contains(&relation_label))
+        })
+}
+
+/// In `--primitive-strict=0.15` or newer strict mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
 /// in capability declarations. They must be replaced by their kernel-effect equivalents.
 fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
     use crate::error::MigrationDiagnostic;
@@ -2528,6 +2634,7 @@ pub enum EntryWitnessArg {
     U8(u8),
     U16(u16),
     U32(u32),
+    I32(i32),
     U64(u64),
     U128(u128),
     Address([u8; 32]),
@@ -2677,6 +2784,7 @@ fn entry_witness_append_scalar_arg(witness: &mut Vec<u8>, param: &ParamMetadata,
         ("u8", EntryWitnessArg::U8(value)) if width == 1 => witness.push(*value),
         ("u16", EntryWitnessArg::U16(value)) if width == 2 => witness.extend_from_slice(&value.to_le_bytes()),
         ("u32", EntryWitnessArg::U32(value)) if width == 4 => witness.extend_from_slice(&value.to_le_bytes()),
+        ("i32", EntryWitnessArg::I32(value)) if width == 4 => witness.extend_from_slice(&value.to_le_bytes()),
         ("u64", EntryWitnessArg::U64(value)) if width == 8 => witness.extend_from_slice(&value.to_le_bytes()),
         (_, EntryWitnessArg::Bytes(bytes)) if bytes.len() == width && entry_witness_type_is_small_aggregate(&param.ty) => {
             witness.extend_from_slice(bytes);
@@ -2729,6 +2837,7 @@ fn entry_witness_scalar_param_width(ty: &str) -> Option<usize> {
         "bool" | "u8" => Some(1),
         "u16" => Some(2),
         "u32" => Some(4),
+        "i32" => Some(4),
         "u64" => Some(8),
         other => entry_witness_static_type_len(other).filter(|width| (1..=8).contains(width)),
     }
@@ -2746,6 +2855,7 @@ pub(crate) fn entry_witness_static_type_len(ty: &str) -> Option<usize> {
         "bool" | "u8" => return Some(1),
         "u16" => return Some(2),
         "u32" => return Some(4),
+        "i32" => return Some(4),
         "u64" => return Some(8),
         "u128" => return Some(16),
         "Address" | "Hash" => return Some(32),
@@ -3228,6 +3338,9 @@ fn compile_ast_with_build(
     metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, options.is_assurance_strict_016());
     if options.is_assurance_strict_016() {
         crate::proof_plan::soundness::validate_metadata(&metadata, true)?;
+    }
+    if options.is_ckb_source_strict_017() {
+        validate_primitive_strict_017_metadata(&metadata)?;
     }
 
     let result = CompileResult { artifact_bytes, artifact_format, artifact_hash, metadata, ast: ast.clone() };
@@ -4389,6 +4502,7 @@ fn collect_ir_type_named_types(ty: &ir::IrType, used_types: &mut BTreeSet<String
         ir::IrType::U8
         | ir::IrType::U16
         | ir::IrType::U32
+        | ir::IrType::I32
         | ir::IrType::U64
         | ir::IrType::U128
         | ir::IrType::Bool
@@ -4403,7 +4517,7 @@ fn collect_inline_named_type_dependencies(name: &str, used_types: &mut BTreeSet<
         return;
     };
     match inner {
-        "bool" | "u8" | "u16" | "u32" | "u64" | "u128" | "Address" | "Hash" | "String" | "Vec" => {}
+        "bool" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "Address" | "Hash" | "String" | "Vec" => {}
         nested if nested.starts_with("Vec<") && nested.ends_with('>') => {
             used_types.insert(nested.to_string());
             collect_inline_named_type_dependencies(nested, used_types);
@@ -11254,6 +11368,7 @@ fn metadata_fixed_scalar_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Op
         (ir::IrType::Bool | ir::IrType::U8, Some(1)) => Some(1),
         (ir::IrType::U16, Some(2)) => Some(2),
         (ir::IrType::U32, Some(4)) => Some(4),
+        (ir::IrType::I32, Some(4)) => Some(4),
         (ir::IrType::U64, Some(8)) => Some(8),
         (ir::IrType::U128, Some(16)) => Some(16),
         _ => None,
@@ -11303,6 +11418,7 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
         "bool" | "u8" => Some(1),
         "u16" => Some(2),
         "u32" => Some(4),
+        "i32" => Some(4),
         "u64" => Some(8),
         "u128" => Some(16),
         "Address" | "Hash" => Some(32),
@@ -11385,6 +11501,7 @@ fn metadata_fixed_scalar_size(ty: &ir::IrType) -> Option<usize> {
         ir::IrType::Bool | ir::IrType::U8 => Some(1),
         ir::IrType::U16 => Some(2),
         ir::IrType::U32 => Some(4),
+        ir::IrType::I32 => Some(4),
         ir::IrType::U64 => Some(8),
         _ => None,
     }
@@ -11458,6 +11575,144 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_input_since" => {
                     features.insert("ckb-input-since".to_string());
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(func.as_str(), "__ckb_since_epoch_absolute" | "__ckb_since_epoch_relative") =>
+                {
+                    features.insert("ckb-since-epoch-encoding".to_string());
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_input_out_point_index"
+                            | "__ckb_input_out_point_tx_hash_low"
+                            | "__ckb_require_input_out_point_tx_hash"
+                            | "__ckb_require_input_out_point"
+                            | "__ckb_require_metapoint_relative"
+                            | "__ckb_require_lock_type_metapoint_pairs"
+                            | "__ckb_require_type_lock_metapoint_pairs"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_match_master_out_point_pairs_from_data"
+                    ) =>
+                {
+                    features.insert("ckb-source-input-out-point".to_string());
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_require_metapoint_relative"
+                            | "__ckb_require_lock_type_metapoint_pairs"
+                            | "__ckb_require_type_lock_metapoint_pairs"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_match_master_out_point_pairs_from_data"
+                    ) {
+                        features.insert("ckb-metapoint-relative".to_string());
+                    }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_require_lock_type_metapoint_pairs"
+                            | "__ckb_require_type_lock_metapoint_pairs"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_match_master_out_point_pairs_from_data"
+                    ) {
+                        features.insert("ckb-metapoint-pair-cardinality".to_string());
+                    }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                    ) {
+                        features.insert("ckb-metapoint-data-driven-cardinality".to_string());
+                    }
+                    if func == "__ckb_require_lock_match_master_out_point_pairs_from_data" {
+                        features.insert("ckb-metapoint-master-outpoint-data-cardinality".to_string());
+                    }
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_cell_capacity"
+                            | "__ckb_cell_occupied_capacity"
+                            | "__ckb_cell_unoccupied_capacity"
+                            | "__ckb_cell_output_index"
+                            | "__ckb_input_out_point_index"
+                            | "__ckb_input_out_point_tx_hash_low"
+                            | "__ckb_require_input_out_point_tx_hash"
+                            | "__ckb_require_input_out_point"
+                            | "__ckb_require_metapoint_relative"
+                            | "__ckb_require_lock_type_metapoint_pairs"
+                            | "__ckb_require_type_lock_metapoint_pairs"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_match_master_out_point_pairs_from_data"
+                            | "__ckb_cell_lock_hash_low"
+                            | "__ckb_cell_type_hash_low"
+                            | "__ckb_require_cell_lock_hash"
+                            | "__ckb_require_cell_type_hash"
+                            | "__ckb_require_cell_lock_args_empty"
+                            | "__ckb_require_cell_type_args_empty"
+                            | "__ckb_require_cell_lock_args_hash"
+                            | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_cell_data_size"
+                    ) =>
+                {
+                    features.insert("ckb-source-cell-fields".to_string());
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_require_cell_lock_args_empty"
+                            | "__ckb_require_cell_type_args_empty"
+                            | "__ckb_require_cell_lock_args_hash"
+                            | "__ckb_require_cell_type_args_hash"
+                    ) {
+                        features.insert("ckb-script-args-requirements".to_string());
+                    }
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_require_current_script_args_empty" => {
+                    features.insert("ckb-script-args-requirements".to_string());
+                    features.insert("ckb-source-cell-fields".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__dao_accumulated_rate" => {
+                    features.insert("ckb-dao-header-accumulated-rate".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__dao_input_accumulated_rate" => {
+                    features.insert("ckb-dao-input-header-accumulated-rate".to_string());
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(
+                        func.as_str(),
+                        "__dao_has_dao_type" | "__dao_is_deposit_data" | "__dao_is_withdrawal_request_data"
+                    ) =>
+                {
+                    features.insert("ckb-dao-cell-classification".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__dao_require_header_dep_for_input" => {
+                    features.insert("ckb-dao-header-lineage".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__dao_require_input_since_at_least" => {
+                    features.insert("ckb-dao-input-since-maturity".to_string());
+                    features.insert("ckb-input-since".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__dao_require_input_relative_epoch_since_at_least" => {
+                    features.insert("ckb-dao-relative-epoch-maturity".to_string());
+                    features.insert("ckb-input-since".to_string());
+                    features.insert("ckb-since-epoch-encoding".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__xudt_require_group_amount_conserved" => {
+                    features.insert("ckb-xudt-layout-binding".to_string());
+                    features.insert("ckb-xudt-group-amount-conservation".to_string());
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(func.as_str(), "__xudt_require_group_amount_minted" | "__xudt_require_group_amount_burned") =>
+                {
+                    features.insert("ckb-xudt-layout-binding".to_string());
+                    features.insert("ckb-xudt-group-amount-delta".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func.starts_with("__xudt_") => {
+                    features.insert("ckb-xudt-layout-binding".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func.starts_with("__c256_") => {
+                    features.insert("ckb-c256-product-arithmetic".to_string());
                 }
                 ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
@@ -11930,6 +12185,143 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_source_header_dep" => Some(("source-header-dep", "SOURCE_VIEW", "HeaderDep", "source::header_dep")),
         "__ckb_source_group_input" => Some(("source-group-input", "SOURCE_VIEW", "GroupInput", "source::group_input")),
         "__ckb_source_group_output" => Some(("source-group-output", "SOURCE_VIEW", "GroupOutput", "source::group_output")),
+        "__ckb_since_epoch_absolute" => {
+            Some(("since-epoch-absolute", "CKB_SINCE_ENCODING", "Expression", "ckb::since_epoch_absolute"))
+        }
+        "__ckb_since_epoch_relative" => {
+            Some(("since-epoch-relative", "CKB_SINCE_ENCODING", "Expression", "ckb::since_epoch_relative"))
+        }
+        "__ckb_cell_capacity" => Some(("cell-capacity", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_capacity")),
+        "__ckb_cell_occupied_capacity" => {
+            Some(("cell-occupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView", "ckb::cell_occupied_capacity"))
+        }
+        "__ckb_cell_unoccupied_capacity" => {
+            Some(("cell-unoccupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView", "ckb::cell_unoccupied_capacity"))
+        }
+        "__ckb_cell_output_index" => Some(("cell-output-index", "SOURCE_VIEW", "SourceView", "ckb::cell_output_index")),
+        "__ckb_input_out_point_index" => {
+            Some(("input-out-point-index", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::input_out_point_index"))
+        }
+        "__ckb_input_out_point_tx_hash_low" => {
+            Some(("input-out-point-tx-hash-low", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::input_out_point_tx_hash_low"))
+        }
+        "__ckb_require_input_out_point_tx_hash" => {
+            Some(("input-out-point-tx-hash-require", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::require_input_out_point_tx_hash"))
+        }
+        "__ckb_require_input_out_point" => {
+            Some(("input-out-point-require", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::require_input_out_point"))
+        }
+        "__ckb_require_metapoint_relative" => {
+            Some(("metapoint-relative-require", "LOAD_INPUT_BY_FIELD/SOURCE_VIEW", "Input/Output", "ckb::require_metapoint_relative"))
+        }
+        "__ckb_require_lock_type_metapoint_pairs" => Some((
+            "metapoint-lock-type-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_lock_type_metapoint_pairs",
+        )),
+        "__ckb_require_type_lock_metapoint_pairs" => Some((
+            "metapoint-type-lock-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_type_lock_metapoint_pairs",
+        )),
+        "__ckb_require_lock_type_metapoint_pairs_from_i32_data" => Some((
+            "metapoint-lock-type-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_lock_type_metapoint_pairs_from_i32_data",
+        )),
+        "__ckb_require_type_lock_metapoint_pairs_from_i32_data" => Some((
+            "metapoint-type-lock-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_type_lock_metapoint_pairs_from_i32_data",
+        )),
+        "__ckb_require_lock_match_master_out_point_pairs_from_data" => Some((
+            "metapoint-lock-match-master-out-point-data-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD",
+            "Input/Output",
+            "ckb::require_lock_match_master_out_point_pairs_from_data",
+        )),
+        "__ckb_cell_lock_hash_low" => Some(("cell-lock-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_hash_low")),
+        "__ckb_cell_type_hash_low" => Some(("cell-type-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_hash_low")),
+        "__ckb_require_cell_lock_hash" => {
+            Some(("cell-lock-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_hash"))
+        }
+        "__ckb_require_cell_type_hash" => {
+            Some(("cell-type-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_hash"))
+        }
+        "__ckb_require_cell_lock_args_empty" => {
+            Some(("cell-lock-script-empty-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_args_empty"))
+        }
+        "__ckb_require_cell_type_args_empty" => {
+            Some(("cell-type-script-empty-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_empty"))
+        }
+        "__ckb_require_cell_lock_args_hash" => {
+            Some(("cell-lock-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_args_hash"))
+        }
+        "__ckb_require_cell_type_args_hash" => {
+            Some(("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_hash"))
+        }
+        "__ckb_require_current_script_args_empty" => Some((
+            "current-script-empty-args-require",
+            "LOAD_SCRIPT+LOAD_CELL_BY_FIELD",
+            "CurrentScript/Output",
+            "ckb::require_current_script_args_empty",
+        )),
+        "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
+        "__ckb_cell_data_size" => Some(("cell-data-size", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_size")),
+        "__dao_accumulated_rate" => Some(("dao-accumulated-rate", "LOAD_HEADER_BY_FIELD", "HeaderDep", "dao::accumulated_rate")),
+        "__dao_input_accumulated_rate" => {
+            Some(("dao-input-accumulated-rate", "LOAD_HEADER", "Input/GroupInput", "dao::input_accumulated_rate"))
+        }
+        "__dao_has_dao_type" => Some(("dao-type-hash-classifier", "LOAD_CELL_BY_FIELD", "SourceView", "dao::has_dao_type")),
+        "__dao_is_deposit_data" => Some(("dao-deposit-data-classifier", "LOAD_CELL_DATA", "SourceView", "dao::is_deposit_data")),
+        "__dao_is_withdrawal_request_data" => {
+            Some(("dao-withdrawal-request-data-classifier", "LOAD_CELL_DATA", "SourceView", "dao::is_withdrawal_request_data"))
+        }
+        "__dao_require_header_dep_for_input" => {
+            Some(("dao-header-dep-input-lineage", "LOAD_HEADER_BY_FIELD", "Input/HeaderDep", "dao::require_header_dep_for_input"))
+        }
+        "__dao_require_input_since_at_least" => {
+            Some(("dao-input-since-maturity", "LOAD_INPUT_BY_FIELD", "Input/GroupInput", "dao::require_input_since_at_least"))
+        }
+        "__dao_require_input_relative_epoch_since_at_least" => Some((
+            "dao-input-relative-epoch-since-maturity",
+            "LOAD_INPUT_BY_FIELD",
+            "Input/GroupInput",
+            "dao::require_input_relative_epoch_since_at_least",
+        )),
+        "__xudt_amount_low" => Some(("xudt-amount-low", "LOAD_CELL_DATA", "SourceView", "xudt::amount_low")),
+        "__xudt_amount_high" => Some(("xudt-amount-high", "LOAD_CELL_DATA", "SourceView", "xudt::amount_high")),
+        "__xudt_owner_mode_input_type_hash" => {
+            Some(("xudt-owner-mode-input-type-hash", "LOAD_CELL_BY_FIELD", "SourceView", "xudt::owner_mode_input_type_hash"))
+        }
+        "__xudt_require_owner_mode_input_type" => {
+            Some(("xudt-require-owner-mode-input-type", "LOAD_CELL_BY_FIELD", "SourceView", "xudt::require_owner_mode_input_type"))
+        }
+        "__xudt_require_owner_mode_type_args" => {
+            Some(("xudt-require-owner-mode-type-args", "LOAD_CELL_BY_FIELD", "SourceView", "xudt::require_owner_mode_type_args"))
+        }
+        "__xudt_require_owner_mode_type_args_current_script" => Some((
+            "xudt-require-owner-mode-type-args-current-script",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD",
+            "CurrentScript/SourceView",
+            "xudt::require_owner_mode_type_args_current_script",
+        )),
+        "__xudt_require_group_amount_conserved" => Some((
+            "xudt-group-amount-conservation",
+            "LOAD_CELL_DATA",
+            "GroupInput/GroupOutput",
+            "xudt::require_group_amount_conserved",
+        )),
+        "__xudt_require_group_amount_minted" => {
+            Some(("xudt-group-amount-minted-delta", "LOAD_CELL_DATA", "GroupInput/GroupOutput", "xudt::require_group_amount_minted"))
+        }
+        "__xudt_require_group_amount_burned" => {
+            Some(("xudt-group-amount-burned-delta", "LOAD_CELL_DATA", "GroupInput/GroupOutput", "xudt::require_group_amount_burned"))
+        }
         "__ckb_witness_raw" => Some(("witness-raw", "LOAD_WITNESS", "Witness", "witness::raw")),
         "__ckb_witness_lock" => Some(("witness-lock", "LOAD_WITNESS_ARGS_LOCK", "GroupInput", "witness::lock")),
         "__ckb_witness_input_type" => {
@@ -11993,6 +12385,11 @@ fn ckb_script_group_metadata(
         match access.source.as_str() {
             "Input" | "GroupInput" => {
                 input_sources.insert(access.source.clone());
+            }
+            "Input/GroupInput" => {
+                input_sources.insert("Input".to_string());
+                input_sources.insert("GroupInput".to_string());
+                group_scoped_sources.insert("GroupInput".to_string());
             }
             "Output" | "GroupOutput" => {
                 output_sources.insert(access.source.clone());
@@ -12423,6 +12820,7 @@ fn molecule_type_for_ir_type(
         ir::IrType::U8 => Some("byte".to_string()),
         ir::IrType::U16 => Some(molecule_fixed_array_alias(aliases, "CellScriptUint16", "byte", 2)),
         ir::IrType::U32 => Some(molecule_fixed_array_alias(aliases, "CellScriptUint32", "byte", 4)),
+        ir::IrType::I32 => Some(molecule_fixed_array_alias(aliases, "CellScriptInt32", "byte", 4)),
         ir::IrType::U64 => Some(molecule_fixed_array_alias(aliases, "CellScriptUint64", "byte", 8)),
         ir::IrType::U128 => Some(molecule_fixed_array_alias(aliases, "CellScriptUint128", "byte", 16)),
         ir::IrType::Bool => Some(molecule_fixed_array_alias(aliases, "CellScriptBool", "byte", 1)),
@@ -12666,6 +13064,7 @@ fn ir_type_encoded_size(
         ir::IrType::U8 | ir::IrType::Bool => Some(1),
         ir::IrType::U16 => Some(2),
         ir::IrType::U32 => Some(4),
+        ir::IrType::I32 => Some(4),
         ir::IrType::U64 => Some(8),
         ir::IrType::U128 => Some(16),
         ir::IrType::Address | ir::IrType::Hash => Some(32),
@@ -12699,6 +13098,7 @@ fn ir_type_to_string(ty: &ir::IrType) -> String {
         ir::IrType::U8 => "u8".to_string(),
         ir::IrType::U16 => "u16".to_string(),
         ir::IrType::U32 => "u32".to_string(),
+        ir::IrType::I32 => "i32".to_string(),
         ir::IrType::U64 => "u64".to_string(),
         ir::IrType::U128 => "u128".to_string(),
         ir::IrType::Bool => "bool".to_string(),
@@ -12886,8 +13286,8 @@ fn collect_type_fragment_cell_backed_names(
 
 fn type_name_token_is_cell_backed(token: &str, cell_type_kinds: &HashMap<String, ir::IrTypeKind>) -> bool {
     match token {
-        "" | "u8" | "u16" | "u32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec" | "usize" | "isize"
-        | "read_ref" | "mut" => false,
+        "" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec" | "usize"
+        | "isize" | "read_ref" | "mut" => false,
         name => cell_type_kinds.contains_key(name),
     }
 }
@@ -12919,6 +13319,7 @@ fn type_static_length(ty: &ir::IrType) -> Option<usize> {
         ir::IrType::Bool | ir::IrType::U8 => Some(1),
         ir::IrType::U16 => Some(2),
         ir::IrType::U32 => Some(4),
+        ir::IrType::I32 => Some(4),
         ir::IrType::U64 => Some(8),
         ir::IrType::U128 => Some(16),
         ir::IrType::Address | ir::IrType::Hash => Some(32),
@@ -13224,7 +13625,9 @@ fn mutate_transition_is_verifier_coverable(
         }
         return match &transition.operand {
             ir::IrOperand::Const(ir::IrConst::U64(_)) => true,
-            ir::IrOperand::Var(var) => matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::U64),
+            ir::IrOperand::Var(var) => {
+                matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::I32 | ir::IrType::U64)
+            }
             _ => false,
         };
     }
@@ -13236,7 +13639,9 @@ fn mutate_transition_is_verifier_coverable(
         // The delta must be u64 (fits in a single register for the carry path).
         return match &transition.operand {
             ir::IrOperand::Const(ir::IrConst::U64(_)) => true,
-            ir::IrOperand::Var(var) => matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::U64),
+            ir::IrOperand::Var(var) => {
+                matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::I32 | ir::IrType::U64)
+            }
             _ => false,
         };
     }
@@ -13252,7 +13657,9 @@ fn mutate_transition_is_verifier_coverable(
     }
     match &transition.operand {
         ir::IrOperand::Const(ir::IrConst::U64(_)) => true,
-        ir::IrOperand::Var(var) => matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::U64),
+        ir::IrOperand::Var(var) => {
+            matches!(var.ty, ir::IrType::U8 | ir::IrType::U16 | ir::IrType::U32 | ir::IrType::I32 | ir::IrType::U64)
+        }
         _ => false,
     }
 }

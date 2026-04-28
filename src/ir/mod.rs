@@ -127,6 +127,7 @@ pub enum IrType {
     U8,
     U16,
     U32,
+    I32,
     U64,
     U128,
     Bool,
@@ -868,6 +869,7 @@ impl IrGenerator {
             IrType::U8 | IrType::Bool => Some(1),
             IrType::U16 => Some(2),
             IrType::U32 => Some(4),
+            IrType::I32 => Some(4),
             IrType::U64 => Some(8),
             IrType::U128 => Some(16),
             IrType::Address | IrType::Hash => Some(32),
@@ -971,6 +973,7 @@ impl IrGenerator {
             Type::U8 => IrType::U8,
             Type::U16 => IrType::U16,
             Type::U32 => IrType::U32,
+            Type::I32 => IrType::I32,
             Type::U64 => IrType::U64,
             Type::U128 => IrType::U128,
             Type::Bool => IrType::Bool,
@@ -1797,7 +1800,7 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
-                let dest = self.new_var("tmp", self.binary_result_type(binary.op));
+                let dest = self.new_var("tmp", self.binary_result_type_for_operands(binary.op, &left.operand, &right.operand));
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Binary {
                     dest: dest.clone(),
@@ -1942,6 +1945,22 @@ impl IrGenerator {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::And | BinaryOp::Or => {
                 IrType::U64
             }
+        }
+    }
+
+    fn binary_result_type_for_operands(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
+        match op {
+            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty == IrType::U128 || right_ty == IrType::U128 {
+                    IrType::U128
+                } else {
+                    IrType::U64
+                }
+            }
+            BinaryOp::And | BinaryOp::Or => self.binary_result_type(op),
         }
     }
 
@@ -3130,7 +3149,7 @@ impl IrGenerator {
                 self.transition_param_ids.contains(&root_var.id)
                     && self
                         .lookup_field_ir_type(&root_var.ty, field_name)
-                        .is_some_and(|ty| matches!(ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64))
+                        .is_some_and(|ty| matches!(ty, IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64))
             }
             Expr::Cast(cast) => self.transition_expr_is_coverable_u64(&cast.expr, vars),
             Expr::Call(call) if call.args.is_empty() => match call.func.as_ref() {
@@ -3421,6 +3440,175 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
+                "ckb::since_epoch_absolute" if call.args.len() == 3 => self.lower_simple_runtime_call(
+                    "__ckb_since_epoch_absolute",
+                    "ckb_since_epoch_absolute",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::since_epoch_relative" if call.args.len() == 3 => self.lower_simple_runtime_call(
+                    "__ckb_since_epoch_relative",
+                    "ckb_since_epoch_relative",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::current_role" if call.args.is_empty() => {
+                    let role = if self.lowering_lock_entry { 1 } else { 2 };
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(role)), current: Some(current) })
+                }
+                "ckb::current_script_hash" if call.args.is_empty() => self.lower_simple_runtime_call(
+                    "__ckb_current_script_hash",
+                    "ckb_current_script_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_capacity",
+                    "ckb_cell_capacity",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_occupied_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_occupied_capacity",
+                    "ckb_cell_occupied_capacity",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_unoccupied_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_unoccupied_capacity",
+                    "ckb_cell_unoccupied_capacity",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_output_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_output_index",
+                    "ckb_cell_output_index",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::input_out_point_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_out_point_index",
+                    "ckb_input_out_point_index",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::input_out_point_tx_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_out_point_tx_hash_low",
+                    "ckb_input_out_point_tx_hash_low",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_hash_low",
+                    "ckb_cell_lock_hash_low",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_hash_low",
+                    "ckb_cell_type_hash_low",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::require_cell_lock_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_current_script_args_empty" if call.args.is_empty() => {
+                    self.lower_void_runtime_call("__ckb_require_current_script_args_empty", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_lock_args_empty" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_empty", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_args_empty" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_empty", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_lock_args_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_args_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_input_out_point_tx_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_input_out_point_tx_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_input_out_point" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_input_out_point", &call.args, current, blocks, vars)
+                }
+                "ckb::require_metapoint_relative" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_metapoint_relative", &call.args, current, blocks, vars)
+                }
+                "ckb::require_lock_type_metapoint_pairs" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_lock_type_metapoint_pairs", &call.args, current, blocks, vars)
+                }
+                "ckb::require_type_lock_metapoint_pairs" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_type_lock_metapoint_pairs", &call.args, current, blocks, vars)
+                }
+                "ckb::require_lock_type_metapoint_pairs_from_i32_data" if call.args.len() == 2 => self.lower_void_runtime_call(
+                    "__ckb_require_lock_type_metapoint_pairs_from_i32_data",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::require_type_lock_metapoint_pairs_from_i32_data" if call.args.len() == 2 => self.lower_void_runtime_call(
+                    "__ckb_require_type_lock_metapoint_pairs_from_i32_data",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::require_lock_match_master_out_point_pairs_from_data" if call.args.len() == 5 => self.lower_void_runtime_call(
+                    "__ckb_require_lock_match_master_out_point_pairs_from_data",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_size" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_size",
+                    "ckb_cell_data_size",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_source_input",
                     "source_input",
@@ -3505,6 +3693,125 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "dao::accumulated_rate" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__dao_accumulated_rate",
+                    "dao_accumulated_rate",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "dao::input_accumulated_rate" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__dao_input_accumulated_rate",
+                    "dao_input_accumulated_rate",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "dao::is_deposit_data" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__dao_is_deposit_data",
+                    "dao_is_deposit_data",
+                    IrType::Bool,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "dao::is_withdrawal_request_data" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__dao_is_withdrawal_request_data",
+                    "dao_is_withdrawal_request_data",
+                    IrType::Bool,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "dao::has_dao_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__dao_has_dao_type",
+                    "dao_has_dao_type",
+                    IrType::Bool,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "dao::require_header_dep_for_input" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__dao_require_header_dep_for_input", &call.args, current, blocks, vars)
+                }
+                "dao::require_input_since_at_least" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__dao_require_input_since_at_least", &call.args, current, blocks, vars)
+                }
+                "dao::require_input_relative_epoch_since_at_least" if call.args.len() == 4 => self.lower_void_runtime_call(
+                    "__dao_require_input_relative_epoch_since_at_least",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "xudt::amount_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__xudt_amount_low",
+                    "xudt_amount_low",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "xudt::amount_high" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__xudt_amount_high",
+                    "xudt_amount_high",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "xudt::owner_mode_input_type_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__xudt_owner_mode_input_type_hash",
+                    "xudt_owner_mode_input_type_hash",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "xudt::require_owner_mode_input_type" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__xudt_require_owner_mode_input_type", &call.args, current, blocks, vars)
+                }
+                "xudt::require_owner_mode_type_args" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__xudt_require_owner_mode_type_args", &call.args, current, blocks, vars)
+                }
+                "xudt::require_owner_mode_type_args_current_script" if call.args.len() == 2 => self.lower_void_runtime_call(
+                    "__xudt_require_owner_mode_type_args_current_script",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "xudt::require_group_amount_conserved" if call.args.is_empty() => {
+                    self.lower_void_runtime_call("__xudt_require_group_amount_conserved", &call.args, current, blocks, vars)
+                }
+                "xudt::require_group_amount_minted" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__xudt_require_group_amount_minted", &call.args, current, blocks, vars)
+                }
+                "xudt::require_group_amount_burned" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__xudt_require_group_amount_burned", &call.args, current, blocks, vars)
+                }
+                "c256::require_product_lte" if call.args.len() == 4 => {
+                    self.lower_void_runtime_call("__c256_require_u128_product_lte", &call.args, current, blocks, vars)
+                }
+                "c256::require_product_eq" if call.args.len() == 4 => {
+                    self.lower_void_runtime_call("__c256_require_u128_product_eq", &call.args, current, blocks, vars)
+                }
+                "c256::require_sum2_products_lte" if call.args.len() == 8 => {
+                    self.lower_void_runtime_call("__c256_require_u128_sum2_products_lte", &call.args, current, blocks, vars)
+                }
+                "c256::require_sum2_products_eq" if call.args.len() == 8 => {
+                    self.lower_void_runtime_call("__c256_require_u128_sum2_products_eq", &call.args, current, blocks, vars)
+                }
                 "spawn" if call.args.len() == 1 => {
                     let dest = self.new_var("spawn_result", IrType::U64);
                     let target = match &call.args[0] {
@@ -4091,6 +4398,7 @@ impl IrGenerator {
             "u8" => IrType::U8,
             "u16" => IrType::U16,
             "u32" => IrType::U32,
+            "i32" => IrType::I32,
             "u64" => IrType::U64,
             "u128" => IrType::U128,
             "bool" => IrType::Bool,
@@ -4158,6 +4466,7 @@ fn inline_ir_type_repr(ty: &IrType) -> Option<String> {
         IrType::U8 => Some("u8".to_string()),
         IrType::U16 => Some("u16".to_string()),
         IrType::U32 => Some("u32".to_string()),
+        IrType::I32 => Some("i32".to_string()),
         IrType::U64 => Some("u64".to_string()),
         IrType::U128 => Some("u128".to_string()),
         IrType::Bool => Some("bool".to_string()),
@@ -4181,6 +4490,7 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
         "u8" => IrType::U8,
         "u16" => IrType::U16,
         "u32" => IrType::U32,
+        "i32" => IrType::I32,
         "u64" => IrType::U64,
         "u128" => IrType::U128,
         "bool" => IrType::Bool,
@@ -4570,6 +4880,7 @@ fn ast_type_to_ir(ty: &Type) -> IrType {
         Type::U8 => IrType::U8,
         Type::U16 => IrType::U16,
         Type::U32 => IrType::U32,
+        Type::I32 => IrType::I32,
         Type::U64 => IrType::U64,
         Type::U128 => IrType::U128,
         Type::Bool => IrType::Bool,
@@ -4864,6 +5175,7 @@ fn fixed_encoded_size_for_ir_type(ty: &IrType) -> Option<usize> {
         IrType::U8 | IrType::Bool => Some(1),
         IrType::U16 => Some(2),
         IrType::U32 => Some(4),
+        IrType::I32 => Some(4),
         IrType::U64 => Some(8),
         IrType::U128 => Some(16),
         IrType::Address | IrType::Hash => Some(32),
@@ -4898,6 +5210,7 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
         Type::U8 => IrType::U8,
         Type::U16 => IrType::U16,
         Type::U32 => IrType::U32,
+        Type::I32 => IrType::I32,
         Type::U64 => IrType::U64,
         Type::U128 => IrType::U128,
         Type::Bool => IrType::Bool,
@@ -4941,7 +5254,7 @@ fn call_target_is_min(expr: &Expr) -> bool {
 }
 
 fn is_verifier_coverable_output_field_type(ty: &IrType) -> bool {
-    matches!(ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::Address | IrType::Hash)
+    matches!(ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64 | IrType::Address | IrType::Hash)
         || matches!(ty, IrType::Array(inner, _) if matches!(inner.as_ref(), IrType::U8))
 }
 

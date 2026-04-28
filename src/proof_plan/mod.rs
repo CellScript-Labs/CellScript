@@ -137,6 +137,11 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
     let mut coverage = vec![format!("declared_invariant_assertions:{}", invariant.assert_count)];
     coverage.extend(invariant.aggregates.iter().map(aggregate_coverage_label));
+    for aggregate in &invariant.aggregates {
+        if let Some(helper) = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate) {
+            coverage.push(format!("runtime_helper:{helper}"));
+        }
+    }
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
 
@@ -146,13 +151,27 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut reads);
 
-    let mut input_output_relation_checks = invariant.aggregates.iter().map(aggregate_relation_check_label).collect::<Vec<_>>();
+    let mut input_output_relation_checks =
+        invariant.aggregates.iter().map(|aggregate| aggregate_relation_check_label(invariant, aggregate)).collect::<Vec<_>>();
     dedup(&mut input_output_relation_checks);
 
-    let mut builder_assumptions = vec![
-        "declared(metadata-only invariant not yet lowered to executable verifier code)".to_string(),
-        format!("declared(assert_invariant_count:{})", invariant.assert_count),
-    ];
+    let all_aggregates_runtime_helper_backed = !invariant.aggregates.is_empty()
+        && invariant.aggregates.iter().all(|aggregate| aggregate_xudt_group_amount_helper_required(invariant, aggregate));
+    let mut builder_assumptions = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        let mut assumptions = invariant
+            .aggregates
+            .iter()
+            .filter_map(|aggregate| aggregate_xudt_group_amount_runtime_helper(invariant, aggregate))
+            .map(|helper| format!("declared(runtime-helper-required:{helper})"))
+            .collect::<Vec<_>>();
+        assumptions.push(format!("declared(assert_invariant_count:{})", invariant.assert_count));
+        assumptions
+    } else {
+        vec![
+            "declared(metadata-only invariant not yet lowered to executable verifier code)".to_string(),
+            format!("declared(assert_invariant_count:{})", invariant.assert_count),
+        ]
+    };
     if !invariant.aggregates.is_empty() {
         builder_assumptions.push(format!("declared(aggregate_invariant_count:{})", invariant.aggregates.len()));
     }
@@ -164,10 +183,18 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = vec![ProofPlanDiagnosticMetadata {
-        severity: "warning".to_string(),
-        message: "declared invariant is metadata-only until executable lowering covers it".to_string(),
-    }];
+    let mut diagnostics = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: "declared xUDT group amount invariant can be discharged by the matching xUDT group amount runtime helper in a selected entry"
+                .to_string(),
+        }]
+    } else {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "declared invariant is metadata-only until executable lowering covers it".to_string(),
+        }]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "warning".to_string(),
@@ -201,7 +228,11 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
         builder_assumptions,
-        codegen_coverage_status: "gap:metadata-only".to_string(),
+        codegen_coverage_status: if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+            "gap:runtime-helper-required".to_string()
+        } else {
+            "gap:metadata-only".to_string()
+        },
         status: "runtime-required".to_string(),
         detail: format!(
             "explicit source invariant declaration captured for ProofPlan auditing; aggregate_primitives={}",
@@ -215,14 +246,22 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = aggregate.scope.clone();
     let reads = aggregate_reads(aggregate);
-    let relation_check = aggregate_relation_check_label(aggregate);
+    let relation_check = aggregate_relation_check_label(invariant, aggregate);
     let mut coverage = vec![aggregate_coverage_label(aggregate)];
+    let xudt_group_amount_helper = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate);
+    if let Some(helper) = xudt_group_amount_helper {
+        coverage.push(format!("runtime_helper:{helper}"));
+    }
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
-    let mut builder_assumptions = vec![
-        "declared(metadata-only aggregate invariant not yet lowered to executable verifier code)".to_string(),
-        format!("declared(parent_invariant:{})", invariant.name),
-    ];
+    let mut builder_assumptions = if let Some(helper) = xudt_group_amount_helper {
+        vec![format!("declared(runtime-helper-required:{helper})"), format!("declared(parent_invariant:{})", invariant.name)]
+    } else {
+        vec![
+            "declared(metadata-only aggregate invariant not yet lowered to executable verifier code)".to_string(),
+            format!("declared(parent_invariant:{})", invariant.name),
+        ]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         builder_assumptions.push(
             "declared(lock transaction scan only protects the lock group unless the builder constrains every relevant cell)"
@@ -231,10 +270,17 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = vec![ProofPlanDiagnosticMetadata {
-        severity: "warning".to_string(),
-        message: "aggregate invariant primitive is metadata-only until executable lowering covers it".to_string(),
-    }];
+    let mut diagnostics = if let Some(helper) = xudt_group_amount_helper {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: format!("aggregate invariant requires {helper} runtime helper coverage"),
+        }]
+    } else {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "aggregate invariant primitive is metadata-only until executable lowering covers it".to_string(),
+        }]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "warning".to_string(),
@@ -268,7 +314,11 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
         builder_assumptions,
-        codegen_coverage_status: "gap:metadata-only".to_string(),
+        codegen_coverage_status: if xudt_group_amount_helper.is_some() {
+            "gap:runtime-helper-required".to_string()
+        } else {
+            "gap:metadata-only".to_string()
+        },
         status: "runtime-required".to_string(),
         detail: format!("aggregate invariant primitive declared under invariant '{}'", invariant.name),
         diagnostics,
@@ -350,7 +400,7 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
 fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccessMetadata]) -> Vec<String> {
     let mut reads = BTreeSet::new();
     for access in runtime_accesses {
-        if let Some(read) = read_for_source(&access.source) {
+        for read in reads_for_source(&access.source) {
             reads.insert(read.to_string());
         }
     }
@@ -399,17 +449,22 @@ fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[Ckb
     reads.into_iter().collect()
 }
 
-fn read_for_source(source: &str) -> Option<&'static str> {
+fn reads_for_source(source: &str) -> &'static [&'static str] {
     match source {
-        "Input" => Some("input"),
-        "Output" => Some("output"),
-        "GroupInput" => Some("group_input"),
-        "GroupOutput" => Some("group_output"),
-        "CellDep" => Some("cell_dep"),
-        "HeaderDep" => Some("header_dep"),
-        "Witness" => Some("witness"),
-        "ScriptArgs" => Some("lock_args"),
-        _ => None,
+        "Input" => &["input"],
+        "Output" => &["output"],
+        "GroupInput" => &["group_input"],
+        "GroupOutput" => &["group_output"],
+        "Input/GroupInput" => &["input", "group_input"],
+        "GroupInput/GroupOutput" => &["group_input", "group_output"],
+        "Input/Output" => &["input", "output", "source_view"],
+        "Input/HeaderDep" => &["input", "header_dep"],
+        "CellDep" => &["cell_dep"],
+        "HeaderDep" => &["header_dep"],
+        "Witness" => &["witness"],
+        "ScriptArgs" => &["lock_args"],
+        "SourceView" => &["source_view"],
+        _ => &[],
     }
 }
 
@@ -417,7 +472,7 @@ fn reads_for_obligation(obligation: &VerifierObligationMetadata, body_reads: &[S
     let mut reads = body_reads.to_vec();
     if obligation.category == "cell-access" {
         if let Some(source) = obligation.feature.split(':').nth(1).and_then(|source| source.split('#').next()) {
-            if let Some(read) = read_for_source(source) {
+            for read in reads_for_source(source) {
                 reads.push(read.to_string());
             }
         }
@@ -715,18 +770,26 @@ fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
     }
 }
 
-fn aggregate_relation_check_label(aggregate: &ir::IrAggregateInvariant) -> String {
+fn aggregate_relation_check_label(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> String {
     match aggregate.kind {
         AggregateInvariantKind::Sum => format!(
-            "assert_sum:{}{}{}=metadata-only",
+            "assert_sum:{}{}{}={}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?")
+            aggregate.rhs.as_deref().unwrap_or("?"),
+            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
+                .map(|helper| format!("runtime-helper-required:{helper}"))
+                .unwrap_or_else(|| "metadata-only".to_string())
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved:{}=metadata-only", aggregate.target),
-        AggregateInvariantKind::Delta => {
-            format!("assert_delta:{}:{}=metadata-only", aggregate.target, aggregate.argument.as_deref().unwrap_or("?"))
-        }
+        AggregateInvariantKind::Delta => format!(
+            "assert_delta:{}:{}={}",
+            aggregate.target,
+            aggregate.argument.as_deref().unwrap_or("?"),
+            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
+                .map(|helper| format!("runtime-helper-required:{helper}"))
+                .unwrap_or_else(|| "metadata-only".to_string())
+        ),
         AggregateInvariantKind::Distinct => format!("assert_distinct:{}=metadata-only", aggregate.target),
         AggregateInvariantKind::Singleton => format!("assert_singleton:{}=metadata-only", aggregate.target),
     }
@@ -808,6 +871,52 @@ fn aggregate_relation_symbol(relation: AggregateRelation) -> &'static str {
         AggregateRelation::Ge => ">=",
         AggregateRelation::Gt => ">",
     }
+}
+
+fn aggregate_xudt_group_amount_helper_required(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> bool {
+    aggregate_xudt_group_amount_runtime_helper(invariant, aggregate).is_some()
+}
+
+fn aggregate_xudt_group_amount_runtime_helper(
+    invariant: &ir::IrInvariant,
+    aggregate: &ir::IrAggregateInvariant,
+) -> Option<&'static str> {
+    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+        return None;
+    }
+    match aggregate.kind {
+        AggregateInvariantKind::Sum if aggregate.relation == Some(AggregateRelation::Eq) => {
+            let rhs = aggregate.rhs.as_deref()?;
+            let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
+            let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
+            (left_type == right_type
+                && ((left_source == "group_outputs" && right_source == "group_inputs")
+                    || (left_source == "group_inputs" && right_source == "group_outputs")))
+                .then_some("xudt::require_group_amount_conserved")
+        }
+        AggregateInvariantKind::Delta => {
+            let (source, _type_name) = aggregate_group_amount_endpoint(&aggregate.target)?;
+            let argument = aggregate.argument.as_deref()?;
+            if argument.is_empty() {
+                return None;
+            }
+            match source {
+                "group_outputs" => Some("xudt::require_group_amount_minted"),
+                "group_inputs" => Some("xudt::require_group_amount_burned"),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
+    let (source, rest) = target.split_once('<')?;
+    if source != "group_inputs" && source != "group_outputs" {
+        return None;
+    }
+    let (type_name, field) = rest.split_once(">.")?;
+    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
 }
 
 fn declared_group_cardinality(invariant: &ir::IrInvariant) -> &'static str {

@@ -265,6 +265,7 @@ pub enum Type {
     U8,
     U16,
     U32,
+    I32,
     U64,
     U128,
     Bool,

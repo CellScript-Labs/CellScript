@@ -21,7 +21,7 @@ The current project direction is simple:
 | 0.13 release scope | Beta released; implementation scope closed. | [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
 | 0.14 release scope | Implementation branch is feature-complete for the current CKB semantic-completeness beta scope. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes draft](CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | 0.15 release scope | Implementation branch adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, and macro provenance. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md) |
-| 0.16 release scope | Implemented on `cellscript-0.16`: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](../roadmap/CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
+| 0.16 release scope | Implemented on `cellscript-0.16`: operational semantics, ProofPlan soundness, builder assumptions, transaction validation, template-only transaction plans, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](../roadmap/CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md) |
@@ -95,10 +95,16 @@ surface:
   enforcement;
 - `runtime.builder_assumptions`, `cellc explain-assumptions`, and
   `cellc validate-tx`;
-- transaction solver templates, deployment plans, dependency locks, proof diffs,
-  profiles, transaction traces, and audit bundles;
+- template-only transaction plans, deployment plans, dependency locks, proof
+  diffs, profiles, transaction traces, and audit bundles;
 - standard CKB compatibility fixture manifest for sUDT, xUDT, ACP, Cheque,
   Omnilock, NervosDAO since/epoch, and Type ID.
+
+The 0.17 branch records closure of the 0.16 review findings in
+`docs/0.17/review_findings_closure.md`: ProofPlan matching is no longer keyed
+only by coarse category/feature/status, `validate-tx` rejects bare evidence
+tokens and cross-checks indexed payload fields, protocol stdlib descriptor
+stubs are not stable, and `solve-tx` is explicitly `can_submit=false`.
 
 Detailed status:
 

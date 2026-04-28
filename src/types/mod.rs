@@ -305,6 +305,7 @@ fn type_repr(ty: &Type) -> String {
         Type::U8 => "u8".to_string(),
         Type::U16 => "u16".to_string(),
         Type::U32 => "u32".to_string(),
+        Type::I32 => "i32".to_string(),
         Type::U64 => "u64".to_string(),
         Type::U128 => "u128".to_string(),
         Type::Bool => "bool".to_string(),
@@ -1009,8 +1010,8 @@ impl<'a> TypeChecker<'a> {
 
     fn type_name_token_is_cell_backed(&self, token: &str) -> bool {
         match token {
-            "" | "u8" | "u16" | "u32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec" | "usize"
-            | "isize" | "read_ref" | "mut" => false,
+            "" | "u8" | "u16" | "u32" | "i32" | "u64" | "u128" | "bool" | "Address" | "Hash" | "String" | "Range" | "Vec"
+            | "usize" | "isize" | "read_ref" | "mut" => false,
             name => self.resolve_cell_type_kind(name).is_some(),
         }
     }
@@ -1146,6 +1147,7 @@ impl<'a> TypeChecker<'a> {
             Type::Bool | Type::U8 => Some(1),
             Type::U16 => Some(2),
             Type::U32 => Some(4),
+            Type::I32 => Some(4),
             Type::U64 => Some(8),
             Type::U128 => Some(16),
             Type::Address | Type::Hash => Some(32),
@@ -2327,6 +2329,8 @@ impl<'a> TypeChecker<'a> {
                 if name.starts_with("env::")
                     || name.starts_with("ckb::")
                     || name.starts_with("source::")
+                    || name.starts_with("dao::")
+                    || name.starts_with("xudt::")
                     || name.starts_with("witness::")
                     || matches!(
                         name.as_str(),
@@ -2802,6 +2806,7 @@ impl<'a> TypeChecker<'a> {
             "u8" => Type::U8,
             "u16" => Type::U16,
             "u32" => Type::U32,
+            "i32" => Type::I32,
             "u64" => Type::U64,
             "u128" => Type::U128,
             "bool" => Type::Bool,
@@ -2890,9 +2895,149 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
-                        ("ckb", "header_epoch_number" | "header_epoch_start_block_number" | "header_epoch_length" | "input_since") => {
+                        (
+                            "ckb",
+                            "header_epoch_number"
+                            | "header_epoch_start_block_number"
+                            | "header_epoch_length"
+                            | "input_since"
+                            | "current_role",
+                        ) => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
+                        }
+                        ("ckb", "current_script_hash") => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::Hash
+                        }
+                        ("ckb", "since_epoch_absolute" | "since_epoch_relative") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::U64) {
+                                return Err(CompileError::new(
+                                    format!("{} expects (number: u64, index: u64, length: u64)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::U64
+                        }
+                        (
+                            "ckb",
+                            "cell_capacity"
+                            | "cell_occupied_capacity"
+                            | "cell_unoccupied_capacity"
+                            | "cell_output_index"
+                            | "input_out_point_index"
+                            | "input_out_point_tx_hash_low"
+                            | "cell_lock_hash_low"
+                            | "cell_type_hash_low"
+                            | "cell_data_size",
+                        ) => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects a source view returned by source::*", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::U64
+                        }
+                        ("ckb", "require_cell_lock_hash" | "require_cell_type_hash") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, expected_hash: Hash)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_current_script_args_empty") => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::Unit
+                        }
+                        ("ckb", "require_cell_lock_args_empty" | "require_cell_type_args_empty") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects a source view returned by source::*", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_cell_lock_args_hash" | "require_cell_type_args_hash") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, expected_args_hash: Hash)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_input_out_point_tx_hash" | "require_input_out_point") => {
+                            let expects_index = suffix == "require_input_out_point";
+                            let expected_arity = if expects_index { 3 } else { 2 };
+                            self.validate_builtin_arity(name, expected_arity, arg_types, call.span)?;
+                            let expected_index_ok = !expects_index || arg_types[2] == Type::U64;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || !expected_index_ok {
+                                return Err(CompileError::new(
+                                    format!(
+                                        "{} expects {}",
+                                        name,
+                                        if expects_index {
+                                            "(source_view: u64, expected_hash: Hash, expected_index: u64)"
+                                        } else {
+                                            "(source_view: u64, expected_hash: Hash)"
+                                        }
+                                    ),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_metapoint_relative") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 || arg_types[2] != Type::I32 {
+                                return Err(CompileError::new(
+                                    "ckb::require_metapoint_relative expects (base_view: u64, related_view: u64, relative_distance: i32)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_lock_type_metapoint_pairs" | "require_type_lock_metapoint_pairs") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::I32 {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, relative_distance: i32)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        (
+                            "ckb",
+                            "require_lock_type_metapoint_pairs_from_i32_data" | "require_type_lock_metapoint_pairs_from_i32_data",
+                        ) => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, distance_offset: u64)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_lock_match_master_out_point_pairs_from_data") => {
+                            self.validate_builtin_arity(name, 5, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::U64) {
+                                return Err(CompileError::new(
+                                    "ckb::require_lock_match_master_out_point_pairs_from_data expects (input_source_view: u64, output_source_view: u64, action_offset: u64, tx_hash_offset: u64, index_offset: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
                         }
                         ("source", "input" | "output" | "cell_dep" | "header_dep" | "group_input" | "group_output") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -2900,6 +3045,140 @@ impl<'a> TypeChecker<'a> {
                                 return Err(CompileError::new(format!("{} expects a u64 index", name), call.span));
                             }
                             Type::U64
+                        }
+                        ("dao", "accumulated_rate") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "dao::accumulated_rate expects a HeaderDep source view returned by source::header_dep",
+                                    call.span,
+                                ));
+                            }
+                            Type::U64
+                        }
+                        ("dao", "input_accumulated_rate") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "dao::input_accumulated_rate expects an Input or GroupInput source view returned by source::input/source::group_input",
+                                    call.span,
+                                ));
+                            }
+                            Type::U64
+                        }
+                        ("dao", "is_deposit_data" | "is_withdrawal_request_data" | "has_dao_type") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects a source view returned by source::*", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Bool
+                        }
+                        ("dao", "require_header_dep_for_input") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "dao::require_header_dep_for_input expects (input_view: u64, header_view: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("dao", "require_input_since_at_least") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "dao::require_input_since_at_least expects (input_view: u64, required_since: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("dao", "require_input_relative_epoch_since_at_least") => {
+                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::U64) {
+                                return Err(CompileError::new(
+                                    "dao::require_input_relative_epoch_since_at_least expects (input_view: u64, number: u64, index: u64, length: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("xudt", "owner_mode_input_type_hash" | "amount_low" | "amount_high") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects a source view returned by source::*", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::U64
+                        }
+                        ("xudt", "require_owner_mode_input_type") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                                return Err(CompileError::new(
+                                    "xudt::require_owner_mode_input_type expects (source_view: u64, expected_hash: Hash)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("xudt", "require_owner_mode_type_args") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "xudt::require_owner_mode_type_args expects (source_view: u64, owner_hash: Hash, flags: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("xudt", "require_owner_mode_type_args_current_script") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(
+                                    "xudt::require_owner_mode_type_args_current_script expects (source_view: u64, flags: u64)",
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("xudt", "require_group_amount_conserved") => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::Unit
+                        }
+                        ("xudt", "require_group_amount_minted" | "require_group_amount_burned") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U128 {
+                                return Err(CompileError::new(format!("{} expects a u128 delta amount", name), call.span));
+                            }
+                            Type::Unit
+                        }
+                        ("c256", "require_product_lte" | "require_product_eq") => {
+                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::U128) {
+                                return Err(CompileError::new(
+                                    format!("{} expects four u128 operands: (left_amount, left_multiplier, right_amount, right_multiplier)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        ("c256", "require_sum2_products_lte" | "require_sum2_products_eq") => {
+                            self.validate_builtin_arity(name, 8, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::U128) {
+                                return Err(CompileError::new(
+                                    format!(
+                                        "{} expects eight u128 operands: left pair 1, left pair 2, right pair 1, right pair 2",
+                                        name
+                                    ),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
                         }
                         ("witness", "raw" | "lock" | "input_type" | "output_type") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -3514,6 +3793,7 @@ impl<'a> TypeChecker<'a> {
             (Type::U8, Type::U8) => true,
             (Type::U16, Type::U16) => true,
             (Type::U32, Type::U32) => true,
+            (Type::I32, Type::I32) => true,
             (Type::U64, Type::U64) => true,
             (Type::U128, Type::U128) => true,
             (Type::Bool, Type::Bool) => true,
@@ -3651,7 +3931,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_numeric_type(&self, ty: &Type) -> bool {
-        matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128)
+        matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::I32 | Type::U64 | Type::U128)
             || matches!(ty, Type::Named(name) if name == "usize" || name == "isize")
     }
 
@@ -3775,7 +4055,7 @@ fn aggregate_target_type_and_field(target: &str) -> Option<(&str, &str)> {
 
 fn aggregate_field_type_is_supported(ty: &Type) -> bool {
     match ty {
-        Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Address | Type::Hash => true,
+        Type::U8 | Type::U16 | Type::U32 | Type::I32 | Type::U64 | Type::U128 | Type::Address | Type::Hash => true,
         Type::Array(inner, _) => matches!(inner.as_ref(), Type::U8),
         _ => false,
     }

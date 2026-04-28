@@ -255,7 +255,7 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
         match value {
             Value::Array(items) => {
                 for item in items {
-                    match validate_evidence_item(item, None, assumption) {
+                    match validate_evidence_item(item, None, assumption, tx) {
                         EvidenceValidation::Valid => return EvidenceValidation::Valid,
                         EvidenceValidation::Missing => {}
                         EvidenceValidation::Invalid(message) => {
@@ -266,7 +266,7 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
             }
             Value::Object(object) => {
                 if let Some(value) = object.get(&assumption.assumption_id) {
-                    match validate_evidence_item(value, Some(&assumption.assumption_id), assumption) {
+                    match validate_evidence_item(value, Some(&assumption.assumption_id), assumption, tx) {
                         EvidenceValidation::Valid => return EvidenceValidation::Valid,
                         EvidenceValidation::Missing => {}
                         EvidenceValidation::Invalid(message) => {
@@ -274,7 +274,7 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
                         }
                     }
                 }
-                match validate_evidence_item(value, None, assumption) {
+                match validate_evidence_item(value, None, assumption, tx) {
                     EvidenceValidation::Valid => return EvidenceValidation::Valid,
                     EvidenceValidation::Missing => {}
                     EvidenceValidation::Invalid(message) => {
@@ -288,13 +288,18 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
     invalid.map(EvidenceValidation::Invalid).unwrap_or(EvidenceValidation::Missing)
 }
 
-fn validate_evidence_item(item: &Value, map_key: Option<&str>, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
+fn validate_evidence_item(
+    item: &Value,
+    map_key: Option<&str>,
+    assumption: &BuilderAssumptionMetadata,
+    tx: &Value,
+) -> EvidenceValidation {
     match item {
         Value::String(id) if id == &assumption.assumption_id => EvidenceValidation::Invalid(
             "builder_assumption_evidence must be an object with assumption_id, kind, origin, feature, proof_plan_status, and evidence payload"
                 .to_string(),
         ),
-        Value::Object(object) => validate_evidence_object(object, map_key, assumption),
+        Value::Object(object) => validate_evidence_object(object, map_key, assumption, tx),
         Value::Bool(true) if map_key == Some(assumption.assumption_id.as_str()) => EvidenceValidation::Invalid(
             "builder_assumption_evidence map values must be evidence objects, not booleans".to_string(),
         ),
@@ -306,6 +311,7 @@ fn validate_evidence_object(
     object: &serde_json::Map<String, Value>,
     map_key: Option<&str>,
     assumption: &BuilderAssumptionMetadata,
+    tx: &Value,
 ) -> EvidenceValidation {
     let id = object.get("assumption_id").and_then(Value::as_str).or(map_key);
     let Some(id) = id else {
@@ -330,11 +336,12 @@ fn validate_evidence_object(
             .push(format!("proof_plan_status must be '{}' for assumption {}", assumption.proof_plan_status, assumption.assumption_id));
     }
 
-    let has_payload = object.get("evidence").is_some_and(non_empty_evidence_payload)
-        || object.get("payload").is_some_and(non_empty_evidence_payload);
-    if !has_payload {
+    let payload = object.get("evidence").or_else(|| object.get("payload"));
+    if !payload.is_some_and(non_empty_evidence_payload) {
         mismatches
             .push(format!("builder_assumption_evidence for {} must include non-empty evidence or payload", assumption.assumption_id));
+    } else if let Some(payload) = payload {
+        validate_evidence_payload_shape(&mut mismatches, payload, assumption, tx);
     }
 
     if mismatches.is_empty() {
@@ -342,6 +349,361 @@ fn validate_evidence_object(
     } else {
         EvidenceValidation::Invalid(mismatches.join("; "))
     }
+}
+
+fn validate_evidence_payload_shape(mismatches: &mut Vec<String>, payload: &Value, assumption: &BuilderAssumptionMetadata, tx: &Value) {
+    let Some(object) = payload.as_object() else {
+        mismatches.push("evidence payload must be an object with concrete transaction evidence".to_string());
+        return;
+    };
+
+    if !assumption.required_inputs.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["inputs", "input_cells", "required_inputs"],
+            "input evidence for required input or group_input reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["inputs", "input_cells", "required_inputs"],
+            "inputs",
+            tx,
+            "input evidence",
+            &["index", "out_point", "type_hash", "lock_hash", "capacity"],
+            None,
+        );
+    }
+    if !assumption.required_outputs.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["outputs", "output_cells", "required_outputs"],
+            "output evidence for required output or group_output reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["outputs", "output_cells", "required_outputs"],
+            "outputs",
+            tx,
+            "output evidence",
+            &["index", "type_hash", "lock_hash", "capacity", "data"],
+            None,
+        );
+    }
+    if !assumption.required_cell_deps.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["cell_deps", "required_cell_deps"],
+            "cell_dep evidence for required cell dependency reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["cell_deps", "required_cell_deps"],
+            "cell_deps",
+            tx,
+            "cell_dep evidence",
+            &["index", "name", "out_point", "code_hash", "tx_hash", "dep_type"],
+            None,
+        );
+    }
+    if !assumption.required_witness_fields.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["witnesses", "witness_fields", "required_witness_fields"],
+            "witness evidence for required witness fields",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["witnesses", "witness_fields", "required_witness_fields"],
+            "witnesses",
+            tx,
+            "witness evidence",
+            &["index", "field", "lock", "input_type", "output_type", "bytes"],
+            Some("field"),
+        );
+    }
+
+    if assumption.kind == "capacity_policy" || assumption.capacity_policy != "none" {
+        require_payload_u64(mismatches, object, "occupied_capacity_shannons");
+        require_payload_u64(mismatches, object, "tx_size_bytes");
+        require_payload_array_present(mismatches, object, &["under_capacity_output_indexes"], "under-capacity output index evidence");
+        if let Some(indexes) = object.get("under_capacity_output_indexes").and_then(Value::as_array) {
+            if !indexes.is_empty() {
+                mismatches.push("capacity evidence reports under-capacity outputs; transaction is not valid".to_string());
+            }
+            validate_index_values(mismatches, indexes, json_array_len(tx, "outputs"), "under_capacity_output_indexes");
+        }
+    }
+
+    if assumption.kind == "type_id_builder_plan" {
+        let has_type_id_object = object.get("type_id").is_some_and(|value| value.as_object().is_some_and(|object| !object.is_empty()));
+        let has_flat_fields = object.get("first_input_out_point").is_some()
+            && object.get("output_index").and_then(Value::as_u64).is_some()
+            && object.get("expected_type_id_args").and_then(Value::as_str).is_some_and(|value| !value.is_empty());
+        if !has_type_id_object && !has_flat_fields {
+            mismatches.push(
+                "type_id_builder_plan evidence must include type_id object or first_input_out_point/output_index/expected_type_id_args"
+                    .to_string(),
+            );
+        }
+        if let Some(type_id) = object.get("type_id").and_then(Value::as_object) {
+            validate_type_id_evidence(mismatches, type_id, tx);
+        } else {
+            validate_flat_type_id_evidence(mismatches, object, tx);
+        }
+    }
+
+    if assumption.kind == "create_unique_global_uniqueness" {
+        let checked = object.get("uniqueness_checked").and_then(Value::as_bool) == Some(true);
+        let proof = object.get("uniqueness_proof").or_else(|| object.get("unique_cell")).is_some_and(non_empty_evidence_payload);
+        if !checked && !proof {
+            mismatches.push(
+                "create_unique_global_uniqueness evidence must include uniqueness_checked=true or uniqueness_proof/unique_cell payload"
+                    .to_string(),
+            );
+        }
+    }
+
+    if assumption.kind == "lock_group_transaction_scope" {
+        let reviewed = object.get("transaction_scope_reviewed").and_then(Value::as_bool) == Some(true);
+        let groups = object.get("covered_lock_groups").is_some_and(non_empty_evidence_payload);
+        if !reviewed && !groups {
+            mismatches.push(
+                "lock_group_transaction_scope evidence must include transaction_scope_reviewed=true or covered_lock_groups"
+                    .to_string(),
+            );
+        }
+    }
+
+    if matches!(assumption.kind.as_str(), "metadata_only_gap" | "runtime_required_proof_plan") {
+        let manual_review = object.get("manual_review").is_some_and(non_empty_evidence_payload);
+        let checked = object.get("checked").and_then(Value::as_bool) == Some(true);
+        if !manual_review && !checked {
+            mismatches.push("metadata/runtime ProofPlan gap evidence must include manual_review payload or checked=true".to_string());
+        }
+    }
+}
+
+fn require_payload_array(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, fields: &[&str], label: &str) {
+    if fields.iter().any(|field| object.get(*field).is_some_and(|value| value.as_array().is_some_and(|items| !items.is_empty()))) {
+        return;
+    }
+    mismatches.push(format!("evidence payload must include non-empty {label} ({})", fields.join(" or ")));
+}
+
+fn require_payload_array_present(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, fields: &[&str], label: &str) {
+    if fields.iter().any(|field| object.get(*field).is_some_and(|value| value.as_array().is_some())) {
+        return;
+    }
+    mismatches.push(format!("evidence payload must include {label} array ({})", fields.join(" or ")));
+}
+
+fn require_payload_u64(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, field: &str) {
+    match object.get(field).and_then(Value::as_u64) {
+        Some(value) if value > 0 => {}
+        Some(_) => mismatches.push(format!("evidence payload numeric {field} must be greater than zero")),
+        None => mismatches.push(format!("evidence payload must include numeric {field}")),
+    }
+}
+
+fn validate_payload_array_items(
+    mismatches: &mut Vec<String>,
+    object: &serde_json::Map<String, Value>,
+    fields: &[&str],
+    tx_field: &str,
+    tx: &Value,
+    label: &str,
+    concrete_fields: &[&str],
+    required_string_field: Option<&str>,
+) {
+    let Some(items) = fields.iter().find_map(|field| object.get(*field).and_then(Value::as_array)) else {
+        return;
+    };
+    let tx_len = json_array_len(tx, tx_field);
+    for (position, item) in items.iter().enumerate() {
+        let Some(item_object) = item.as_object() else {
+            mismatches.push(format!("{label} item {position} must be an object with concrete transaction fields"));
+            continue;
+        };
+        if !concrete_fields.iter().any(|field| item_object.get(*field).is_some_and(non_empty_evidence_payload)) {
+            mismatches.push(format!("{label} item {position} must include one of {}", concrete_fields.join(", ")));
+        }
+        if let Some(required) = required_string_field {
+            if item_object.get(required).and_then(Value::as_str).is_none_or(|value| value.is_empty()) {
+                mismatches.push(format!("{label} item {position} must include non-empty {required}"));
+            }
+        }
+        match item_object.get("index").and_then(Value::as_u64) {
+            Some(index) => {
+                validate_single_index(mismatches, index, tx_len, &format!("{label} index"));
+                validate_evidence_item_matches_tx(mismatches, item_object, tx, tx_field, index as usize, label, position);
+            }
+            None => mismatches.push(format!("{label} item {position} must include numeric index binding to transaction {tx_field}")),
+        }
+    }
+}
+
+fn validate_index_values(mismatches: &mut Vec<String>, indexes: &[Value], tx_len: usize, label: &str) {
+    for (position, index) in indexes.iter().enumerate() {
+        match index.as_u64() {
+            Some(index) => validate_single_index(mismatches, index, tx_len, label),
+            None => mismatches.push(format!("{label} entry {position} must be a numeric output index")),
+        }
+    }
+}
+
+fn validate_single_index(mismatches: &mut Vec<String>, index: u64, tx_len: usize, label: &str) {
+    if index as usize >= tx_len {
+        mismatches.push(format!("{label} {index} is out of range for transaction array length {tx_len}"));
+    }
+}
+
+fn validate_evidence_item_matches_tx(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx: &Value,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(tx_item) = tx.get(tx_field).and_then(Value::as_array).and_then(|items| items.get(index)) else {
+        return;
+    };
+    let Some(tx_object) = tx_item.as_object() else {
+        mismatches.push(format!("transaction {tx_field}[{index}] referenced by {label} item {position} must be an object"));
+        return;
+    };
+    for field in [
+        "source",
+        "out_point",
+        "type_hash",
+        "lock_hash",
+        "capacity",
+        "data",
+        "name",
+        "dep_type",
+        "code_hash",
+        "tx_hash",
+        "field",
+        "lock",
+        "input_type",
+        "output_type",
+        "bytes",
+    ] {
+        validate_matching_field(mismatches, evidence, tx_object, field, tx_field, index, label, position);
+    }
+    validate_matching_alias(mismatches, evidence, tx_object, "capacity", "capacity_shannons", tx_field, index, label, position);
+}
+
+fn validate_matching_field(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx_object: &serde_json::Map<String, Value>,
+    field: &str,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(expected) = evidence.get(field) else {
+        return;
+    };
+    let Some(actual) = tx_object.get(field) else {
+        return;
+    };
+    if expected != actual {
+        mismatches.push(format!("{label} item {position} {field} does not match transaction {tx_field}[{index}].{field}"));
+    }
+}
+
+fn validate_matching_alias(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx_object: &serde_json::Map<String, Value>,
+    evidence_field: &str,
+    tx_field_name: &str,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(expected) = evidence.get(evidence_field) else {
+        return;
+    };
+    let Some(actual) = tx_object.get(tx_field_name) else {
+        return;
+    };
+    if expected != actual {
+        mismatches
+            .push(format!("{label} item {position} {evidence_field} does not match transaction {tx_field}[{index}].{tx_field_name}"));
+    }
+}
+
+fn validate_type_id_evidence(mismatches: &mut Vec<String>, type_id: &serde_json::Map<String, Value>, tx: &Value) {
+    if type_id.get("first_input_out_point").and_then(Value::as_str).is_none_or(|value| value.is_empty()) {
+        mismatches.push("type_id evidence must include first_input_out_point".to_string());
+    }
+    match type_id.get("output_index").and_then(Value::as_u64) {
+        Some(index) => {
+            validate_single_index(mismatches, index, json_array_len(tx, "outputs"), "type_id output_index");
+            validate_type_id_matches_output(mismatches, type_id, tx, index as usize);
+        }
+        None => mismatches.push("type_id evidence must include numeric output_index".to_string()),
+    }
+    match type_id.get("expected_type_id_args").and_then(Value::as_str) {
+        Some(args) if canonical_hex_32(args) => {}
+        Some(_) => mismatches.push("type_id expected_type_id_args must be a canonical 0x-prefixed 32-byte hex string".to_string()),
+        None => mismatches.push("type_id evidence must include expected_type_id_args".to_string()),
+    }
+}
+
+fn validate_flat_type_id_evidence(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, tx: &Value) {
+    if object.get("first_input_out_point").is_some()
+        || object.get("output_index").is_some()
+        || object.get("expected_type_id_args").is_some()
+    {
+        validate_type_id_evidence(mismatches, object, tx);
+    }
+}
+
+fn validate_type_id_matches_output(
+    mismatches: &mut Vec<String>,
+    type_id: &serde_json::Map<String, Value>,
+    tx: &Value,
+    output_index: usize,
+) {
+    let Some(expected_args) = type_id.get("expected_type_id_args").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(output) = tx.get("outputs").and_then(Value::as_array).and_then(|items| items.get(output_index)) else {
+        return;
+    };
+    let Some(actual_args) = output_type_args(output) else {
+        return;
+    };
+    if actual_args != expected_args {
+        mismatches.push(format!("type_id expected_type_id_args does not match transaction outputs[{output_index}] type args"));
+    }
+}
+
+fn output_type_args(output: &Value) -> Option<&str> {
+    output
+        .get("type_args")
+        .or_else(|| output.get("type").and_then(|ty| ty.get("args")))
+        .or_else(|| output.get("type_script").and_then(|ty| ty.get("args")))
+        .and_then(Value::as_str)
+}
+
+fn canonical_hex_32(value: &str) -> bool {
+    value.len() == 66 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn push_evidence_mismatch(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, field: &str, expected: &str) {

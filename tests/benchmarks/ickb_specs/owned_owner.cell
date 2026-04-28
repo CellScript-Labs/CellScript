@@ -1,0 +1,105 @@
+module cellscript::benchmarks::ickb_owned_owner
+
+resource OwnedWithdrawal has store, create, consume {
+    request_epoch: u64
+    maturity_epoch: u64
+    owner: Address
+    owned_index: u64
+    owner_relative_distance: i32
+}
+
+resource OwnerCell has store, create, consume {
+    owner: Address
+    owned_index: u64
+    owner_index: u64
+    owner_relative_distance: i32
+}
+
+action mint_owned_owner(
+    request_epoch: u64,
+    maturity_epoch: u64,
+    owner: Address,
+    owned_index: u64,
+    owner_index: u64,
+    owner_relative_distance: i32
+) -> (OwnedWithdrawal, OwnerCell) {
+    ckb::require_current_script_args_empty()
+    let role = ckb::current_role()
+    let owner_output_index = ckb::cell_output_index(source::output(owner_index))
+
+    assert_invariant(role == 2, "owned-owner mint must run as type script")
+    assert_invariant(maturity_epoch > request_epoch, "invalid maturity")
+    assert_invariant(owned_index != owner_index, "same index")
+    assert_invariant(owner_output_index == owner_index, "owner output index mismatch")
+    ckb::require_metapoint_relative(
+        source::output(owner_index),
+        source::output(owned_index),
+        owner_relative_distance
+    )
+    assert_invariant(dao::has_dao_type(source::output(owned_index)), "owned output must be DAO")
+    assert_invariant(dao::is_withdrawal_request_data(source::output(owned_index)), "owned output must be withdrawal")
+    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
+
+    let owned = create OwnedWithdrawal {
+        request_epoch,
+        maturity_epoch,
+        owner,
+        owned_index,
+        owner_relative_distance
+    } with_lock(owner)
+
+    let owner_cell = create OwnerCell {
+        owner,
+        owned_index,
+        owner_index,
+        owner_relative_distance
+    } with_lock(owner)
+
+    (owned, owner_cell)
+}
+
+action melt_owned_owner(
+    owned: OwnedWithdrawal,
+    owner_cell: OwnerCell,
+    claimed_owner: Address
+) {
+    ckb::require_current_script_args_empty()
+    assert_invariant(owner_cell.owner == claimed_owner, "wrong owner")
+    assert_invariant(owned.owner == owner_cell.owner, "owner mismatch")
+    assert_invariant(owned.owned_index == owner_cell.owned_index, "owned mismatch")
+    assert_invariant(owned.owner_relative_distance == owner_cell.owner_relative_distance, "distance mismatch")
+
+    consume owned
+    consume owner_cell
+}
+
+lock owned_unlock(
+    owned: protected OwnedWithdrawal,
+    owner_cell: protected OwnerCell,
+    expected_owner_args_hash: lock_args Hash,
+    expected_owner_tx_hash: witness Hash
+) -> bool {
+    ckb::require_current_script_args_empty()
+    let input = source::group_input(0)
+    let owner_input = source::group_input(1)
+
+    ckb::require_cell_lock_args_hash(input, expected_owner_args_hash)
+    ckb::require_input_out_point(input, expected_owner_tx_hash, owned.owned_index)
+    ckb::require_metapoint_relative(owner_input, input, owner_cell.owner_relative_distance)
+    assert_invariant(dao::has_dao_type(input), "owned input must be DAO")
+    assert_invariant(dao::is_withdrawal_request_data(input), "owned input must be withdrawal")
+    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+
+    require ckb::current_role() == 1
+    require owned.owner == owner_cell.owner
+    require owned.owned_index == owner_cell.owned_index
+    require owned.owner_relative_distance == owner_cell.owner_relative_distance
+}
+
+// TODO(ickb-benchmark): signed little-endian i32, input OutPoint tx-hash +
+// index binding, 32-byte lock args binding, and pairwise MetaPoint relative
+// checks now lower to runtime helpers. Current-script type-only/lock-only
+// MetaPoint pair scans can load the signed i32 distance from owner cell data at
+// offset 0. Exact "every paired owned cell is a DAO withdrawal request"
+// quantification remains in the test fixture model until CellScript has
+// first-class filtered MetaPoint maps and original CKB VM differential evidence.

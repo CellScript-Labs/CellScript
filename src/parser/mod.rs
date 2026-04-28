@@ -146,7 +146,10 @@ impl<'a> Parser<'a> {
     }
 
     fn looks_like_type_name(name: &str) -> bool {
-        name.split("::").last().and_then(|segment| segment.chars().next()).is_some_and(|ch| ch.is_ascii_uppercase())
+        let Some(segment) = name.rsplit("::").next() else {
+            return false;
+        };
+        segment.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) && !segment.contains('_')
     }
 
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern> {
@@ -1226,6 +1229,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Type::U32
             }
+            TokenKind::I32 => {
+                self.advance();
+                Type::I32
+            }
             TokenKind::U64 => {
                 self.advance();
                 Type::U64
@@ -1324,6 +1331,7 @@ impl<'a> Parser<'a> {
             Type::U8 => "u8".to_string(),
             Type::U16 => "u16".to_string(),
             Type::U32 => "u32".to_string(),
+            Type::I32 => "i32".to_string(),
             Type::U64 => "u64".to_string(),
             Type::U128 => "u128".to_string(),
             Type::Bool => "bool".to_string(),
@@ -2783,6 +2791,23 @@ action test(x: u64, y: u64) -> u64 {
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn test_if_expr_with_all_caps_constant_before_block() {
+        let input = r#"
+module test
+
+const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000
+
+action discount(raw: u128) -> u128 {
+    let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 }
+    return raw - oversize
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        assert_eq!(module.items.len(), 2);
     }
 
     #[test]

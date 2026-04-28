@@ -101,6 +101,27 @@ git -C /tmp/cellscript-ickb-audit/proposal rev-parse HEAD
 git -C /tmp/cellscript-ickb-audit/v1-core rev-parse HEAD
 ```
 
+Production-equivalence revisit:
+
+```bash
+rm -rf /tmp/cellscript-ickb-prod-eq
+git clone --depth 1 https://github.com/ickb/v1-core.git /tmp/cellscript-ickb-prod-eq/v1-core
+git clone --depth 1 https://github.com/ickb/proposal.git /tmp/cellscript-ickb-prod-eq/proposal
+git -C /tmp/cellscript-ickb-prod-eq/v1-core rev-parse HEAD
+git -C /tmp/cellscript-ickb-prod-eq/proposal rev-parse HEAD
+command -v capsule || true
+command -v cross || true
+command -v docker || true
+cd /tmp/cellscript-ickb-prod-eq/v1-core/scripts
+cargo test --locked
+```
+
+Result: v1-core and proposal resolved to the same commits listed above.
+`docker` was available at `/opt/homebrew/bin/docker`, but `capsule` and `cross`
+were not installed. `cargo test --locked` compiled the iCKB contract crates and
+the `tests` crate, then failed the two test cases because the test loader could
+not find prebuilt script binaries under `scripts/build/debug`.
+
 iCKB source inspection:
 
 ```bash
@@ -153,9 +174,13 @@ Benchmark tests after implementation:
 
 ```bash
 cargo test --locked -p cellscript --test ickb_benchmark
+cargo test --locked -p cellscript --test v0_17 ickb_benchmark_specs_compile_under_0_17_strict_source_mode -- --test-threads=1
+target/debug/cellc tests/benchmarks/ickb_specs/ickb_logic.cell --target-profile ckb --target riscv64-asm --debug
 ```
 
-Result: passed, 4 tests.
+Result: the iCKB benchmark tests passed, and `ickb_logic.cell` compiled to
+RISC-V assembly after the parser was tightened so all-caps constants immediately
+before `{ ... }` branches are not misread as struct initializers.
 
 ## Assumptions And Gaps
 
@@ -167,3 +192,7 @@ Result: passed, 4 tests.
   executions.
 - iCKB's own reusable CKB test harness could not be run to completion without
   a prior Capsule build producing `build/debug` or `build/release` binaries.
+- The iCKB 10% oversized-deposit discount formula is now present in
+  `tests/benchmarks/ickb_specs/ickb_logic.cell`; this proves expression/compile
+  coverage for the formula, not production equivalence for the surrounding DAO
+  HeaderDep lineage.
