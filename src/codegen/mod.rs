@@ -9883,6 +9883,65 @@ mod tests {
     }
 
     #[test]
+    fn internal_assembler_encodes_emitted_instruction_surface() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "li a0, 8".to_string(),
+            "li a1, 4".to_string(),
+            "add t0, a0, a1".to_string(),
+            "addi t0, t0, -1".to_string(),
+            "sub t1, a0, a1".to_string(),
+            "and t2, a0, a1".to_string(),
+            "or t3, a0, a1".to_string(),
+            "mul t4, a0, a1".to_string(),
+            "div t5, a0, a1".to_string(),
+            "rem t6, a0, a1".to_string(),
+            "slt s0, a1, a0".to_string(),
+            "sltu s1, a1, a0".to_string(),
+            "sgt s2, a0, a1".to_string(),
+            "xori s3, a0, 1".to_string(),
+            "seqz s4, a0".to_string(),
+            "snez s5, a0".to_string(),
+            "neg s6, a0".to_string(),
+            "slli s7, a0, 3".to_string(),
+            "sd t0, 0(sp)".to_string(),
+            "ld t1, 0(sp)".to_string(),
+            "sb t1, 8(sp)".to_string(),
+            "sh t1, 10(sp)".to_string(),
+            "sw t1, 12(sp)".to_string(),
+            "lbu t2, 8(sp)".to_string(),
+            "la t3, data_label".to_string(),
+            "call helper".to_string(),
+            "beq a0, a1, branch_target".to_string(),
+            "bne a0, a1, branch_target".to_string(),
+            "blt a1, a0, branch_target".to_string(),
+            "bge a0, a1, branch_target".to_string(),
+            "bltu a1, a0, branch_target".to_string(),
+            "bgeu a0, a1, branch_target".to_string(),
+            "beqz a0, branch_target".to_string(),
+            "bnez a0, branch_target".to_string(),
+            "j done".to_string(),
+            "branch_target:".to_string(),
+            "ecall".to_string(),
+            "helper:".to_string(),
+            "ret".to_string(),
+            "done:".to_string(),
+            "ret".to_string(),
+            ".section .rodata".to_string(),
+            "data_label:".to_string(),
+            ".word 7".to_string(),
+            ".byte 1".to_string(),
+            ".ascii \"x\"".to_string(),
+            ".align 3".to_string(),
+        ];
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should encode the emitted instruction surface");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn internal_assembler_relaxes_out_of_range_register_conditional_branch() {
         for mnemonic in ["beq", "bne", "blt", "bge", "bltu", "bgeu"] {
             let mut lines = vec![
