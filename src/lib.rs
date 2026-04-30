@@ -11763,6 +11763,9 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_sighash_all" => {
                     features.insert("ckb-sighash-all".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_require_witness_size_at_least" => {
+                    features.insert("ckb-witness-args".to_string());
+                }
                 ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_require_") => {
                     features.insert("ckb-declarative-since".to_string());
                 }
@@ -12370,6 +12373,10 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_witness_output_type" => {
             Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::output_type"))
+        }
+        "__ckb_witness_size" => Some(("witness-size", "LOAD_WITNESS", "Witness", "witness::size")),
+        "__ckb_require_witness_size_at_least" => {
+            Some(("require-witness-size-at-least", "LOAD_WITNESS", "Witness", "ckb::require_witness_size_at_least"))
         }
         "__ckb_sighash_all" => Some(("sighash-all", "CKB_SIGHASH_ALL", "GroupInput", "env::sighash_all")),
         "__ckb_require_maturity" => Some(("require-maturity", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_maturity")),

@@ -10109,7 +10109,7 @@ impl CodeGenerator {
         if field_index < 2 {
             self.emit(format!("ld t5, {}(sp)", next_offsets_offset));
         } else {
-            self.emit(format!("addi t5, t0, 0"));
+            self.emit("addi t5, t0, 0".to_string());
         }
 
         // Check field offset bounds: field_offset < next_offset <= total_size

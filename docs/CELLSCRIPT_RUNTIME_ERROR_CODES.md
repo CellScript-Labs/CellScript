@@ -61,10 +61,12 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 39 | `metapoint-mismatch` | A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance. | Check the paired input OutPoints or output indexes and the signed relative-distance field. |
 | 40 | `metapoint-cardinality-mismatch` | A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation. | Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell. |
 | 41 | `script-identity-mismatch` | A loaded CKB Script code_hash or hash_type did not match the expected identity. | Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct. |
+| 42 | `witness-malformed` | Loaded witness bytes did not match the expected Molecule WitnessArgs layout or ABI magic. | Verify witness encoding follows the expected Molecule format with correct total_size, field_count and field offsets. |
+| 43 | `witness-field-truncated` | A WitnessArgs field offset or length exceeded the loaded witness byte range. | Check that each witness field offset and data length fall within the loaded witness byte range. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Code `6` and values above `41` are currently reserved.
+- Code `6` and values above `43` are currently reserved.

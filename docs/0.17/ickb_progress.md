@@ -10,7 +10,7 @@
 - 仓库：`/Users/arthur/RustroverProjects/CellScript`
 - 分支：`research/protocol-equivalence`
 - 上一个本地基线提交：`a0842ad Advance CellScript 0.17 iCKB benchmark gates`
-- 最新提交：`9312bb2 Advance protocol equivalence research evidence`（工作区干净，已全部提交）
+- 最新提交：`5bfe24d feat(witness): add witness size, require_witness_size_at_least, and WitnessArgs Molecule field parsing`（工作区干净，已全部提交）
 - 忽略未跟踪目录：`typescript`
 - 此前未跟踪路径已在 `9312bb2` 中提交并跟踪：
   - `tests/support/ckb_script_runner.rs`（已跟踪）
@@ -445,7 +445,7 @@ manifest closure 和非可执行假设清空后才能提升。
 | 原始 iCKB 单侧 VM 证据 | 96-98% | 原始 iCKB Logic、Limit Order、Owned-Owner 与未修改 DAO ELF 已执行多个 VM 场景；已修补 DAO hash 的 deposit phase 1 通过，观测周期为 `97057`，并新增 deposit 上界 exit `8` 拒绝；原始 DAO phase-1 withdrawing cell 创建通过，phase-2 mature withdrawal 通过，phase-2 max capacity 通过，phase-2 immature since 以 exit `-17` 拒绝，phase-2 over-withdraw capacity 和 wrong deposit accumulated_rate 均以 exit `-15` 拒绝，phase-2 missing withdraw header 与 deposit-data input 均以 exit `2` 拒绝，phase-2 malformed input data 以 exit `-4` 拒绝，phase-2 missing deposit header 与 deposit header index 越界均以 exit `1` 拒绝，phase-2 wrong deposit header index 与 wrong withdraw committed header 均以 exit `-14` 拒绝；valid Owned-Owner input pairing 观测周期为 `83458`，valid output pairing 观测周期为 `47359`；Owned-Owner input/output owner data length mismatch 均以 exit `4` 拒绝，input/output script misuse 均以 exit `7` 拒绝，input/output non-withdrawal request、input/output related type-hash mismatch 与 input/output related data-rule mismatch 均以 exit `6` 拒绝，input/output missing-owner、input/output missing-owned、input/output duplicate-owner pair、input/output relative mismatch 均以 exit `8` 拒绝。 | 继续补原始 DAO 容量补偿、DAO rate recomputation 与 committed header 替换边界。 |
 | 双侧 CKB VM 差分证据 | 98-99%（选定夹具证据覆盖） | 已有 66 条真实差分行：11 条通过（deposit phase 1、receipt group exact mint、mint from receipt、DAO mature withdrawal、DAO max withdrawal capacity、valid limit order CKB-to-UDT、limit order CKB-to-UDT min-match boundary、valid limit order UDT-to-CKB、limit order UDT-to-CKB min-match boundary、valid Owned-Owner input pairing、valid Owned-Owner output pairing）和 55 条拒绝；active `MODEL` 行已清零，但等价状态仍是 `NOT_PROVEN`。 | 继续补真实 owner-auth 字节夹具、withdraw/redeem 聚合 accounting 和容量补偿差分。 |
 | DAO/header 血缘证明 | 92-95% | wrong accumulated rate 和 missing header dep 已进入单 receipt 差分证据；本轮新增 receipt group missing-header 拒绝和 wrong-rate 拒绝，证明两个 receipt 输入的 group 聚合也依赖交易 header dep 与 DAO accumulated_rate；另有 mature/immature redeem relative-since CellScript-only VM 通过/拒绝，三条 original DAO phase-1/phase-2 通过/拒绝，并新增十二条 DAO phase-2 withdrawal maturity/header/data-shape/capacity/rate 差分行，覆盖 deposit header、withdraw header、witness input_type、immature since 拒绝、max capacity 通过、over-withdraw capacity 拒绝、wrong deposit accumulated_rate 拒绝、missing withdraw header 拒绝、missing deposit header 拒绝、deposit header index 越界拒绝、deposit-data input 拒绝、malformed input-data 拒绝、wrong deposit header index 拒绝与 wrong committed withdraw header 拒绝；但完整二次提现容量/DAO rate recomputation 仍未完整双侧差分执行。 | 优先把 withdraw/redeem 聚合 accounting、capacity compensation 和 receipt pairing 配成双侧 VM 夹具。 |
-| Witness/Molecule/Auth 解析 | 0-10% | 暂无实质推进，仍主要是未来协议中立工作。 | 设计通用 WitnessArgs / Molecule 解析器，避免加入 iCKB 专用辅助函数。 |
+| Witness/Molecule/Auth 解析 | 30-35% | 已实现 `witness::size`（U64）、`witness::raw`（Hash）和 `ckb::require_witness_size_at_least`；已实现完整 WitnessArgs Molecule 表头解析（total_size、field_count、3 字段 offset）与 BytesOpt 字段提取（lock/input_type/output_type，最多 32 字节，缺席字段零填充）；新增 `WitnessMalformed(42)` 和 `WitnessFieldTruncated(43)` 运行时错误。 | 继续补齐 auth 类型化字段、malformed/truncated/reordered witness 负向 VM 测试。 |
 | 一等 `Script` API | 25-30% | 新增 `require_cell_lock_script_hash_type` / `require_cell_type_script_hash_type` 提供 Script hash_type 身份检查；仍缺少一等 value/accessor/args 构造与 group scan。 | 在 `src/` 中以协议中立方式实现一等 `Script` value/type、`script.code_hash`、`script.args`。 |
 | 可执行聚合降低 | 67-71% | mint-family 差分已覆盖 xUDT mint amount、amount inflation/deflation、错误 xUDT args、错误 accumulated rate、缺失 header dep，并新增单 receipt malformed-data 拒绝、两个 receipt 输入精确 mint 两份 xUDT 的 group exact-mint 通过、比两份多 1 shannon 的 group over-mint 拒绝、只 mint 一份 xUDT 的 group under-mint 拒绝、group missing-header 拒绝、group wrong-rate 拒绝、group wrong-xUDT 拒绝、group first malformed-receipt-data 拒绝和 group second malformed-receipt-data 拒绝；deposit phase 1 已覆盖下界和上界 capacity 拒绝，deposit/receipt output accounting 已新增 duplicate receipt output `ReceiptMismatch` 拒绝；Limit Order 已覆盖夹具绑定 value conservation、CKB-to-UDT 与 UDT-to-CKB 两个有效方向、两个方向的精确 min-match 边界、CKB-to-UDT no-CKB-paid、UDT-to-CKB no-UDT-paid、UDT-decreased、两个方向的 min-match 拒绝边界、两个方向的 underpayment、CKB-to-UDT wrong-asset type-hash low-word mismatch 和 UDT-to-CKB wrong-asset mismatch；但完整 receipt 字节解码和通用 `assert_sum` / `assert_delta` 自动降低仍未完成。 | 支持按 SourceView、type hash、lock hash、script args 过滤/分组。 |
 | 通用 MetaPoint map | 65-70% | 已有 filtered pair scan（含 related type hash + data rule 过滤）；Limit Order 夹具已跑通 Mint-relative 到 Match-absolute master OutPoint；Owned-Owner relative pairing 已有 input 通过、output 通过、input mismatch、output mismatch、input duplicate-owner、output duplicate-owner、input missing-owner、output missing-owner、input missing-owned、output missing-owned 十条原始脚本差分行，并新增 input/output script-role misuse、input/output non-withdrawal request、input/output owner data length mismatch、input/output related type-hash mismatch 与 input/output related data-rule mismatch 十条拒绝；本次新增 `_filtered` 变体支持 related type hash 与 data rule 双重过滤，但仍不是一等 map/query API。 | 增加一等 input/output 关系 map API、去重、精确基数检查。 |
@@ -730,14 +730,23 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 
 ### 通用 Witness/Molecule/Auth 解析器
 
-需要：
+已完成：
 
-- 通用 witness 解析器
-- `WitnessArgs` lock/input_type/output_type 解析
-- malformed/truncated/reordered witness 负向测试
+- `witness::size(source_view)` → U64：通过 `LOAD_WITNESS` syscall 返回 witness 字节长度
+- `witness::raw(source_view)` → Hash：从 witness 偏移 0 加载 32 字节
+- `ckb::require_witness_size_at_least(source_view, min_size)`：运行时检查 witness 大小下界，不足时触发 epilogue
+- WitnessArgs Molecule 表解析：20 字节表头（total_size、field_count、3 字段 offset），含 bounds checking
+- WitnessArgs BytesOpt 字段提取：`witness::lock`、`witness::input_type`、`witness::output_type`
+- `WitnessMalformed(42)` 和 `WitnessFieldTruncated(43)` 运行时错误
+- 编译器端完整管线：types → IR → codegen → lib.rs feature flags → LSP completions
+- 类型签名、metadata（runtime features + access entries）、assembly symbol 验证测试
+
+待完成：
+
 - 类型化 auth 字段
-- 稳定运行时错误
-- 文档和 compiler/type/lowering/codegen 测试
+- malformed/truncated/reordered witness 负向 CKB VM 测试
+- 更通用的 Molecule 解码器（可变长度字段、嵌套结构）
+- 文档
 
 不要在 `src/` 中实现 iCKB 专用 witness 辅助函数。
 
@@ -805,6 +814,10 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 - filtered MetaPoint pair scan
 - SourceView Script `code_hash + hash_type` 身份辅助函数
 - 辅助函数 operands 的本地计算 `u128` add/sub/mul/div/compare 物化
+- witness size（`LOAD_WITNESS` syscall）
+- witness raw 字节加载
+- `require_witness_size_at_least` 运行时下界检查
+- WitnessArgs Molecule 表解析（lock/input_type/output_type BytesOpt 字段提取，最多 32 字节）
 
 ## 验收命令
 

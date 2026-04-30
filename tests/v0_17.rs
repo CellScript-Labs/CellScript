@@ -978,3 +978,70 @@ fn ickb_benchmark_specs_compile_under_0_17_strict_source_mode() {
 fn ickb_spec_path(file: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("benchmarks").join("ickb_specs").join(file)
 }
+
+const WITNESS_SIZE_AND_REQUIRE_SOURCE: &str = r#"
+module v017::witness_size_and_require
+
+resource Wallet has store, create, consume {
+    owner: Hash,
+}
+
+lock witness_size_lock(wallet: protected Wallet, claimed: witness Hash, min_size: u64) -> bool {
+    let view = source::group_input(0)
+    let sz = witness::size(view)
+    ckb::require_witness_size_at_least(view, min_size)
+    let raw = witness::raw(view)
+    require raw == claimed
+}
+"#;
+
+#[test]
+fn v0_17_witness_size_and_require_witness_size_at_least_compile_and_emit_metadata() {
+    let result = compile(
+        WITNESS_SIZE_AND_REQUIRE_SOURCE,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.17".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_or_else(|err| panic!("witness size test should compile: {}", err.message));
+
+    let features = &result.metadata.runtime.ckb_runtime_features;
+    assert!(features.iter().any(|f| f == "ckb-witness-args"), "missing ckb-witness-args feature: {features:?}");
+
+    let accesses = &result.metadata.runtime.ckb_runtime_accesses;
+    assert!(
+        accesses.iter().any(|a| {
+            a.operation == "witness-size" && a.syscall == "LOAD_WITNESS" && a.source == "Witness" && a.binding == "witness::size"
+        }),
+        "missing witness-size access: {accesses:#?}"
+    );
+    assert!(
+        accesses.iter().any(|a| {
+            a.operation == "require-witness-size-at-least"
+                && a.syscall == "LOAD_WITNESS"
+                && a.source == "Witness"
+                && a.binding == "ckb::require_witness_size_at_least"
+        }),
+        "missing require-witness-size-at-least access: {accesses:#?}"
+    );
+    assert!(
+        accesses.iter().any(|a| {
+            a.operation == "witness-raw" && a.syscall == "LOAD_WITNESS" && a.source == "Witness" && a.binding == "witness::raw"
+        }),
+        "missing witness-raw access: {accesses:#?}"
+    );
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    assert!(assembly.contains(".global __ckb_witness_size"), "missing __ckb_witness_size helper:\n{assembly}");
+    assert!(
+        assembly.contains(".global __ckb_require_witness_size_at_least"),
+        "missing __ckb_require_witness_size_at_least helper:\n{assembly}"
+    );
+    assert!(assembly.contains(".global __ckb_witness_raw"), "missing __ckb_witness_raw helper:\n{assembly}");
+
+    let proof_status = &result.metadata.runtime.proof_plan_soundness.status;
+    assert_eq!(proof_status, "passed", "proof plan soundness failed");
+}
