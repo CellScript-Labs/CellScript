@@ -11,7 +11,7 @@
 - 分支：`research/protocol-equivalence`
 - 上一个本地基线提交：`a0842ad Advance CellScript 0.17 iCKB benchmark gates`
 - 最近 witness 基线提交：`a44431b docs: sync witness milestone progress`
-- 本次工作范围：Witness/Molecule/Auth 解析闭环到 100%，补齐真实 CKB VM 字段隔离与 malformed/truncated/reordered witness 证据
+- 本次工作范围：Witness/Molecule/Auth 解析闭环、0.18 Script API scope-control、DAO withdrawal capacity-compensation runtime formula evidence、DAO witness input_type 差分拒绝证据
 - 忽略未跟踪目录：`typescript`
 - 此前未跟踪路径已在 `9312bb2` 中提交并跟踪：
   - `tests/support/ckb_script_runner.rs`（已跟踪）
@@ -43,7 +43,7 @@
 - 当前行数：
   - 14 行：`CELL_SCRIPT_CKB_VM_EXECUTED`
   - 8 行：`ORIGINAL_ICKB_CKB_VM_EXECUTED`
-  - 66 行：`DIFFERENTIAL_CKB_VM_EXECUTED`
+  - 75 行：`DIFFERENTIAL_CKB_VM_EXECUTED`
   - 0 行：`MODEL`
 
 本轮清理后，已经有严格差分伴随行的 legacy model 行不再留在 active matrix
@@ -86,13 +86,22 @@
 - `differential: DAO mature withdrawal original vs CellScript agree`
 - `differential: DAO immature withdrawal original vs CellScript agree`
 - `differential: DAO max withdrawal capacity original vs CellScript agree`
+- `differential: DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree`
+- `differential: DAO deposit-rate adjusted over-withdraw capacity original vs CellScript agree`
+- `differential: DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree`
+- `differential: DAO withdraw-rate adjusted over-withdraw capacity original vs CellScript agree`
 - `differential: DAO wrong deposit accumulated rate original vs CellScript agree`
+- `differential: DAO wrong withdraw accumulated rate original vs CellScript agree`
 - `differential: DAO over-withdraw capacity original vs CellScript agree`
 - `differential: DAO missing withdraw header original vs CellScript agree`
 - `differential: DAO missing deposit header original vs CellScript agree`
 - `differential: DAO deposit header index out of bounds original vs CellScript agree`
 - `differential: DAO withdrawal deposit-data input original vs CellScript agree`
 - `differential: DAO withdrawal malformed input data original vs CellScript agree`
+- `differential: DAO missing witness input_type original vs CellScript agree`
+- `differential: DAO empty witness input_type original vs CellScript agree`
+- `differential: DAO short witness input_type original vs CellScript agree`
+- `differential: DAO long witness input_type original vs CellScript agree`
 - `differential: DAO wrong deposit header index original vs CellScript agree`
 - `differential: DAO wrong withdraw committed header original vs CellScript agree`
 - `differential: valid limit order original vs CellScript agree`
@@ -230,17 +239,26 @@ header、withdraw header 和 witness `input_type = 1`，在 mature since
 DAO/header lineage 和 maturity 的原始脚本侧证据，但还不是原始 DAO vs CellScript
 的双侧差分行。
 
-本轮再把 phase-2 DAO withdrawal maturity/header/data-shape/capacity/rate 升级成十二条真实差分行：
+本轮再把 phase-2 DAO withdrawal maturity/header/data-shape/capacity/rate/witness 升级成二十一条真实差分行：
 `differential: DAO mature withdrawal original vs CellScript agree`、
 `differential: DAO immature withdrawal original vs CellScript agree`、
 `differential: DAO max withdrawal capacity original vs CellScript agree`、
+`differential: DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree`、
+`differential: DAO deposit-rate adjusted over-withdraw capacity original vs CellScript agree`、
+`differential: DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree`、
+`differential: DAO withdraw-rate adjusted over-withdraw capacity original vs CellScript agree`、
 `differential: DAO wrong deposit accumulated rate original vs CellScript agree`、
+`differential: DAO wrong withdraw accumulated rate original vs CellScript agree`、
 `differential: DAO over-withdraw capacity original vs CellScript agree`、
 `differential: DAO missing withdraw header original vs CellScript agree`、
 `differential: DAO missing deposit header original vs CellScript agree`、
 `differential: DAO deposit header index out of bounds original vs CellScript agree`、
 `differential: DAO withdrawal deposit-data input original vs CellScript agree`、
 `differential: DAO withdrawal malformed input data original vs CellScript agree`、
+`differential: DAO missing witness input_type original vs CellScript agree`、
+`differential: DAO empty witness input_type original vs CellScript agree`、
+`differential: DAO short witness input_type original vs CellScript agree`、
+`differential: DAO long witness input_type original vs CellScript agree`、
 `differential: DAO wrong deposit header index original vs CellScript agree` 和
 `differential: DAO wrong withdraw committed header original vs CellScript agree`。mature 与
 immature 两行使用同一个归一化夹具形状：一个 withdrawing DAO input、
@@ -248,17 +266,41 @@ withdraw/deposit 两个 header dep、witness `input_type = 1` 和一个 withdraw
 capacity output。mature since `0x2003e8022a0002f3` 双侧通过；immature since
 `0x2003e802290002f3` 双侧拒绝，原始 DAO exit `-17`，CellScript exit `36`。
 max-capacity 行保持 mature since、withdraw/deposit header、witness
-`input_type = 1` 和 withdrawal data 形状不变，并用 CellScript 容量探针确认
-实测原始 DAO 容量边界 `123468305678` shannon 双侧通过。
-over-withdraw capacity 行使用同一形状，但把 withdrawal output capacity 设置为
-`123468305679` shannon，比该实测边界多 1。原始 DAO 以 exit `-15`
-拒绝，CellScript 容量探针以 exit `48` 拒绝，失败模式为
-`dao_over_withdraw_capacity`。wrong-deposit-rate 行保持输出容量在
-`123468305678`，但把 deposit header accumulated_rate 从 `10000000` 改成
-`10000001`；原始 DAO 以 exit `-15` 拒绝，CellScript rate/capacity 探针
-以 exit `41` 拒绝，失败模式为 `dao_wrong_deposit_accumulated_rate`。
-这三条行覆盖具体 DAO 容量上界的通过/拒绝边界和 deposit rate 变动拒绝，
-但还不是完整通用二次提现容量补偿降低。
+`input_type = 1` 和 withdrawal data 形状不变，并用 CellScript 容量探针在运行时读取
+`cell_capacity`、`cell_occupied_capacity`、`dao::input_accumulated_rate` 和
+deposit header `dao::accumulated_rate`，计算
+`occupied + ((input_capacity - occupied) * withdraw_rate / deposit_rate)`，确认
+原始 DAO 容量边界 `123468305678` shannon 双侧通过。over-withdraw capacity
+行使用同一形状，但把 withdrawal output capacity 设置为 `123468305679` shannon，
+比该实测边界多 1。原始 DAO 以 exit `-15` 拒绝，CellScript runtime formula
+探针以 exit `48` 拒绝，失败模式为 `dao_over_withdraw_capacity`。
+deposit-rate-adjusted-max 行把 deposit header accumulated_rate 改为 `10000001`，
+同时把 withdrawal output capacity 设置为 fixture-rate 最大值 `123468294151`
+shannon；原始 DAO 与 CellScript runtime formula 探针均通过。withdraw-rate-adjusted-max
+行把 withdraw header accumulated_rate 改为 `10000999`，同时把 output capacity
+设置为 fixture-rate 最大值 `123468294152` shannon；双侧同样通过。这两条正向行证明
+容量公式确实读取并使用 fixture header rate，而不是只在错误场景中拒绝。
+本轮继续新增 deposit-rate-adjusted-over 和 withdraw-rate-adjusted-over 两条
+`fixture_rate_plus_one` 拒绝行：前者把 output capacity 设置为 `123468294152`，
+比 deposit fixture-rate 最大值多 1 shannon；后者设置为 `123468294153`，
+比 withdraw fixture-rate 最大值多 1 shannon。两条都由原始 DAO 以 exit `-15`
+拒绝，CellScript runtime formula 探针以 exit `48` 拒绝，证明 adjusted-rate
+边界不是近似检查，而是精确上界。
+wrong-deposit-rate 行保持输出容量在 `123468305678`，但把 deposit header
+accumulated_rate 从 `10000000` 改成 `10000001`；CellScript 侧不再硬编码正确
+rate，而是用 fixture rate 计算出最大容量 `123468294151`，确认该输出多取
+`11527` shannon。原始 DAO 以 exit `-15` 拒绝，CellScript runtime formula 探针
+以 exit `48` 拒绝，失败模式为 `dao_wrong_deposit_accumulated_rate`。
+wrong-withdraw-rate 行保持输出容量在 `123468305678`，但把 withdraw header
+accumulated_rate 从 `10001000` 改成 `10000999`；同一个 runtime formula 计算出
+fixture 最大容量 `123468294152`，确认该输出多取 `11526` shannon。原始 DAO 以
+exit `-15` 拒绝，CellScript runtime formula 探针以 exit `48` 拒绝，失败模式为
+`dao_wrong_withdraw_accumulated_rate`。这八条行现在覆盖选定 DAO withdrawal
+capacity compensation 公式的正确 rate 最大值、fixture-rate 最大值、fixture-rate
+plus-one 拒绝、correct-rate overdraw 拒绝以及 deposit/withdraw rate 变动拒绝；
+矩阵 normalized fixture 记录 occupied、withdrawable、
+withdraw/deposit rates、correct-rate max 和 fixture-rate max。但这仍不是通用多输入
+redeem accounting 或 `assert_delta` lowering。
 missing-withdraw-header 行保持 mature since、deposit header 和同一个 output
 capacity，但省略 input committed header 所需的 withdraw header dep，并把 witness
 `input_type` 指向现有 deposit header index `0`；原始 DAO exit `2`，CellScript
@@ -285,7 +327,17 @@ capacity，但把 input data 从 withdrawal-request block number 改成
 探针 exit `34`，失败模式为 `dao_withdrawal_deposit_data_input`。
 malformed-input-data 行保留相同 mature/header/witness/output 形状，但把 input data
 缩短成 `0x12060000`；原始 DAO exit `-4`，CellScript classifier 探针 exit `34`，
-失败模式为 `dao_withdrawal_malformed_input_data`。本轮还把协议中立
+失败模式为 `dao_withdrawal_malformed_input_data`。missing-witness-input_type 行保持
+mature since、withdraw/deposit 两个 header dep、withdrawal data 和 output capacity
+有效，但 witness 完全省略 `input_type`；empty-witness-input_type 行则提供
+`input_type` 字段但 payload 长度为 0；short-witness-input_type 行提供
+`0x01` 这个非空 1 字节 payload；long-witness-input_type 行提供
+`0x010000000000000099` 这个 9 字节 payload，而不是 DAO 期望的 8 字节
+little-endian header dep index。四条都由原始 DAO 以 exit `-11` 拒绝；
+CellScript WitnessArgs input_type 探针对 missing/empty 以 exit `42` 拒绝，
+对短/长宽度以 exit `43` 拒绝，失败模式分别为
+`dao_missing_witness_input_type`、`dao_empty_witness_input_type`、
+`dao_short_witness_input_type` 和 `dao_long_witness_input_type`。本轮还把协议中立
 `dao::accumulated_rate(source::header_dep(i))` 与
 `dao::require_header_dep_for_input(input, header)` 从无效的 DAO
 `LOAD_HEADER_BY_FIELD` 路径切到 `LOAD_HEADER` 绝对 offset 读取。
@@ -444,7 +496,7 @@ cargo test --locked -p cellscript --test ickb_diff -- --test-threads=1
 结果：
 
 ```text
-89 passed; 0 failed
+105 passed; 0 failed
 ```
 
 说明：行级证据名称使用 `DIFFERENTIAL_CKB_VM_EXECUTED`；生产门禁模式仍使用
@@ -454,28 +506,74 @@ cargo test --locked -p cellscript --test ickb_diff -- --test-threads=1
 
 这些百分比只用于规划，不代表生产就绪证明。这里把“选定夹具的证据覆盖率”
 和“生产等价准备度”分开记录：active matrix 的执行覆盖已经很高，但生产等价
-仍为 `NOT_PROVEN`，必须等真实 owner-auth witness 夹具、一等 `Script`、通用聚合降低、完整
-manifest closure 和非可执行假设清空后才能提升。
+仍为 `NOT_PROVEN`，必须等真实 owner-auth witness 夹具、DAO redeem aggregate
+accounting、通用聚合降低、完整 manifest closure 和非可执行假设清空后才能提升。
+一等公民 `Script` API 明确不属于 0.17 交付范围；它移动到下一个版本 0.18。
+0.17 只保留 helper-level Script support，用于继续补 iCKB 等价证据。
 
 | 里程碑 | 当前估计 | 当前状态 | 下一步 |
 |---|---:|---|---|
 | 协议中立 CKB/CellScript 基础能力 | 82-85% | DAO rate/data/type 辅助函数、HeaderDep DAO rate/lineage 辅助函数、xUDT 金额检查、SourceView 脚本身份（含 `code_hash + hash_type` 身份要求）、OutPoint、MetaPoint 扫描（含 filtered pair scan）、`u128`、C256、带符号 `i32` 已有较多基础；HeaderDep DAO 辅助函数已从 `LOAD_HEADER_BY_FIELD` 切到 `LOAD_HEADER` 绝对 offset；新增 `ScriptIdentityMismatch`(41) 运行时错误。 | 继续补齐任意 args 访问、通用 group 扫描。 |
-| CKB VM 执行基础设施 | 99% | `ckb-testtool` 执行框架已可加载原始二进制、执行 CellScript ELF，并通过 66 条差分行；本轮新增 CellDep 数据读取回归行，证明 fixture `cell_deps` 会真正进入交易 CellDep 列表；另确认 duplicate receipt-id、wrong-owner synthetic resource fields、immature-redeem synthetic epoch fields 都是非 active row 的模型假设，并分别绑定 receipt group exact-mint、valid Owned-Owner、DAO immature withdrawal replacement evidence；另有 mature/immature redeem relative-since CellScript-only 通过/拒绝证据、三条原始 DAO 二进制通过/拒绝证据，以及十二条 DAO phase-2 withdrawal maturity/header/data-shape/capacity/rate 差分证据。 | 抽象更多可复用夹具，扩展到真实 owner-auth 字节、withdraw/redeem 聚合场景。 |
-| 原始 iCKB 单侧 VM 证据 | 96-98% | 原始 iCKB Logic、Limit Order、Owned-Owner 与未修改 DAO ELF 已执行多个 VM 场景；已修补 DAO hash 的 deposit phase 1 通过，观测周期为 `97057`，并新增 deposit 上界 exit `8` 拒绝；原始 DAO phase-1 withdrawing cell 创建通过，phase-2 mature withdrawal 通过，phase-2 max capacity 通过，phase-2 immature since 以 exit `-17` 拒绝，phase-2 over-withdraw capacity 和 wrong deposit accumulated_rate 均以 exit `-15` 拒绝，phase-2 missing withdraw header 与 deposit-data input 均以 exit `2` 拒绝，phase-2 malformed input data 以 exit `-4` 拒绝，phase-2 missing deposit header 与 deposit header index 越界均以 exit `1` 拒绝，phase-2 wrong deposit header index 与 wrong withdraw committed header 均以 exit `-14` 拒绝；valid Owned-Owner input pairing 观测周期为 `83458`，valid output pairing 观测周期为 `47359`；Owned-Owner input/output owner data length mismatch 均以 exit `4` 拒绝，input/output script misuse 均以 exit `7` 拒绝，input/output non-withdrawal request、input/output related type-hash mismatch 与 input/output related data-rule mismatch 均以 exit `6` 拒绝，input/output missing-owner、input/output missing-owned、input/output duplicate-owner pair、input/output relative mismatch 均以 exit `8` 拒绝。 | 继续补原始 DAO 容量补偿、DAO rate recomputation 与 committed header 替换边界。 |
-| 双侧 CKB VM 差分证据 | 98-99%（选定夹具证据覆盖） | 已有 66 条真实差分行：11 条通过（deposit phase 1、receipt group exact mint、mint from receipt、DAO mature withdrawal、DAO max withdrawal capacity、valid limit order CKB-to-UDT、limit order CKB-to-UDT min-match boundary、valid limit order UDT-to-CKB、limit order UDT-to-CKB min-match boundary、valid Owned-Owner input pairing、valid Owned-Owner output pairing）和 55 条拒绝；active `MODEL` 行已清零，但等价状态仍是 `NOT_PROVEN`。 | 继续补真实 owner-auth 字节夹具、withdraw/redeem 聚合 accounting 和容量补偿差分。 |
-| DAO/header 血缘证明 | 92-95% | wrong accumulated rate 和 missing header dep 已进入单 receipt 差分证据；本轮新增 receipt group missing-header 拒绝和 wrong-rate 拒绝，证明两个 receipt 输入的 group 聚合也依赖交易 header dep 与 DAO accumulated_rate；另有 mature/immature redeem relative-since CellScript-only VM 通过/拒绝，三条 original DAO phase-1/phase-2 通过/拒绝，并新增十二条 DAO phase-2 withdrawal maturity/header/data-shape/capacity/rate 差分行，覆盖 deposit header、withdraw header、witness input_type、immature since 拒绝、max capacity 通过、over-withdraw capacity 拒绝、wrong deposit accumulated_rate 拒绝、missing withdraw header 拒绝、missing deposit header 拒绝、deposit header index 越界拒绝、deposit-data input 拒绝、malformed input-data 拒绝、wrong deposit header index 拒绝与 wrong committed withdraw header 拒绝；但完整二次提现容量/DAO rate recomputation 仍未完整双侧差分执行。 | 优先把 withdraw/redeem 聚合 accounting、capacity compensation 和 receipt pairing 配成双侧 VM 夹具。 |
+| CKB VM 执行基础设施 | 99% | `ckb-testtool` 执行框架已可加载原始二进制、执行 CellScript ELF，并通过 75 条差分行；本轮新增 CellDep 数据读取回归行，证明 fixture `cell_deps` 会真正进入交易 CellDep 列表；另确认 duplicate receipt-id、wrong-owner synthetic resource fields、immature-redeem synthetic epoch fields 都是非 active row 的模型假设，并分别绑定 receipt group exact-mint、valid Owned-Owner、DAO immature withdrawal replacement evidence；另有 mature/immature redeem relative-since CellScript-only 通过/拒绝证据、三条原始 DAO 二进制通过/拒绝证据，以及二十一条 DAO phase-2 withdrawal maturity/header/data-shape/capacity/rate/witness 差分证据。 | 抽象更多可复用夹具，扩展到真实 owner-auth 字节、withdraw/redeem 聚合场景。 |
+| 原始 iCKB 单侧 VM 证据 | 96-98% | 原始 iCKB Logic、Limit Order、Owned-Owner 与未修改 DAO ELF 已执行多个 VM 场景；已修补 DAO hash 的 deposit phase 1 通过，观测周期为 `97057`，并新增 deposit 上界 exit `8` 拒绝；原始 DAO phase-1 withdrawing cell 创建通过，phase-2 mature withdrawal 通过，phase-2 max capacity、deposit-rate adjusted max 和 withdraw-rate adjusted max 均通过，phase-2 immature since 以 exit `-17` 拒绝，phase-2 over-withdraw capacity、deposit-rate adjusted over-withdraw、withdraw-rate adjusted over-withdraw、wrong deposit accumulated_rate 和 wrong withdraw accumulated_rate 均以 exit `-15` 拒绝，phase-2 missing withdraw header 与 deposit-data input 均以 exit `2` 拒绝，phase-2 malformed input data 以 exit `-4` 拒绝，phase-2 missing deposit header 与 deposit header index 越界均以 exit `1` 拒绝，phase-2 wrong deposit header index 与 wrong withdraw committed header 均以 exit `-14` 拒绝，phase-2 missing/empty/short/long witness input_type 均以 exit `-11` 拒绝；valid Owned-Owner input pairing 观测周期为 `83458`，valid output pairing 观测周期为 `47359`；Owned-Owner input/output owner data length mismatch 均以 exit `4` 拒绝，input/output script misuse 均以 exit `7` 拒绝，input/output non-withdrawal request、input/output related type-hash mismatch 与 input/output related data-rule mismatch 均以 exit `6` 拒绝，input/output missing-owner、input/output missing-owned、input/output duplicate-owner pair、input/output relative mismatch 均以 exit `8` 拒绝。 | 继续补 DAO redeem aggregate accounting 与更多 committed header 替换边界。 |
+| 双侧 CKB VM 差分证据 | 98-99%（选定夹具证据覆盖） | 已有 75 条真实差分行：13 条通过（deposit phase 1、receipt group exact mint、mint from receipt、DAO mature withdrawal、DAO max withdrawal capacity、DAO deposit-rate adjusted max withdrawal capacity、DAO withdraw-rate adjusted max withdrawal capacity、valid limit order CKB-to-UDT、limit order CKB-to-UDT min-match boundary、valid limit order UDT-to-CKB、limit order UDT-to-CKB min-match boundary、valid Owned-Owner input pairing、valid Owned-Owner output pairing）和 62 条拒绝；active `MODEL` 行已清零，但等价状态仍是 `NOT_PROVEN`。 | 继续补真实 owner-auth 字节夹具、withdraw/redeem 聚合 accounting 和 DAO redeem accounting 差分。 |
+| DAO/header 血缘证明 | 96-98% | wrong accumulated rate 和 missing header dep 已进入单 receipt 差分证据；本轮新增 receipt group missing-header 拒绝和 wrong-rate 拒绝，证明两个 receipt 输入的 group 聚合也依赖交易 header dep 与 DAO accumulated_rate；另有 mature/immature redeem relative-since CellScript-only VM 通过/拒绝，三条 original DAO phase-1/phase-2 通过/拒绝，并新增二十一条 DAO phase-2 withdrawal maturity/header/data-shape/capacity/rate/witness 差分行，覆盖 deposit header、withdraw header、witness input_type、immature since 拒绝、max capacity 通过、deposit-rate adjusted max 通过、deposit-rate adjusted over-withdraw 拒绝、withdraw-rate adjusted max 通过、withdraw-rate adjusted over-withdraw 拒绝、over-withdraw capacity 拒绝、wrong deposit accumulated_rate 拒绝、wrong withdraw accumulated_rate 拒绝、missing withdraw header 拒绝、missing deposit header 拒绝、deposit header index 越界拒绝、deposit-data input 拒绝、malformed input-data 拒绝、missing witness input_type 拒绝、empty witness input_type 拒绝、short witness input_type 拒绝、long witness input_type 拒绝、wrong deposit header index 拒绝与 wrong committed withdraw header 拒绝；本轮把 max/adjusted-max/adjusted-over/over/wrong-deposit-rate/wrong-withdraw-rate 八条的 CellScript 侧推进为 runtime capacity compensation formula，夹具记录 occupied、withdrawable、withdraw/deposit rates、correct-rate max、fixture-rate max 和 fixture-rate plus-one 边界；但多输入 redeem accounting 仍未完整双侧差分执行。 | 优先把 redeem aggregate accounting、receipt pairing 和更多 DAO 边界配成双侧 VM 夹具。 |
 | Witness/Molecule/Auth 解析 | 100%（协议中立解析闭环） | 已实现 `witness::size`（U64，标量 fail-closed 约定）、`witness::raw`（Hash，带 caller buffer 桥接）和 `ckb::require_witness_size_at_least`（void runtime requirement，正确保存 `min_size` 与栈帧管理）；已实现完整 WitnessArgs Molecule 表头解析（16 字节头：total_size + 3 offsets，field_count 从 offset0/4-1 推导）与 BytesOpt 字段提取（lock/input_type/output_type，带 caller buffer 写入、None 支持、短字段零填充）；Hash 返回路径已加入 `emit_runtime_witness_hash_call` 桥接函数（分配 caller buffer、参数 set-up、状态检查、存储 buffer 指针）；`allocate_var_storage` 已为 witness Hash 调用分配 32 字节缓冲区；新增 `WitnessMalformed(42)` 和 `WitnessFieldTruncated(43)` 运行时错误；七条真实 CKB VM witness 回归覆盖空 WitnessArgs、too-small fail-closed、短字段零填充、ckb-types builder 产物的 lock/input_type/output_type 字段隔离、total_size mismatch、offset 乱序和 offset 越界；类型推断、IR、LSP、feature flags、runtime access metadata 和 proof-plan `reads: witness` 已对齐。Auth 口径固定为显式数据源/claim 授权域检查，不引入隐式 signer 语义。 | 解析器项关闭；后续真实 owner-auth witness 字节属于生产等价夹具/证据，不再作为解析器缺口。 |
-| 一等 `Script` API | 25-30% | 新增 `require_cell_lock_script_hash_type` / `require_cell_type_script_hash_type` 提供 Script hash_type 身份检查；仍缺少一等 value/accessor/args 构造与 group scan。 | 在 `src/` 中以协议中立方式实现一等 `Script` value/type、`script.code_hash`、`script.args`。 |
-| 可执行聚合降低 | 67-71% | mint-family 差分已覆盖 xUDT mint amount、amount inflation/deflation、错误 xUDT args、错误 accumulated rate、缺失 header dep，并新增单 receipt malformed-data 拒绝、两个 receipt 输入精确 mint 两份 xUDT 的 group exact-mint 通过、比两份多 1 shannon 的 group over-mint 拒绝、只 mint 一份 xUDT 的 group under-mint 拒绝、group missing-header 拒绝、group wrong-rate 拒绝、group wrong-xUDT 拒绝、group first malformed-receipt-data 拒绝和 group second malformed-receipt-data 拒绝；deposit phase 1 已覆盖下界和上界 capacity 拒绝，deposit/receipt output accounting 已新增 duplicate receipt output `ReceiptMismatch` 拒绝；Limit Order 已覆盖夹具绑定 value conservation、CKB-to-UDT 与 UDT-to-CKB 两个有效方向、两个方向的精确 min-match 边界、CKB-to-UDT no-CKB-paid、UDT-to-CKB no-UDT-paid、UDT-decreased、两个方向的 min-match 拒绝边界、两个方向的 underpayment、CKB-to-UDT wrong-asset type-hash low-word mismatch 和 UDT-to-CKB wrong-asset mismatch；但完整 receipt 字节解码和通用 `assert_sum` / `assert_delta` 自动降低仍未完成。 | 支持按 SourceView、type hash、lock hash、script args 过滤/分组。 |
+| 一等公民 `Script` API | 0.18 scope（0.17 不交付） | 0.17 只保留 helper-level Script support，已覆盖 active iCKB 差分矩阵需要的 `Script identity + args binding + role`：`require_cell_*_script_hash_type`、args empty/hash、xUDT owner-mode args、filtered pair scan 等；不在 0.17 做 arbitrary Script constructor 或一等 Script value。 | 0.18 再做只读 ScriptRef/ScriptArgs：`code_hash`、`hash_type`、`args_empty`、`args_hash`、exact/prefix/suffix args checks；禁止 deploy manifest resolution、TYPE_ID constructor、任意 script hash synthesis。 |
+| 可执行聚合降低 | 72-75% | mint-family 差分已覆盖 xUDT mint amount、amount inflation/deflation、错误 xUDT args、错误 accumulated rate、缺失 header dep，并新增单 receipt malformed-data 拒绝、两个 receipt 输入精确 mint 两份 xUDT 的 group exact-mint 通过、比两份多 1 shannon 的 group over-mint 拒绝、只 mint 一份 xUDT 的 group under-mint 拒绝、group missing-header 拒绝、group wrong-rate 拒绝、group wrong-xUDT 拒绝、group first malformed-receipt-data 拒绝和 group second malformed-receipt-data 拒绝；deposit phase 1 已覆盖下界和上界 capacity 拒绝，deposit/receipt output accounting 已新增 duplicate receipt output `ReceiptMismatch` 拒绝；DAO withdrawal max、deposit-rate adjusted max、deposit-rate adjusted over、withdraw-rate adjusted max、withdraw-rate adjusted over、over、wrong-deposit-rate、wrong-withdraw-rate 已用 runtime capacity compensation formula 覆盖选定边界；Limit Order 已覆盖夹具绑定 value conservation、CKB-to-UDT 与 UDT-to-CKB 两个有效方向、两个方向的精确 min-match 边界、CKB-to-UDT no-CKB-paid、UDT-to-CKB no-UDT-paid、UDT-decreased、两个方向的 min-match 拒绝边界、两个方向的 underpayment、CKB-to-UDT wrong-asset type-hash low-word mismatch 和 UDT-to-CKB wrong-asset mismatch；但完整 receipt 字节解码和通用 `assert_sum` / `assert_delta` 自动降低仍未完成。 | 支持按 SourceView、type hash、lock hash、script args 过滤/分组，并把 capacity/accounting 公式收敛到 generic lowering。 |
 | 通用 MetaPoint map | 65-70% | 已有 filtered pair scan（含 related type hash + data rule 过滤）；Limit Order 夹具已跑通 Mint-relative 到 Match-absolute master OutPoint；Owned-Owner relative pairing 已有 input 通过、output 通过、input mismatch、output mismatch、input duplicate-owner、output duplicate-owner、input missing-owner、output missing-owner、input missing-owned、output missing-owned 十条原始脚本差分行，并新增 input/output script-role misuse、input/output non-withdrawal request、input/output owner data length mismatch、input/output related type-hash mismatch 与 input/output related data-rule mismatch 十条拒绝；本次新增 `_filtered` 变体支持 related type hash 与 data rule 双重过滤，但仍不是一等 map/query API。 | 增加一等 input/output 关系 map API、去重、精确基数检查。 |
-| 生产证据清单 | 80-85%（生产等价准备度） | 矩阵已记录 66 条差分执行对象，包含哈希、状态/周期、交易大小、容量、手续费和失败模式；另有 14 条 CellScript-only VM 执行行和 8 条 original-side VM 执行行作为前置证据；active matrix 的 `MODEL` 已从 9 条压缩到 0 条，duplicate receipt-id、wrong owner、immature redeem 都被单独登记为非可执行模型假设，并绑定 replacement differential evidence；production gate 已要求 PROVEN 模式下该 registry 必须为空。 | 保持 `equivalence_status = NOT_PROVEN`；补齐完整 equivalence evidence manifest、真实 owner-auth/witness、DAO redeem aggregate accounting。 |
+| 生产证据清单 | 81-86%（生产等价准备度） | 矩阵已记录 75 条差分执行对象，包含哈希、状态/周期、交易大小、容量、手续费和失败模式；另有 14 条 CellScript-only VM 执行行和 8 条 original-side VM 执行行作为前置证据；active matrix 的 `MODEL` 已从 9 条压缩到 0 条，duplicate receipt-id、wrong owner、immature redeem 都被单独登记为非可执行模型假设，并绑定 replacement differential evidence；production gate 已要求 PROVEN 模式下该 registry 必须为空。 | 保持 `equivalence_status = NOT_PROVEN`；补齐完整 equivalence evidence manifest、真实 owner-auth/witness、DAO redeem aggregate accounting。 |
+
+## Roadmap decision: first-class Script API moved to 0.18
+
+一等公民 `Script` API 明确移入 0.18，不作为 0.17 任一优先级交付项。当前
+helper-level Script support 已足够覆盖 active iCKB differential matrix：Script
+identity、Script args binding、xUDT owner-mode args、filtered MetaPoint scan 和
+lock/type pair scan 已支撑现有 75 条差分行与 active `MODEL` 清零。直接在 0.17
+推进完整 `Script` API 会把范围扩到 arbitrary Script construction、Molecule
+encoding、deploy-manifest resolution、TYPE_ID construction、script-hash synthesis
+和 cell dep solving；这些有价值，但不是最短的 production equivalence evidence 路径。
+
+0.17/0.18 分界固定为：
+
+- 0.17 P0：owner-auth witness production fixtures、DAO redeem aggregate accounting、
+  withdrawal/redeem capacity compensation、DAO rate recomputation differential evidence
+- 0.17 P1：generic `assert_sum` / `assert_delta` lowering，以及 xUDT、receipt/deposit、
+  capacity accounting 需要的 group-by/filter lowering
+- 0.18：read-only ScriptRef / ScriptArgs，不做 arbitrary constructor、不做 deploy
+  manifest resolution、不做 TYPE_ID constructor
+- 0.18+：query syntax sugar 和 ergonomics
+
+0.18 ScriptRef 只允许读和比较：
+
+- `cell.lock.code_hash`
+- `cell.lock.hash_type`
+- `cell.lock.args_empty`
+- `cell.lock.args_hash`
+- `cell.type?.code_hash`
+- `cell.type?.hash_type`
+- `cell.type?.args_empty`
+- `cell.type?.args_hash`
+- exact / prefix / suffix args checks
+
+0.18 明确禁止：
+
+- constructing arbitrary `Script` values
+- constructing TYPE_ID scripts
+- script hash synthesis from arbitrary fields
+- deployment manifest resolution
+- cell dep solving
+
+0.18 ScriptRef 的目的，是把现有 helper fragmentation 收束成 typed
+read/compare surface，不是引入新的 script-construction layer。中文口径：0.17
+先补证据，不扩语言野心；0.18 再把 ScriptRef 做成收束层。
 
 本轮不再使用“总体生产等价进度 99%”这种单一数字。更准确的口径是：
 **选定 normalized fixtures 的差分执行证据覆盖率已经很高**（active `MODEL`
-行为 0，66 条为双侧 CKB VM 差分执行行），但**完整生产等价准备度约为
-80-85%**，并且不声明 production equivalence。只要完整 equivalence evidence
-manifest、真实 owner-auth/witness 语义、一等 `Script`、DAO redeem aggregate
-accounting、byte-accurate receipt decoding、非可执行 legacy assumptions 清空和
+行为 0，75 条为双侧 CKB VM 差分执行行），但**完整生产等价准备度约为
+81-86%**，并且不声明 production equivalence。只要完整 equivalence evidence
+manifest、真实 owner-auth/witness 语义、DAO redeem aggregate accounting、
+byte-accurate receipt decoding、非可执行 legacy assumptions 清空和
 通用聚合降低没有闭环，就必须保持 `NOT_PROVEN`。
 
 ## 近期关键突破
@@ -741,7 +839,8 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 - 已有部分 CellScript-side CKB VM 测试。
 - 辅助函数级 missing-header 失败关闭已存在，并且 mint-family 中已有一条
   original-vs-CellScript 差分行覆盖 header omission。
-- 完整 original-vs-CellScript 差分 DAO 血缘尚未完成。
+- 选定 DAO phase-2 lineage、maturity、capacity、rate 和 witness input_type 路径已有
+  original-vs-CellScript 差分行；完整多输入 redeem accounting 尚未完成。
 
 ## 剩余编译器/运行时工作
 
@@ -768,7 +867,7 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 
 不要在 `src/` 中实现 iCKB 专用 witness 辅助函数。
 
-### 一等 `Script` API
+### 0.18 ScriptRef / ScriptArgs scope
 
 当前辅助函数级支持：
 
@@ -777,21 +876,37 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 - 32-byte args hash
 - `code_hash + hash_type` 身份辅助函数
 
-缺失：
+0.18 允许：
 
-- 一等 `Script` value/type
-- `script.code_hash`
-- `script.hash_type`
-- `script.args`
-- 任意 args length/prefix/suffix 检查
-- scripts 的 lock/type group 扫描
-- xUDT args 构造器最终应使用通用 Script API
+- `cell.lock.code_hash`
+- `cell.lock.hash_type`
+- `cell.lock.args_empty`
+- `cell.lock.args_hash`
+- `cell.type?.code_hash`
+- `cell.type?.hash_type`
+- `cell.type?.args_empty`
+- `cell.type?.args_hash`
+- exact / prefix / suffix args checks
+
+0.18 暂不允许：
+
+- 一等 arbitrary `Script` value/type constructor
+- constructing TYPE_ID scripts
+- script hash synthesis from arbitrary fields
+- deployment manifest resolution
+- cell dep solving
+
+该项后置到 0.18。当前 0.17 继续优先补 production evidence、DAO redeem accounting
+和通用 `assert_sum` / `assert_delta` lowering。
 
 ### 可执行聚合降低
 
 当前状态：
 
 - 许多聚合检查仍需要手动辅助函数调用。
+- DAO withdrawal max/adjusted-max/adjusted-over/over/wrong-deposit-rate/wrong-withdraw-rate 已不再使用硬编码最大容量，CellScript 侧会在
+  CKB VM 中运行时读取 occupied/input capacity 与 withdraw/deposit rate，并计算
+  capacity compensation 上界。
 
 需要：
 
@@ -799,7 +914,7 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 - 按 SourceView、type hash、lock hash、script args 过滤/分组
 - 精确 equality / `<=` / `>=`
 - 生成的聚合代码 CKB VM 测试
-- 替代仅模型级 iCKB receipt/deposit accounting
+- 替代手写探针级 receipt/deposit/redeem accounting
 
 ### 通用 MetaPoint Maps
 

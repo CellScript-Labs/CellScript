@@ -170,7 +170,16 @@ const MISSING_HEADER_DEP_DIFF_SCENARIO: &str = "differential: missing header dep
 const DAO_MATURE_WITHDRAWAL_DIFF_SCENARIO: &str = "differential: DAO mature withdrawal original vs CellScript agree";
 const DAO_IMMATURE_WITHDRAWAL_DIFF_SCENARIO: &str = "differential: DAO immature withdrawal original vs CellScript agree";
 const DAO_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str = "differential: DAO max withdrawal capacity original vs CellScript agree";
+const DAO_DEPOSIT_RATE_ADJUSTED_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree";
+const DAO_DEPOSIT_RATE_ADJUSTED_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO deposit-rate adjusted over-withdraw capacity original vs CellScript agree";
 const DAO_WRONG_DEPOSIT_RATE_DIFF_SCENARIO: &str = "differential: DAO wrong deposit accumulated rate original vs CellScript agree";
+const DAO_WITHDRAW_RATE_ADJUSTED_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree";
+const DAO_WITHDRAW_RATE_ADJUSTED_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO withdraw-rate adjusted over-withdraw capacity original vs CellScript agree";
+const DAO_WRONG_WITHDRAW_RATE_DIFF_SCENARIO: &str = "differential: DAO wrong withdraw accumulated rate original vs CellScript agree";
 const DAO_OVER_WITHDRAW_CAPACITY_DIFF_SCENARIO: &str = "differential: DAO over-withdraw capacity original vs CellScript agree";
 const DAO_MISSING_WITHDRAW_HEADER_DIFF_SCENARIO: &str = "differential: DAO missing withdraw header original vs CellScript agree";
 const DAO_MISSING_DEPOSIT_HEADER_DIFF_SCENARIO: &str = "differential: DAO missing deposit header original vs CellScript agree";
@@ -180,6 +189,10 @@ const DAO_WITHDRAWAL_DEPOSIT_DATA_INPUT_DIFF_SCENARIO: &str =
     "differential: DAO withdrawal deposit-data input original vs CellScript agree";
 const DAO_WITHDRAWAL_MALFORMED_INPUT_DATA_DIFF_SCENARIO: &str =
     "differential: DAO withdrawal malformed input data original vs CellScript agree";
+const DAO_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO missing witness input_type original vs CellScript agree";
+const DAO_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO empty witness input_type original vs CellScript agree";
+const DAO_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO short witness input_type original vs CellScript agree";
+const DAO_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO long witness input_type original vs CellScript agree";
 const DAO_WRONG_DEPOSIT_HEADER_INDEX_DIFF_SCENARIO: &str = "differential: DAO wrong deposit header index original vs CellScript agree";
 const DAO_WRONG_WITHDRAW_COMMITTED_HEADER_DIFF_SCENARIO: &str =
     "differential: DAO wrong withdraw committed header original vs CellScript agree";
@@ -539,13 +552,23 @@ const ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX: u64 = 554;
 const ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH: u64 = 1000;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK: u64 = 2_000_610;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE: u64 = 10_001_000;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE: u64 = 10_000_999;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER: u64 = 575;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX: u64 = 610;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH: u64 = 1100;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE: u64 = 0x2003e8022a0002f3;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_IMMATURE_SINCE: u64 = 0x2003e802290002f3;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY: u64 = 123_468_105_678;
+const ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY: u64 = 8_200_000_000;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY - ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY: u64 = 123_468_305_678;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY: u64 = 123_468_294_151;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY: u64 = 123_468_294_152;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_OVER_OUTPUT_CAPACITY: u64 = ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_IMMATURE_OUTPUT_CAPACITY: u64 = 123_468_045_678;
 const ORIGINAL_DAO_MAX_CYCLES: u64 = 50_000_000;
@@ -577,16 +600,21 @@ action test_dao_withdrawal_capacity() -> u64 {
     }
     dao::require_input_since_at_least(input, 2306942530136048371)
     dao::require_header_dep_for_input(input, source::header_dep(0))
+    let input_capacity = ckb::cell_capacity(input)
+    let occupied_capacity = ckb::cell_occupied_capacity(input)
     let withdraw_rate = dao::input_accumulated_rate(input)
-    if withdraw_rate != 10001000 {
+    if withdraw_rate == 0 {
         return 40
     }
     let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
+    if deposit_header_rate == 0 {
         return 41
     }
+    let withdrawable_capacity = input_capacity - occupied_capacity
+    let compensated_capacity = (withdrawable_capacity * withdraw_rate) / deposit_header_rate
+    let max_output_capacity = occupied_capacity + compensated_capacity
     let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > 123468305678 {
+    if output_capacity > max_output_capacity {
         return 48
     }
     return 0
@@ -625,6 +653,58 @@ action test_dao_withdrawal_deposit_header_witness() -> u64 {
     dao::require_input_since_at_least(input, 2306942530136048371)
     dao::require_header_dep_for_input(input, source::header_dep(0))
     let deposit_header_rate = dao::accumulated_rate(source::header_dep(0))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+}
+"#;
+const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type";
+const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_withdrawal_witness_input_type
+
+action test_dao_withdrawal_witness_input_type() -> u64 {
+    ckb::require_current_script_args_empty()
+    let input = source::group_input(0)
+    let is_withdrawal = dao::is_withdrawal_request_data(input)
+    if !is_withdrawal {
+        return 34
+    }
+    dao::require_input_since_at_least(input, 2306942530136048371)
+    dao::require_header_dep_for_input(input, source::header_dep(0))
+    let deposit_header_index = witness::input_type(input)
+    if deposit_header_index == Hash::zero() {
+        return 42
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+}
+"#;
+const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type_width";
+const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_withdrawal_witness_input_type_width
+
+action test_dao_withdrawal_witness_input_type_width() -> u64 {
+    ckb::require_current_script_args_empty()
+    let input = source::group_input(0)
+    let is_withdrawal = dao::is_withdrawal_request_data(input)
+    if !is_withdrawal {
+        return 34
+    }
+    dao::require_input_since_at_least(input, 2306942530136048371)
+    dao::require_header_dep_for_input(input, source::header_dep(0))
+    let witness_bytes = witness::size(input)
+    if witness_bytes != 28 {
+        return 43
+    }
+    let deposit_header_index = witness::input_type(input)
+    if deposit_header_index == Hash::zero() {
+        return 42
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
     if deposit_header_rate != 10000000 {
         return 41
     }
@@ -2085,9 +2165,13 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
     );
     let deposit_header_hash = deposit_header.hash();
     context.insert_header(deposit_header);
+    let withdraw_accumulated_rate = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+        _ => ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+    };
     let withdraw_header = dao_test_header(
         ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
-        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        withdraw_accumulated_rate,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
@@ -2126,12 +2210,31 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
         DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => 1u64,
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => 1u64,
         DaoWithdrawalHeaderDepMode::WrongDepositHeaderIndex => 0u64,
         DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader => 1u64,
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => 1u64,
     };
-    let witness = packed::WitnessArgs::new_builder()
-        .input_type(Some(Bytes::from(witness_header_dep_index.to_le_bytes().to_vec())).pack())
-        .build();
+    let witness = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => packed::WitnessArgs::new_builder().build(),
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::default()).pack()).build()
+        }
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(vec![1u8])).pack()).build()
+        }
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => {
+            let mut input_type = witness_header_dep_index.to_le_bytes().to_vec();
+            input_type.push(0x99);
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(input_type)).pack()).build()
+        }
+        _ => packed::WitnessArgs::new_builder()
+            .input_type(Some(Bytes::from(witness_header_dep_index.to_le_bytes().to_vec())).pack())
+            .build(),
+    };
     let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
         .input(packed::CellInput::new_builder().previous_output(withdrawing_out_point).since(input_since).build())
         .cell_dep(packed::CellDep::new_builder().out_point(dao_code_out_point).dep_type(DepType::Code).build())
@@ -2142,7 +2245,12 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present
         | DaoWithdrawalHeaderDepMode::DepositDataInput
         | DaoWithdrawalHeaderDepMode::MalformedInputData
-        | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => {
+        | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
+        | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
+        | DaoWithdrawalHeaderDepMode::MissingWitnessInputType
+        | DaoWithdrawalHeaderDepMode::EmptyWitnessInputType
+        | DaoWithdrawalHeaderDepMode::ShortWitnessInputType
+        | DaoWithdrawalHeaderDepMode::LongWitnessInputType => {
             tx_builder.header_dep(withdraw_header_hash).header_dep(deposit_header_hash)
         }
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => tx_builder.header_dep(deposit_header_hash),
@@ -2194,9 +2302,13 @@ fn run_cellscript_dao_withdrawal_with_program(
     );
     let deposit_header_hash = deposit_header.hash();
     context.insert_header(deposit_header);
+    let withdraw_accumulated_rate = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+        _ => ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+    };
     let withdraw_header = dao_test_header(
         ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
-        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        withdraw_accumulated_rate,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
         ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
@@ -2235,12 +2347,31 @@ fn run_cellscript_dao_withdrawal_with_program(
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
         DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => 1u64,
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => 1u64,
         DaoWithdrawalHeaderDepMode::WrongDepositHeaderIndex => 0u64,
         DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader => 1u64,
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => 1u64,
     };
-    let witness = packed::WitnessArgs::new_builder()
-        .input_type(Some(Bytes::from(witness_header_dep_index.to_le_bytes().to_vec())).pack())
-        .build();
+    let witness = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => packed::WitnessArgs::new_builder().build(),
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::default()).pack()).build()
+        }
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(vec![1u8])).pack()).build()
+        }
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => {
+            let mut input_type = witness_header_dep_index.to_le_bytes().to_vec();
+            input_type.push(0x99);
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(input_type)).pack()).build()
+        }
+        _ => packed::WitnessArgs::new_builder()
+            .input_type(Some(Bytes::from(witness_header_dep_index.to_le_bytes().to_vec())).pack())
+            .build(),
+    };
     let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
         .input(packed::CellInput::new_builder().previous_output(withdrawing_out_point).since(input_since).build())
         .cell_dep(packed::CellDep::new_builder().out_point(cellscript_out_point).dep_type(DepType::Code).build())
@@ -2251,7 +2382,12 @@ fn run_cellscript_dao_withdrawal_with_program(
         DaoWithdrawalHeaderDepMode::Present
         | DaoWithdrawalHeaderDepMode::DepositDataInput
         | DaoWithdrawalHeaderDepMode::MalformedInputData
-        | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => {
+        | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
+        | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
+        | DaoWithdrawalHeaderDepMode::MissingWitnessInputType
+        | DaoWithdrawalHeaderDepMode::EmptyWitnessInputType
+        | DaoWithdrawalHeaderDepMode::ShortWitnessInputType
+        | DaoWithdrawalHeaderDepMode::LongWitnessInputType => {
             tx_builder.header_dep(withdraw_header_hash).header_dep(deposit_header_hash)
         }
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => tx_builder.header_dep(deposit_header_hash),
@@ -2666,8 +2802,13 @@ enum DaoWithdrawalHeaderDepMode {
     MissingDepositHeader,
     DepositHeaderIndexOutOfBounds,
     WrongDepositAccumulatedRate,
+    WrongWithdrawAccumulatedRate,
     WrongDepositHeaderIndex,
     WrongWithdrawCommittedHeader,
+    MissingWitnessInputType,
+    EmptyWitnessInputType,
+    ShortWitnessInputType,
+    LongWitnessInputType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3283,6 +3424,61 @@ fn dao_withdrawal_wrong_deposit_rate_differential_execution() -> Value {
     )
 }
 
+fn dao_withdrawal_deposit_rate_adjusted_max_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_deposit_rate_adjusted_over_capacity_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_deposit_rate_adjusted_over_withdraw_capacity"),
+        DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_wrong_withdraw_rate_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY,
+        Some("dao_wrong_withdraw_accumulated_rate"),
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_withdraw_rate_adjusted_max_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_withdraw_rate_adjusted_over_capacity_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_withdraw_rate_adjusted_over_withdraw_capacity"),
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
+    )
+}
+
 fn dao_withdrawal_over_capacity_differential_execution() -> Value {
     dao_withdrawal_differential_execution_with_cellscript_probe(
         ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
@@ -3357,6 +3553,50 @@ fn dao_withdrawal_malformed_input_data_differential_execution() -> Value {
         DaoWithdrawalHeaderDepMode::MalformedInputData,
         DAO_WITHDRAWAL_CELLSCRIPT_PROGRAM,
         DAO_WITHDRAWAL_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_missing_witness_input_type_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY,
+        Some("dao_missing_witness_input_type"),
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_empty_witness_input_type_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY,
+        Some("dao_empty_witness_input_type"),
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_short_witness_input_type_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY,
+        Some("dao_short_witness_input_type"),
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_ACTION,
+    )
+}
+
+fn dao_withdrawal_long_witness_input_type_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY,
+        Some("dao_long_witness_input_type"),
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_ACTION,
     )
 }
 
@@ -7495,17 +7735,40 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::MalformedInputData => Bytes::from(vec![0x12, 0x06, 0x00, 0x00]),
         _ => Bytes::from(ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec()),
     };
+    let fixture_rate_maximum_capacity = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY,
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY
+        }
+        _ => ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY,
+    };
+    let fixture_rate_adjusted_max = failure_mode.is_none()
+        && fixture_rate_maximum_capacity != ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY
+        && output_capacity == fixture_rate_maximum_capacity;
     let scenario = match failure_mode {
         Some("dao_missing_withdraw_header") => "dao_missing_withdraw_header",
         Some("dao_missing_deposit_header") => "dao_missing_deposit_header",
         Some("dao_deposit_header_index_out_of_bounds") => "dao_deposit_header_index_out_of_bounds",
         Some("dao_over_withdraw_capacity") => "dao_over_withdraw_capacity",
+        Some("dao_deposit_rate_adjusted_over_withdraw_capacity") => "dao_deposit_rate_adjusted_over_withdraw_capacity",
         Some("dao_wrong_deposit_accumulated_rate") => "dao_wrong_deposit_accumulated_rate",
+        Some("dao_withdraw_rate_adjusted_over_withdraw_capacity") => "dao_withdraw_rate_adjusted_over_withdraw_capacity",
+        Some("dao_wrong_withdraw_accumulated_rate") => "dao_wrong_withdraw_accumulated_rate",
         Some("dao_withdrawal_deposit_data_input") => "dao_withdrawal_deposit_data_input",
         Some("dao_withdrawal_malformed_input_data") => "dao_withdrawal_malformed_input_data",
+        Some("dao_missing_witness_input_type") => "dao_missing_witness_input_type",
+        Some("dao_empty_witness_input_type") => "dao_empty_witness_input_type",
+        Some("dao_short_witness_input_type") => "dao_short_witness_input_type",
+        Some("dao_long_witness_input_type") => "dao_long_witness_input_type",
         Some("dao_wrong_deposit_header_index") => "dao_wrong_deposit_header_index",
         Some("dao_wrong_withdraw_committed_header") => "dao_wrong_withdraw_committed_header",
         Some(_) => "dao_immature_withdrawal",
+        None if header_dep_mode == DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate && fixture_rate_adjusted_max => {
+            "dao_deposit_rate_adjusted_max_withdrawal_capacity"
+        }
+        None if header_dep_mode == DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate && fixture_rate_adjusted_max => {
+            "dao_withdraw_rate_adjusted_max_withdrawal_capacity"
+        }
         None if output_capacity == ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY => "dao_max_withdrawal_capacity",
         None => "dao_mature_withdrawal",
     };
@@ -7520,16 +7783,45 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-out-of-bounds-deposit-header probe"
         }
         Some("dao_over_withdraw_capacity") => {
-            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe"
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
+        }
+        Some("dao_deposit_rate_adjusted_over_withdraw_capacity") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
         }
         Some("dao_wrong_deposit_accumulated_rate") => {
-            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe with explicit deposit-header accumulated_rate check"
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
+        }
+        Some("dao_withdraw_rate_adjusted_over_withdraw_capacity") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
+        }
+        Some("dao_wrong_withdraw_accumulated_rate") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
+        }
+        None
+            if matches!(
+                header_dep_mode,
+                DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
+            ) && fixture_rate_adjusted_max =>
+        {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
         }
         Some("dao_withdrawal_deposit_data_input") => {
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated withdrawal-data classifier probe"
         }
         Some("dao_withdrawal_malformed_input_data") => {
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated malformed withdrawal-data classifier probe"
+        }
+        Some("dao_missing_witness_input_type") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type presence probe"
+        }
+        Some("dao_empty_witness_input_type") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type non-empty probe"
+        }
+        Some("dao_short_witness_input_type") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type width probe"
+        }
+        Some("dao_long_witness_input_type") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type exact-width probe"
         }
         Some("dao_wrong_deposit_header_index") => {
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-deposit-header-witness probe"
@@ -7538,9 +7830,17 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-input-header probe"
         }
         None if output_capacity == ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY => {
-            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe"
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe"
         }
         _ => "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-maturity probe",
+    };
+    let deposit_accumulated_rate = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+        _ => ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+    };
+    let withdraw_accumulated_rate = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+        _ => ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
     };
     let mut output = json!({
         "index": 0,
@@ -7553,13 +7853,51 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
     if failure_mode == Some("dao_over_withdraw_capacity") {
         output["expected_maximum_capacity_shannons"] = json!(ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY);
         output["overdrawn_by_shannons"] = json!(output_capacity - ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY);
+    } else if failure_mode == Some("dao_deposit_rate_adjusted_over_withdraw_capacity")
+        || failure_mode == Some("dao_withdraw_rate_adjusted_over_withdraw_capacity")
+    {
+        output["expected_maximum_capacity_shannons_under_fixture_rate"] = json!(fixture_rate_maximum_capacity);
+        output["overdrawn_by_shannons_under_fixture_rate"] = json!(output_capacity - fixture_rate_maximum_capacity);
+        output["capacity_boundary"] = json!("fixture_rate_plus_one");
+    } else if fixture_rate_adjusted_max {
+        output["expected_maximum_capacity_shannons_under_fixture_rate"] = json!(fixture_rate_maximum_capacity);
+        output["capacity_boundary"] = json!("fixture_rate_exact_maximum");
     } else if failure_mode.is_none() && output_capacity == ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY {
         output["expected_maximum_capacity_shannons"] = json!(ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY);
         output["capacity_boundary"] = json!("exact_maximum");
+    } else if failure_mode == Some("dao_wrong_deposit_accumulated_rate") {
+        output["expected_maximum_capacity_shannons_under_fixture_rate"] =
+            json!(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY);
+        output["overdrawn_by_shannons_under_fixture_rate"] =
+            json!(output_capacity - ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY);
+    } else if failure_mode == Some("dao_wrong_withdraw_accumulated_rate") {
+        output["expected_maximum_capacity_shannons_under_fixture_rate"] =
+            json!(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY);
+        output["overdrawn_by_shannons_under_fixture_rate"] =
+            json!(output_capacity - ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY);
     }
-    let deposit_accumulated_rate = match header_dep_mode {
-        DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
-        _ => ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+    if failure_mode == Some("dao_over_withdraw_capacity")
+        || failure_mode == Some("dao_deposit_rate_adjusted_over_withdraw_capacity")
+        || failure_mode == Some("dao_wrong_deposit_accumulated_rate")
+        || failure_mode == Some("dao_withdraw_rate_adjusted_over_withdraw_capacity")
+        || failure_mode == Some("dao_wrong_withdraw_accumulated_rate")
+        || fixture_rate_adjusted_max
+        || (failure_mode.is_none() && output_capacity == ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY)
+    {
+        output["dao_capacity_compensation"] = json!({
+            "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+            "input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+            "input_occupied_capacity_shannons": ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY,
+            "withdrawable_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY,
+            "withdraw_accumulated_rate": withdraw_accumulated_rate,
+            "deposit_accumulated_rate": deposit_accumulated_rate,
+            "expected_correct_rate_maximum_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY,
+            "expected_fixture_rate_maximum_capacity_shannons": fixture_rate_maximum_capacity
+        });
+    }
+    let withdraw_header_role = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => "withdraw_header_wrong_accumulated_rate",
+        _ => "withdraw_header",
     };
     let deposit_header_role = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => "deposit_header_wrong_accumulated_rate",
@@ -7571,13 +7909,18 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         | DaoWithdrawalHeaderDepMode::MalformedInputData
         | DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds
         | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
+        | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
         | DaoWithdrawalHeaderDepMode::WrongDepositHeaderIndex
-        | DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader => json!([
+        | DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader
+        | DaoWithdrawalHeaderDepMode::MissingWitnessInputType
+        | DaoWithdrawalHeaderDepMode::EmptyWitnessInputType
+        | DaoWithdrawalHeaderDepMode::ShortWitnessInputType
+        | DaoWithdrawalHeaderDepMode::LongWitnessInputType => json!([
             {
                 "index": 0,
-                "role": "withdraw_header",
+                "role": withdraw_header_role,
                 "block_number": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
-                "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+                "accumulated_rate": withdraw_accumulated_rate,
                 "epoch": {
                     "number": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
                     "index": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
@@ -7631,8 +7974,43 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
         DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => 1u64,
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => 1u64,
         DaoWithdrawalHeaderDepMode::WrongDepositHeaderIndex => 0u64,
         DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader => 1u64,
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => 1u64,
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => 1u64,
+    };
+    let witness = match header_dep_mode {
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => json!({
+            "index": 0,
+            "input_type_present": false
+        }),
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => json!({
+            "index": 0,
+            "input_type_present": true,
+            "input_type_bytes": "0x",
+            "input_type_length_bytes": 0
+        }),
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => json!({
+            "index": 0,
+            "input_type_present": true,
+            "input_type_bytes": "0x01",
+            "input_type_length_bytes": 1,
+            "expected_input_type_length_bytes": 8
+        }),
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => json!({
+            "index": 0,
+            "input_type_present": true,
+            "input_type_bytes": "0x010000000000000099",
+            "input_type_length_bytes": 9,
+            "expected_input_type_length_bytes": 8
+        }),
+        _ => json!({
+            "index": 0,
+            "input_type_header_dep_index_le_u64": witness_header_dep_index
+        }),
     };
     let linked_header = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::Present => "withdraw_header",
@@ -7642,8 +8020,13 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => "withdraw_header",
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => "withdraw_header",
         DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate => "withdraw_header",
+        DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate => "withdraw_header_wrong_accumulated_rate",
         DaoWithdrawalHeaderDepMode::WrongDepositHeaderIndex => "withdraw_header",
         DaoWithdrawalHeaderDepMode::WrongWithdrawCommittedHeader => "deposit_header_as_committed_withdraw_header",
+        DaoWithdrawalHeaderDepMode::MissingWitnessInputType => "withdraw_header",
+        DaoWithdrawalHeaderDepMode::EmptyWitnessInputType => "withdraw_header",
+        DaoWithdrawalHeaderDepMode::ShortWitnessInputType => "withdraw_header",
+        DaoWithdrawalHeaderDepMode::LongWitnessInputType => "withdraw_header",
     };
     let input_role = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::DepositDataInput => "deposit_data_dao_cell_spent_as_withdrawal",
@@ -7658,12 +8041,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         "input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
         "cell_deps": ["script_under_test"],
         "header_deps": header_deps,
-        "witnesses": [
-            {
-                "index": 0,
-                "input_type_header_dep_index_le_u64": witness_header_dep_index
-            }
-        ],
+        "witnesses": [witness],
         "inputs": [
             {
                 "index": 0,
@@ -9264,6 +9642,95 @@ fn differential_dao_wrong_deposit_rate_both_reject() {
 }
 
 #[test]
+fn differential_dao_deposit_rate_adjusted_max_both_accept() {
+    let execution = dao_withdrawal_deposit_rate_adjusted_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_deposit_rate_adjusted_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[1]["role"], "deposit_header_wrong_accumulated_rate");
+    assert_eq!(header_deps[1]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY));
+    assert_eq!(output["capacity_boundary"], "fixture_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_DEPOSIT_RATE_ADJUSTED_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_deposit_rate_adjusted_over_capacity_both_reject() {
+    let execution = dao_withdrawal_deposit_rate_adjusted_over_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_deposit_rate_adjusted_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_deposit_rate_adjusted_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[1]["role"], "deposit_header_wrong_accumulated_rate");
+    assert_eq!(header_deps[1]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_OVER_OUTPUT_CAPACITY));
+    assert_eq!(output["overdrawn_by_shannons_under_fixture_rate"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "fixture_rate_plus_one");
+    assert_matrix_execution_matches(DAO_DEPOSIT_RATE_ADJUSTED_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_wrong_withdraw_rate_both_reject() {
+    let execution = dao_withdrawal_wrong_withdraw_rate_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_wrong_withdraw_accumulated_rate");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_wrong_withdraw_accumulated_rate");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[0]["role"], "withdraw_header_wrong_accumulated_rate");
+    assert_eq!(header_deps[0]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["expected_maximum_capacity_shannons_under_fixture_rate"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_matrix_execution_matches(DAO_WRONG_WITHDRAW_RATE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_withdraw_rate_adjusted_max_both_accept() {
+    let execution = dao_withdrawal_withdraw_rate_adjusted_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_withdraw_rate_adjusted_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[0]["role"], "withdraw_header_wrong_accumulated_rate");
+    assert_eq!(header_deps[0]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY));
+    assert_eq!(output["capacity_boundary"], "fixture_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_WITHDRAW_RATE_ADJUSTED_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_withdraw_rate_adjusted_over_capacity_both_reject() {
+    let execution = dao_withdrawal_withdraw_rate_adjusted_over_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_withdraw_rate_adjusted_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_withdraw_rate_adjusted_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[0]["role"], "withdraw_header_wrong_accumulated_rate");
+    assert_eq!(header_deps[0]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY));
+    assert_eq!(output["overdrawn_by_shannons_under_fixture_rate"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "fixture_rate_plus_one");
+    assert_matrix_execution_matches(DAO_WITHDRAW_RATE_ADJUSTED_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
 fn differential_dao_over_withdraw_capacity_both_reject() {
     let execution = dao_withdrawal_over_capacity_differential_execution();
     assert_eq!(execution["failure_mode"], "dao_over_withdraw_capacity");
@@ -9333,6 +9800,63 @@ fn differential_dao_withdrawal_malformed_input_data_both_reject() {
     assert_eq!(execution["original_ickb_status"], "fail");
     assert_eq!(execution["cellscript_status"], "fail");
     assert_matrix_execution_matches(DAO_WITHDRAWAL_MALFORMED_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_missing_witness_input_type_both_reject() {
+    let execution = dao_withdrawal_missing_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_missing_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_missing_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_present"], false);
+    assert_matrix_execution_matches(DAO_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_empty_witness_input_type_both_reject() {
+    let execution = dao_withdrawal_empty_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_empty_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_empty_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_present"], true);
+    assert_eq!(witnesses[0]["input_type_length_bytes"].as_u64(), Some(0));
+    assert_matrix_execution_matches(DAO_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_short_witness_input_type_both_reject() {
+    let execution = dao_withdrawal_short_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_short_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_short_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_present"], true);
+    assert_eq!(witnesses[0]["input_type_length_bytes"].as_u64(), Some(1));
+    assert_eq!(witnesses[0]["expected_input_type_length_bytes"].as_u64(), Some(8));
+    assert_matrix_execution_matches(DAO_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_long_witness_input_type_both_reject() {
+    let execution = dao_withdrawal_long_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_long_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_long_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_present"], true);
+    assert_eq!(witnesses[0]["input_type_length_bytes"].as_u64(), Some(9));
+    assert_eq!(witnesses[0]["expected_input_type_length_bytes"].as_u64(), Some(8));
+    assert_matrix_execution_matches(DAO_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
 }
 
 #[test]

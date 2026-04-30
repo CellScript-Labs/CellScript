@@ -8,7 +8,7 @@ Current status: `NOT_PROVEN` (partial CKB VM execution evidence available).
 The current benchmark has advanced from `MODEL_LEVEL_ONLY` to
 `PARTIAL_CKB_VM_EXECUTION`: CellScript-generated scripts and original iCKB
 ELFs both execute under real CKB VM/syscall context via `ckb-testtool`, and
-sixty-six rows now have original-vs-CellScript pass/fail differential evidence;
+seventy-five rows now have original-vs-CellScript pass/fail differential evidence;
 fourteen additional CellScript-only VM rows provide precursor syscall and
 DAO-maturity evidence, and eight original-side rows now include iCKB Logic plus
 unmodified DAO binary execution.
@@ -110,7 +110,7 @@ Current row counts by evidence level:
 
 - `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
 - `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 66
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
 - `MODEL`: 0
 
 The matrix also carries a `remaining_model_blockers` registry. The test suite
@@ -124,7 +124,7 @@ differential row that already executes the closest chain-level fixture shape.
 For production mode, this registry must be empty; otherwise the gate rejects the
 claim even if all active rows have CKB VM evidence.
 
-The sixty-six differential rows are:
+The seventy-five differential rows are:
 
 1. **Non-empty script args reject**: unpatched original iCKB Logic and a
    generated CellScript ELF both reject the same normalized non-empty type args
@@ -432,6 +432,50 @@ The sixty-six differential rows are:
    and a generated CellScript ELF both reject the same normalized fixture where
    two type-owner cells point to the same lock-owned withdrawal request, with
    named `duplicate_owner_pair` failure mode.
+67. **DAO wrong withdraw accumulated rate reject**: unmodified original DAO ELF
+   and a generated CellScript runtime capacity-compensation probe both reject
+   the same normalized phase-2 withdrawal fixture when the withdraw header
+   accumulated rate is `10000999` instead of `10001000`, causing the correct-rate
+   output capacity to exceed the fixture-rate maximum by `11526` shannons, with
+   named `dao_wrong_withdraw_accumulated_rate` failure mode.
+68. **DAO deposit-rate adjusted max withdrawal capacity**: unmodified original
+   DAO ELF and a generated CellScript runtime capacity-compensation probe both
+   accept the same normalized phase-2 withdrawal fixture when the deposit header
+   accumulated rate is `10000001` and output capacity is exactly the fixture-rate
+   maximum `123468294151`.
+69. **DAO withdraw-rate adjusted max withdrawal capacity**: unmodified original
+   DAO ELF and a generated CellScript runtime capacity-compensation probe both
+   accept the same normalized phase-2 withdrawal fixture when the withdraw header
+   accumulated rate is `10000999` and output capacity is exactly the fixture-rate
+   maximum `123468294152`.
+70. **DAO deposit-rate adjusted over-withdraw capacity reject**: unmodified
+   original DAO ELF and a generated CellScript runtime capacity-compensation
+   probe both reject the same normalized phase-2 withdrawal fixture when the
+   deposit header accumulated rate is `10000001` and output capacity is one
+   shannon above the fixture-rate maximum `123468294151`.
+71. **DAO withdraw-rate adjusted over-withdraw capacity reject**: unmodified
+   original DAO ELF and a generated CellScript runtime capacity-compensation
+   probe both reject the same normalized phase-2 withdrawal fixture when the
+   withdraw header accumulated rate is `10000999` and output capacity is one
+   shannon above the fixture-rate maximum `123468294152`.
+72. **DAO missing witness input_type reject**: unmodified original DAO ELF and a
+   generated CellScript WitnessArgs input_type presence probe both reject the
+   same normalized phase-2 withdrawal fixture when the witness omits
+   `input_type` entirely.
+73. **DAO empty witness input_type reject**: unmodified original DAO ELF and a
+   generated CellScript WitnessArgs input_type non-empty probe both reject the
+   same normalized phase-2 withdrawal fixture when witness `input_type` is
+   present but has zero payload bytes.
+74. **DAO short witness input_type reject**: unmodified original DAO ELF and a
+   generated CellScript WitnessArgs input_type width probe both reject the same
+   normalized phase-2 withdrawal fixture when witness `input_type` is present
+   and non-empty but only one byte long instead of the expected 8-byte
+   little-endian header dep index.
+75. **DAO long witness input_type reject**: unmodified original DAO ELF and a
+   generated CellScript WitnessArgs input_type exact-width probe both reject
+   the same normalized phase-2 withdrawal fixture when witness `input_type` is
+   present but nine bytes long instead of the expected 8-byte little-endian
+   header dep index.
 
 No model-level rows remain as active benchmark coverage entries. Legacy model
 rows whose scenarios now have fixture-bound differential coverage were removed
@@ -453,16 +497,16 @@ execution evidence fails the test suite.
 
 ## What Still Blocks Equivalence
 
-- Sixty-six normalized fixtures have full original-vs-CellScript differential
+- Seventy-five normalized fixtures have full original-vs-CellScript differential
   execution evidence.
 - DAO hash patching is used for original iCKB Logic in the current test
   environment and is recorded in each differential execution object. This is
   functional evidence under controlled script identity, not mainnet identity
   reconstruction.
-- DAO header dep lineage, maturity, occupied capacity, witness parsing, and
-  cell dep substitution are still partly modelled instead of byte-accurately
-  executed; the missing-header-dep row only covers one concrete receipt input
-  header omission case.
+- Selected DAO phase-2 lineage, maturity, occupied capacity, rate, witness
+  input_type, and cell dep substitution paths now have byte-accurate execution
+  rows; full multi-input DAO redeem accounting and production fixture manifest
+  closure still remain outside the proven subset.
 - Mint from receipt, amount inflation, amount deflation, wrong xUDT args, wrong
   accumulated rate, and missing header dep now have partial receipt/xUDT
   differential evidence, but full receipt byte decoding and aggregate
@@ -478,8 +522,8 @@ execution evidence fails the test suite.
   CKB-to-UDT underpayment rejection, CKB-to-UDT wrong-asset rejection,
   CKB-to-UDT insufficient-match rejection, CKB-to-UDT no-CKB-paid rejection,
   and UDT-decreased rejection now have fixture-bound differential VM evidence,
-  but full action-aware MetaPoint/OutPoint map and full first-class `Script`
-  equality semantics remain open.
+  but full action-aware MetaPoint/OutPoint map remains open. First-class
+  `Script` equality semantics are explicitly scoped to 0.18, not the 0.17 gate.
 - Owned-Owner relative-distance pairing now has input-side and output-side pass
   rows plus input-side and output-side mismatch reject rows, with original DAO
   hash patched to a shared auxiliary withdrawal type hash for ckb-testtool where
@@ -502,7 +546,7 @@ execution evidence fails the test suite.
   reject row covers the same cardinality failure on the output side. These still
   do not cover full
   synthetic wrong-owner resource fields or complete first-class MetaPoint map
-  behaviour.
+  behaviour. First-class Script API work is tracked separately as 0.18 scope.
 - Wrong owner and immature redeem are no longer active model rows. They are
   recorded as non-executable model assumptions with replacement differential
   evidence for the executable Owned-Owner and DAO maturity fixture shapes.

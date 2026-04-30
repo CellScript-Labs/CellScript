@@ -21,7 +21,7 @@ Current row counts:
 
 - `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
 - `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 66
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
 - `MODEL`: 0
 
 The top-level `remaining_model_blockers` registry is now empty, and the test
@@ -108,15 +108,24 @@ creation remains original-side only.
 | wrong accumulated rate original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | wrong_accumulated_rate |
 | missing header dep original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | missing_header_dep |
 | DAO mature withdrawal original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 7840 | n/a |
-| DAO max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 12374 | n/a |
+| DAO max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
+| DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
+| DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
 | DAO immature withdrawal original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_incorrect_since |
+| DAO deposit-rate adjusted over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_deposit_rate_adjusted_over_withdraw_capacity |
+| DAO withdraw-rate adjusted over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_withdraw_rate_adjusted_over_withdraw_capacity |
 | DAO wrong deposit accumulated rate original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_wrong_deposit_accumulated_rate |
+| DAO wrong withdraw accumulated rate original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_wrong_withdraw_accumulated_rate |
 | DAO over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_over_withdraw_capacity |
 | DAO missing withdraw header original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_missing_withdraw_header |
 | DAO missing deposit header original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_missing_deposit_header |
 | DAO deposit header index out of bounds original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_deposit_header_index_out_of_bounds |
 | DAO withdrawal deposit-data input original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_withdrawal_deposit_data_input |
 | DAO withdrawal malformed input data original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_withdrawal_malformed_input_data |
+| DAO missing witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_missing_witness_input_type |
+| DAO empty witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_empty_witness_input_type |
+| DAO short witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_short_witness_input_type |
+| DAO long witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_long_witness_input_type |
 | DAO wrong deposit header index original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_wrong_deposit_header_index |
 | DAO wrong withdraw committed header original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_wrong_withdraw_committed_header |
 | valid limit order original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 60243 | pass / 11144 | n/a |
@@ -210,10 +219,23 @@ probe, and sets output capacity to the observed original DAO boundary
 shape but sets output capacity to `123468305679`, one shannon above that
 observed boundary; original DAO rejects with exit `-15`, while the CellScript
 capacity probe rejects with exit `48` under `dao_over_withdraw_capacity`. The
+deposit-rate adjusted max row changes the deposit header accumulated rate from
+`10000000` to `10000001` and sets output capacity to the fixture-rate maximum
+`123468294151`; both sides pass. The withdraw-rate adjusted max row changes the
+withdraw header accumulated rate from `10001000` to `10000999` and sets output
+capacity to the fixture-rate maximum `123468294152`; both sides pass. The
+deposit-rate adjusted over row sets output capacity to `123468294152`, one
+shannon above the deposit fixture-rate maximum; both sides reject. The
+withdraw-rate adjusted over row sets output capacity to `123468294153`, one
+shannon above the withdraw fixture-rate maximum; both sides reject. The
 wrong-deposit-rate row keeps the output at `123468305678` but changes the
 deposit header accumulated rate from `10000000` to `10000001`; original DAO
 rejects with exit `-15`, while the CellScript rate/capacity probe rejects with
-exit `41` under `dao_wrong_deposit_accumulated_rate`. The missing
+exit `48` under `dao_wrong_deposit_accumulated_rate`. The wrong-withdraw-rate
+row keeps the output at `123468305678` but changes the withdraw header
+accumulated rate from `10001000` to `10000999`; original DAO rejects with exit
+`-15`, while the CellScript rate/capacity probe rejects with exit `48` under
+`dao_wrong_withdraw_accumulated_rate`. The missing
 withdraw-header row keeps mature since, the deposit header, witness
 `input_type = 0`, and the same output capacity, but omits the withdraw header
 dep required by the input's committed header; original DAO rejects with exit
@@ -244,6 +266,13 @@ classifier probe rejects with exit `34` under
 same mature/header/witness shape but shortens input data to `0x12060000`;
 original DAO rejects with exit `-4`, while the CellScript classifier probe
 rejects with exit `34` under `dao_withdrawal_malformed_input_data`.
+The missing-witness-input_type, empty-witness-input_type, short-witness-input_type,
+and long-witness-input_type rows keep the same mature/header/data/output shape
+but omit WitnessArgs `input_type`, provide it with zero payload bytes, provide
+only one non-zero byte, or provide nine bytes instead of the expected 8-byte
+little-endian header dep index. Original DAO rejects all four with exit `-11`;
+CellScript rejects the missing/empty rows with exit `42` and the width rows with
+exit `43`.
 The mint-family rows use an input iCKB receipt cell, the original xUDT binary
 with `Data1` hash type, owner-mode args, and a header-linked input accumulated
 rate. The pass, amount-inflation, amount-deflation, wrong-rate, and
@@ -289,8 +318,8 @@ below `ckb_min_match = 64`, so both scripts reject the same reverse-direction
 min-fill violation. The UDT-to-CKB underpayment row consumes the full
 10,000,000,000 UDT fill but only pays 5,000,000,000 CKB into the output order,
 so both scripts reject the same reverse-direction value-shortfall fixture. Full
-first-class action-aware MetaPoint map and full `Script` equality semantics
-remain open.
+first-class action-aware MetaPoint map remains open. Full `Script` equality
+semantics move to the 0.18 ScriptRef/ScriptArgs track.
 
 The Owned-Owner rows use the original `owned_owner` binary and generated
 CellScript ELFs on lock-owned/type-owner fixture shapes. The input valid row
@@ -471,7 +500,7 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
 
 ## What Still Blocks Full Differential Equivalence
 
-- Sixty-six normalized fixtures have full original-vs-CellScript CKB VM
+- Seventy-five normalized fixtures have full original-vs-CellScript CKB VM
   differential evidence.
 - DAO hash patching is still a test-environment bridge and must remain
   explicitly recorded; it is not mainnet identity reconstruction.
@@ -496,7 +525,11 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
   second-withdrawal request/deposit/header binding, computed multi-cell iCKB
   mint-side receipt/deposit/DAO aggregate lowering, and native action-aware
   MetaPoint map semantics for a true CKB VM differential test.
-- Generic witness/Molecule parser and first-class Script API are still missing.
+- Generic witness/Molecule parsing is implemented and now has protocol-neutral
+  CKB VM coverage plus DAO witness input_type differential reject rows; the
+  remaining language-surface gap is first-class read-only ScriptRef/ScriptArgs.
+  That topic is explicitly deferred to CellScript 0.18 and is not a 0.17
+  differential blocker.
 
 ## Next Differential Step
 
@@ -508,8 +541,10 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
    fixture adds real owner-auth bytes or redeem aggregate fields that both
    original iCKB and CellScript can execute.
 
-3. **Implement generic Molecule/WitnessArgs parser** (protocol-neutral, in
-   `src/`) and first-class `Script` type to support authorization patterns.
+3. **Defer first-class Script API to 0.18**. The 0.17 line keeps helper-level
+   Script checks; 0.18 should add read-only ScriptRef/ScriptArgs to collapse
+   helper fragmentation without arbitrary Script construction, deploy manifest
+   resolution, or TYPE_ID constructors.
 
 Until every selected scenario has matching original-vs-CellScript CKB VM
 execution evidence, equivalence must not be claimed.

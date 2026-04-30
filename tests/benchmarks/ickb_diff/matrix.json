@@ -30,7 +30,9 @@
       "replacement_evidence": "differential: DAO immature withdrawal original vs CellScript agree"
     }
   ],
-  "remaining_model_blockers": [],
+  "remaining_model_blockers": [
+
+  ],
   "required_evidence_for_equivalence": [
     "original_ickb_repo_commit",
     "original_ickb_script_binary_sha256",
@@ -342,8 +344,12 @@
           ],
           "script_under_test_difference": "only code cell and script hashes differ between original iCKB and CellScript",
           "input_capacity_shannons": 100000000000,
-          "cell_deps": [],
-          "header_deps": [],
+          "cell_deps": [
+
+          ],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -416,7 +422,9 @@
           "cell_deps": [
             "dao"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -498,7 +506,9 @@
           "cell_deps": [
             "dao"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -581,7 +591,9 @@
           "cell_deps": [
             "dao"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -658,8 +670,12 @@
           ],
           "script_under_test_difference": "only code cell and script hashes differ between original iCKB and CellScript",
           "input_capacity_shannons": 200000000000,
-          "cell_deps": [],
-          "header_deps": [],
+          "cell_deps": [
+
+          ],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -734,7 +750,9 @@
           "cell_deps": [
             "dao"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -1057,7 +1075,9 @@
           "cell_deps": [
             "xudt"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -2329,7 +2349,9 @@
           "cell_deps": [
             "xudt"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -2489,10 +2511,10 @@
       "original_ickb_executed": true,
       "full_differential": true,
       "failure_mode": null,
-      "note": "Both the unmodified original DAO ELF and a generated CellScript capacity upper-bound probe accept the same normalized phase-2 withdrawal fixture when output capacity is exactly the observed DAO maximum 123468305678 shannons; this covers the selected capacity boundary, not full generic DAO rate recomputation",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe accept the same normalized phase-2 withdrawal fixture when output capacity is exactly the observed DAO maximum 123468305678 shannons; this covers the selected capacity boundary with runtime formula evaluation, not full generic DAO aggregation",
       "execution": {
-        "fixture_sha256": "0x0a9026164e93abcd42746cfc791fe4c8fdd395c5a150be82011beea15fd216ab",
-        "normalized_fixture_sha256": "0x0a9026164e93abcd42746cfc791fe4c8fdd395c5a150be82011beea15fd216ab",
+        "fixture_sha256": "0xe96d227b05071da42931c27649c51f7947f7dfdc5bef28175da2f99f07bec28c",
+        "normalized_fixture_sha256": "0xe96d227b05071da42931c27649c51f7947f7dfdc5bef28175da2f99f07bec28c",
         "transaction_context_sha256": {
           "original": "0xf12b44d84aa81a1388e3a81f5c80c9318b70f71a646b73cf87de0acf931b7dcc",
           "cellscript": "0xe154fd2ed5a1908f33bc2b82660fabf21b15bc019f13528b8f01338ce07d86d1"
@@ -2500,7 +2522,7 @@
         "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_ickb_binary_patched": false,
-        "cellscript_artifact_sha256": "0x1cd64da5641802a0d2798dbbe909ce7b79ce00d9bec612b52013124dd9ce24bc",
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
         "original_ickb_exit_code": 0,
         "cellscript_exit_code": 0,
@@ -2508,7 +2530,7 @@
         "cellscript_status": "pass",
         "statuses_match": true,
         "original_cycles": 14301,
-        "cellscript_cycles": 12374,
+        "cellscript_cycles": 15038,
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
           "original": 375,
@@ -2525,7 +2547,7 @@
           "script_under_test_roles": [
             "input_0_type"
           ],
-          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe",
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
           "input_capacity_shannons": 123456780000,
           "cell_deps": [
             "script_under_test"
@@ -2583,11 +2605,511 @@
               "type": null,
               "data": "0x",
               "expected_maximum_capacity_shannons": 123468305678,
-              "capacity_boundary": "exact_maximum"
+              "capacity_boundary": "exact_maximum",
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10001000,
+                "deposit_accumulated_rate": 10000000,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468305678
+              }
             }
           ],
           "expected_status": "pass",
           "failure_mode": null
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree",
+      "original_ickb_expected": "pass",
+      "cellscript_expected": "pass",
+      "result": "differential-agree-pass",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": null,
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe accept the same normalized phase-2 withdrawal fixture when deposit header accumulated_rate is 10000001 and output capacity is exactly the fixture-rate maximum 123468294151 shannons",
+      "execution": {
+        "fixture_sha256": "0xa71501049ca412093194cf7721dc9803c4f9b8de849a6f61e92fe3c95e021ab7",
+        "normalized_fixture_sha256": "0xa71501049ca412093194cf7721dc9803c4f9b8de849a6f61e92fe3c95e021ab7",
+        "transaction_context_sha256": {
+          "original": "0xc299ddb7681725eedb0a67ba7b0f5a00a176aec106a0906212a0fe39ee55788e",
+          "cellscript": "0x9e87d5649297431c78be315bcd9fb5b495fcf5fdbc7736a14bf48c7c458511e8"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": 0,
+        "cellscript_exit_code": 0,
+        "original_ickb_status": "pass",
+        "cellscript_status": "pass",
+        "statuses_match": true,
+        "original_cycles": 14301,
+        "cellscript_cycles": 15038,
+        "tx_size_bytes": 375,
+        "tx_size_bytes_by_side": {
+          "original": 375,
+          "cellscript": 375
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": null,
+        "original_error": null,
+        "cellscript_error": null,
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_deposit_rate_adjusted_max_withdrawal_capacity",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header_wrong_accumulated_rate",
+              "block_number": 1554,
+              "accumulated_rate": 10000001,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_header_dep_index_le_u64": 1
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468294151,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294151,
+              "capacity_boundary": "fixture_rate_exact_maximum",
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10001000,
+                "deposit_accumulated_rate": 10000001,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294151
+              }
+            }
+          ],
+          "expected_status": "pass",
+          "failure_mode": null
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree",
+      "original_ickb_expected": "pass",
+      "cellscript_expected": "pass",
+      "result": "differential-agree-pass",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": null,
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe accept the same normalized phase-2 withdrawal fixture when withdraw header accumulated_rate is 10000999 and output capacity is exactly the fixture-rate maximum 123468294152 shannons",
+      "execution": {
+        "fixture_sha256": "0xe429115753d68646c41d9cc1996dd54fa0b6a4eea7a66a9fa7c58571ee06edfe",
+        "normalized_fixture_sha256": "0xe429115753d68646c41d9cc1996dd54fa0b6a4eea7a66a9fa7c58571ee06edfe",
+        "transaction_context_sha256": {
+          "original": "0x8b27a2495b1c6caff68f6ba612f88cd7246b77826b996631e00398cf197e290c",
+          "cellscript": "0x124204563326c8151b3410cd11c71dcac66d4643b95b258d65c555f21a3e08e2"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": 0,
+        "cellscript_exit_code": 0,
+        "original_ickb_status": "pass",
+        "cellscript_status": "pass",
+        "statuses_match": true,
+        "original_cycles": 14301,
+        "cellscript_cycles": 15038,
+        "tx_size_bytes": 375,
+        "tx_size_bytes_by_side": {
+          "original": 375,
+          "cellscript": 375
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": null,
+        "original_error": null,
+        "cellscript_error": null,
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_withdraw_rate_adjusted_max_withdrawal_capacity",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header_wrong_accumulated_rate",
+              "block_number": 2000610,
+              "accumulated_rate": 10000999,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_header_dep_index_le_u64": 1
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header_wrong_accumulated_rate",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468294152,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294152,
+              "capacity_boundary": "fixture_rate_exact_maximum",
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10000999,
+                "deposit_accumulated_rate": 10000000,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294152
+              }
+            }
+          ],
+          "expected_status": "pass",
+          "failure_mode": null
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO deposit-rate adjusted over-withdraw capacity original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_deposit_rate_adjusted_over_withdraw_capacity",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe reject the same normalized phase-2 withdrawal fixture when deposit header accumulated_rate is 10000001 and output capacity is one shannon above the fixture-rate maximum 123468294151 shannons",
+      "execution": {
+        "fixture_sha256": "0x8565376f2f0c0ec0a158fbe5bc23f4372769db3dbbbee40d823da6dc054fcb07",
+        "normalized_fixture_sha256": "0x8565376f2f0c0ec0a158fbe5bc23f4372769db3dbbbee40d823da6dc054fcb07",
+        "transaction_context_sha256": {
+          "original": "0x7ca757ff371d5a1486d9c0009f7a348820a484beddcb28a3c767df86e9127965",
+          "cellscript": "0x7f488ea635006919dd6aac1feb8f0dc89611b1147eac70b452228459fb1fdb93"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -15,
+        "cellscript_exit_code": 48,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 375,
+        "tx_size_bytes_by_side": {
+          "original": 375,
+          "cellscript": 375
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_deposit_rate_adjusted_over_withdraw_capacity",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -15 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-15 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38de6ef3bf62c01137160bb2f08c0f511a7a9504241fceea356733410b20fded.html#48 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_deposit_rate_adjusted_over_withdraw_capacity",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header_wrong_accumulated_rate",
+              "block_number": 1554,
+              "accumulated_rate": 10000001,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_header_dep_index_le_u64": 1
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468294152,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294151,
+              "overdrawn_by_shannons_under_fixture_rate": 1,
+              "capacity_boundary": "fixture_rate_plus_one",
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10001000,
+                "deposit_accumulated_rate": 10000001,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294151
+              }
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_deposit_rate_adjusted_over_withdraw_capacity"
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO withdraw-rate adjusted over-withdraw capacity original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_withdraw_rate_adjusted_over_withdraw_capacity",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe reject the same normalized phase-2 withdrawal fixture when withdraw header accumulated_rate is 10000999 and output capacity is one shannon above the fixture-rate maximum 123468294152 shannons",
+      "execution": {
+        "fixture_sha256": "0x3c8227d2d397d74532072b35dfed385ab8e52f6faed117d1233226c6493ce503",
+        "normalized_fixture_sha256": "0x3c8227d2d397d74532072b35dfed385ab8e52f6faed117d1233226c6493ce503",
+        "transaction_context_sha256": {
+          "original": "0xbefc088c491199600e122112ddeee319adbb17e4f0adc8cc49559f79c4b4f073",
+          "cellscript": "0x91a42da1ec94998db81d83d7d87df16d3e764773197f84587ce339b3510e6279"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -15,
+        "cellscript_exit_code": 48,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 375,
+        "tx_size_bytes_by_side": {
+          "original": 375,
+          "cellscript": 375
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_withdraw_rate_adjusted_over_withdraw_capacity",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -15 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-15 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38de6ef3bf62c01137160bb2f08c0f511a7a9504241fceea356733410b20fded.html#48 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_withdraw_rate_adjusted_over_withdraw_capacity",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header_wrong_accumulated_rate",
+              "block_number": 2000610,
+              "accumulated_rate": 10000999,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_header_dep_index_le_u64": 1
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header_wrong_accumulated_rate",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468294153,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294152,
+              "overdrawn_by_shannons_under_fixture_rate": 1,
+              "capacity_boundary": "fixture_rate_plus_one",
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10000999,
+                "deposit_accumulated_rate": 10000000,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294152
+              }
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_withdraw_rate_adjusted_over_withdraw_capacity"
         }
       }
     },
@@ -2711,10 +3233,10 @@
       "original_ickb_executed": true,
       "full_differential": true,
       "failure_mode": "dao_wrong_deposit_accumulated_rate",
-      "note": "Both the unmodified original DAO ELF and a generated CellScript capacity/rate probe reject the same normalized phase-2 withdrawal fixture when the deposit header accumulated_rate is 10000001 instead of 10000000 while output capacity remains at the observed correct-rate maximum",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation probe reject the same normalized phase-2 withdrawal fixture when the deposit header accumulated_rate is 10000001 instead of 10000000 while output capacity remains at the observed correct-rate maximum",
       "execution": {
-        "fixture_sha256": "0xc9de26ca9d7155620d500190ec89943a5ebed4d67cd6bd961c634583596bba34",
-        "normalized_fixture_sha256": "0xc9de26ca9d7155620d500190ec89943a5ebed4d67cd6bd961c634583596bba34",
+        "fixture_sha256": "0xfa24073c487b7232ef3b5438cd5b14e5ac59ca275fb44582cedc83f3df1df102",
+        "normalized_fixture_sha256": "0xfa24073c487b7232ef3b5438cd5b14e5ac59ca275fb44582cedc83f3df1df102",
         "transaction_context_sha256": {
           "original": "0x41251d2a5451d6a464ea0b3d34e61320d7bea9949f99f4df068bd59ae6977bb6",
           "cellscript": "0x56d4ea57806ce8687752546c96cce6fa7e215fed949326e0c5b8c46366bbf2d5"
@@ -2722,10 +3244,10 @@
         "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_ickb_binary_patched": false,
-        "cellscript_artifact_sha256": "0x1cd64da5641802a0d2798dbbe909ce7b79ce00d9bec612b52013124dd9ce24bc",
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
         "original_ickb_exit_code": -15,
-        "cellscript_exit_code": 41,
+        "cellscript_exit_code": 48,
         "original_ickb_status": "fail",
         "cellscript_status": "fail",
         "statuses_match": true,
@@ -2740,14 +3262,14 @@
         "fee_shannons": 0,
         "failure_mode": "dao_wrong_deposit_accumulated_rate",
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -15 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-15 } }",
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 41 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/81f6505c4f9b5db2cb9dc4311c32058281e46837903b8f9d62614199180819ea.html#41 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38de6ef3bf62c01137160bb2f08c0f511a7a9504241fceea356733410b20fded.html#48 } }",
         "normalized_fixture": {
           "schema": "cellscript-ickb-normalized-fixture-v1",
           "scenario": "dao_wrong_deposit_accumulated_rate",
           "script_under_test_roles": [
             "input_0_type"
           ],
-          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe with explicit deposit-header accumulated_rate check",
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
           "input_capacity_shannons": 123456780000,
           "cell_deps": [
             "script_under_test"
@@ -2803,11 +3325,145 @@
               "capacity_shannons": 123468305678,
               "lock": "always_success",
               "type": null,
-              "data": "0x"
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294151,
+              "overdrawn_by_shannons_under_fixture_rate": 11527,
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10001000,
+                "deposit_accumulated_rate": 10000001,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294151
+              }
             }
           ],
           "expected_status": "fail",
           "failure_mode": "dao_wrong_deposit_accumulated_rate"
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO wrong withdraw accumulated rate original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_wrong_withdraw_accumulated_rate",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation probe reject the same normalized phase-2 withdrawal fixture when the withdraw header accumulated_rate is 10000999 instead of 10001000 while output capacity remains at the observed correct-rate maximum",
+      "execution": {
+        "fixture_sha256": "0x2318bdf89f7f0e2821d14627cf6bfe99cdc6ad3878f0a86de857fc23dd8c3dba",
+        "normalized_fixture_sha256": "0x2318bdf89f7f0e2821d14627cf6bfe99cdc6ad3878f0a86de857fc23dd8c3dba",
+        "transaction_context_sha256": {
+          "original": "0xb597d1a7ee1726d8fc86bd27e9dbd3e9d0238f1e2190c7e4be86a67f6e1fe57f",
+          "cellscript": "0x763396f40ab455a59b3008517ae1d4755734cfc6b6a092122c73f9716ee3fcaa"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -15,
+        "cellscript_exit_code": 48,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 375,
+        "tx_size_bytes_by_side": {
+          "original": 375,
+          "cellscript": 375
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_wrong_withdraw_accumulated_rate",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -15 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-15 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38de6ef3bf62c01137160bb2f08c0f511a7a9504241fceea356733410b20fded.html#48 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_wrong_withdraw_accumulated_rate",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header_wrong_accumulated_rate",
+              "block_number": 2000610,
+              "accumulated_rate": 10000999,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_header_dep_index_le_u64": 1
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header_wrong_accumulated_rate",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468305678,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x",
+              "expected_maximum_capacity_shannons_under_fixture_rate": 123468294152,
+              "overdrawn_by_shannons_under_fixture_rate": 11526,
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10000999,
+                "deposit_accumulated_rate": 10000000,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468294152
+              }
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_wrong_withdraw_accumulated_rate"
         }
       }
     },
@@ -2821,10 +3477,10 @@
       "original_ickb_executed": true,
       "full_differential": true,
       "failure_mode": "dao_over_withdraw_capacity",
-      "note": "Both the unmodified original DAO ELF and a generated CellScript capacity upper-bound probe reject the same normalized phase-2 withdrawal fixture when output capacity is one shannon above the observed DAO maximum 123468305678 shannons; status and failure mode match while numeric exit codes differ by implementation",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript DAO occupied-capacity plus rate-compensation upper-bound probe reject the same normalized phase-2 withdrawal fixture when output capacity is one shannon above the observed DAO maximum 123468305678 shannons; status and failure mode match while numeric exit codes differ by implementation",
       "execution": {
-        "fixture_sha256": "0x1c5ada4f64c57fa668082486cd88d3a96911d05d4d4f9f2fb089688dc6aea2f2",
-        "normalized_fixture_sha256": "0x1c5ada4f64c57fa668082486cd88d3a96911d05d4d4f9f2fb089688dc6aea2f2",
+        "fixture_sha256": "0xa3a6ce7a1feee2c07fbfd42c769237467c26fe70fd5830b559360292f82c65de",
+        "normalized_fixture_sha256": "0xa3a6ce7a1feee2c07fbfd42c769237467c26fe70fd5830b559360292f82c65de",
         "transaction_context_sha256": {
           "original": "0x94185efaad3f35aec8f5926f71550e143ad10de560f09cbde319b0a77ad049f2",
           "cellscript": "0xd0680527dd457d9677071ada1914e4d856e9982a2452be5ef001dd3acd1e4572"
@@ -2832,7 +3488,7 @@
         "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_ickb_binary_patched": false,
-        "cellscript_artifact_sha256": "0x1cd64da5641802a0d2798dbbe909ce7b79ce00d9bec612b52013124dd9ce24bc",
+        "cellscript_artifact_sha256": "0x43c36c1f1abfda36dc141502410a4bab8dde23e0995bb1b7e28473a2a6cf1e11",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
         "original_ickb_exit_code": -15,
         "cellscript_exit_code": 48,
@@ -2850,14 +3506,14 @@
         "fee_shannons": 0,
         "failure_mode": "dao_over_withdraw_capacity",
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -15 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-15 } }",
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/81f6505c4f9b5db2cb9dc4311c32058281e46837903b8f9d62614199180819ea.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38de6ef3bf62c01137160bb2f08c0f511a7a9504241fceea356733410b20fded.html#48 } }",
         "normalized_fixture": {
           "schema": "cellscript-ickb-normalized-fixture-v1",
           "scenario": "dao_over_withdraw_capacity",
           "script_under_test_roles": [
             "input_0_type"
           ],
-          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated since-plus-header-plus-output-capacity upper-bound probe",
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated DAO occupied-capacity plus rate-compensation upper-bound probe",
           "input_capacity_shannons": 123456780000,
           "cell_deps": [
             "script_under_test"
@@ -2915,7 +3571,17 @@
               "type": null,
               "data": "0x",
               "expected_maximum_capacity_shannons": 123468305678,
-              "overdrawn_by_shannons": 1
+              "overdrawn_by_shannons": 1,
+              "dao_capacity_compensation": {
+                "formula": "occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate)",
+                "input_capacity_shannons": 123456780000,
+                "input_occupied_capacity_shannons": 8200000000,
+                "withdrawable_capacity_shannons": 115256780000,
+                "withdraw_accumulated_rate": 10001000,
+                "deposit_accumulated_rate": 10000000,
+                "expected_correct_rate_maximum_capacity_shannons": 123468305678,
+                "expected_fixture_rate_maximum_capacity_shannons": 123468305678
+              }
             }
           ],
           "expected_status": "fail",
@@ -3452,6 +4118,454 @@
       }
     },
     {
+      "scenario": "differential: DAO missing witness input_type original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_missing_witness_input_type",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript WitnessArgs input_type presence probe reject the same normalized phase-2 withdrawal fixture when withdraw/deposit headers, mature since, withdrawal data, and output capacity remain valid but the witness omits input_type entirely.",
+      "execution": {
+        "fixture_sha256": "0xd42e24217cf452d4ac450489b989fb6b0753e782da5e113e86dc99717c2c43e5",
+        "normalized_fixture_sha256": "0xd42e24217cf452d4ac450489b989fb6b0753e782da5e113e86dc99717c2c43e5",
+        "transaction_context_sha256": {
+          "original": "0x3b42d6abdbbe444bd18ec82f79f0957dcf658886950af073be3b87c6a65806e3",
+          "cellscript": "0x4664ad65515d0464d2ccb664143d55d245dca4a1a5c295f10f8581acf9e6665f"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0xf4a25bd48793d7bd2a5c99ec723ceadc4d8cf2e263825158f61d74a69fe13276",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -11,
+        "cellscript_exit_code": 42,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 363,
+        "tx_size_bytes_by_side": {
+          "original": 363,
+          "cellscript": 363
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_missing_witness_input_type",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -11 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-11 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/52cae96d35f76f56f20491c5b055b0ede6488e7afa89f6cffafc6ad3b5d1b958.html#42 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_missing_witness_input_type",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type presence probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_present": false
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468105678,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x"
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_missing_witness_input_type"
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO empty witness input_type original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_empty_witness_input_type",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript WitnessArgs input_type non-empty probe reject the same normalized phase-2 withdrawal fixture when withdraw/deposit headers, mature since, withdrawal data, and output capacity remain valid but witness input_type is present with zero payload bytes.",
+      "execution": {
+        "fixture_sha256": "0x99b2c530d6ac7027f16690627021473bd4c3b251868e4cc95a5748b49a7fc321",
+        "normalized_fixture_sha256": "0x99b2c530d6ac7027f16690627021473bd4c3b251868e4cc95a5748b49a7fc321",
+        "transaction_context_sha256": {
+          "original": "0xa6e52352d56970a80477d56ae7aa76fd7e9e3c6f2ba524061ddce0be595a0685",
+          "cellscript": "0xcff2662290d2b51eeece2068f1314aa1d8951d089caf6bb6a91472165ba71e4f"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0xf4a25bd48793d7bd2a5c99ec723ceadc4d8cf2e263825158f61d74a69fe13276",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -11,
+        "cellscript_exit_code": 42,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 367,
+        "tx_size_bytes_by_side": {
+          "original": 367,
+          "cellscript": 367
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_empty_witness_input_type",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -11 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-11 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/52cae96d35f76f56f20491c5b055b0ede6488e7afa89f6cffafc6ad3b5d1b958.html#42 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_empty_witness_input_type",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type non-empty probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_bytes": "0x",
+              "input_type_length_bytes": 0,
+              "input_type_present": true
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468105678,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x"
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_empty_witness_input_type"
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO short witness input_type original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_short_witness_input_type",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript WitnessArgs input_type width probe reject the same normalized phase-2 withdrawal fixture when witness input_type is present and non-empty but only one byte long instead of the expected 8-byte little-endian header dep index.",
+      "execution": {
+        "fixture_sha256": "0x4c2a5ba870273edb9071a3fd5ac28fe77240705a125b5c43bc63e7754f741dd5",
+        "normalized_fixture_sha256": "0x4c2a5ba870273edb9071a3fd5ac28fe77240705a125b5c43bc63e7754f741dd5",
+        "transaction_context_sha256": {
+          "original": "0xb14a4d8444a600f344cc976d38c700473d21c46f1c2e6ae0b8fb175e9f30b027",
+          "cellscript": "0x9afd5da236fd6284710bfd432abed0c99c6c2ab00d5f4442264364e428f64525"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0xc799ccd4e3aaa9acb2fc6bfcea13ada731b2f6a5bc6219a77826c4fcebf0a0ca",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -11,
+        "cellscript_exit_code": 43,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 368,
+        "tx_size_bytes_by_side": {
+          "original": 368,
+          "cellscript": 368
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_short_witness_input_type",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -11 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-11 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/8b9d2a0720bd150631f9bf78135d657a0258cfe6f646c0b14e8fc1c1823d6407.html#43 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_short_witness_input_type",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type width probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_present": true,
+              "input_type_bytes": "0x01",
+              "input_type_length_bytes": 1,
+              "expected_input_type_length_bytes": 8
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468105678,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x"
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_short_witness_input_type"
+        }
+      }
+    },
+    {
+      "scenario": "differential: DAO long witness input_type original vs CellScript agree",
+      "original_ickb_expected": "fail",
+      "cellscript_expected": "fail",
+      "result": "differential-agree-fail",
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "ckb_vm_execution": true,
+      "original_ickb_executed": true,
+      "full_differential": true,
+      "failure_mode": "dao_long_witness_input_type",
+      "note": "Both the unmodified original DAO ELF and a generated CellScript WitnessArgs input_type exact-width probe reject the same normalized phase-2 withdrawal fixture when witness input_type is present but nine bytes long instead of the expected 8-byte little-endian header dep index.",
+      "execution": {
+        "fixture_sha256": "0xb3a5f4c598f40c1696b0611f4d886dc22a4eb5c5064aa0e801cb013f7e922456",
+        "normalized_fixture_sha256": "0xb3a5f4c598f40c1696b0611f4d886dc22a4eb5c5064aa0e801cb013f7e922456",
+        "transaction_context_sha256": {
+          "original": "0xee3ce5ba6a06e226e8e6bbdda5361154ff2cc430fcd7b6dcdf5f491ec51bb999",
+          "cellscript": "0xd2e2479c0bee8fa8ca5901dd4e24032183027a8772ea291ad7d0d9cc535d0de8"
+        },
+        "original_ickb_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": "0xc799ccd4e3aaa9acb2fc6bfcea13ada731b2f6a5bc6219a77826c4fcebf0a0ca",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "original_ickb_exit_code": -11,
+        "cellscript_exit_code": 43,
+        "original_ickb_status": "fail",
+        "cellscript_status": "fail",
+        "statuses_match": true,
+        "original_cycles": 0,
+        "cellscript_cycles": 0,
+        "tx_size_bytes": 376,
+        "tx_size_bytes_by_side": {
+          "original": 376,
+          "cellscript": 376
+        },
+        "occupied_capacity_shannons": 4100000000,
+        "fee_shannons": 0,
+        "failure_mode": "dao_long_witness_input_type",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code -11 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8dd5e7795fb41d9b59ab104661a0e54d609508f4c89b0365bf4077430ef695d.html#-11 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/8b9d2a0720bd150631f9bf78135d657a0258cfe6f646c0b14e8fc1c1823d6407.html#43 } }",
+        "normalized_fixture": {
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "scenario": "dao_long_witness_input_type",
+          "script_under_test_roles": [
+            "input_0_type"
+          ],
+          "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type exact-width probe",
+          "input_capacity_shannons": 123456780000,
+          "cell_deps": [
+            "script_under_test"
+          ],
+          "header_deps": [
+            {
+              "index": 0,
+              "role": "withdraw_header",
+              "block_number": 2000610,
+              "accumulated_rate": 10001000,
+              "epoch": {
+                "number": 575,
+                "index": 610,
+                "length": 1100
+              }
+            },
+            {
+              "index": 1,
+              "role": "deposit_header",
+              "block_number": 1554,
+              "accumulated_rate": 10000000,
+              "epoch": {
+                "number": 35,
+                "index": 554,
+                "length": 1000
+              }
+            }
+          ],
+          "witnesses": [
+            {
+              "index": 0,
+              "input_type_present": true,
+              "input_type_bytes": "0x010000000000000099",
+              "input_type_length_bytes": 9,
+              "expected_input_type_length_bytes": 8
+            }
+          ],
+          "inputs": [
+            {
+              "index": 0,
+              "role": "withdrawing_dao_cell",
+              "capacity_shannons": 123456780000,
+              "lock": "always_success",
+              "type": "script_under_test",
+              "data": "0x1206000000000000",
+              "deposit_block_number": 1554,
+              "linked_header": "withdraw_header",
+              "since": "0x2003e8022a0002f3",
+              "since_u64": 2306942530136048371
+            }
+          ],
+          "outputs": [
+            {
+              "index": 0,
+              "role": "withdrawn_capacity_cell",
+              "capacity_shannons": 123468105678,
+              "lock": "always_success",
+              "type": null,
+              "data": "0x"
+            }
+          ],
+          "expected_status": "fail",
+          "failure_mode": "dao_long_witness_input_type"
+        }
+      }
+    },
+    {
       "scenario": "differential: DAO wrong deposit header index original vs CellScript agree",
       "original_ickb_expected": "fail",
       "cellscript_expected": "fail",
@@ -3727,7 +4841,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -3835,7 +4951,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -3943,7 +5061,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4051,7 +5171,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4159,7 +5281,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4267,7 +5391,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4375,7 +5501,9 @@
             "script_under_test",
             "auxiliary_type"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4485,7 +5613,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4603,7 +5733,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4721,7 +5853,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4839,7 +5973,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -4957,7 +6093,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5075,7 +6213,9 @@
             "auxiliary_type",
             "always_success_funding_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5192,7 +6332,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -5298,7 +6440,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5400,7 +6544,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5503,7 +6649,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5615,7 +6763,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5722,7 +6872,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5810,7 +6962,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5897,7 +7051,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -5998,7 +7154,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -6102,7 +7260,9 @@
             "auxiliary_withdrawal_type_code",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -6209,7 +7369,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -6317,7 +7479,9 @@
             "auxiliary_withdrawal_type_code",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -6428,7 +7592,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -6538,7 +7704,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -6645,7 +7813,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x"
@@ -6747,7 +7917,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -6833,7 +8005,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -6923,7 +8097,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -7010,7 +8186,9 @@
             "script_under_test",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x"
           ],
@@ -7103,7 +8281,9 @@
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "header_deps": [],
+          "header_deps": [
+
+          ],
           "witnesses": [
             "0x",
             "0x",

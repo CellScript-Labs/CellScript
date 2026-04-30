@@ -13,6 +13,8 @@ overstating production equivalence.
 ## Recommended Review Surface
 
 - `BRANCHES.md`
+- `docs/CELLSCRIPT_0_18_ROADMAP.md`
+- `docs/0.17/ickb_cellscript_maturity_methodology.md`
 - `docs/0.17/ickb_diff_results.md`
 - `docs/0.17/ickb_production_equivalence_gate.md`
 - `docs/0.17/ickb_progress.md`
@@ -22,7 +24,7 @@ overstating production equivalence.
 
 The active iCKB matrix currently contains:
 
-- 66 original-vs-CellScript CKB VM differential rows.
+- 75 original-vs-CellScript CKB VM differential rows.
 - 14 CellScript-only CKB VM rows.
 - 8 original-side CKB VM rows.
 - 0 active `MODEL` rows.
@@ -34,8 +36,8 @@ The production gate intentionally remains `NOT_PROVEN` because the following
 items are still unresolved:
 
 - non-executable legacy assumptions registry closure;
-- full witness/auth semantics;
-- first-class `Script` support;
+- real owner-auth witness production fixtures;
+- first-class `Script` support, now explicitly scoped to 0.18;
 - generic aggregate lowering;
 - byte-accurate receipt decoding;
 - complete DAO redeem accounting;
