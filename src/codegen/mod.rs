@@ -8290,6 +8290,12 @@ enum Instruction {
     La { rd: u8, label: String },
     Call { label: String },
     Jump { label: String },
+    Beq { rs1: u8, rs2: u8, label: String },
+    Bne { rs1: u8, rs2: u8, label: String },
+    Blt { rs1: u8, rs2: u8, label: String },
+    Bge { rs1: u8, rs2: u8, label: String },
+    Bltu { rs1: u8, rs2: u8, label: String },
+    Bgeu { rs1: u8, rs2: u8, label: String },
     Beqz { rs: u8, label: String },
     Bnez { rs: u8, label: String },
     Ret,
@@ -8684,11 +8690,13 @@ impl ParsedAssembly {
         let mut relaxed = BTreeSet::new();
         let mut offset = 0usize;
         for (index, op) in self.text_ops.iter().enumerate() {
-            if let AsmOp::Instruction(inst @ (Instruction::Beqz { .. } | Instruction::Bnez { .. })) = op {
-                let pc = layout.text_user_base + offset as u64;
-                let target = branch_target(inst, self, layout)?;
-                if !signed_bits_fit(relative_offset(pc, target)?, 13) {
-                    relaxed.insert(index);
+            if let AsmOp::Instruction(inst) = op {
+                if conditional_branch_parts(inst).is_some() {
+                    let pc = layout.text_user_base + offset as u64;
+                    let target = branch_target(inst, self, layout)?;
+                    if !signed_bits_fit(relative_offset(pc, target)?, 13) {
+                        relaxed.insert(index);
+                    }
                 }
             }
             offset += op_size(op, offset, SectionKind::Text, index, BranchSizeMode::Conservative);
@@ -9070,10 +9078,10 @@ fn build_machine_block(
 fn instruction_terminator(op: &AsmOp) -> Option<MachineTerminator> {
     match op {
         AsmOp::Instruction(Instruction::Jump { label }) => Some(MachineTerminator::Jump { target: label.clone() }),
-        AsmOp::Instruction(Instruction::Beqz { label, .. } | Instruction::Bnez { label, .. }) => {
-            Some(MachineTerminator::ConditionalBranch { target: label.clone() })
-        }
         AsmOp::Instruction(Instruction::Ret) => Some(MachineTerminator::Return),
+        AsmOp::Instruction(inst) => {
+            conditional_branch_parts(inst).map(|(_, _, label, _)| MachineTerminator::ConditionalBranch { target: label.to_string() })
+        }
         _ => None,
     }
 }
@@ -9090,8 +9098,10 @@ impl ParsedAssembly {
         let text_size = text_op_layouts.iter().map(|op| op.size).sum();
         let mut max_cond_branch_abs_distance = 0u64;
         for op_layout in text_op_layouts {
-            let AsmOp::Instruction(inst @ (Instruction::Beqz { .. } | Instruction::Bnez { .. })) = &self.text_ops[op_layout.op_index]
-            else {
+            let AsmOp::Instruction(inst) = &self.text_ops[op_layout.op_index] else {
+                continue;
+            };
+            if conditional_branch_parts(inst).is_none() {
                 continue;
             };
             let pc = layout.text_user_base + op_layout.offset as u64;
@@ -9274,6 +9284,20 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
         "la" => Ok(Instruction::La { rd: parse_register(arg(&args, 0)?)?, label: arg(&args, 1)?.to_string() }),
         "call" => Ok(Instruction::Call { label: arg(&args, 0)?.to_string() }),
         "j" => Ok(Instruction::Jump { label: arg(&args, 0)?.to_string() }),
+        "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu" => {
+            let rs1 = parse_register(arg(&args, 0)?)?;
+            let rs2 = parse_register(arg(&args, 1)?)?;
+            let label = arg(&args, 2)?.to_string();
+            match opcode {
+                "beq" => Ok(Instruction::Beq { rs1, rs2, label }),
+                "bne" => Ok(Instruction::Bne { rs1, rs2, label }),
+                "blt" => Ok(Instruction::Blt { rs1, rs2, label }),
+                "bge" => Ok(Instruction::Bge { rs1, rs2, label }),
+                "bltu" => Ok(Instruction::Bltu { rs1, rs2, label }),
+                "bgeu" => Ok(Instruction::Bgeu { rs1, rs2, label }),
+                _ => unreachable!("branch opcode matched above"),
+            }
+        }
         "beqz" => Ok(Instruction::Beqz { rs: parse_register(arg(&args, 0)?)?, label: arg(&args, 1)?.to_string() }),
         "bnez" => Ok(Instruction::Bnez { rs: parse_register(arg(&args, 0)?)?, label: arg(&args, 1)?.to_string() }),
         "ret" => Ok(Instruction::Ret),
@@ -9298,9 +9322,36 @@ impl<'a> BranchSizeMode<'a> {
 }
 
 fn branch_target(inst: &Instruction, parsed: &ParsedAssembly, layout: &SectionLayout) -> Result<u64> {
+    if let Some((_, _, label, _)) = conditional_branch_parts(inst) {
+        parsed.symbol_address(label, layout)
+    } else {
+        Err(CompileError::new("instruction is not a conditional branch", crate::error::Span::default()))
+    }
+}
+
+fn conditional_branch_parts(inst: &Instruction) -> Option<(u8, u8, &str, u32)> {
     match inst {
-        Instruction::Beqz { label, .. } | Instruction::Bnez { label, .. } => parsed.symbol_address(label, layout),
-        _ => Err(CompileError::new("instruction is not a conditional branch", crate::error::Span::default())),
+        Instruction::Beq { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b000)),
+        Instruction::Bne { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b001)),
+        Instruction::Blt { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b100)),
+        Instruction::Bge { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b101)),
+        Instruction::Bltu { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b110)),
+        Instruction::Bgeu { rs1, rs2, label } => Some((*rs1, *rs2, label.as_str(), 0b111)),
+        Instruction::Beqz { rs, label } => Some((*rs, 0, label.as_str(), 0b000)),
+        Instruction::Bnez { rs, label } => Some((*rs, 0, label.as_str(), 0b001)),
+        _ => None,
+    }
+}
+
+fn inverse_branch_funct3(funct3: u32) -> u32 {
+    match funct3 {
+        0b000 => 0b001,
+        0b001 => 0b000,
+        0b100 => 0b101,
+        0b101 => 0b100,
+        0b110 => 0b111,
+        0b111 => 0b110,
+        _ => unreachable!("unsupported branch funct3"),
     }
 }
 
@@ -9376,23 +9427,21 @@ fn encode_instruction(
             let target = parsed.symbol_address(label, layout)?;
             out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc, target)?)?.to_le_bytes());
         }
-        Instruction::Beqz { rs, label } => {
+        Instruction::Beq { .. }
+        | Instruction::Bne { .. }
+        | Instruction::Blt { .. }
+        | Instruction::Bge { .. }
+        | Instruction::Bltu { .. }
+        | Instruction::Bgeu { .. }
+        | Instruction::Beqz { .. }
+        | Instruction::Bnez { .. } => {
+            let (rs1, rs2, label, funct3) = conditional_branch_parts(inst).expect("conditional branch parts");
             let target = parsed.symbol_address(label, layout)?;
             if relaxed_branch {
-                out.extend_from_slice(&encode_b_type(0x63, 0b001, *rs, 0, 8)?.to_le_bytes());
+                out.extend_from_slice(&encode_b_type(0x63, inverse_branch_funct3(funct3), rs1, rs2, 8)?.to_le_bytes());
                 out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc + 4, target)?)?.to_le_bytes());
             } else {
-                out.extend_from_slice(&encode_b_type(0x63, 0b000, *rs, 0, relative_offset(pc, target)?)?.to_le_bytes());
-            }
-        }
-        Instruction::Bnez { rs, label } => {
-            let target = parsed.symbol_address(label, layout)?;
-            if relaxed_branch {
-                out.extend_from_slice(&encode_b_type(0x63, 0b000, *rs, 0, 8)?.to_le_bytes());
-                out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc + 4, target)?)?.to_le_bytes());
-            } else {
-                // bnez rs, label = bne rs, x0, label (funct3=001, rs1=rs, rs2=x0)
-                out.extend_from_slice(&encode_b_type(0x63, 0b001, *rs, 0, relative_offset(pc, target)?)?.to_le_bytes());
+                out.extend_from_slice(&encode_b_type(0x63, funct3, rs1, rs2, relative_offset(pc, target)?)?.to_le_bytes());
             }
         }
         Instruction::Ret => out.extend_from_slice(&encode_i_type(0x67, 0, 0b000, 1, 0)?.to_le_bytes()),
@@ -9441,7 +9490,16 @@ fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: us
         AsmOp::Instruction(Instruction::Li { imm, .. }) => li_sequence_size(*imm),
         AsmOp::Instruction(Instruction::La { .. }) => 8,
         AsmOp::Instruction(Instruction::Call { .. }) => 8,
-        AsmOp::Instruction(Instruction::Beqz { .. } | Instruction::Bnez { .. }) => match branch_size_mode {
+        AsmOp::Instruction(
+            Instruction::Beq { .. }
+            | Instruction::Bne { .. }
+            | Instruction::Blt { .. }
+            | Instruction::Bge { .. }
+            | Instruction::Bltu { .. }
+            | Instruction::Bgeu { .. }
+            | Instruction::Beqz { .. }
+            | Instruction::Bnez { .. },
+        ) => match branch_size_mode {
             BranchSizeMode::Conservative => 8,
             BranchSizeMode::Exact(relaxed) if section == SectionKind::Text && relaxed.contains(&op_index) => 8,
             BranchSizeMode::Exact(_) => 4,
@@ -9805,6 +9863,50 @@ mod tests {
     }
 
     #[test]
+    fn internal_assembler_encodes_register_conditional_branches() {
+        for mnemonic in ["beq", "bne", "blt", "bge", "bltu", "bgeu"] {
+            let lines = vec![
+                ".section .text".to_string(),
+                ".global entry".to_string(),
+                "entry:".to_string(),
+                "li a0, 1".to_string(),
+                "li a1, 1".to_string(),
+                format!("{} a0, a1, target", mnemonic),
+                "li a0, 2".to_string(),
+                "target:".to_string(),
+                "ret".to_string(),
+            ];
+
+            let elf = assemble_elf_internal(&lines).unwrap_or_else(|err| panic!("internal assembler should encode {mnemonic}: {err}"));
+            assert!(elf.starts_with(b"\x7fELF"), "expected ELF output for {mnemonic}");
+        }
+    }
+
+    #[test]
+    fn internal_assembler_relaxes_out_of_range_register_conditional_branch() {
+        for mnemonic in ["beq", "bne", "blt", "bge", "bltu", "bgeu"] {
+            let mut lines = vec![
+                ".section .text".to_string(),
+                ".global entry".to_string(),
+                "entry:".to_string(),
+                "li a0, 0".to_string(),
+                "li a1, 0".to_string(),
+                format!("{} a0, a1, far_target", mnemonic),
+            ];
+            for _ in 0..1500 {
+                lines.push("addi t0, t0, 0".to_string());
+            }
+            lines.push("far_target:".to_string());
+            lines.push("ret".to_string());
+
+            let plan = MachineLayoutPlan::build(&lines).unwrap_or_else(|err| panic!("machine layout should relax {mnemonic}: {err}"));
+            assert_eq!(plan.metrics.relaxed_branch_count, 1, "expected one relaxed branch for {mnemonic}");
+            let elf = assemble_elf_internal(&lines).unwrap_or_else(|err| panic!("internal assembler should relax {mnemonic}: {err}"));
+            assert!(elf.starts_with(b"\x7fELF"), "expected ELF output for relaxed {mnemonic}");
+        }
+    }
+
+    #[test]
     fn machine_layout_plan_reports_branch_relaxation_metrics() {
         let mut lines = vec![
             ".section .text".to_string(),
@@ -9895,6 +9997,36 @@ mod tests {
             ]
         );
         assert_eq!(unreachable_machine_block_count(&plan.parsed, cfg), 0);
+    }
+
+    #[test]
+    fn machine_layout_plan_builds_register_conditional_branch_blocks() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "li a0, 0".to_string(),
+            "li a1, 0".to_string(),
+            "bgeu a0, a1, done".to_string(),
+            "li a0, 1".to_string(),
+            "j done".to_string(),
+            "done:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let plan = MachineLayoutPlan::build(&lines).expect("machine layout plan");
+        let cfg = &plan.cfg;
+        assert_eq!(cfg.blocks.len(), 3, "expected entry, fallthrough, and done blocks: {:?}", cfg.blocks);
+        assert_eq!(cfg.blocks[0].label.as_deref(), Some("entry"));
+        assert_eq!(cfg.blocks[0].terminator, MachineTerminator::ConditionalBranch { target: "done".to_string() });
+        assert_eq!(
+            cfg.edges,
+            vec![
+                MachineCfgEdge { from: 0, to: 2, kind: MachineCfgEdgeKind::ConditionalTaken },
+                MachineCfgEdge { from: 0, to: 1, kind: MachineCfgEdgeKind::ConditionalFallthrough },
+                MachineCfgEdge { from: 1, to: 2, kind: MachineCfgEdgeKind::Jump },
+            ]
+        );
     }
 
     #[test]

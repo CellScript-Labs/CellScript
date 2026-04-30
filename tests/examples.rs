@@ -538,6 +538,88 @@ fn registry_example_uses_bounded_local_vec_helpers_without_collection_debt() {
     }
 }
 
+#[test]
+fn registry_example_with_insert_contains_compiles_to_elf() {
+    let result = compile_file(
+        language_example_path("registry.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("registry example should compile to ELF through the internal assembler");
+
+    assert!(!result.artifact_bytes.is_empty(), "registry ELF artifact should be non-empty");
+}
+
+#[test]
+fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() {
+    let result =
+        compile_file(language_example_path("order_book.cell"), CompileOptions::default()).expect("order book example should compile");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("order book asm should be utf8");
+
+    for marker in [
+        "# cellscript abi: stack collection push element_size=56",
+        "# cellscript abi: stack collection insert element_size=56",
+        "# cellscript abi: stack collection contains element_size=56",
+        "# cellscript abi: stack collection remove element_size=56",
+        "# cellscript abi: stack collection pop element_size=56",
+        "# cellscript abi: stack collection reverse element_size=56",
+        "# cellscript abi: stack collection swap element_size=56",
+        "# cellscript abi: stack collection clear",
+    ] {
+        assert!(asm.contains(marker), "order book example should lower bounded Vec helper marker {marker}:\n{asm}");
+    }
+
+    for name in ["local_book_seed", "local_bid_priority", "local_cancel_order", "local_match_quote"] {
+        let action = action(&result.metadata, name);
+        assert!(
+            action.fail_closed_runtime_features.is_empty(),
+            "order book {name} should not carry collection fail-closed debt: {:?}",
+            action.fail_closed_runtime_features
+        );
+    }
+
+    let order_vecs = result
+        .metadata
+        .runtime
+        .collection_instantiations
+        .iter()
+        .filter(|instantiation| instantiation.collection_ty == "Vec<Order>")
+        .collect::<Vec<_>>();
+    assert!(!order_vecs.is_empty(), "order book should expose Vec<Order> monomorphization metadata");
+    for instantiation in &order_vecs {
+        assert_eq!(instantiation.element_ty, "Order");
+        assert_eq!(instantiation.element_width_bytes, 56);
+        assert_eq!(instantiation.backing, "stack-fixed-buffer:256");
+        assert_eq!(instantiation.status, "checked-runtime");
+    }
+
+    let bid_priority = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_bid_priority")
+        .expect("bid priority should expose Vec<Order> metadata");
+    for helper in ["new", "push", "insert", "swap", "reverse", "index", "len"] {
+        assert!(
+            bid_priority.helpers.contains(&helper.to_string()),
+            "order book bid priority should expose helper {helper}: {:?}",
+            bid_priority.helpers
+        );
+    }
+
+    let cancel = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_cancel_order")
+        .expect("cancel should expose Vec<Order> metadata");
+    for helper in ["new", "push", "contains", "remove", "clear", "len"] {
+        assert!(cancel.helpers.contains(&helper.to_string()), "order book cancel should expose helper {helper}: {:?}", cancel.helpers);
+    }
+
+    let elf = compile_file(
+        language_example_path("order_book.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("order book example should compile to ELF through the internal assembler");
+    assert!(!elf.artifact_bytes.is_empty(), "order book ELF artifact should be non-empty");
+}
+
 fn assert_create(action: &cellscript::ActionMetadata, ty: &str, context: &str) {
     assert!(
         action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "create"),

@@ -1,0 +1,88 @@
+module cellscript::language::order_book
+
+// Non-production language experiment. This models only local stack-backed order
+// vectors; it does not persist orders as Cells, prove map membership, settle
+// assets, or enforce exchange-level authorization.
+
+struct Order {
+    trader: Address,
+    price: u64,
+    amount: u64,
+    nonce: u64,
+}
+
+struct MatchQuote {
+    maker: Address,
+    price: u64,
+    amount: u64,
+}
+
+action local_book_seed(bid: Order, ask: Order) -> bool {
+    let mut bids = Vec::with_capacity(4)
+    let mut asks: Vec<Order> = []
+    bids.push(bid)
+    asks.push(ask)
+
+    if bids.len() == 1 && asks.len() == 1 {
+        if bids.capacity() >= 4 {
+            return bids.first().price < asks.first().price
+        }
+    }
+
+    return false
+}
+
+action local_bid_priority(low: Order, high: Order) -> Address {
+    let mut bids: Vec<Order> = []
+    bids.push(low)
+    bids.insert(0, high)
+    bids.swap(0, 1)
+    bids.reverse()
+
+    if bids.first().price >= bids.last().price {
+        return bids.first().trader
+    }
+
+    return low.trader
+}
+
+action local_cancel_order(first: Order, second: Order, cancel_nonce: u64) -> bool {
+    let mut orders = Vec::new()
+    orders.push(first)
+    orders.push(second)
+
+    if orders.contains(second) {
+        let removed = orders.remove(1)
+        orders.clear()
+        return removed.nonce == cancel_nonce && orders.is_empty()
+    }
+
+    return false
+}
+
+action local_match_quote(bid: Order, ask: Order) -> MatchQuote {
+    assert_invariant(bid.price >= ask.price, "book not crossed")
+
+    let mut bids = Vec::new()
+    let mut asks = Vec::new()
+    bids.push(bid)
+    asks.push(ask)
+
+    let resting_ask = asks.pop()
+    let incoming_bid = bids.pop()
+    let trade_amount = min_u64(incoming_bid.amount, resting_ask.amount)
+
+    return MatchQuote {
+        maker: resting_ask.trader,
+        price: resting_ask.price,
+        amount: trade_amount,
+    }
+}
+
+fn min_u64(left: u64, right: u64) -> u64 {
+    if left < right {
+        return left
+    }
+
+    return right
+}
