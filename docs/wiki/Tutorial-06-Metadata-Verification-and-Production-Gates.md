@@ -157,29 +157,42 @@ to chain evidence. Run the CKB acceptance gate from the CellScript repository
 root:
 
 ```bash
+./scripts/cellscript_ckb_release_gate.sh production
 ./scripts/ckb_cellscript_acceptance.sh --production
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
 ```
 
-The CKB validator requires strict original bundled-example coverage, scoped action and
-lock compile coverage, builder-backed action runs, builder-backed lock
+For pre-push checks, the quick gate runs the compiler/tooling suite and
+compile-only production acceptance:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh
+```
+
+The quick gate is useful development evidence. The production mode is the
+release-facing gate because it runs builder-backed local CKB transactions.
+
+The CKB validator requires strict original bundled-example coverage, scoped
+action and lock compile coverage, builder-backed action runs, builder-backed lock
 valid-spend and invalid-spend matrices, valid transaction dry-runs, committed
 valid transactions, malformed rejection, measured cycles, consensus-serialized
 transaction size, occupied-capacity evidence, no under-capacity outputs, bundled
 example deployment, and a passed final production hardening gate.
 
 The production gate compiles `examples/acceptance/*.cell` when present. Those
-files intentionally retain scheduler and effect-profile metadata while
-`examples/*.cell` and `examples/business/*.cell` remain the cleaner business
-reading surface.
+files intentionally retain scheduler and effect-profile metadata while the
+seven bundled top-level production examples and `examples/business/*.cell`
+remain the cleaner business reading surface.
 
 Lock behavior coverage is machine-readable through
 `lock_acceptance_scope.onchain_lock_spend_matrix_scope`; each listed lock must
 have both valid-spend and invalid-spend evidence.
 
-`examples/registry.cell` is a bounded-collection language example covered by
-compiler/tooling tests, not by the bundled CKB production matrix.
+`examples/language/registry.cell`, its top-level compatibility mirror
+`examples/registry.cell`, and `examples/language/order_book.cell` are
+bounded-collection language examples covered by compiler/tooling tests, not by
+the bundled CKB production matrix.
 
 `--compile-only` and bounded diagnostic runs can help development, but they are
 not external production release evidence.

@@ -69,7 +69,7 @@ split across compiler metadata, builders, and production evidence.
 | `&mut` Cell updates | Metadata exposes mutate input/output access, but syntax can look like in-place account storage. | Add explicit continuity policy for type id, lock, data schema, and capacity. |
 | Capacity policy | Capacity evidence is builder/runtime-required and validated by reports. | Promote common capacity requirements into declarative DSL policy where practical. |
 | Timelock policy | since/header/runtime features are visible in metadata. | Make since/header assumptions more directly declarative and statically auditable. |
-| Collection examples | `registry.cell` covers bounded local Vec language behavior. | Keep it outside production CKB scope unless promoted into builder-backed chain evidence. |
+| Collection examples | `examples/language/registry.cell`, its top-level compatibility mirror `examples/registry.cell`, and `examples/language/order_book.cell` cover bounded local Vec language behavior. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |
 
 The most important correction is to avoid overstating what action coverage
 proves. The current production run proves transaction shape, Cell data layout,

@@ -1,6 +1,7 @@
 # CellScript Entry Witness ABI
 
-**Status**: production contract for CellScript 0.12 authoring and builder tooling.
+**Status**: production contract for current CellScript authoring and builder
+tooling.
 
 CellScript action and lock entrypoints are normal RISC-V functions at the machine
 level, but chain transactions provide their public arguments through the grouped

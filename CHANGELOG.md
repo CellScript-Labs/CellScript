@@ -2,6 +2,17 @@
 
 ## 0.13.0 - 2026-04-30
 
+- Complete the internal RISC-V ELF assembler branch surface used by current
+  codegen, including `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `beqz`,
+  `bnez`, and branch relaxation coverage.
+- Harden the stack-backed `Vec<T>` helper boundary so unsupported receivers,
+  invalid `extend_from_slice` element types, and unrefined `Vec::new()` slice
+  extension cases fail at compile time instead of drifting into hidden runtime
+  paths.
+- Add `examples/language/order_book.cell` as a non-production language example
+  for local stack-backed order vectors.
+- Add the CKB release-gate wrapper script and document the difference between
+  quick compile-only evidence and full production acceptance.
 - Add builder-backed local CKB valid-spend and invalid-spend acceptance coverage
   for all 16 bundled lock entries, in the same production gate as the 43 action
   flows.

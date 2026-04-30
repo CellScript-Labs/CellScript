@@ -1,6 +1,6 @@
 # CellScript Capacity And Builder Contract
 
-**Status**: production builder contract for CellScript 0.12.
+**Status**: production builder contract for the current CellScript CKB profile.
 
 CellScript exposes capacity requirements, but it does not claim to statically
 prove every CKB transaction's occupied capacity. Capacity is a transaction-level

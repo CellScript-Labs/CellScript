@@ -268,6 +268,14 @@ action burn(token: Token) {
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
+Non-production language examples live under `examples/language/`. They compile
+and exercise compiler/tooling surfaces, but they are not part of the seven-file
+CKB production acceptance matrix. `registry.cell` covers bounded local
+`Vec<Address>` / `Vec<Hash>` helpers; the top-level `examples/registry.cell` is
+a compatibility mirror of that language example. `order_book.cell` is a local
+stack-backed order-vector sketch and does not claim persistent order-book
+semantics.
+
 ## Comparison
 
 Why CellScript is shaped around typed Cells, linear resources, explicit
@@ -410,7 +418,7 @@ CKB cycle/capacity estimates.
 | Module | What it does |
 |---|---|
 | **Stdlib** (`stdlib/`) | Built-in functions that lower to ckb-vm syscalls and small runtime helpers: `syscall_load_tx_hash`, `syscall_load_script_hash`, `syscall_load_cell`, `syscall_load_header`, cycle/time helpers, and math helpers. Module-injected, not linked separately. |
-| **Collections** (`stdlib/collections.rs`) | Vector-like ops (push, length, get) that lower to Cell output data region writes/reads with bounds checks. |
+| **Collections** (`stdlib/collections.rs`) | Bounded stack-backed `Vec<T: FixedWidth>` helpers for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Cell-backed collection ownership remains unsupported. |
 
 ### Tooling Surface
 
@@ -496,7 +504,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.12.0"
+version = "0.13.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

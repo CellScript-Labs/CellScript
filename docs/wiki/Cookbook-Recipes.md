@@ -162,6 +162,7 @@ This is a compiler/package gate. Use it before asking for deeper CKB evidence.
 Use this only from the CellScript repository root:
 
 ```bash
+./scripts/cellscript_ckb_release_gate.sh production
 ./scripts/ckb_cellscript_acceptance.sh --production
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
@@ -183,7 +184,8 @@ Start with the smallest example that teaches the idea you need:
 | Claim receipts | `examples/vesting.cell` |
 | Shared liquidity state | `examples/amm_pool.cell` |
 | Composition patterns | `examples/launch.cell` |
-| Local bounded vectors | `examples/registry.cell` |
+| Local bounded vectors | `examples/language/registry.cell` |
+| Local order-vector helpers | `examples/language/order_book.cell` |
 
 Read one example for one idea. The examples are easier to learn from when you do
 not treat them as one large feature checklist.

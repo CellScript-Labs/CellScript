@@ -1,6 +1,6 @@
 # CellScript CKB Deployment Manifest
 
-**Status**: production authoring surface for CellScript 0.12 metadata and
+**Status**: production authoring surface for current CellScript metadata and
 builder handoff.
 
 CellScript does not ask contract authors to encode CKB `CellDep`, `hash_type`,
@@ -63,7 +63,7 @@ Empty bytes must hash to:
 ```
 
 The same algorithm is available to Rust tooling as
-`cellscript::ckb_blake2b256`. This is the supported 0.12 builder/release helper
+`cellscript::ckb_blake2b256`. This is the supported builder/release helper
 surface. It is not an in-script syscall and does not claim arbitrary dynamic
 on-chain hashing unless the artifact links a real RISC-V Blake2b implementation.
 

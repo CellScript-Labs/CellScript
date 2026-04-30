@@ -25,9 +25,10 @@ locks strict-compile under the CKB profile and are exercised with builder-backed
 local CKB valid-spend and invalid-spend transactions. The production report keeps
 the matrix explicit in `lock_acceptance_scope.onchain_lock_spend_matrix_scope`.
 
-`registry.cell` is not part of the seven-example CKB production action matrix.
-It is a 0.13 language/tooling example for bounded local `Vec<Address>` and
-`Vec<Hash>` helper behavior.
+`examples/language/registry.cell`, its top-level compatibility mirror
+`examples/registry.cell`, and `examples/language/order_book.cell` are not part
+of the seven-example CKB production action matrix. They are 0.13
+language/tooling examples for bounded local `Vec<T>` helper behavior.
 
 ## `token.cell`
 

@@ -1,6 +1,6 @@
 # CellScript Linear Ownership
 
-**Status**: production semantics for CellScript 0.12.
+**Status**: production semantics for the current CellScript CKB profile.
 
 CellScript treats cell-backed resources as linear values. A linear value cannot
 be copied, silently dropped, or used after it has been consumed, transferred,
@@ -39,15 +39,16 @@ Silent end-of-scope loss is rejected.
 
 ## Cell-Backed Collections
 
-Generic ownership of collections of linear cells is not a production feature in
-0.12. A `Vec<Token>` or `HashMap<Hash, NFT>` would require a verifier-backed
-membership and consumption model. Until that model exists, such cases must
-remain compile-time rejected or represented as structured runtime blockers.
+Generic ownership of collections of linear cells is not a production feature.
+0.13 stack-backed `Vec<T: FixedWidth>` helpers are verifier-local value
+helpers, not cell ownership containers. A `Vec<Token>` or `HashMap<Hash, NFT>`
+would require a verifier-backed membership and consumption model. Until that
+model exists, such cases must remain compile-time rejected or represented as
+structured runtime blockers.
 
-Future design candidates:
+Missing verifier pieces:
 
 - `consume_each`
 - typed collection destructuring
 - verifier-backed membership proofs
 - schema-level ownership witnesses
-

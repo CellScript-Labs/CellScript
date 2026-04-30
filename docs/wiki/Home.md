@@ -124,6 +124,7 @@ Keep two levels separate:
 Release-facing CKB evidence comes from the repository root:
 
 ```bash
+./scripts/cellscript_ckb_release_gate.sh production
 ./scripts/ckb_cellscript_acceptance.sh --production
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json

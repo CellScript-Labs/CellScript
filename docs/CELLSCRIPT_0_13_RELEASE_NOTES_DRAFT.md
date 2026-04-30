@@ -1,9 +1,8 @@
 # CellScript 0.13 Release Notes Draft
 
-**Status**: Release-gate draft for the 0.13 implementation now merged to
-`main`.
+**Status**: Release notes for the 0.13 implementation on `nightly-0.13`.
 
-**Updated**: 2026-04-27.
+**Updated**: 2026-05-01.
 
 ## Collections Scope
 
@@ -32,10 +31,15 @@ New in 0.13:
   `swap`, and `clear`.
 - Negative type-check coverage for unsupported helper/type combinations.
 - Stable fail-closed metadata names for unsupported collection paths.
-- `examples/registry.cell` documents supported local `Vec<Address>` /
-  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support. It is
-  a compiler/tooling language example, not part of the seven-example CKB
+- `examples/language/registry.cell` documents supported local `Vec<Address>` /
+  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support. The
+  top-level `examples/registry.cell` remains a compatibility mirror. It is a
+  compiler/tooling language example, not part of the seven-example CKB
   production action acceptance matrix.
+- `examples/language/order_book.cell` is a non-production language example for
+  local stack-backed order vectors. It compiles through the bounded `Vec<T>`
+  helper surface, but it does not persist orders as Cells, prove map membership,
+  settle assets, or enforce exchange-level authorization.
 - The canonical business examples are now mirrored under `examples/business/`,
   while production/profile metadata lives under `examples/acceptance/`. The CKB
   acceptance script compiles the profiled copies when present, keeping
@@ -111,6 +115,37 @@ cargo clippy --locked -p cellscript --all-targets -- -D warnings
 cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
 ```
+
+CKB-facing repository gates:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh
+./scripts/cellscript_ckb_release_gate.sh production
+./scripts/ckb_cellscript_acceptance.sh --production
+```
+
+The default `cellscript_ckb_release_gate.sh` mode is the quick gate. It includes
+compile-only production acceptance and is useful before push. The `production`
+mode runs the full local CKB acceptance script and is the release-facing gate.
+
+## Backend And ELF Emission
+
+New in 0.13:
+
+- The internal ELF assembler covers the emitted instruction surface used by the
+  current compiler and stdlib tests.
+- Register conditional branches `beq`, `bne`, `blt`, `bge`, `bltu`, and `bgeu`
+  are accepted and encoded.
+- Zero-compare branches `beqz` and `bnez` remain supported.
+- Conditional branch relaxation is covered for both zero-compare and register
+  branch forms, so generated local `Vec<T>` helpers such as `insert` and
+  `contains` can compile to ELF without relying on an external assembler.
+
+Important boundary:
+
+- This is not a claim of full arbitrary RISC-V assembly support. The internal
+  assembler is kept aligned to the CellScript-emitted surface and guarded by an
+  emitted-instruction-surface regression test.
 
 ## CLI Ergonomics
 

@@ -256,6 +256,12 @@ action burn(token: Token) {
 | `examples/amm_pool.cell` | Shared pool state、swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
+非生产语言示例位于 `examples/language/`。这些文件用于验证编译器和工具面，
+不属于七个文件的 CKB production acceptance matrix。`registry.cell` 覆盖
+bounded local `Vec<Address>` / `Vec<Hash>` helper；顶层
+`examples/registry.cell` 是这个语言示例的兼容镜像。`order_book.cell` 是
+local stack-backed order vector 草图，不宣称持久化 order-book 语义。
+
 ## 对比
 
 CellScript 为什么围绕 typed Cells、线性资源、显式交易 effect 和 ckb-vm
@@ -387,7 +393,7 @@ stack-spill 布局、witness byte bounds、CKB cycle/capacity 估算。
 | 模块 | 作用 |
 |---|---|
 | **Stdlib**（`stdlib/`） | 降低到 ckb-vm syscall 和小型运行时 helper 的内置函数：`syscall_load_tx_hash`、`syscall_load_script_hash`、`syscall_load_cell`、`syscall_load_header`、cycle/time helper 和 math helper。模块注入，不单独链接。 |
-| **Collections**（`stdlib/collections.rs`） | 类 vector 操作（push、length、get），降低到 Cell output data 区域写入/读取并带边界检查。 |
+| **Collections**（`stdlib/collections.rs`） | bounded stack-backed `Vec<T: FixedWidth>` helpers，用于 verifier-local value：`new`、`with_capacity`、`capacity`、`push`、`extend_from_slice`、`len`、`is_empty`、indexing、`first`、`last`、`contains`、`set`、`remove`、`pop`、`insert`、`reverse`、`truncate`、`swap`、`clear`。Cell-backed collection ownership 仍不支持。 |
 
 ### 工具面
 
@@ -471,7 +477,7 @@ IR 模块输出审计报告；其他入口返回
 ```toml
 [package]
 name = "token"
-version = "0.12.0"
+version = "0.13.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 
