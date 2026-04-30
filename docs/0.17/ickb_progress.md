@@ -744,21 +744,23 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 
 已完成：
 
-- `witness::size(source_view)` → U64：通过 `LOAD_WITNESS` syscall 返回 witness 字节长度
-- `witness::raw(source_view)` → Hash：从 witness 偏移 0 加载 32 字节
-- `ckb::require_witness_size_at_least(source_view, min_size)`：运行时检查 witness 大小下界，不足时触发 epilogue
-- WitnessArgs Molecule 表解析：20 字节表头（total_size、field_count、3 字段 offset），含 bounds checking
-- WitnessArgs BytesOpt 字段提取：`witness::lock`、`witness::input_type`、`witness::output_type`
+- `witness::size(source_view)` → U64：通过 `LOAD_WITNESS` syscall 返回 witness 字节长度，并使用标量 fail-closed ABI（`a0=value, a1=status`）
+- `witness::raw(source_view)` → Hash：通过 caller buffer 桥接从 witness 偏移 0 加载最多 32 字节，短 witness 前缀零填充
+- `ckb::require_witness_size_at_least(source_view, min_size)`：运行时检查 witness 大小下界，保存调用方 `min_size`，不足时以 `WitnessMalformed(42)` fail-closed
+- WitnessArgs Molecule 表解析：16 字节表头（total_size + 3 offsets），`field_count` 从 `offset0/4 - 1` 推导，含 total_size、offset 单调性和 bounds checking
+- WitnessArgs BytesOpt 字段提取：`witness::lock`、`witness::input_type`、`witness::output_type`，支持 None 的相邻 offset、短字段零填充和 caller buffer 写回
 - `WitnessMalformed(42)` 和 `WitnessFieldTruncated(43)` 运行时错误
 - 编译器端完整管线：types → IR → codegen → lib.rs feature flags → LSP completions
 - 类型签名、metadata（runtime features + access entries）、assembly symbol 验证测试
+- 真实 CKB VM 回归：空 WitnessArgs 通过、`require_witness_size_at_least` too-small 拒绝、短 lock BytesOpt 零填充
+- proof-plan `reads: witness` 元数据已与 witness runtime access 对齐
 
 待完成：
 
 - 类型化 auth 字段
+- `input_type` / `output_type` 字段的正向 CKB VM 证据
 - malformed/truncated/reordered witness 负向 CKB VM 测试
 - 更通用的 Molecule 解码器（可变长度字段、嵌套结构）
-- 文档
 
 不要在 `src/` 中实现 iCKB 专用 witness 辅助函数。
 
@@ -827,9 +829,10 @@ active matrix 移除；当前没有仍留在 `MODEL` 中的场景。
 - SourceView Script `code_hash + hash_type` 身份辅助函数
 - 辅助函数 operands 的本地计算 `u128` add/sub/mul/div/compare 物化
 - witness size（`LOAD_WITNESS` syscall）
-- witness raw 字节加载
-- `require_witness_size_at_least` 运行时下界检查
-- WitnessArgs Molecule 表解析（lock/input_type/output_type BytesOpt 字段提取，最多 32 字节）
+- witness raw 字节加载（caller buffer 桥接，短前缀零填充）
+- `require_witness_size_at_least` 运行时下界检查（too-small fail-closed）
+- WitnessArgs Molecule 表解析（16 字节头、lock/input_type/output_type BytesOpt 字段提取、None 支持、最多 32 字节）
+- witness runtime access 的 proof-plan `reads: witness` 元数据对齐
 
 ## 验收命令
 
