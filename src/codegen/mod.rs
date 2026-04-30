@@ -24,9 +24,8 @@ const CLAIM_LOAD_ECDSA_SIGNATURE_HASH_SYSCALL_NUMBER: u64 = 3004;
 const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = 1;
 const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = 2;
-const CKB_HEADER_FIELD_DAO: u64 = 3;
+const CKB_DAO_HEADER_FIELD_ABSOLUTE_OFFSET: u64 = 160;
 const CKB_DAO_HEADER_ACCUMULATED_RATE_ABSOLUTE_OFFSET: u64 = 160 + 8;
-const CKB_DAO_FIELD_ACCUMULATED_RATE_OFFSET: u64 = 8;
 const CKB_DAO_TYPE_HASH_WORDS_LE: [i64; 4] = [-8442554211429484596, 7297449809414763189, -7890662964692133976, 6381290010727626424];
 const CKB_INPUT_FIELD_OUT_POINT: u64 = 0;
 const CKB_INPUT_FIELD_SINCE: u64 = 1;
@@ -151,6 +150,8 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
         || helpers.contains("__ckb_require_type_lock_metapoint_pairs")
         || helpers.contains("__ckb_require_lock_type_metapoint_pairs_from_i32_data")
         || helpers.contains("__ckb_require_type_lock_metapoint_pairs_from_i32_data")
+        || helpers.contains("__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered")
+        || helpers.contains("__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered")
         || helpers.contains("__ckb_require_lock_match_master_out_point_pairs_from_data")
     {
         helpers.insert("__ckb_require_metapoint_relative".to_string());
@@ -195,6 +196,8 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_type_lock_metapoint_pairs"
             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
             | "__ckb_cell_lock_hash_low"
             | "__ckb_cell_type_hash_low"
@@ -205,6 +208,8 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_cell_type_args_empty"
             | "__ckb_require_cell_lock_args_hash"
             | "__ckb_require_cell_type_args_hash"
+            | "__ckb_require_cell_lock_script_hash_type"
+            | "__ckb_require_cell_type_script_hash_type"
             | "__c256_require_u128_product_lte"
             | "__c256_require_u128_product_eq"
             | "__c256_require_u128_sum2_products_lte"
@@ -8285,6 +8290,9 @@ impl CodeGenerator {
         if self.emit_runtime_fixed_hash_requirement_call(func, args)? {
             return Ok(());
         }
+        if self.emit_runtime_cell_script_hash_type_requirement_call(func, args)? {
+            return Ok(());
+        }
         if self.emit_runtime_input_out_point_requirement_call(func, args)? {
             return Ok(());
         }
@@ -8292,6 +8300,9 @@ impl CodeGenerator {
             return Ok(());
         }
         if self.emit_runtime_xudt_group_amount_delta_call(func, args)? {
+            return Ok(());
+        }
+        if self.emit_runtime_metapoint_filtered_pair_call(func, args)? {
             return Ok(());
         }
         if self.emit_runtime_c256_product_requirement_call(func, args)? {
@@ -8454,6 +8465,53 @@ impl CodeGenerator {
         Ok(true)
     }
 
+    fn emit_runtime_cell_script_hash_type_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(func, "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type") {
+            return Ok(false);
+        }
+        if args.len() != 3 {
+            return Ok(false);
+        }
+
+        let expected = self.expected_fixed_byte_source(&args[1], 32);
+        match expected {
+            Some(ExpectedFixedByteSource::Const(bytes)) => {
+                let size_offset = self.runtime_scratch_size_offset();
+                let buffer_offset = self.runtime_scratch_buffer_offset();
+                let hash: [u8; 32] = bytes.as_slice().try_into().expect("expected fixed hash width");
+                self.emit_store_fixed_byte_const_to_scratch(&IrOperand::Const(IrConst::Hash(hash)), size_offset, buffer_offset, 32);
+                self.emit_sp_addi("a1", buffer_offset);
+                self.emit("li a2, 32");
+            }
+            Some(source) => {
+                self.emit_prepare_fixed_byte_source(&source, 32, "runtime expected Script code hash");
+                if self.emit_fixed_byte_source_pointer_to("a1", &source) {
+                    self.emit("li a2, 32");
+                } else {
+                    self.emit(
+                        "# cellscript abi: runtime expected Script code hash source is not addressable; pass null to fail closed",
+                    );
+                    self.emit("li a1, 0");
+                    self.emit("li a2, 0");
+                }
+            }
+            None => {
+                self.emit("# cellscript abi: runtime expected Script code hash is unavailable; pass null to fail closed");
+                self.emit("li a1, 0");
+                self.emit("li a2, 0");
+            }
+        }
+
+        self.emit_operand_to_register("a0", &args[0]);
+        self.emit_operand_to_register("a3", &args[2]);
+        self.emit("call ".to_string() + func);
+        let ok_label = self.fresh_label("runtime_script_identity_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+        Ok(true)
+    }
+
     fn emit_runtime_input_out_point_requirement_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
         if func != "__ckb_require_input_out_point" {
             return Ok(false);
@@ -8582,6 +8640,56 @@ impl CodeGenerator {
 
         self.emit("call ".to_string() + func);
         let ok_label = self.fresh_label("runtime_xudt_delta_requirement_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+        Ok(true)
+    }
+
+    fn emit_runtime_metapoint_filtered_pair_call(&mut self, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(
+            func,
+            "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
+        ) {
+            return Ok(false);
+        }
+        if args.len() != 4 {
+            return Ok(false);
+        }
+
+        let expected = self.expected_fixed_byte_source(&args[2], 32);
+        match expected {
+            Some(ExpectedFixedByteSource::Const(bytes)) => {
+                let size_offset = self.runtime_scratch_size_offset();
+                let buffer_offset = self.runtime_scratch_buffer_offset();
+                let hash: [u8; 32] = bytes.as_slice().try_into().expect("expected fixed hash width");
+                self.emit_store_fixed_byte_const_to_scratch(&IrOperand::Const(IrConst::Hash(hash)), size_offset, buffer_offset, 32);
+                self.emit_sp_addi("a2", buffer_offset);
+                self.emit("li a3, 32");
+            }
+            Some(source) => {
+                self.emit_prepare_fixed_byte_source(&source, 32, "runtime filtered MetaPoint related type hash");
+                if self.emit_fixed_byte_source_pointer_to("a2", &source) {
+                    self.emit("li a3, 32");
+                } else {
+                    self.emit("# cellscript abi: filtered MetaPoint expected type hash is not addressable; pass null to fail closed");
+                    self.emit("li a2, 0");
+                    self.emit("li a3, 0");
+                }
+            }
+            None => {
+                self.emit("# cellscript abi: filtered MetaPoint expected type hash is unavailable; pass null to fail closed");
+                self.emit("li a2, 0");
+                self.emit("li a3, 0");
+            }
+        }
+
+        self.emit_operand_to_register("a0", &args[0]);
+        self.emit_operand_to_register("a1", &args[1]);
+        self.emit_operand_to_register("a4", &args[3]);
+        self.emit("call ".to_string() + func);
+        let ok_label = self.fresh_label("runtime_metapoint_filtered_pair_ok");
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_epilogue();
         self.emit_label(&ok_label);
@@ -9531,6 +9639,8 @@ impl CodeGenerator {
             || referenced_helpers.contains("__ckb_require_type_lock_metapoint_pairs")
             || referenced_helpers.contains("__ckb_require_lock_type_metapoint_pairs_from_i32_data")
             || referenced_helpers.contains("__ckb_require_type_lock_metapoint_pairs_from_i32_data")
+            || referenced_helpers.contains("__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered")
+            || referenced_helpers.contains("__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered")
             || referenced_helpers.contains("__ckb_require_lock_match_master_out_point_pairs_from_data")
         {
             self.emit_runtime_current_script_role_at_helper(enabled);
@@ -9559,6 +9669,14 @@ impl CodeGenerator {
                 "current-script type-only to lock-only MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
             ),
             (
+                "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered",
+                "current-script lock-only to type-only filtered MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
+            ),
+            (
+                "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered",
+                "current-script type-only to lock-only filtered MetaPoint pair cardinality check using signed i32 distance loaded from base cell data",
+            ),
+            (
                 "__ckb_require_lock_match_master_out_point_pairs_from_data",
                 "current-script lock-only match order input/output pairing using master OutPoint loaded from order data",
             ),
@@ -9571,6 +9689,8 @@ impl CodeGenerator {
             ("__ckb_require_cell_type_args_empty", "SourceView type Script empty args requirement"),
             ("__ckb_require_cell_lock_args_hash", "SourceView lock Script 32-byte args binding check"),
             ("__ckb_require_cell_type_args_hash", "SourceView type Script 32-byte args binding check"),
+            ("__ckb_require_cell_lock_script_hash_type", "SourceView lock Script code_hash/hash_type binding check"),
+            ("__ckb_require_cell_type_script_hash_type", "SourceView type Script code_hash/hash_type binding check"),
             ("__c256_require_u128_product_lte", "C256 u128 product <= requirement"),
             ("__c256_require_u128_product_eq", "C256 u128 product == requirement"),
             ("__c256_require_u128_sum2_products_lte", "C256 u128 product-sum <= requirement"),
@@ -9629,16 +9749,22 @@ impl CodeGenerator {
                 "__ckb_require_input_out_point" => self.emit_runtime_input_out_point_requirement_helper(enabled),
                 "__ckb_require_metapoint_relative" => self.emit_runtime_metapoint_relative_requirement_helper(enabled),
                 "__ckb_require_lock_type_metapoint_pairs" => {
-                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, true, false, enabled)
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, true, false, false, enabled)
                 }
                 "__ckb_require_type_lock_metapoint_pairs" => {
-                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, false, false, enabled)
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, false, false, false, enabled)
                 }
                 "__ckb_require_lock_type_metapoint_pairs_from_i32_data" => {
-                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, true, true, enabled)
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, true, true, false, enabled)
                 }
                 "__ckb_require_type_lock_metapoint_pairs_from_i32_data" => {
-                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, false, true, enabled)
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, false, true, false, enabled)
+                }
+                "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered" => {
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, true, true, true, enabled)
+                }
+                "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered" => {
+                    self.emit_runtime_metapoint_pair_cardinality_helper(name, detail, false, true, true, enabled)
                 }
                 "__ckb_require_lock_match_master_out_point_pairs_from_data" => {
                     self.emit_runtime_lock_match_master_out_point_pairs_from_data_helper(enabled)
@@ -9675,6 +9801,12 @@ impl CodeGenerator {
                 }
                 "__ckb_require_cell_type_args_hash" => {
                     self.emit_runtime_cell_script_args_hash_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
+                }
+                "__ckb_require_cell_lock_script_hash_type" => {
+                    self.emit_runtime_cell_script_hash_type_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
+                }
+                "__ckb_require_cell_type_script_hash_type" => {
+                    self.emit_runtime_cell_script_hash_type_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
                 "__c256_require_u128_product_lte" => self.emit_runtime_c256_product_requirement_helper(name, detail, false),
                 "__c256_require_u128_product_eq" => self.emit_runtime_c256_product_requirement_helper(name, detail, true),
@@ -10409,16 +10541,24 @@ impl CodeGenerator {
         detail: &str,
         lock_to_type: bool,
         distance_from_base_data: bool,
+        related_filter: bool,
         enabled: bool,
     ) {
         self.emit_global(symbol);
         self.emit_label(symbol);
         self.emit(format!("# cellscript abi: {}", detail));
         self.emit("# cellscript abi: scans current-script lock-only/type-only cells and requires one-to-one MetaPoint pairing");
+        if related_filter {
+            self.emit("# cellscript abi: related role cells must match expected TypeHash and generic data rule");
+            self.emit("# cellscript abi: filtered data rules: 0=no data check, 1=exact 8-byte zero u64, 2=exact 8-byte nonzero u64");
+        }
         if distance_from_base_data {
             self.emit("# cellscript abi: args a0=SourceView selecting Input/Output source class, a1=base-cell data offset containing signed i32 distance");
         } else {
             self.emit("# cellscript abi: args a0=SourceView selecting Input/Output source class, a1=signed i32 distance");
+        }
+        if related_filter {
+            self.emit("# cellscript abi: filtered args a2=expected_related_type_hash_ptr, a3=hash_len, a4=related_data_rule");
         }
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
@@ -10437,8 +10577,14 @@ impl CodeGenerator {
         const MATCH_COUNT_OFFSET: usize = 72;
         const SIZE_OFFSET: usize = 80;
         const DATA_OFFSET_OFFSET: usize = 88;
-        const SCRIPT_HASH_OFFSET: usize = 96;
-        const DATA_BUFFER_OFFSET: usize = 128;
+        const FILTER_RULE_OFFSET: usize = 96;
+        const EXPECTED_HASH_PTR_OFFSET: usize = 104;
+        const EXPECTED_HASH_LEN_OFFSET: usize = 112;
+        const SCRIPT_HASH_OFFSET: usize = 128;
+        const TYPE_HASH_BUFFER_OFFSET: usize = 160;
+        const DATA_BUFFER_OFFSET: usize = 192;
+        const RA_OFFSET: usize = 216;
+        const STACK_SIZE: usize = 224;
 
         let invalid = self.fresh_label("metapoint_pair_source_invalid");
         let source_input = self.fresh_label("metapoint_pair_source_input");
@@ -10460,6 +10606,10 @@ impl CodeGenerator {
         let status_failed = self.fresh_label("metapoint_pair_status_failed");
         let relation_failed = self.fresh_label("metapoint_pair_relation_failed");
         let role_mismatch = self.fresh_label("metapoint_pair_role_mismatch");
+        let bad_expected = self.fresh_label("metapoint_pair_filter_expected_invalid");
+        let bad_data_rule = self.fresh_label("metapoint_pair_filter_data_rule_invalid");
+        let related_type_mismatch = self.fresh_label("metapoint_pair_related_type_mismatch");
+        let related_data_mismatch = self.fresh_label("metapoint_pair_related_data_mismatch");
         let data_loaded = self.fresh_label("metapoint_pair_data_loaded");
         let data_len_enough = self.fresh_label("metapoint_pair_data_len_enough");
         let data_malformed = self.fresh_label("metapoint_pair_data_malformed");
@@ -10470,8 +10620,8 @@ impl CodeGenerator {
         let base_role = if lock_to_type { 1 } else { 2 };
         let related_role = if lock_to_type { 2 } else { 1 };
 
-        self.emit("addi sp, sp, -160");
-        self.emit("sd ra, 152(sp)");
+        self.emit(format!("addi sp, sp, -{}", STACK_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
         self.emit(format!("sd a0, {}(sp)", INPUT_VIEW_OFFSET));
         if distance_from_base_data {
             self.emit(format!("sd a1, {}(sp)", DATA_OFFSET_OFFSET));
@@ -10483,6 +10633,18 @@ impl CodeGenerator {
         self.emit(format!("sd zero, {}(sp)", BASE_INDEX_OFFSET));
         self.emit(format!("sd zero, {}(sp)", BASE_COUNT_OFFSET));
         self.emit(format!("sd zero, {}(sp)", RELATED_COUNT_OFFSET));
+        if related_filter {
+            self.emit(format!("sd a2, {}(sp)", EXPECTED_HASH_PTR_OFFSET));
+            self.emit(format!("sd a3, {}(sp)", EXPECTED_HASH_LEN_OFFSET));
+            self.emit(format!("sd a4, {}(sp)", FILTER_RULE_OFFSET));
+            self.emit(format!("beqz a2, {}", bad_expected));
+            self.emit("li t0, 32");
+            self.emit("sub t1, a3, t0");
+            self.emit(format!("bnez t1, {}", bad_expected));
+            self.emit("li t0, 2");
+            self.emit("sltu t1, t0, a4");
+            self.emit(format!("bnez t1, {}", bad_data_rule));
+        }
 
         self.emit("# cellscript abi: decode SourceView source class; index component is ignored for group scan");
         self.emit_decode_source_view_to_t1_t2(&invalid);
@@ -10606,6 +10768,21 @@ impl CodeGenerator {
         self.emit(format!("j {}", advance_related));
 
         self.emit_label(&inner_role_candidate);
+        if related_filter {
+            self.emit_metapoint_related_cell_filter_check(
+                SOURCE_OFFSET,
+                RELATED_INDEX_OFFSET,
+                EXPECTED_HASH_PTR_OFFSET,
+                FILTER_RULE_OFFSET,
+                SIZE_OFFSET,
+                TYPE_HASH_BUFFER_OFFSET,
+                DATA_BUFFER_OFFSET,
+                &status_failed,
+                &related_type_mismatch,
+                &related_data_mismatch,
+                &bad_data_rule,
+            );
+        }
         self.emit(format!("ld t0, {}(sp)", VIEW_KIND_OFFSET));
         self.emit(format!("li t1, {}", CKB_SOURCE_VIEW_SHIFT));
         self.emit("mul t0, t0, t1");
@@ -10647,6 +10824,21 @@ impl CodeGenerator {
         self.emit(format!("li t2, {}", related_role));
         self.emit("sub t3, t0, t2");
         self.emit(format!("bnez t3, {}", increment_outer));
+        if related_filter {
+            self.emit_metapoint_related_cell_filter_check(
+                SOURCE_OFFSET,
+                BASE_INDEX_OFFSET,
+                EXPECTED_HASH_PTR_OFFSET,
+                FILTER_RULE_OFFSET,
+                SIZE_OFFSET,
+                TYPE_HASH_BUFFER_OFFSET,
+                DATA_BUFFER_OFFSET,
+                &status_failed,
+                &related_type_mismatch,
+                &related_data_mismatch,
+                &bad_data_rule,
+            );
+        }
         self.emit(format!("ld t4, {}(sp)", RELATED_COUNT_OFFSET));
         self.emit("addi t4, t4, 1");
         self.emit(format!("sd t4, {}(sp)", RELATED_COUNT_OFFSET));
@@ -10680,15 +10872,124 @@ impl CodeGenerator {
         self.emit_label(&role_mismatch);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptRoleMismatch.code()));
         self.emit(format!("j {}", done));
+        self.emit_label(&bad_expected);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&bad_data_rule);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&related_type_mismatch);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::TypeHashMismatch.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&related_data_mismatch);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
         self.emit_label(&data_malformed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
         self.emit(format!("j {}", done));
         self.emit_label(&cardinality);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::MetaPointCardinalityMismatch.code()));
         self.emit_label(&done);
-        self.emit("ld ra, 152(sp)");
-        self.emit("addi sp, sp, 160");
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", STACK_SIZE));
         self.emit("ret");
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_metapoint_related_cell_filter_check(
+        &mut self,
+        source_offset: usize,
+        related_index_offset: usize,
+        expected_hash_ptr_offset: usize,
+        filter_rule_offset: usize,
+        size_offset: usize,
+        type_hash_buffer_offset: usize,
+        data_buffer_offset: usize,
+        status_failed: &str,
+        type_mismatch: &str,
+        data_mismatch: &str,
+        bad_data_rule: &str,
+    ) {
+        let type_loaded = self.fresh_label("metapoint_filter_type_loaded");
+        let type_size_ok = self.fresh_label("metapoint_filter_type_size_ok");
+        let data_rule_done = self.fresh_label("metapoint_filter_data_rule_done");
+        let data_rule_zero = self.fresh_label("metapoint_filter_data_rule_zero");
+        let data_rule_nonzero = self.fresh_label("metapoint_filter_data_rule_nonzero");
+        let abi = self.runtime_abi();
+
+        self.emit("# cellscript abi: filtered MetaPoint related cell type hash and data-rule check");
+        self.emit("li t0, 32");
+        self.emit(format!("sd t0, {}(sp)", size_offset));
+        self.emit(format!("addi a0, sp, {}", type_hash_buffer_offset));
+        self.emit(format!("addi a1, sp, {}", size_offset));
+        self.emit("li a2, 0");
+        self.emit(format!("ld a3, {}(sp)", related_index_offset));
+        self.emit(format!("ld a4, {}(sp)", source_offset));
+        self.emit(format!("li a5, {}", CKB_CELL_FIELD_TYPE_HASH));
+        self.emit(format!("li a7, {}", abi.load_cell_by_field));
+        self.emit("ecall");
+        self.emit(format!("beqz a0, {}", type_loaded));
+        self.emit("addi t1, a0, 0");
+        self.emit(format!("j {}", status_failed));
+        self.emit_label(&type_loaded);
+        self.emit(format!("ld t0, {}(sp)", size_offset));
+        self.emit("li t1, 32");
+        self.emit("sub t2, t0, t1");
+        self.emit(format!("beqz t2, {}", type_size_ok));
+        self.emit(format!("j {}", type_mismatch));
+        self.emit_label(&type_size_ok);
+        self.emit(format!("addi a0, sp, {}", type_hash_buffer_offset));
+        self.emit(format!("ld a1, {}(sp)", expected_hash_ptr_offset));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit(format!("bnez a0, {}", type_mismatch));
+
+        self.emit(format!("ld t0, {}(sp)", filter_rule_offset));
+        self.emit(format!("beqz t0, {}", data_rule_done));
+        self.emit("li t1, 1");
+        self.emit("sub t2, t0, t1");
+        self.emit(format!("beqz t2, {}", data_rule_zero));
+        self.emit("li t1, 2");
+        self.emit("sub t2, t0, t1");
+        self.emit(format!("beqz t2, {}", data_rule_nonzero));
+        self.emit(format!("j {}", bad_data_rule));
+
+        for (label, require_nonzero) in [(&data_rule_zero, false), (&data_rule_nonzero, true)] {
+            let data_loaded = self.fresh_label("metapoint_filter_data_loaded");
+            let data_size_ok = self.fresh_label("metapoint_filter_data_size_ok");
+            let data_value_ok = self.fresh_label("metapoint_filter_data_value_ok");
+            self.emit_label(label);
+            self.emit("li t0, 8");
+            self.emit(format!("sd t0, {}(sp)", size_offset));
+            self.emit(format!("addi a0, sp, {}", data_buffer_offset));
+            self.emit(format!("addi a1, sp, {}", size_offset));
+            self.emit("li a2, 0");
+            self.emit(format!("ld a3, {}(sp)", related_index_offset));
+            self.emit(format!("ld a4, {}(sp)", source_offset));
+            self.emit(format!("li a7, {}", abi.load_cell_data));
+            self.emit("ecall");
+            self.emit(format!("beqz a0, {}", data_loaded));
+            self.emit(format!("j {}", data_mismatch));
+            self.emit_label(&data_loaded);
+            self.emit(format!("ld t0, {}(sp)", size_offset));
+            self.emit("li t1, 8");
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("beqz t2, {}", data_size_ok));
+            self.emit(format!("j {}", data_mismatch));
+            self.emit_label(&data_size_ok);
+            self.emit(format!("ld t0, {}(sp)", data_buffer_offset));
+            if require_nonzero {
+                self.emit(format!("bnez t0, {}", data_value_ok));
+                self.emit(format!("j {}", data_mismatch));
+            } else {
+                self.emit(format!("beqz t0, {}", data_value_ok));
+                self.emit(format!("j {}", data_mismatch));
+            }
+            self.emit_label(&data_value_ok);
+            self.emit(format!("j {}", data_rule_done));
+        }
+
+        self.emit_label(&data_rule_done);
     }
 
     fn emit_runtime_lock_match_master_out_point_pairs_from_data_helper(&mut self, enabled: bool) {
@@ -11572,6 +11873,123 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_cell_script_hash_type_requirement_helper(&mut self, symbol: &str, detail: &str, field_id: u64, enabled: bool) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: CKB SourceView Script code_hash/hash_type requirement ({})", detail));
+        self.emit("# cellscript abi: args a0=SourceView, a1=expected_code_hash_ptr, a2=expected_code_hash_len, a3=expected_hash_type");
+        self.emit("# cellscript abi: validates Molecule Script table prefix without constraining args length");
+        if !enabled {
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit("ret");
+            return;
+        }
+
+        const SCRIPT_SIZE_OFFSET: usize = 8;
+        const SCRIPT_BUFFER_OFFSET: usize = 16;
+        const EXPECTED_CODE_HASH_PTR_OFFSET: usize = 80;
+        const EXPECTED_CODE_HASH_LEN_OFFSET: usize = 88;
+        const EXPECTED_HASH_TYPE_OFFSET: usize = 96;
+        const RA_OFFSET: usize = 120;
+        const FRAME_SIZE: usize = 128;
+        const SCRIPT_PREFIX_SIZE: u64 = 53;
+
+        let invalid = self.fresh_label("script_identity_source_invalid");
+        let bad_expected = self.fresh_label("script_identity_expected_invalid");
+        let bad_hash_type = self.fresh_label("script_identity_hash_type_invalid");
+        let loaded = self.fresh_label("script_identity_loaded");
+        let prefix_loaded = self.fresh_label("script_identity_prefix_loaded");
+        let failed = self.fresh_label("script_identity_load_failed");
+        let malformed = self.fresh_label("script_identity_malformed");
+        let mismatch = self.fresh_label("script_identity_mismatch");
+        let done = self.fresh_label("script_identity_done");
+        let abi = self.runtime_abi();
+
+        self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", EXPECTED_CODE_HASH_PTR_OFFSET));
+        self.emit(format!("sd a2, {}(sp)", EXPECTED_CODE_HASH_LEN_OFFSET));
+        self.emit(format!("sd a3, {}(sp)", EXPECTED_HASH_TYPE_OFFSET));
+
+        self.emit(format!("beqz a1, {}", bad_expected));
+        self.emit("li t0, 32");
+        self.emit("sub t1, a2, t0");
+        self.emit(format!("bnez t1, {}", bad_expected));
+        self.emit("li t0, 256");
+        self.emit("sltu t1, a3, t0");
+        self.emit(format!("beqz t1, {}", bad_hash_type));
+
+        self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit(format!("li t0, {}", SCRIPT_PREFIX_SIZE));
+        self.emit(format!("sd t0, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
+        self.emit(format!("addi a1, sp, {}", SCRIPT_SIZE_OFFSET));
+        self.emit("li a2, 0");
+        self.emit("addi a3, t1, 0");
+        self.emit("addi a4, t2, 0");
+        self.emit(format!("li a5, {}", field_id));
+        self.emit(format!("li a7, {}", abi.load_cell_by_field));
+        self.emit("ecall");
+        self.emit(format!("beqz a0, {}", loaded));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", prefix_loaded));
+        self.emit(format!("j {}", failed));
+
+        self.emit_label(&loaded);
+        self.emit(format!("j {}", prefix_loaded));
+        self.emit_label(&prefix_loaded);
+        self.emit(format!("ld t3, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit("li t1, 49");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("bnez t2, {}", malformed));
+
+        self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET);
+        self.emit("sub t2, t0, t3");
+        self.emit(format!("bnez t2, {}", malformed));
+        for (offset, expected) in [(4usize, 16u64), (8, 48), (12, 49)] {
+            self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + offset);
+            self.emit(format!("li t1, {}", expected));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", malformed));
+        }
+
+        self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET + 16));
+        self.emit(format!("ld a1, {}(sp)", EXPECTED_CODE_HASH_PTR_OFFSET));
+        self.emit("li a2, 32");
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit(format!("bnez a0, {}", mismatch));
+
+        self.emit(format!("lbu t0, {}(sp)", SCRIPT_BUFFER_OFFSET + 48));
+        self.emit(format!("ld t1, {}(sp)", EXPECTED_HASH_TYPE_OFFSET));
+        self.emit("sub t2, t0, t1");
+        self.emit(format!("bnez t2, {}", mismatch));
+        self.emit("li a0, 0");
+        self.emit(format!("j {}", done));
+
+        self.emit_label(&invalid);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&bad_expected);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&bad_hash_type);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::NumericOrDiscriminantInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&malformed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&mismatch);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptIdentityMismatch.code()));
+        self.emit_label(&done);
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
+        self.emit("ret");
+    }
+
     fn emit_runtime_load_u64_le_helper(&mut self) {
         self.emit_global("__cellscript_load_u64_le");
         self.emit_label("__cellscript_load_u64_le");
@@ -12103,7 +12521,9 @@ impl CodeGenerator {
     fn emit_runtime_dao_accumulated_rate_helper(&mut self, enabled: bool) {
         self.emit_global("__dao_accumulated_rate");
         self.emit_label("__dao_accumulated_rate");
-        self.emit("# cellscript abi: DAO accumulated-rate HeaderDep SourceView helper (DAO field offset=8 in the header DAO field)");
+        self.emit(
+            "# cellscript abi: DAO accumulated-rate HeaderDep SourceView helper via LOAD_HEADER at absolute header offset 160+8",
+        );
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("addi a1, a0, 0");
@@ -12127,11 +12547,10 @@ impl CodeGenerator {
         self.emit("sd t0, 8(sp)");
         self.emit("addi a0, sp, 16");
         self.emit("addi a1, sp, 8");
-        self.emit(format!("li a2, {}", CKB_DAO_FIELD_ACCUMULATED_RATE_OFFSET));
+        self.emit(format!("li a2, {}", CKB_DAO_HEADER_ACCUMULATED_RATE_ABSOLUTE_OFFSET));
         self.emit("addi a3, t1, 0");
         self.emit(format!("li a4, {}", abi.source_header_dep));
-        self.emit(format!("li a5, {}", CKB_HEADER_FIELD_DAO));
-        self.emit(format!("li a7, {}", abi.load_header_by_field));
+        self.emit(format!("li a7, {}", abi.load_header));
         self.emit("ecall");
         self.emit(format!("beqz a0, {}", loaded));
         self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
@@ -12380,32 +12799,30 @@ impl CodeGenerator {
         self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
         self.emit(format!("addi a0, sp, {}", INPUT_DAO_OFFSET));
         self.emit(format!("addi a1, sp, {}", SIZE_OFFSET));
-        self.emit("li a2, 0");
+        self.emit(format!("li a2, {}", CKB_DAO_HEADER_FIELD_ABSOLUTE_OFFSET));
         self.emit(format!("ld a3, {}(sp)", INPUT_INDEX_OFFSET));
         self.emit(format!("ld a4, {}(sp)", INPUT_SOURCE_OFFSET));
-        self.emit(format!("li a5, {}", CKB_HEADER_FIELD_DAO));
-        self.emit(format!("li a7, {}", abi.load_header_by_field));
+        self.emit(format!("li a7, {}", abi.load_header));
         self.emit("ecall");
         self.emit(format!("bnez a0, {}", input_failed));
         self.emit(format!("ld t0, {}(sp)", SIZE_OFFSET));
         self.emit("li t1, 32");
-        self.emit("sub t2, t0, t1");
+        self.emit("sltu t2, t0, t1");
         self.emit(format!("bnez t2, {}", malformed));
 
         self.emit("li t0, 32");
         self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
         self.emit(format!("addi a0, sp, {}", HEADER_DAO_OFFSET));
         self.emit(format!("addi a1, sp, {}", SIZE_OFFSET));
-        self.emit("li a2, 0");
+        self.emit(format!("li a2, {}", CKB_DAO_HEADER_FIELD_ABSOLUTE_OFFSET));
         self.emit(format!("ld a3, {}(sp)", HEADER_INDEX_OFFSET));
         self.emit(format!("li a4, {}", CKB_SOURCE_HEADER_DEP));
-        self.emit(format!("li a5, {}", CKB_HEADER_FIELD_DAO));
-        self.emit(format!("li a7, {}", abi.load_header_by_field));
+        self.emit(format!("li a7, {}", abi.load_header));
         self.emit("ecall");
         self.emit(format!("bnez a0, {}", header_failed));
         self.emit(format!("ld t0, {}(sp)", SIZE_OFFSET));
         self.emit("li t1, 32");
-        self.emit("sub t2, t0, t1");
+        self.emit("sltu t2, t0, t1");
         self.emit(format!("bnez t2, {}", malformed));
 
         self.emit(format!("addi a0, sp, {}", INPUT_DAO_OFFSET));
@@ -15027,6 +15444,8 @@ fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__ckb_require_cell_type_args_empty"
             | "__ckb_require_cell_lock_args_hash"
             | "__ckb_require_cell_type_args_hash"
+            | "__ckb_require_cell_lock_script_hash_type"
+            | "__ckb_require_cell_type_script_hash_type"
             | "__ckb_require_input_out_point_tx_hash"
             | "__ckb_require_input_out_point"
             | "__ckb_require_metapoint_relative"
@@ -15034,6 +15453,8 @@ fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__ckb_require_type_lock_metapoint_pairs"
             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
             | "__dao_require_header_dep_for_input"
             | "__dao_require_input_since_at_least"

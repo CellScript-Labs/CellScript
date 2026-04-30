@@ -61,6 +61,10 @@ Implemented:
   `ckb::require_cell_lock_args_hash`, and
   `ckb::require_cell_type_args_hash`, lowering to Molecule `Script` field
   checks for empty args or exact 32-byte owner/type args.
+- `ckb::require_cell_lock_script_hash_type` and
+  `ckb::require_cell_type_script_hash_type`, lowering to Molecule `Script`
+  prefix checks for code_hash/hash_type identity without a protocol-specific
+  helper.
 - `ckb::require_current_script_args_empty`, lowering to `LOAD_SCRIPT` for the
   executing script and scanning Output locks so same-code/hash-type output
   locks also have empty `Script.args`, matching iCKB `has_empty_args`.
@@ -114,8 +118,9 @@ Implemented:
   `tests/benchmarks/ickb_specs/ickb_logic.cell`.
 - executable production-equivalence claim gate in
   `tests/benchmarks/ickb_diff/matrix.json` and `tests/ickb_diff.rs`; current
-  status is `MODEL_LEVEL_ONLY` /
-  `NOT_PROVEN`.
+  status is `PARTIAL_CKB_VM_EXECUTION` / `NOT_PROVEN`, with three
+  original-vs-CellScript differential rows and remaining iCKB scenarios still
+  model-level.
 - hardened 0.16 assurance paths: ProofPlan obligation origin/scope matching,
   duplicate/semantically incomplete ProofPlan record rejection, cell-access
   source/read consistency checks, concrete builder evidence payload validation,
@@ -256,10 +261,11 @@ cell and type in another. v0.17 now exposes current-role,
 `ckb::current_script_hash() -> Hash`, a `LOAD_SCRIPT` current/output-lock
 empty-args guard matching iCKB `has_empty_args`, full 32-byte SourceView
 lock/type hash requirement helpers, SourceView empty-args and 32-byte args
-helpers, and an xUDT owner-mode type-args verifier, including
-current-script-hash binding, as auditable bridges. CellScript still cannot
-express arbitrary script args or lock/type relation scans as a
-production-equivalent first-class Script identity API.
+helpers, generic SourceView Script code_hash/hash_type identity helpers, and an
+xUDT owner-mode type-args verifier, including current-script-hash binding, as
+auditable bridges. CellScript still cannot express arbitrary script args or
+lock/type relation scans as a production-equivalent first-class Script identity
+API.
 
 **Change**
 
@@ -318,9 +324,9 @@ cell.data
 - Base-cell-data signed i32 current-script lock/type pair cardinality can be
   checked with `ckb::require_lock_type_metapoint_pairs_from_i32_data` and
   `ckb::require_type_lock_metapoint_pairs_from_i32_data`.
-- Owned-Owner's exact DAO-withdrawal related-cell filter is kept in the
-  benchmark model until CellScript has a protocol-neutral filtered MetaPoint
-  aggregate primitive.
+- Owned-Owner's exact DAO-withdrawal related-cell filter can now be expressed
+  with protocol-neutral filtered MetaPoint scans that bind related TypeHash and
+  exact 8-byte zero/nonzero data rules.
 - Limit Order Match paths can scan current-script lock-only input/output order
   cells and require outputs to preserve the same absolute master OutPoint with
   `ckb::require_lock_match_master_out_point_pairs_from_data`.
@@ -457,7 +463,7 @@ Current partial surface:
 
 - `dao::accumulated_rate(source::header_dep(i))`;
 - `dao::require_header_dep_for_input(source::group_input(i), source::header_dep(j))`,
-  which compares full 32-byte DAO fields via `LOAD_HEADER_BY_FIELD`.
+  which compares full 32-byte DAO fields via `LOAD_HEADER` absolute header offsets.
 - `dao::is_deposit_data(source::group_input(i))` and
   `dao::is_withdrawal_request_data(source::group_input(i))`, which classify DAO
   deposit/withdrawal-request data with the same exact 8-byte zero/non-zero rule
@@ -511,12 +517,13 @@ ABI/sign-extension support, input OutPoint tx-hash/index reads now lower to
 exists, and `ckb::require_metapoint_relative(base, related, distance)` lowers
 pairwise source-index MetaPoint binding for input/group-input and
 output/group-output pairs. Fixed-distance and base-cell-data signed i32
-current-script lock/type pair cardinality also lower to executable scans. The
-Limit Order Match absolute master-OutPoint bridge now lowers to an executable
-current-script lock-only input/output scan. Owned-Owner's exact
-DAO-withdrawal related-cell rule remains model-level, because solving it in
-core needs a generic filtered MetaPoint aggregate rather than an
-iCKB-specific combined helper. Full protocol-specific maps with native
+current-script lock/type pair cardinality also lower to executable scans.
+Filtered variants now require every related-role cell to match a caller-supplied
+TypeHash and generic data rule (`0` no data check, `1` exact 8-byte zero u64,
+`2` exact 8-byte nonzero u64), which covers the Owned-Owner DAO-withdrawal
+related-cell shape without an iCKB-specific combined helper. The Limit Order
+Match absolute master-OutPoint bridge now lowers to an executable current-script
+lock-only input/output scan. Full protocol-specific maps with native
 action/data validation still need first-class aggregate scan lowering.
 
 **Acceptance**
@@ -525,9 +532,8 @@ action/data validation still need first-class aggregate scan lowering.
 - Owned-Owner signed relative distance matches the original iCKB `i32` byte
   encoding path and can bind a 32-byte owner lock args hash plus a full input
   OutPoint tx-hash/index pair, pairwise MetaPoint relative relation, and
-  fixed-distance or owner-cell-data type-lock pair cardinality. The
-  DAO-withdrawal related-cell classifier remains a benchmark-model assertion
-  until native filtered scan/map APIs exist.
+  fixed-distance or owner-cell-data type-lock pair cardinality, including a
+  protocol-neutral filtered related-cell TypeHash/data-rule check.
 - Limit Order Match can require absolute master-OutPoint preservation across
   lock-only order inputs/outputs; native action-aware MetaPoint/OutPoint maps
   and original iCKB VM differential evidence remain open.
@@ -697,9 +703,11 @@ Exit criteria: positive and negative benchmark fixtures execute in CKB VM.
 - Update differential report from model-level to executed partial.
 
 Exit criteria: no equivalence claim is made without executed evidence.
-The diff matrix may only move from `MODEL_LEVEL_ONLY` to
-`EXECUTED_CKB_VM_DIFF` when every executed row carries the evidence required by
-`docs/0.17/ickb_production_equivalence_gate.md`.
+The diff matrix may only move from `MODEL_LEVEL_ONLY` to partial executed modes
+when every executed row carries the evidence required by
+`docs/0.17/ickb_production_equivalence_gate.md`; it may only move to production
+mode `EXECUTED_CKB_VM_DIFF` / `PROVEN` when every selected row satisfies that
+gate.
 
 ## Validation Gate
 
@@ -748,4 +756,4 @@ cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat
 5. `docs/0.17/ickb_final_report.md` is updated with the new evidence.
 6. No unsupported feature is represented as supported.
 7. `tests/ickb_diff.rs` accepts the matrix as executed evidence rather than
-   `MODEL_LEVEL_ONLY`; otherwise 0.17 remains partial/not-proven.
+   model-only evidence; otherwise 0.17 remains partial/not-proven.

@@ -443,6 +443,14 @@ impl LspServer {
                         "ckb::require_cell_type_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
                     ),
                     (
+                        "require_cell_lock_script_hash_type",
+                        "ckb::require_cell_lock_script_hash_type(${1:source::group_input(0)}, ${2:expected_code_hash}, ${3:expected_hash_type})",
+                    ),
+                    (
+                        "require_cell_type_script_hash_type",
+                        "ckb::require_cell_type_script_hash_type(${1:source::group_input(0)}, ${2:expected_code_hash}, ${3:expected_hash_type})",
+                    ),
+                    (
                         "require_input_out_point_tx_hash",
                         "ckb::require_input_out_point_tx_hash(${1:source::group_input(0)}, ${2:expected_tx_hash})",
                     ),
@@ -469,6 +477,14 @@ impl LspServer {
                     (
                         "require_type_lock_metapoint_pairs_from_i32_data",
                         "ckb::require_type_lock_metapoint_pairs_from_i32_data(${1:source::input(0)}, ${2:distance_offset})",
+                    ),
+                    (
+                        "require_lock_type_metapoint_pairs_from_i32_data_filtered",
+                        "ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered(${1:source::input(0)}, ${2:distance_offset}, ${3:expected_related_type_hash}, ${4:related_data_rule})",
+                    ),
+                    (
+                        "require_type_lock_metapoint_pairs_from_i32_data_filtered",
+                        "ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(${1:source::input(0)}, ${2:distance_offset}, ${3:expected_related_type_hash}, ${4:related_data_rule})",
                     ),
                     (
                         "require_lock_match_master_out_point_pairs_from_data",

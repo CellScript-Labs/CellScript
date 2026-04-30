@@ -97,6 +97,8 @@ action mint_from_receipt(
     receipt: IckbReceipt,
     existing_tokens: IckbToken,
     expected_xudt_args_hash: Hash,
+    expected_xudt_code_hash: Hash,
+    expected_xudt_hash_type: u64,
     owner: Address
 ) -> IckbToken {
     ckb::require_current_script_args_empty()
@@ -118,6 +120,7 @@ action mint_from_receipt(
     assert_invariant(receipt.deposit_accumulated_rate == input_header_rate, "receipt input header mismatch")
     assert_invariant(group_capacity > 0, "missing group input capacity")
     let current_logic_hash: Hash = ckb::current_script_hash()
+    ckb::require_cell_type_script_hash_type(source::group_output(0), expected_xudt_code_hash, expected_xudt_hash_type)
     xudt::require_owner_mode_type_args(source::group_output(0), current_logic_hash, 2147483648)
     xudt::require_owner_mode_type_args(source::group_output(0), receipt.logic_hash, 2147483648)
     assert_invariant(
@@ -235,8 +238,9 @@ lock withdrawal_owner(request: protected WithdrawalRequest, claimed_owner: witne
 
 // TODO(ickb-benchmark): CellScript can now verify xUDT owner-mode Type args
 // against either an explicit logic hash or LOAD_SCRIPT_HASH(current script),
-// but it still lacks a first-class Script value for code_hash/hash_type/args
-// construction across arbitrary lock/type positions.
+// and can bind a cell Type Script code_hash/hash_type through a generic Script
+// identity helper. It still lacks a first-class Script value and arbitrary
+// variable-length args construction across lock/type positions.
 // TODO(ickb-benchmark): executable aggregate invariant lowering is required
 // for transaction-wide exact equality across iCKB tokens, receipts, and deposits.
 // TODO(ickb-benchmark): iCKB receipt layout and deposit output matching must

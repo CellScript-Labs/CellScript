@@ -2975,6 +2975,16 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Unit
                         }
+                        ("ckb", "require_cell_lock_script_hash_type" | "require_cell_type_script_hash_type") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, expected_code_hash: Hash, expected_hash_type: u64)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
                         ("ckb", "require_input_out_point_tx_hash" | "require_input_out_point") => {
                             let expects_index = suffix == "require_input_out_point";
                             let expected_arity = if expects_index { 3 } else { 2 };
@@ -3024,6 +3034,27 @@ impl<'a> TypeChecker<'a> {
                             if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, distance_offset: u64)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
+                        }
+                        (
+                            "ckb",
+                            "require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "require_type_lock_metapoint_pairs_from_i32_data_filtered",
+                        ) => {
+                            self.validate_builtin_arity(name, 4, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64
+                                || arg_types[1] != Type::U64
+                                || arg_types[2] != Type::Hash
+                                || arg_types[3] != Type::U64
+                            {
+                                return Err(CompileError::new(
+                                    format!(
+                                        "{} expects (source_view: u64, distance_offset: u64, expected_related_type_hash: Hash, related_data_rule: u64)",
+                                        name
+                                    ),
                                     call.span,
                                 ));
                             }

@@ -22,7 +22,7 @@ pub const POSITIVE_FIXTURES: [&str; 6] = [
     "valid_owned_owner_unlock.json",
 ];
 
-pub const NEGATIVE_FIXTURES: [&str; 16] = [
+pub const NEGATIVE_FIXTURES: [&str; 18] = [
     "amount_deflation_exact_equality.json",
     "amount_inflation.json",
     "capacity_violation.json",
@@ -33,6 +33,8 @@ pub const NEGATIVE_FIXTURES: [&str; 16] = [
     "limit_order_wrong_asset.json",
     "missing_header_dep.json",
     "owned_owner_relative_distance_mismatch.json",
+    "owned_owner_related_data_rule_mismatch.json",
+    "owned_owner_related_type_hash_mismatch.json",
     "redeem_before_maturity.json",
     "script_role_confusion.json",
     "witness_malformation.json",
@@ -264,6 +266,12 @@ fn evaluate_owned_owner(data: &Value) -> std::result::Result<(), String> {
     }
     if !bool_field(data, "withdrawal_request")? {
         return Err("not_withdrawal_request".to_string());
+    }
+    if data.get("related_type_hash_matches").is_some_and(|value| value.as_bool() == Some(false)) {
+        return Err("related_type_hash_mismatch".to_string());
+    }
+    if data.get("related_data_rule_matches").is_some_and(|value| value.as_bool() == Some(false)) {
+        return Err("related_data_rule_mismatch".to_string());
     }
     if str_field(data, "owner")? != str_field(data, "claimed_owner")? {
         return Err("wrong_owner".to_string());

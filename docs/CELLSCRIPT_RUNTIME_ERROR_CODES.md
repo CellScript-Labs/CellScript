@@ -60,10 +60,11 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 38 | `script-args-mismatch` | A loaded CKB Script args field did not match the expected args policy. | Check lock/type script args and whether this protocol path requires empty script args. |
 | 39 | `metapoint-mismatch` | A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance. | Check the paired input OutPoints or output indexes and the signed relative-distance field. |
 | 40 | `metapoint-cardinality-mismatch` | A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation. | Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell. |
+| 41 | `script-identity-mismatch` | A loaded CKB Script code_hash or hash_type did not match the expected identity. | Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Code `6` and values above `40` are currently reserved.
+- Code `6` and values above `41` are currently reserved.

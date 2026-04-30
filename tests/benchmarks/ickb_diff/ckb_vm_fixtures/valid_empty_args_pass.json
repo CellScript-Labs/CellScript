@@ -1,0 +1,34 @@
+{
+  "schema": "cellscript-ckb-vm-fixture-v1",
+  "description": "CellScript script using LOAD_SCRIPT_HASH syscall pass case - calls ckb::current_script_hash() and returns 0",
+  "entry_action": "verify_script_hash_syscall",
+  "cellscript_source": "inline",
+  "expected_result": "pass",
+  "failure_mode": null,
+  "ckb_transaction": {
+    "script_args": "0x",
+    "inputs": [
+      {
+        "capacity": 100000000000,
+        "lock_script": "always_success",
+        "type_script": null,
+        "data": "0x"
+      }
+    ],
+    "outputs": [
+      {
+        "capacity": 100000000000,
+        "lock_script": "always_success",
+        "type_script": "current_under_test",
+        "data": "0x"
+      }
+    ],
+    "cell_deps": [],
+    "header_deps": [],
+    "witnesses": []
+  },
+  "cellscript_metadata": {
+    "primitive_compat": null,
+    "note": "Uses ckb::current_script_hash() which invokes LOAD_SCRIPT_HASH syscall. This is a real CKB VM syscall, not a compile-time constant. Proves the CKB VM harness works with actual syscall context."
+  }
+}

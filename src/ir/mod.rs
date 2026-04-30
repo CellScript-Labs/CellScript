@@ -3564,6 +3564,12 @@ impl IrGenerator {
                 "ckb::require_cell_type_args_hash" if call.args.len() == 2 => {
                     self.lower_void_runtime_call("__ckb_require_cell_type_args_hash", &call.args, current, blocks, vars)
                 }
+                "ckb::require_cell_lock_script_hash_type" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_script_hash_type", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_script_hash_type" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_script_hash_type", &call.args, current, blocks, vars)
+                }
                 "ckb::require_input_out_point_tx_hash" if call.args.len() == 2 => {
                     self.lower_void_runtime_call("__ckb_require_input_out_point_tx_hash", &call.args, current, blocks, vars)
                 }
@@ -3593,6 +3599,22 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered" if call.args.len() == 4 => self
+                    .lower_void_runtime_call(
+                        "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered",
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                    ),
+                "ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered" if call.args.len() == 4 => self
+                    .lower_void_runtime_call(
+                        "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered",
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                    ),
                 "ckb::require_lock_match_master_out_point_pairs_from_data" if call.args.len() == 5 => self.lower_void_runtime_call(
                     "__ckb_require_lock_match_master_out_point_pairs_from_data",
                     &call.args,

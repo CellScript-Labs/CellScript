@@ -242,6 +242,24 @@ impl StdLib {
                 return_type: None,
             },
             StdFunction {
+                name: "ckb_require_cell_lock_script_hash_type".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_code_hash".to_string(), IrType::Hash),
+                    ("expected_hash_type".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_script_hash_type".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_code_hash".to_string(), IrType::Hash),
+                    ("expected_hash_type".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
                 name: "ckb_require_input_out_point_tx_hash".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64), ("expected_hash".to_string(), IrType::Hash)],
                 return_type: None,
@@ -282,6 +300,26 @@ impl StdLib {
             StdFunction {
                 name: "ckb_require_type_lock_metapoint_pairs_from_i32_data".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64), ("distance_offset".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("distance_offset".to_string(), IrType::U64),
+                    ("expected_related_type_hash".to_string(), IrType::Hash),
+                    ("related_data_rule".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("distance_offset".to_string(), IrType::U64),
+                    ("expected_related_type_hash".to_string(), IrType::Hash),
+                    ("related_data_rule".to_string(), IrType::U64),
+                ],
                 return_type: None,
             },
             StdFunction {

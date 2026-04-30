@@ -45,6 +45,7 @@ pub enum CellScriptRuntimeError {
     ScriptArgsMismatch = 38,
     MetaPointMismatch = 39,
     MetaPointCardinalityMismatch = 40,
+    ScriptIdentityMismatch = 41,
 }
 
 impl CellScriptRuntimeError {
@@ -93,6 +94,7 @@ impl CellScriptRuntimeError {
             Self::ScriptArgsMismatch => "script-args-mismatch",
             Self::MetaPointMismatch => "metapoint-mismatch",
             Self::MetaPointCardinalityMismatch => "metapoint-cardinality-mismatch",
+            Self::ScriptIdentityMismatch => "script-identity-mismatch",
         }
     }
 
@@ -143,6 +145,7 @@ impl CellScriptRuntimeError {
             Self::MetaPointCardinalityMismatch => {
                 "A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation."
             }
+            Self::ScriptIdentityMismatch => "A loaded CKB Script code_hash or hash_type did not match the expected identity.",
         }
     }
 
@@ -211,6 +214,7 @@ impl CellScriptRuntimeError {
             Self::MetaPointCardinalityMismatch => {
                 "Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell."
             }
+            Self::ScriptIdentityMismatch => "Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct.",
         }
     }
 
@@ -255,6 +259,7 @@ impl CellScriptRuntimeError {
             38 => Some(Self::ScriptArgsMismatch),
             39 => Some(Self::MetaPointMismatch),
             40 => Some(Self::MetaPointCardinalityMismatch),
+            41 => Some(Self::ScriptIdentityMismatch),
             _ => None,
         }
     }
@@ -308,6 +313,7 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::ScriptArgsMismatch,
     CellScriptRuntimeError::MetaPointMismatch,
     CellScriptRuntimeError::MetaPointCardinalityMismatch,
+    CellScriptRuntimeError::ScriptIdentityMismatch,
 ];
 
 pub fn runtime_error_info(error: CellScriptRuntimeError) -> CellScriptRuntimeErrorInfo {

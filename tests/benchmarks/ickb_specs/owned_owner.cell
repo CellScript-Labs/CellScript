@@ -1,5 +1,7 @@
 module cellscript::benchmarks::ickb_owned_owner
 
+const RELATED_DATA_RULE_EXACT_U64_NONZERO: u64 = 2
+
 resource OwnedWithdrawal has store, create, consume {
     request_epoch: u64
     maturity_epoch: u64
@@ -21,6 +23,7 @@ action mint_owned_owner(
     owner: Address,
     owned_index: u64,
     owner_index: u64,
+    expected_owned_type_hash: Hash,
     owner_relative_distance: i32
 ) -> (OwnedWithdrawal, OwnerCell) {
     ckb::require_current_script_args_empty()
@@ -38,7 +41,12 @@ action mint_owned_owner(
     )
     assert_invariant(dao::has_dao_type(source::output(owned_index)), "owned output must be DAO")
     assert_invariant(dao::is_withdrawal_request_data(source::output(owned_index)), "owned output must be withdrawal")
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
+    ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(
+        source::output(0),
+        0,
+        expected_owned_type_hash,
+        RELATED_DATA_RULE_EXACT_U64_NONZERO
+    )
 
     let owned = create OwnedWithdrawal {
         request_epoch,
@@ -77,6 +85,7 @@ lock owned_unlock(
     owned: protected OwnedWithdrawal,
     owner_cell: protected OwnerCell,
     expected_owner_args_hash: lock_args Hash,
+    expected_owned_type_hash: witness Hash,
     expected_owner_tx_hash: witness Hash
 ) -> bool {
     ckb::require_current_script_args_empty()
@@ -88,7 +97,12 @@ lock owned_unlock(
     ckb::require_metapoint_relative(owner_input, input, owner_cell.owner_relative_distance)
     assert_invariant(dao::has_dao_type(input), "owned input must be DAO")
     assert_invariant(dao::is_withdrawal_request_data(input), "owned input must be withdrawal")
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+    ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(
+        source::input(0),
+        0,
+        expected_owned_type_hash,
+        RELATED_DATA_RULE_EXACT_U64_NONZERO
+    )
 
     require ckb::current_role() == 1
     require owned.owner == owner_cell.owner
@@ -100,6 +114,7 @@ lock owned_unlock(
 // index binding, 32-byte lock args binding, and pairwise MetaPoint relative
 // checks now lower to runtime helpers. Current-script type-only/lock-only
 // MetaPoint pair scans can load the signed i32 distance from owner cell data at
-// offset 0. Exact "every paired owned cell is a DAO withdrawal request"
-// quantification remains in the test fixture model until CellScript has
-// first-class filtered MetaPoint maps and original CKB VM differential evidence.
+// offset 0. The generic filtered scan can require every related lock-only cell
+// to match an expected TypeHash and exact 8-byte nonzero data rule; the remaining
+// gap is first-class filtered MetaPoint map syntax and original CKB VM
+// differential evidence.

@@ -118,9 +118,11 @@ git diff --check
   `xudt::require_owner_mode_type_args(source, owner_hash, flags)` for the
   iCKB-style `[logic_hash, 0x80000000]` pattern, and
   `xudt::require_owner_mode_type_args_current_script(source, flags)` binds that
-  owner hash to `LOAD_SCRIPT_HASH(current script)`. The benchmark still keeps
-  an `xudt_args_hash` field because CellScript does not yet expose arbitrary
-  first-class `Script` construction.
+  owner hash to `LOAD_SCRIPT_HASH(current script)`. `mint_from_receipt` also
+  calls `ckb::require_cell_type_script_hash_type(source, code_hash, hash_type)`
+  so xUDT Type Script identity is bound without an iCKB-specific helper. The
+  benchmark still keeps an `xudt_args_hash` field because CellScript does not
+  yet expose arbitrary first-class `Script` construction.
 - `ckb::current_script_hash()` exposes the current script hash as a reusable
   32-byte `Hash`; `ickb_logic.cell::mint_from_receipt` passes it into the
   generic xUDT owner-mode args verifier before the receipt hash check.
@@ -128,7 +130,8 @@ git diff --check
   `ckb::require_current_script_args_empty()` for the executing script's
   Molecule `Script.args` and same-code/hash-type Output lock args, full 32-byte
   `ckb::require_cell_lock_hash` / `ckb::require_cell_type_hash` SourceView
-  requirement helpers, and
+  requirement helpers, generic SourceView Script code_hash/hash_type helpers,
+  and
   `ckb::require_cell_lock_args_empty` / `ckb::require_cell_type_args_empty` plus
   `ckb::require_cell_lock_args_hash` /
   `ckb::require_cell_type_args_hash` SourceView helpers, but not a full
@@ -146,10 +149,13 @@ git diff --check
   through `ckb::require_lock_type_metapoint_pairs` and
   `ckb::require_type_lock_metapoint_pairs`, and i32-data-driven scans lower
   through `ckb::require_*_metapoint_pairs_from_i32_data(source, offset)`.
-  These helpers reject duplicate, missing, or unbalanced lock-only/type-only
-  MetaPoint pairs. The exact Owned-Owner rule that every paired owned cell is a
-  DAO withdrawal request remains in this benchmark's fixture model until
-  CellScript has a protocol-neutral filtered MetaPoint aggregate primitive.
+  Filtered variants such as
+  `ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(source,
+  offset, expected_type_hash, related_data_rule)` additionally require every
+  related-role cell to match a caller-supplied TypeHash and generic data rule
+  (`0` no data check, `1` exact 8-byte zero u64, `2` exact 8-byte nonzero u64).
+  These helpers reject duplicate, missing, unbalanced, wrong-type, or
+  wrong-data lock-only/type-only MetaPoint pairs.
   `ckb::require_lock_match_master_out_point_pairs_from_data(input_source,
   output_source, 16, 20, 52)` covers the Limit Order Match bridge where input
   order cells may still encode Mint-relative master distance while output order

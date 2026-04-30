@@ -11593,6 +11593,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_type_lock_metapoint_pairs"
                             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
                             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                     ) =>
                 {
@@ -11604,6 +11606,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_type_lock_metapoint_pairs"
                             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
                             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                     ) {
                         features.insert("ckb-metapoint-relative".to_string());
@@ -11614,6 +11618,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_type_lock_metapoint_pairs"
                             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
                             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                     ) {
                         features.insert("ckb-metapoint-pair-cardinality".to_string());
@@ -11622,8 +11628,17 @@ fn body_ckb_runtime_features(
                         func.as_str(),
                         "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
                             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
                     ) {
                         features.insert("ckb-metapoint-data-driven-cardinality".to_string());
+                    }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
+                    ) {
+                        features.insert("ckb-metapoint-filtered-cardinality".to_string());
                     }
                     if func == "__ckb_require_lock_match_master_out_point_pairs_from_data" {
                         features.insert("ckb-metapoint-master-outpoint-data-cardinality".to_string());
@@ -11645,6 +11660,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_type_lock_metapoint_pairs"
                             | "__ckb_require_lock_type_metapoint_pairs_from_i32_data"
                             | "__ckb_require_type_lock_metapoint_pairs_from_i32_data"
+                            | "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered"
+                            | "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered"
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                             | "__ckb_cell_lock_hash_low"
                             | "__ckb_cell_type_hash_low"
@@ -11654,6 +11671,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_empty"
                             | "__ckb_require_cell_lock_args_hash"
                             | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_script_hash_type"
+                            | "__ckb_require_cell_type_script_hash_type"
                             | "__ckb_cell_data_size"
                     ) =>
                 {
@@ -11666,6 +11685,10 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_hash"
                     ) {
                         features.insert("ckb-script-args-requirements".to_string());
+                    }
+                    if matches!(func.as_str(), "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type")
+                    {
+                        features.insert("ckb-script-identity-requirements".to_string());
                     }
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_require_current_script_args_empty" => {
@@ -12238,6 +12261,18 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             "Input/Output",
             "ckb::require_type_lock_metapoint_pairs_from_i32_data",
         )),
+        "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered" => Some((
+            "metapoint-lock-type-filtered-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered",
+        )),
+        "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered" => Some((
+            "metapoint-type-lock-filtered-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output",
+            "ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered",
+        )),
         "__ckb_require_lock_match_master_out_point_pairs_from_data" => Some((
             "metapoint-lock-match-master-out-point-data-cardinality",
             "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD",
@@ -12264,6 +12299,12 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_require_cell_type_args_hash" => {
             Some(("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_hash"))
         }
+        "__ckb_require_cell_lock_script_hash_type" => {
+            Some(("cell-lock-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_script_hash_type"))
+        }
+        "__ckb_require_cell_type_script_hash_type" => {
+            Some(("cell-type-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_script_hash_type"))
+        }
         "__ckb_require_current_script_args_empty" => Some((
             "current-script-empty-args-require",
             "LOAD_SCRIPT+LOAD_CELL_BY_FIELD",
@@ -12272,7 +12313,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
         "__ckb_cell_data_size" => Some(("cell-data-size", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_size")),
-        "__dao_accumulated_rate" => Some(("dao-accumulated-rate", "LOAD_HEADER_BY_FIELD", "HeaderDep", "dao::accumulated_rate")),
+        "__dao_accumulated_rate" => Some(("dao-accumulated-rate", "LOAD_HEADER", "HeaderDep", "dao::accumulated_rate")),
         "__dao_input_accumulated_rate" => {
             Some(("dao-input-accumulated-rate", "LOAD_HEADER", "Input/GroupInput", "dao::input_accumulated_rate"))
         }
@@ -12282,7 +12323,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             Some(("dao-withdrawal-request-data-classifier", "LOAD_CELL_DATA", "SourceView", "dao::is_withdrawal_request_data"))
         }
         "__dao_require_header_dep_for_input" => {
-            Some(("dao-header-dep-input-lineage", "LOAD_HEADER_BY_FIELD", "Input/HeaderDep", "dao::require_header_dep_for_input"))
+            Some(("dao-header-dep-input-lineage", "LOAD_HEADER", "Input/HeaderDep", "dao::require_header_dep_for_input"))
         }
         "__dao_require_input_since_at_least" => {
             Some(("dao-input-since-maturity", "LOAD_INPUT_BY_FIELD", "Input/GroupInput", "dao::require_input_since_at_least"))

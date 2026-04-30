@@ -32,6 +32,8 @@ action inspect(
     ckb::require_current_script_args_empty()
     ckb::require_cell_lock_args_hash(output, expected_lock_hash)
     ckb::require_cell_type_args_hash(output, expected_type_hash)
+    ckb::require_cell_lock_script_hash_type(output, expected_lock_hash, 1)
+    ckb::require_cell_type_script_hash_type(output, expected_type_hash, 1)
     dao::require_header_dep_for_input(input, header)
     let absolute_since = ckb::since_epoch_absolute(42, 0, 1)
     let relative_since = ckb::since_epoch_relative(42, 0, 1)
@@ -53,6 +55,8 @@ action inspect(
     ckb::require_type_lock_metapoint_pairs(source::input(0), relative_distance)
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
     ckb::require_lock_type_metapoint_pairs_from_i32_data(source::output(0), 52)
+    ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(source::input(0), 0, expected_type_hash, 2)
+    ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered(source::output(0), 52, expected_type_hash, 1)
     ckb::require_lock_match_master_out_point_pairs_from_data(source::input(0), source::output(0), 16, 20, 52)
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_type_hash(input, current_script_hash)
@@ -281,6 +285,8 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         "__ckb_require_type_lock_metapoint_pairs",
         "__ckb_require_lock_type_metapoint_pairs_from_i32_data",
         "__ckb_require_type_lock_metapoint_pairs_from_i32_data",
+        "__ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered",
+        "__ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered",
         "__ckb_require_lock_match_master_out_point_pairs_from_data",
         "__ckb_cell_lock_hash_low",
         "__ckb_cell_type_hash_low",
@@ -291,6 +297,8 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         "__ckb_require_cell_type_args_empty",
         "__ckb_require_cell_lock_args_hash",
         "__ckb_require_cell_type_args_hash",
+        "__ckb_require_cell_lock_script_hash_type",
+        "__ckb_require_cell_type_script_hash_type",
         "__ckb_cell_data_size",
         "__ckb_since_epoch_absolute",
         "__ckb_since_epoch_relative",
@@ -332,7 +340,7 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
     assert!(assembly.contains("CKB RFC0017 relative epoch since encoder"), "{assembly}");
     assert!(assembly.contains("DAO relative epoch since maturity requirement"), "{assembly}");
     assert!(
-        assembly.contains("DAO field offset=8 in the header DAO field"),
+        assembly.contains("absolute header offset 160+8"),
         "DAO accumulated-rate helper must read the accumulated-rate bytes:\n{assembly}"
     );
     assert!(assembly.contains("DAO input header to HeaderDep lineage requirement"), "{assembly}");
@@ -374,10 +382,15 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         "script args helpers must return a stable args mismatch status:\n{assembly}"
     );
     assert!(
+        assembly.contains(&format!("li a0, {}", CellScriptRuntimeError::ScriptIdentityMismatch.code())),
+        "script identity helpers must return a stable code_hash/hash_type mismatch status:\n{assembly}"
+    );
+    assert!(
         assembly.contains("full-hash requirement"),
         "lock/type/xUDT hash requirements must compare full 32-byte hashes:\n{assembly}"
     );
     assert!(assembly.contains("Script empty-args requirement"), "{assembly}");
+    assert!(assembly.contains("Script code_hash/hash_type requirement"), "{assembly}");
     assert!(
         assembly.contains("current-script empty-args requirement via LOAD_SCRIPT plus output lock scan")
             && assembly.contains("require matching output lock scripts to keep empty args"),
@@ -414,6 +427,11 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         "MetaPoint data-driven pair cardinality helpers must load signed i32 distances from cell data:\n{assembly}"
     );
     assert!(
+        assembly.contains("filtered MetaPoint related cell type hash and data-rule check")
+            && assembly.contains("filtered data rules: 0=no data check, 1=exact 8-byte zero u64, 2=exact 8-byte nonzero u64"),
+        "filtered MetaPoint aggregates must lower generic related-cell type/data filters:\n{assembly}"
+    );
+    assert!(
         assembly.contains("Limit-Order-style lock-only match order master OutPoint pairing")
             && assembly.contains("input orders may encode master as Mint(relative i32) or Match(absolute OutPoint)")
             && assembly.contains("output orders must encode master as Match(absolute OutPoint)"),
@@ -446,8 +464,10 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
     assert!(features.contains(&"ckb-metapoint-relative".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-metapoint-pair-cardinality".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-metapoint-data-driven-cardinality".to_string()), "{features:?}");
+    assert!(features.contains(&"ckb-metapoint-filtered-cardinality".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-metapoint-master-outpoint-data-cardinality".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-script-args-requirements".to_string()), "{features:?}");
+    assert!(features.contains(&"ckb-script-identity-requirements".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-dao-header-accumulated-rate".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-dao-input-header-accumulated-rate".to_string()), "{features:?}");
     assert!(features.contains(&"ckb-dao-cell-classification".to_string()), "{features:?}");
@@ -467,12 +487,12 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         .iter()
         .map(|access| (access.operation.as_str(), access.syscall.as_str(), access.source.as_str()))
         .collect::<Vec<_>>();
-    assert!(accesses.contains(&("dao-accumulated-rate", "LOAD_HEADER_BY_FIELD", "HeaderDep")), "{accesses:?}");
+    assert!(accesses.contains(&("dao-accumulated-rate", "LOAD_HEADER", "HeaderDep")), "{accesses:?}");
     assert!(accesses.contains(&("dao-input-accumulated-rate", "LOAD_HEADER", "Input/GroupInput")), "{accesses:?}");
     assert!(accesses.contains(&("dao-type-hash-classifier", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("dao-deposit-data-classifier", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("dao-withdrawal-request-data-classifier", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
-    assert!(accesses.contains(&("dao-header-dep-input-lineage", "LOAD_HEADER_BY_FIELD", "Input/HeaderDep")), "{accesses:?}");
+    assert!(accesses.contains(&("dao-header-dep-input-lineage", "LOAD_HEADER", "Input/HeaderDep")), "{accesses:?}");
     assert!(accesses.contains(&("dao-input-since-maturity", "LOAD_INPUT_BY_FIELD", "Input/GroupInput")), "{accesses:?}");
     assert!(
         accesses.contains(&("dao-input-relative-epoch-since-maturity", "LOAD_INPUT_BY_FIELD", "Input/GroupInput")),
@@ -495,6 +515,8 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
     );
     assert!(accesses.contains(&("cell-lock-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("cell-lock-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("cell-type-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript")), "{accesses:?}");
     assert!(accesses.contains(&("input-out-point-index", "LOAD_INPUT_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("input-out-point-tx-hash-require", "LOAD_INPUT_BY_FIELD", "SourceView")), "{accesses:?}");
@@ -527,6 +549,22 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
     assert!(
         accesses.contains(&(
             "metapoint-type-lock-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output"
+        )),
+        "{accesses:?}"
+    );
+    assert!(
+        accesses.contains(&(
+            "metapoint-lock-type-filtered-data-pair-cardinality",
+            "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
+            "Input/Output"
+        )),
+        "{accesses:?}"
+    );
+    assert!(
+        accesses.contains(&(
+            "metapoint-type-lock-filtered-data-pair-cardinality",
             "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW",
             "Input/Output"
         )),

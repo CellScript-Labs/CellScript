@@ -58,7 +58,8 @@ fn ickb_benchmark_specs_compile_and_expose_expected_entries() {
         if file == "ickb_logic.cell" {
             assert!(
                 assembly.contains(".global __xudt_require_group_amount_minted")
-                    && assembly.contains(".global __xudt_require_group_amount_burned"),
+                    && assembly.contains(".global __xudt_require_group_amount_burned")
+                    && assembly.contains(".global __ckb_require_cell_type_script_hash_type"),
                 "iCKB logic benchmark should only use protocol-neutral runtime helpers in core codegen:\n{assembly}"
             );
             assert!(
@@ -70,6 +71,7 @@ fn ickb_benchmark_specs_compile_and_expose_expected_entries() {
         if file == "owned_owner.cell" {
             assert!(
                 assembly.contains(".global __ckb_require_type_lock_metapoint_pairs_from_i32_data")
+                    && assembly.contains(".global __ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered")
                     && assembly.contains(".global __dao_has_dao_type")
                     && assembly.contains(".global __dao_is_withdrawal_request_data")
                     && !assembly.contains("__dao_require_type_lock_withdrawal_metapoint_pairs_from_i32_data"),
@@ -97,7 +99,7 @@ fn ickb_fixture_root_model_report_is_test_only() {
     assert_eq!(report["execution_level"], "MODEL");
     assert_eq!(report["ckb_vm_execution"], false);
     assert_eq!(report["positive_fixture_count"], 6);
-    assert_eq!(report["negative_fixture_count"], 16);
+    assert_eq!(report["negative_fixture_count"], 18);
 }
 
 #[test]
@@ -116,18 +118,45 @@ fn ickb_negative_fixtures_fail_for_expected_invariant() {
 fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
     let matrix = read_fixture("ickb_diff", "matrix.json");
     assert_eq!(matrix["schema"], "cellscript-ickb-diff-matrix-v1");
-    assert_eq!(matrix["mode"], "MODEL_LEVEL_ONLY");
+    // Mode can be MODEL_LEVEL_ONLY, CELL_SCRIPT_CKB_VM_EXECUTED, or the current
+    // partial differential VM evidence state.
+    let mode = matrix["mode"].as_str().expect("mode");
+    assert!(
+        matches!(mode, "MODEL_LEVEL_ONLY" | "CELL_SCRIPT_CKB_VM_EXECUTED" | "PARTIAL_CKB_VM_EXECUTION"),
+        "unexpected mode: {mode}"
+    );
     assert_eq!(matrix["equivalence_status"], "NOT_PROVEN");
     assert_eq!(matrix["production_equivalence_claim"], false);
     let rows = matrix["rows"].as_array().expect("rows");
-    assert_eq!(rows.len(), 9);
-    for row in rows {
-        assert!(row["result"].as_str().is_some_and(|result| result.starts_with("model-")), "{row:#?}");
-        assert_eq!(row["evidence_level"], "MODEL", "{row:#?}");
-        assert_eq!(row["ckb_vm_execution"], false, "{row:#?}");
-        assert_eq!(row["original_ickb_executed"], false, "{row:#?}");
-        assert!(row["original_ickb_expected"].as_str().is_some(), "{row:#?}");
-        assert!(row["cellscript_expected"].as_str().is_some(), "{row:#?}");
+    let model_rows: Vec<_> = rows.iter().filter(|row| row["evidence_level"].as_str() == Some("MODEL")).collect();
+    assert!(model_rows.is_empty(), "active matrix must not retain legacy model rows: {model_rows:#?}");
+    assert!(
+        rows.iter().all(|row| !row["result"].as_str().is_some_and(|result| result.starts_with("model-"))),
+        "active matrix must not retain model-* result rows"
+    );
+
+    let remaining_blockers = matrix["remaining_model_blockers"].as_array().expect("remaining_model_blockers");
+    assert!(remaining_blockers.is_empty(), "remaining_model_blockers should mirror zero active MODEL rows");
+
+    let assumptions = matrix["non_executable_model_assumptions"].as_array().expect("non_executable_model_assumptions");
+    let assumption_scenarios =
+        assumptions.iter().map(|row| row["scenario"].as_str().expect("assumption scenario")).collect::<BTreeSet<_>>();
+    assert_eq!(
+        assumption_scenarios,
+        BTreeSet::from(["duplicate receipt", "wrong owner", "immature redeem"]),
+        "legacy non-executable model assumptions should be explicit"
+    );
+    for assumption in assumptions {
+        assert_eq!(assumption["evidence_level"], "NON_EXECUTABLE_MODEL_ASSUMPTION", "{assumption:#?}");
+        assert_eq!(assumption["ckb_vm_execution"], false, "{assumption:#?}");
+        assert!(assumption["reason"].as_str().is_some_and(|reason| !reason.is_empty()), "{assumption:#?}");
+        let replacement = assumption["replacement_evidence"].as_str().expect("replacement evidence");
+        let replacement_row = rows
+            .iter()
+            .find(|row| row["scenario"].as_str() == Some(replacement))
+            .unwrap_or_else(|| panic!("missing replacement evidence row {replacement}"));
+        assert_eq!(replacement_row["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{replacement}");
+        assert_eq!(replacement_row["full_differential"], true, "{replacement}");
     }
 }
 

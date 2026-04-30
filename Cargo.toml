@@ -63,3 +63,5 @@ vm-runner = ["dep:ckb-vm"]
 [dev-dependencies]
 pretty_assertions = "1.4"
 tempfile = "3.10"
+ckb-testtool = "1.1"
+sha2 = "0.10"
