@@ -222,7 +222,9 @@ impl CellScriptRuntimeError {
             }
             Self::ScriptIdentityMismatch => "Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct.",
             Self::WitnessMalformed => "Check witness byte layout, WitnessArgs table header, and entry ABI magic bytes.",
-            Self::WitnessFieldTruncated => "Check that expected WitnessArgs field offsets plus field lengths stay within loaded witness size.",
+            Self::WitnessFieldTruncated => {
+                "Check that expected WitnessArgs field offsets plus field lengths stay within loaded witness size."
+            }
         }
     }
 

@@ -46,6 +46,57 @@ const NON_EXECUTABLE_MODEL_ASSUMPTIONS: [(&str, &str, &str); 3] = [
     ("immature redeem", "immature_redeem", DAO_IMMATURE_WITHDRAWAL_DIFF_SCENARIO),
 ];
 
+const VM_HARNESS_WITNESS_ARGS_PROGRAM: &str = r#"
+module vm_harness_witness_args
+
+action test_witness_args() -> u64 {
+    let view = source::input(0)
+    let size = witness::size(view)
+    ckb::require_witness_size_at_least(view, 16)
+    let raw = witness::raw(view)
+    if size != 16 {
+        return 1
+    }
+    if raw == Hash::zero() {
+        return 2
+    }
+    let lock_field = witness::lock(view)
+    if lock_field != Hash::zero() {
+        return 3
+    }
+    return 0
+}
+"#;
+
+const VM_HARNESS_WITNESS_ARGS_ACTION: &str = "test_witness_args";
+
+const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_PROGRAM: &str = r#"
+module vm_harness_witness_size_too_small
+
+action test_witness_size_too_small() -> u64 {
+    let view = source::input(0)
+    ckb::require_witness_size_at_least(view, 17)
+    return 0
+}
+"#;
+
+const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_small";
+
+const VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM: &str = r#"
+module vm_harness_witness_short_lock
+
+action test_witness_short_lock_zero_padded() -> u64 {
+    let view = source::input(0)
+    let lock_field = witness::lock(view)
+    if lock_field != Hash::zero() {
+        return 1
+    }
+    return 0
+}
+"#;
+
+const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero_padded";
+
 const DEPOSIT_PHASE1_DIFF_SCENARIO: &str = "differential: deposit phase 1 original vs CellScript agree";
 const DEPOSIT_TOO_SMALL_DIFF_SCENARIO: &str = "differential: deposit too small original vs CellScript agree";
 const DEPOSIT_TOO_BIG_DIFF_SCENARIO: &str = "differential: deposit too big original vs CellScript agree";
@@ -1598,6 +1649,87 @@ fn cellscript_cell_dep_data_size_passes_with_fixture_cell_dep() {
         result.exit_code, result.captured_debug
     );
     assert!(result.cycles > 0, "should consume some cycles");
+}
+
+#[test]
+fn cellscript_witness_args_empty_lock_passes_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_ARGS_PROGRAM, VM_HARNESS_WITNESS_ARGS_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![molecule_witness_args(None, None, None)];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code, 0,
+        "CellScript witness::size/raw/lock should pass with empty WitnessArgs, got exit_code={}, debug={:?}",
+        result.exit_code, result.captured_debug
+    );
+    assert!(result.cycles > 0, "should consume some cycles");
+}
+
+#[test]
+fn cellscript_require_witness_size_at_least_rejects_too_small_in_ckb_vm() {
+    let elf =
+        compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_SIZE_TOO_SMALL_PROGRAM, VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, false, Some("witness_size_too_small".to_string()));
+    fixture.witnesses = vec![molecule_witness_args(None, None, None)];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code,
+        cellscript::runtime_errors::CellScriptRuntimeError::WitnessMalformed.code() as i64,
+        "require_witness_size_at_least should fail closed when min_size exceeds actual witness size, got exit_code={}, debug={:?}",
+        result.exit_code,
+        result.captured_debug
+    );
+}
+
+#[test]
+fn cellscript_witness_args_short_lock_is_zero_padded_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM, VM_HARNESS_WITNESS_SHORT_LOCK_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![molecule_witness_args(Some(&[0u8][..]), None, None)];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code, 0,
+        "witness::lock should zero-pad short BytesOpt fields to a 32-byte Hash, got exit_code={}, debug={:?}",
+        result.exit_code, result.captured_debug
+    );
+    assert!(result.cycles > 0, "should consume some cycles");
+}
+
+fn molecule_witness_args(lock: Option<&[u8]>, input_type: Option<&[u8]>, output_type: Option<&[u8]>) -> Bytes {
+    let fields = [molecule_bytes_opt(lock), molecule_bytes_opt(input_type), molecule_bytes_opt(output_type)];
+    let header_size = 16usize;
+    let mut offset = header_size;
+    let mut offsets = Vec::with_capacity(fields.len());
+    for field in &fields {
+        offsets.push(offset as u32);
+        offset += field.len();
+    }
+
+    let mut out = Vec::with_capacity(offset);
+    out.extend_from_slice(&(offset as u32).to_le_bytes());
+    for field_offset in offsets {
+        out.extend_from_slice(&field_offset.to_le_bytes());
+    }
+    for field in fields {
+        out.extend_from_slice(&field);
+    }
+    Bytes::from(out)
+}
+
+fn molecule_bytes_opt(value: Option<&[u8]>) -> Vec<u8> {
+    let Some(bytes) = value else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(4 + bytes.len());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytes);
+    out
 }
 
 // ---------------------------------------------------------------------------

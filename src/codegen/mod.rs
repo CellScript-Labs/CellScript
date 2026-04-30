@@ -2832,6 +2832,17 @@ impl CodeGenerator {
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
                         next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
                     }
+                    IrInstruction::Call { dest: Some(dest), func, args }
+                        if matches!(
+                            func.as_str(),
+                            "__ckb_witness_raw" | "__ckb_witness_lock" | "__ckb_witness_input_type" | "__ckb_witness_output_type"
+                        ) && args.len() == 1
+                            && dest.ty == IrType::Hash =>
+                    {
+                        self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
+                        self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
+                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                    }
                     _ => {}
                 }
             }
@@ -8316,6 +8327,9 @@ impl CodeGenerator {
         if self.emit_runtime_current_script_hash_call(dest, func, args)? {
             return Ok(());
         }
+        if self.emit_runtime_witness_hash_call(dest, func, args)? {
+            return Ok(());
+        }
 
         let abi = self.callable_abis.get(func).cloned();
         let mut abi_index = 0usize;
@@ -8407,6 +8421,42 @@ impl CodeGenerator {
         self.emit_sp_addi("a1", size_offset);
         self.emit("call __ckb_current_script_hash");
         let ok_label = self.fresh_label("current_script_hash_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+        self.emit_sp_addi("t0", buffer_offset);
+        self.emit_stack_sd("t0", dest.id * 8);
+        Ok(true)
+    }
+
+    fn emit_runtime_witness_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(func, "__ckb_witness_raw" | "__ckb_witness_lock" | "__ckb_witness_input_type" | "__ckb_witness_output_type") {
+            return Ok(false);
+        }
+        let Some(dest) = dest else {
+            return Ok(false);
+        };
+        if args.len() != 1 || dest.ty != IrType::Hash {
+            return Ok(false);
+        }
+        let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: witness hash destination has no 32-byte storage; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: witness hash destination has no buffer storage; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+
+        self.emit("# cellscript abi: load witness hash into addressable Hash");
+        self.emit("li t0, 32");
+        self.emit_stack_sd("t0", size_offset);
+        self.emit_operand_to_register("a0", &args[0]);
+        self.emit_sp_addi("a1", buffer_offset);
+        self.emit(format!("call {}", func));
+        let ok_label = self.fresh_label("witness_hash_ok");
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_epilogue();
         self.emit_label(&ok_label);
@@ -9877,14 +9927,15 @@ impl CodeGenerator {
         self.emit_global("__ckb_witness_size");
         self.emit_label("__ckb_witness_size");
         self.emit("# cellscript abi: witness byte size via LOAD_WITNESS");
-        self.emit("# cellscript abi: args a0=SourceView; returns a0=status, a1=size");
+        self.emit("# cellscript abi: args a0=SourceView; returns a0=size, a1=0 on success, a1=error_code on failure");
         if !enabled {
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("ret");
             return;
         }
         let invalid = self.fresh_label("witness_size_source_invalid");
         let failed = self.fresh_label("witness_size_load_failed");
+        let status_ok = self.fresh_label("witness_size_status_ok");
         let done = self.fresh_label("witness_size_done");
         let abi = self.runtime_abi();
 
@@ -9900,24 +9951,30 @@ impl CodeGenerator {
         self.emit("addi a4, t2, 0");
         self.emit(format!("li a7, {}", abi.load_witness));
         self.emit("ecall");
-        self.emit(format!("beqz a0, {}", done));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", status_ok));
+        self.emit(format!("beqz a0, {}", status_ok));
         self.emit(format!("j {}", failed));
 
+        self.emit_label(&status_ok);
+        self.emit(format!("j {}", done));
+
         self.emit_label(&invalid);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
         self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&failed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
         self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&done);
-        self.emit("li a0, 0");
-        self.emit(format!("ld a1, {}(sp)", SIZE_OFFSET));
+        self.emit(format!("ld a0, {}(sp)", SIZE_OFFSET));
+        self.emit("li a1, 0");
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
         self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
@@ -9925,6 +9982,7 @@ impl CodeGenerator {
 
     fn emit_runtime_require_witness_size_at_least_helper(&mut self, enabled: bool) {
         const SIZE_OFFSET: usize = 8;
+        const MIN_SIZE_OFFSET: usize = 16;
         const RA_OFFSET: usize = 24;
         const FRAME_SIZE: usize = 32;
 
@@ -9940,12 +9998,14 @@ impl CodeGenerator {
         let invalid = self.fresh_label("witness_req_size_source_invalid");
         let failed = self.fresh_label("witness_req_size_load_failed");
         let too_small = self.fresh_label("witness_req_size_too_small");
-        let ok = self.fresh_label("witness_req_size_ok");
+        let status_ok = self.fresh_label("witness_req_size_status_ok");
         let done = self.fresh_label("witness_req_size_done");
         let abi = self.runtime_abi();
 
         self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
         self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit("# cellscript abi: preserve min_size before LOAD_WITNESS size probe");
+        self.emit(format!("sd a1, {}(sp)", MIN_SIZE_OFFSET));
         self.emit_decode_source_view_to_t1_t2(&invalid);
         self.emit("li t0, 0");
         self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
@@ -9956,24 +10016,34 @@ impl CodeGenerator {
         self.emit("addi a4, t2, 0");
         self.emit(format!("li a7, {}", abi.load_witness));
         self.emit("ecall");
-        self.emit(format!("beqz a0, {}", ok));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", status_ok));
+        self.emit(format!("beqz a0, {}", status_ok));
         self.emit(format!("j {}", failed));
 
-        self.emit_label(&ok);
+        self.emit_label(&status_ok);
         self.emit(format!("ld t0, {}(sp)", SIZE_OFFSET));
-        self.emit("addi t1, a1, 0");
+        self.emit(format!("ld t1, {}(sp)", MIN_SIZE_OFFSET));
         self.emit("sltu t2, t0, t1");
         self.emit(format!("beqz t2, {}", done));
 
         self.emit_label(&too_small);
-        self.emit_epilogue();
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::WitnessMalformed.code()));
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
+        self.emit("ret");
 
         self.emit_label(&invalid);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&failed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&done);
@@ -9984,15 +10054,15 @@ impl CodeGenerator {
     }
 
     fn emit_runtime_witness_raw_helper(&mut self, enabled: bool) {
-        const SIZE_OFFSET: usize = 8;
-        const BUFFER_OFFSET: usize = 16;
-        const RA_OFFSET: usize = 56;
-        const FRAME_SIZE: usize = 64;
+        const OUTPTR_OFFSET: usize = 8;
+        const SIZE_OFFSET: usize = 16;
+        const RA_OFFSET: usize = 24;
+        const FRAME_SIZE: usize = 32;
 
         self.emit_global("__ckb_witness_raw");
         self.emit_label("__ckb_witness_raw");
-        self.emit("# cellscript abi: load raw witness bytes as a 32-byte Hash");
-        self.emit("# cellscript abi: args a0=out32_ptr, a1=size_ptr; returns a0=status");
+        self.emit("# cellscript abi: load raw witness bytes (first 32) into caller buffer");
+        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr; returns a0=status");
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("ret");
@@ -10000,30 +10070,57 @@ impl CodeGenerator {
         }
         let invalid = self.fresh_label("witness_raw_source_invalid");
         let failed = self.fresh_label("witness_raw_load_failed");
+        let status_ok = self.fresh_label("witness_raw_status_ok");
         let done = self.fresh_label("witness_raw_done");
         let abi = self.runtime_abi();
 
         self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
         self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", OUTPTR_OFFSET));
+        self.emit("# cellscript abi: zero-fill caller witness Hash buffer before raw prefix load");
+        self.emit(format!("ld t0, {}(sp)", OUTPTR_OFFSET));
+        self.emit("li t1, 0");
+        let zero_loop = self.fresh_label("witness_raw_zero_loop");
+        let zero_done = self.fresh_label("witness_raw_zero_done");
+        self.emit_label(&zero_loop);
+        self.emit("li t2, 32");
+        self.emit("sltu t3, t1, t2");
+        self.emit(format!("beqz t3, {}", zero_done));
+        self.emit("add t4, t0, t1");
+        self.emit("sb zero, 0(t4)");
+        self.emit("addi t1, t1, 1");
+        self.emit(format!("j {}", zero_loop));
+        self.emit_label(&zero_done);
         self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit("# cellscript abi: LOAD_WITNESS raw first 32 bytes into caller buffer");
         self.emit("li t0, 32");
         self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
-        self.emit(format!("addi a0, sp, {}", BUFFER_OFFSET));
+        self.emit(format!("ld a0, {}(sp)", OUTPTR_OFFSET));
         self.emit(format!("addi a1, sp, {}", SIZE_OFFSET));
         self.emit("li a2, 0");
         self.emit("addi a3, t1, 0");
         self.emit("addi a4, t2, 0");
         self.emit(format!("li a7, {}", abi.load_witness));
         self.emit("ecall");
-        self.emit(format!("beqz a0, {}", done));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", status_ok));
+        self.emit(format!("beqz a0, {}", status_ok));
         self.emit(format!("j {}", failed));
+
+        self.emit_label(&status_ok);
+        self.emit(format!("j {}", done));
 
         self.emit_label(&invalid);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&failed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
 
         self.emit_label(&done);
@@ -10034,20 +10131,21 @@ impl CodeGenerator {
     }
 
     fn emit_runtime_witness_args_field_helper(&mut self, symbol: &str, detail: &str, field_index: u64, enabled: bool) {
+        const OUTPTR_OFFSET: usize = 0;
         const SIZE_OFFSET: usize = 8;
         const FULL_BUFFER_OFFSET: usize = 16;
         const FULL_BUFFER_SIZE: usize = 512;
-        const FIELD_SIZE_OFFSET: usize = SIZE_OFFSET + FULL_BUFFER_SIZE;
-        const FIELD_BUF_OFFSET: usize = FIELD_SIZE_OFFSET + 8;
+        const FIELD_BUF_OFFSET: usize = FULL_BUFFER_OFFSET + FULL_BUFFER_SIZE;
         const FIELD_BUF_SIZE: usize = 128;
         const HEADER_READ_OFFSET: usize = FIELD_BUF_OFFSET + FIELD_BUF_SIZE;
-        const RA_OFFSET: usize = HEADER_READ_OFFSET + 8;
+        const HEADER_READ_SIZE: usize = 24;
+        const RA_OFFSET: usize = HEADER_READ_OFFSET + HEADER_READ_SIZE;
         const FRAME_SIZE: usize = RA_OFFSET + 8;
 
         self.emit_global(symbol);
         self.emit_label(symbol);
         self.emit(format!("# cellscript abi: extract WitnessArgs field {} ({})", field_index, detail));
-        self.emit("# cellscript abi: args a0=out32_ptr, a1=size_ptr; returns a0=status");
+        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr; returns a0=status");
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("ret");
@@ -10064,6 +10162,21 @@ impl CodeGenerator {
 
         self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
         self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", OUTPTR_OFFSET));
+        self.emit("# cellscript abi: zero-fill extracted WitnessArgs Hash buffer before parsing");
+        self.emit("li t0, 0");
+        let zero_field_loop = self.fresh_label("witness_field_prezero_loop");
+        let zero_field_done = self.fresh_label("witness_field_prezero_done");
+        self.emit_label(&zero_field_loop);
+        self.emit("li t1, 32");
+        self.emit("sltu t2, t0, t1");
+        self.emit(format!("beqz t2, {}", zero_field_done));
+        self.emit(format!("addi t3, sp, {}", FIELD_BUF_OFFSET));
+        self.emit("add t3, t3, t0");
+        self.emit("sb zero, 0(t3)");
+        self.emit("addi t0, t0, 1");
+        self.emit(format!("j {}", zero_field_loop));
+        self.emit_label(&zero_field_done);
         self.emit_decode_source_view_to_t1_t2(&invalid);
 
         // Load full witness
@@ -10082,25 +10195,44 @@ impl CodeGenerator {
         self.emit_label(&ok);
         self.emit(format!("ld t0, {}(sp)", SIZE_OFFSET));
 
-        // Parse Molecule WitnessArgs table header (20 bytes minimum)
-        self.emit("li t1, 20");
+        // Parse Molecule WitnessArgs table header (minimum 4 + 3*4 = 16 bytes)
+        // Table encoding: total_size (4 bytes) + offsets[0..N-1] (4 bytes each)
+        // field_count = (offset0 / 4) - 1
+        self.emit("li t1, 16");
         self.emit("sltu t2, t0, t1");
         self.emit(format!("bnez t2, {}", malformed));
 
-        // Read field_count at offset 4
         self.emit(format!("addi t3, sp, {}", FULL_BUFFER_OFFSET));
-        self.emit("lwu t4, 4(t3)");
-        self.emit("li t5, 3");
-        self.emit("sub t6, t4, t5");
-        self.emit(format!("bnez t6, {}", malformed));
+        self.emit("# cellscript abi: WitnessArgs total_size must match loaded witness size");
+        self.emit_u32_le_from_base_to("t4", "t3", 0, "t5");
+        self.emit("sub t2, t4, t0");
+        self.emit(format!("bnez t2, {}", malformed));
 
-        // Read field offsets from header (offsets 8, 12, 16)
-        self.emit("lwu t4, 8(t3)");
+        // For the current 3-field WitnessArgs table, offset0 must be 16.
+        self.emit_u32_le_from_base_to("t4", "t3", 4, "t5");
+        self.emit("li t5, 16");
+        self.emit("sub t2, t4, t5");
+        self.emit(format!("bnez t2, {}", malformed));
+
+        // Read field offsets from header (offsets at bytes 4, 8, 12)
+        self.emit_u32_le_from_base_to("t4", "t3", 4, "t2");
         self.emit(format!("sd t4, {}(sp)", HEADER_READ_OFFSET));
-        self.emit("lwu t5, 12(t3)");
+        self.emit_u32_le_from_base_to("t5", "t3", 8, "t2");
         self.emit(format!("sd t5, {}(sp)", HEADER_READ_OFFSET + 8));
-        self.emit("lwu t6, 16(t3)");
+        self.emit_u32_le_from_base_to("t6", "t3", 12, "t2");
         self.emit(format!("sd t6, {}(sp)", HEADER_READ_OFFSET + 16));
+
+        self.emit("# cellscript abi: validate all WitnessArgs field offsets are monotonic and in bounds");
+        self.emit(format!("ld t4, {}(sp)", HEADER_READ_OFFSET));
+        self.emit(format!("ld t5, {}(sp)", HEADER_READ_OFFSET + 8));
+        self.emit("sltu t2, t5, t4");
+        self.emit(format!("bnez t2, {}", malformed));
+        self.emit(format!("ld t4, {}(sp)", HEADER_READ_OFFSET + 8));
+        self.emit(format!("ld t5, {}(sp)", HEADER_READ_OFFSET + 16));
+        self.emit("sltu t2, t5, t4");
+        self.emit(format!("bnez t2, {}", malformed));
+        self.emit("sltu t2, t0, t5");
+        self.emit(format!("bnez t2, {}", truncated));
 
         // Select field offset and next field offset
         let field_offsets_offset = HEADER_READ_OFFSET + (field_index * 8) as usize;
@@ -10112,35 +10244,35 @@ impl CodeGenerator {
             self.emit("addi t5, t0, 0".to_string());
         }
 
-        // Check field offset bounds: field_offset < next_offset <= total_size
-        self.emit("sltu t2, t4, t5");
-        self.emit(format!("beqz t2, {}", malformed));
+        // Check field offset bounds: field_offset <= next_offset <= total_size.
+        // BytesOpt None is an empty span, so adjacent offsets may be equal.
+        self.emit("sltu t2, t5, t4");
+        self.emit(format!("bnez t2, {}", malformed));
         self.emit("sltu t2, t0, t5");
         self.emit(format!("bnez t2, {}", truncated));
 
-        // Calculate field data size: next_offset - field_offset - 4 (BytesOpt length prefix)
+        // Calculate BytesOpt field span. Empty span is None.
         self.emit("sub t2, t5, t4");
+        self.emit(format!("beqz t2, {}", field_absent));
         self.emit("li t6, 4");
         self.emit("sltu t3, t2, t6");
         self.emit(format!("bnez t3, {}", malformed));
         self.emit("addi t2, t2, -4");
 
-        // Read BytesOpt length at field_offset
+        // Read Some(Bytes) length at field_offset and require exact Bytes size.
         self.emit(format!("addi t3, sp, {}", FULL_BUFFER_OFFSET));
         self.emit("add t6, t3, t4");
-        self.emit("lwu t1, 0(t6)");
-        self.emit(format!("beqz t1, {}", field_absent));
-
-        // Check length <= field data size
-        self.emit("sltu t3, t2, t1");
+        self.emit_u32_le_from_base_to("t1", "t6", 0, "t3");
+        self.emit("sub t3, t2, t1");
         self.emit(format!("bnez t3, {}", malformed));
 
         // Copy field bytes to output buffer (max 32 bytes for Hash)
         self.emit("li t3, 32");
         self.emit("sltu t5, t3, t1");
-        self.emit("bnez t5, 1f");
+        let copy_count_ready = self.fresh_label("witness_field_copy_count_ready");
+        self.emit(format!("beqz t5, {}", copy_count_ready));
         self.emit("addi t1, t3, 0");
-        self.emit("1:");
+        self.emit_label(&copy_count_ready);
         self.emit(format!("addi t2, sp, {}", FIELD_BUF_OFFSET));
         self.emit("addi t4, t6, 4");
         // Copy loop
@@ -10160,21 +10292,7 @@ impl CodeGenerator {
         self.emit(format!("j {}", done));
 
         self.emit_label(&field_absent);
-        self.emit("li t1, 0");
-        self.emit("li t3, 32");
-        self.emit(format!("addi t2, sp, {}", FIELD_BUF_OFFSET));
-        // Zero-fill for absent field
-        self.emit("li t4, 0");
-        let zero_loop = self.fresh_label("witness_field_zero_loop");
-        let zero_done = self.fresh_label("witness_field_zero_done");
-        self.emit_label(&zero_loop);
-        self.emit("sltu t5, t4, t3");
-        self.emit(format!("beqz t5, {}", zero_done));
-        self.emit("add t5, t2, t4");
-        self.emit("sb zero, 0(t5)");
-        self.emit("addi t4, t4, 1");
-        self.emit(format!("j {}", zero_loop));
-        self.emit_label(&zero_done);
+        self.emit("# cellscript abi: BytesOpt None leaves pre-zeroed Hash buffer");
         self.emit(format!("j {}", done));
 
         self.emit_label(&malformed);
@@ -10202,6 +10320,23 @@ impl CodeGenerator {
         self.emit("ret");
 
         self.emit_label(&done);
+        // Copy 32 bytes from FIELD_BUF_OFFSET to caller's buffer (outptr)
+        self.emit(format!("ld t0, {}(sp)", OUTPTR_OFFSET));
+        self.emit("li t1, 0");
+        let copy_out = self.fresh_label("witness_field_copy_out_loop");
+        let copy_out_done = self.fresh_label("witness_field_copy_out_done");
+        self.emit_label(&copy_out);
+        self.emit("li t2, 32");
+        self.emit("sltu t3, t1, t2");
+        self.emit(format!("beqz t3, {}", copy_out_done));
+        self.emit(format!("addi t2, sp, {}", FIELD_BUF_OFFSET));
+        self.emit("add t2, t2, t1");
+        self.emit("lbu t3, 0(t2)");
+        self.emit("add t4, t0, t1");
+        self.emit("sb t3, 0(t4)");
+        self.emit("addi t1, t1, 1");
+        self.emit(format!("j {}", copy_out));
+        self.emit_label(&copy_out_done);
         self.emit("li a0, 0");
         self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
         self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
@@ -13469,6 +13604,19 @@ impl CodeGenerator {
         self.emit(format!("or {}, {}, t4", dest, dest));
     }
 
+    fn emit_u32_le_from_base_to(&mut self, dest: &str, base: &str, offset: usize, scratch: &str) {
+        self.emit(format!("lbu {}, {}({})", dest, offset, base));
+        self.emit(format!("lbu {}, {}({})", scratch, offset + 1, base));
+        self.emit(format!("slli {}, {}, 8", scratch, scratch));
+        self.emit(format!("or {}, {}, {}", dest, dest, scratch));
+        self.emit(format!("lbu {}, {}({})", scratch, offset + 2, base));
+        self.emit(format!("slli {}, {}, 16", scratch, scratch));
+        self.emit(format!("or {}, {}, {}", dest, dest, scratch));
+        self.emit(format!("lbu {}, {}({})", scratch, offset + 3, base));
+        self.emit(format!("slli {}, {}, 24", scratch, scratch));
+        self.emit(format!("or {}, {}, {}", dest, dest, scratch));
+    }
+
     fn emit_runtime_xudt_require_owner_mode_type_args_helper(&mut self, enabled: bool) {
         self.emit_global("__xudt_require_owner_mode_type_args");
         self.emit_label("__xudt_require_owner_mode_type_args");
@@ -15820,6 +15968,7 @@ fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__c256_require_u128_product_eq"
             | "__c256_require_u128_sum2_products_lte"
             | "__c256_require_u128_sum2_products_eq"
+            | "__ckb_require_witness_size_at_least"
     )
 }
 
@@ -15848,6 +15997,7 @@ fn is_runtime_scalar_failclosed_call(func: &str) -> bool {
             | "__xudt_amount_low"
             | "__xudt_amount_high"
             | "__xudt_owner_mode_input_type_hash"
+            | "__ckb_witness_size"
     )
 }
 

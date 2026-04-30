@@ -403,6 +403,9 @@ fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[Ckb
         for read in reads_for_source(&access.source) {
             reads.insert(read.to_string());
         }
+        if access.source == "Witness" || access.operation.contains("witness") || access.binding.starts_with("witness::") {
+            reads.insert("witness".to_string());
+        }
     }
     if !body.consume_set.is_empty() {
         reads.insert("input".to_string());

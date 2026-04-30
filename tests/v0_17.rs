@@ -991,7 +991,9 @@ lock witness_size_lock(wallet: protected Wallet, claimed: witness Hash, min_size
     let sz = witness::size(view)
     ckb::require_witness_size_at_least(view, min_size)
     let raw = witness::raw(view)
+    let lock_field = witness::lock(view)
     require raw == claimed
+    require lock_field == claimed
 }
 "#;
 
@@ -1033,6 +1035,15 @@ fn v0_17_witness_size_and_require_witness_size_at_least_compile_and_emit_metadat
         }),
         "missing witness-raw access: {accesses:#?}"
     );
+    assert!(
+        accesses.iter().any(|a| {
+            a.operation == "witness-lock"
+                && a.syscall == "LOAD_WITNESS_ARGS_LOCK"
+                && a.source == "GroupInput"
+                && a.binding == "witness::lock"
+        }),
+        "missing witness-lock access: {accesses:#?}"
+    );
 
     let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
     assert!(assembly.contains(".global __ckb_witness_size"), "missing __ckb_witness_size helper:\n{assembly}");
@@ -1041,6 +1052,27 @@ fn v0_17_witness_size_and_require_witness_size_at_least_compile_and_emit_metadat
         "missing __ckb_require_witness_size_at_least helper:\n{assembly}"
     );
     assert!(assembly.contains(".global __ckb_witness_raw"), "missing __ckb_witness_raw helper:\n{assembly}");
+    assert!(assembly.contains(".global __ckb_witness_lock"), "missing __ckb_witness_lock helper:\n{assembly}");
+    assert!(
+        assembly.contains("# cellscript abi: preserve min_size before LOAD_WITNESS size probe"),
+        "require_witness_size_at_least does not preserve min_size:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("# cellscript abi: LOAD_WITNESS raw first 32 bytes into caller buffer"),
+        "witness::raw helper does not use the corrected LOAD_WITNESS caller-buffer ABI:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("# cellscript abi: zero-fill extracted WitnessArgs Hash buffer before parsing"),
+        "WitnessArgs field helper does not pre-zero short/empty Hash output:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("# cellscript abi: WitnessArgs total_size must match loaded witness size"),
+        "WitnessArgs field helper does not validate table total_size:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("# cellscript abi: BytesOpt None leaves pre-zeroed Hash buffer"),
+        "WitnessArgs field helper does not preserve BytesOpt None as an empty field:\n{assembly}"
+    );
 
     let proof_status = &result.metadata.runtime.proof_plan_soundness.status;
     assert_eq!(proof_status, "passed", "proof plan soundness failed");

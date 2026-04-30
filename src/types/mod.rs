@@ -3219,7 +3219,11 @@ impl<'a> TypeChecker<'a> {
                                     call.span,
                                 ));
                             }
-                            if name == "size" { Type::U64 } else { Type::Hash }
+                            if suffix == "size" {
+                                Type::U64
+                            } else {
+                                Type::Hash
+                            }
                         }
                         ("ckb", "require_witness_size_at_least") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
