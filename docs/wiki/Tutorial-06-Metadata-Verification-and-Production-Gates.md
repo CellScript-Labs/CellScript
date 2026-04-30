@@ -162,7 +162,7 @@ python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
 ```
 
-The CKB validator requires strict bundled-example coverage, scoped action and
+The CKB validator requires strict original bundled-example coverage, scoped action and
 lock compile coverage, builder-backed action runs, builder-backed lock
 valid-spend and invalid-spend matrices, valid transaction dry-runs, committed
 valid transactions, malformed rejection, measured cycles, consensus-serialized
