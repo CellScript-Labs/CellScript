@@ -97,6 +97,53 @@ action test_witness_short_lock_zero_padded() -> u64 {
 
 const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero_padded";
 
+const VM_HARNESS_WITNESS_TYPED_FIELDS_PROGRAM: &str = r#"
+module vm_harness_witness_typed_fields
+
+action test_witness_typed_fields() -> u64 {
+    let view = source::input(0)
+    let lock_field = witness::lock(view)
+    let input_type = witness::input_type(view)
+    let output_type = witness::output_type(view)
+    if lock_field == Hash::zero() {
+        return 1
+    }
+    if input_type == Hash::zero() {
+        return 2
+    }
+    if output_type == Hash::zero() {
+        return 3
+    }
+    if lock_field == input_type {
+        return 4
+    }
+    if input_type == output_type {
+        return 5
+    }
+    if lock_field == output_type {
+        return 6
+    }
+    return 0
+}
+"#;
+
+const VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION: &str = "test_witness_typed_fields";
+
+const VM_HARNESS_WITNESS_MALFORMED_PROGRAM: &str = r#"
+module vm_harness_witness_malformed
+
+action test_witness_malformed() -> u64 {
+    let view = source::input(0)
+    let lock_field = witness::lock(view)
+    if lock_field == Hash::zero() {
+        return 1
+    }
+    return 0
+}
+"#;
+
+const VM_HARNESS_WITNESS_MALFORMED_ACTION: &str = "test_witness_malformed";
+
 const DEPOSIT_PHASE1_DIFF_SCENARIO: &str = "differential: deposit phase 1 original vs CellScript agree";
 const DEPOSIT_TOO_SMALL_DIFF_SCENARIO: &str = "differential: deposit too small original vs CellScript agree";
 const DEPOSIT_TOO_BIG_DIFF_SCENARIO: &str = "differential: deposit too big original vs CellScript agree";
@@ -1701,6 +1748,76 @@ fn cellscript_witness_args_short_lock_is_zero_padded_in_ckb_vm() {
     assert!(result.cycles > 0, "should consume some cycles");
 }
 
+#[test]
+fn cellscript_witness_args_lock_input_type_output_type_are_isolated_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_TYPED_FIELDS_PROGRAM, VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION, None);
+
+    let lock = [0x11u8; 32];
+    let input_type = [0x22u8; 32];
+    let output_type = [0x33u8; 32];
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![ckb_packed_witness_args(Some(&lock), Some(&input_type), Some(&output_type))];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code, 0,
+        "WitnessArgs lock/input_type/output_type should load as distinct non-zero Hash buffers, got exit_code={}, debug={:?}",
+        result.exit_code, result.captured_debug
+    );
+    assert!(result.cycles > 0, "should consume some cycles");
+}
+
+#[test]
+fn cellscript_witness_args_total_size_mismatch_rejects_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_MALFORMED_PROGRAM, VM_HARNESS_WITNESS_MALFORMED_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, false, Some("witness_total_size_mismatch".to_string()));
+    fixture.witnesses = vec![molecule_witness_args_with_header(17, [16, 16, 16], &[])];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code,
+        cellscript::runtime_errors::CellScriptRuntimeError::WitnessMalformed.code() as i64,
+        "WitnessArgs total_size mismatch should fail closed as WitnessMalformed, got exit_code={}, debug={:?}",
+        result.exit_code,
+        result.captured_debug
+    );
+}
+
+#[test]
+fn cellscript_witness_args_reordered_offsets_reject_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_MALFORMED_PROGRAM, VM_HARNESS_WITNESS_MALFORMED_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, false, Some("witness_reordered_offsets".to_string()));
+    fixture.witnesses = vec![molecule_witness_args_with_header(16, [16, 12, 16], &[])];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code,
+        cellscript::runtime_errors::CellScriptRuntimeError::WitnessMalformed.code() as i64,
+        "WitnessArgs reordered offsets should fail closed as WitnessMalformed, got exit_code={}, debug={:?}",
+        result.exit_code,
+        result.captured_debug
+    );
+}
+
+#[test]
+fn cellscript_witness_args_truncated_offsets_reject_in_ckb_vm() {
+    let elf = compile_cellscript_source_to_elf(VM_HARNESS_WITNESS_MALFORMED_PROGRAM, VM_HARNESS_WITNESS_MALFORMED_ACTION, None);
+
+    let mut fixture = build_simple_fixture(Bytes::default(), 1, 1, false, Some("witness_truncated_offsets".to_string()));
+    fixture.witnesses = vec![molecule_witness_args_with_header(16, [16, 16, 17], &[])];
+
+    let result = execute_cellscript_script(&elf, &fixture);
+    assert_eq!(
+        result.exit_code,
+        cellscript::runtime_errors::CellScriptRuntimeError::WitnessFieldTruncated.code() as i64,
+        "WitnessArgs offset beyond total_size should fail closed as WitnessFieldTruncated, got exit_code={}, debug={:?}",
+        result.exit_code,
+        result.captured_debug
+    );
+}
+
 fn molecule_witness_args(lock: Option<&[u8]>, input_type: Option<&[u8]>, output_type: Option<&[u8]>) -> Bytes {
     let fields = [molecule_bytes_opt(lock), molecule_bytes_opt(input_type), molecule_bytes_opt(output_type)];
     let header_size = 16usize;
@@ -1720,6 +1837,30 @@ fn molecule_witness_args(lock: Option<&[u8]>, input_type: Option<&[u8]>, output_
         out.extend_from_slice(&field);
     }
     Bytes::from(out)
+}
+
+fn molecule_witness_args_with_header(total_size: u32, offsets: [u32; 3], payload: &[u8]) -> Bytes {
+    let mut out = Vec::with_capacity(16 + payload.len());
+    out.extend_from_slice(&total_size.to_le_bytes());
+    for offset in offsets {
+        out.extend_from_slice(&offset.to_le_bytes());
+    }
+    out.extend_from_slice(payload);
+    Bytes::from(out)
+}
+
+fn ckb_packed_witness_args(lock: Option<&[u8]>, input_type: Option<&[u8]>, output_type: Option<&[u8]>) -> Bytes {
+    let mut builder = packed::WitnessArgs::new_builder();
+    if let Some(bytes) = lock {
+        builder = builder.lock(Some(Bytes::copy_from_slice(bytes)).pack());
+    }
+    if let Some(bytes) = input_type {
+        builder = builder.input_type(Some(Bytes::copy_from_slice(bytes)).pack());
+    }
+    if let Some(bytes) = output_type {
+        builder = builder.output_type(Some(Bytes::copy_from_slice(bytes)).pack());
+    }
+    builder.build().as_bytes()
 }
 
 fn molecule_bytes_opt(value: Option<&[u8]>) -> Vec<u8> {
