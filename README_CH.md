@@ -305,7 +305,8 @@ CellScript 包含生产级本地语言工具：
 - [Collections matrix 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
 - [Mutate append 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
-- [0.13 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_13_ROADMAP.md)
+- [路线图 overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 
 ---
 

@@ -18,11 +18,11 @@ The current project direction is simple:
 
 | Area | Current status | Detailed document |
 |---|---|---|
-| 0.13 release scope | Implementation scope closed and merged to `main`; release-gate evidence remains the active release boundary. | [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
-| CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
-| Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
-| Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md) |
-| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; production claims still require report validation. | [Metadata and production gates wiki](wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
+| 0.13 release scope | Implementation scope closed and merged to `main`; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
+| CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
+| Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
+| Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
+| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; production claims still require report validation. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Documentation and wiki | Wiki is version-neutral, cookbook-oriented, and published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
 
 ## Release Tracks
@@ -40,9 +40,9 @@ defaults, full generic maps, or cell-backed collection ownership.
 
 Detailed status:
 
-- [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md)
+- [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
-- [0.13 release notes draft](CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
+- [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
 
 ### Next Authorization Hardening Track
 
@@ -67,8 +67,8 @@ Non-goals:
 
 Source documents:
 
-- [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ### CKB Evidence Hardening Track
 
@@ -87,9 +87,9 @@ Priorities:
 
 Source documents:
 
-- [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
-- [Capacity and builder contract](CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Metadata and production gates wiki](wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
 
 ### Collections And Ownership Track
 
@@ -111,9 +111,9 @@ Deferred:
 
 Source documents:
 
-- [0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md)
-- [Collections support matrix](CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Linear ownership](CELLSCRIPT_LINEAR_OWNERSHIP.md)
+- [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Linear ownership](../docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 
 ### Declarative CKB Policy Track
 
@@ -130,9 +130,9 @@ Future work:
 
 Source documents:
 
-- [Capacity and builder contract](CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Mutate and replacement outputs](CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
-- [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Mutate and replacement outputs](../docs/CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
+- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ### Documentation And Developer Experience Track
 
@@ -149,13 +149,13 @@ Future work:
 
 - keep wiki links rendered through GitHub Wiki URLs;
 - add recipes when new stable language patterns land;
-- keep release notes and roadmap docs separate from tutorial pages;
+- keep release notes in `docs/` and roadmap files in `roadmap/`, separate from tutorial pages;
 - keep examples split by audience: business, language, and acceptance.
 
 Source documents:
 
 - [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
-- [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
 
 ## Roadmap Discipline
 
