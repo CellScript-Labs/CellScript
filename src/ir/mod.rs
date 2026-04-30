@@ -3715,6 +3715,18 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "witness::size" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_size",
+                    "witness_size",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::require_witness_size_at_least" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_witness_size_at_least", &call.args, current, blocks, vars)
+                }
                 "dao::accumulated_rate" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__dao_accumulated_rate",
                     "dao_accumulated_rate",

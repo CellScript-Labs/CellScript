@@ -400,7 +400,7 @@ impl LspServer {
                 return items;
             }
             "witness" => {
-                for name in ["raw", "lock", "input_type", "output_type"] {
+                for name in ["raw", "lock", "input_type", "output_type", "size"] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Function,

@@ -3211,7 +3211,7 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Unit
                         }
-                        ("witness", "raw" | "lock" | "input_type" | "output_type") => {
+                        ("witness", "raw" | "lock" | "input_type" | "output_type" | "size") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if arg_types[0] != Type::U64 {
                                 return Err(CompileError::new(
@@ -3219,7 +3219,17 @@ impl<'a> TypeChecker<'a> {
                                     call.span,
                                 ));
                             }
-                            Type::Hash
+                            if name == "size" { Type::U64 } else { Type::Hash }
+                        }
+                        ("ckb", "require_witness_size_at_least") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, min_size: u64)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
                         }
                         ("Address", "zero") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;

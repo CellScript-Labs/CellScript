@@ -46,6 +46,8 @@ pub enum CellScriptRuntimeError {
     MetaPointMismatch = 39,
     MetaPointCardinalityMismatch = 40,
     ScriptIdentityMismatch = 41,
+    WitnessMalformed = 42,
+    WitnessFieldTruncated = 43,
 }
 
 impl CellScriptRuntimeError {
@@ -95,6 +97,8 @@ impl CellScriptRuntimeError {
             Self::MetaPointMismatch => "metapoint-mismatch",
             Self::MetaPointCardinalityMismatch => "metapoint-cardinality-mismatch",
             Self::ScriptIdentityMismatch => "script-identity-mismatch",
+            Self::WitnessMalformed => "witness-malformed",
+            Self::WitnessFieldTruncated => "witness-field-truncated",
         }
     }
 
@@ -146,6 +150,8 @@ impl CellScriptRuntimeError {
                 "A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation."
             }
             Self::ScriptIdentityMismatch => "A loaded CKB Script code_hash or hash_type did not match the expected identity.",
+            Self::WitnessMalformed => "Loaded witness bytes did not match the expected Molecule WitnessArgs layout or ABI magic.",
+            Self::WitnessFieldTruncated => "A WitnessArgs field offset or length exceeded the loaded witness byte range.",
         }
     }
 
@@ -215,6 +221,8 @@ impl CellScriptRuntimeError {
                 "Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell."
             }
             Self::ScriptIdentityMismatch => "Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct.",
+            Self::WitnessMalformed => "Check witness byte layout, WitnessArgs table header, and entry ABI magic bytes.",
+            Self::WitnessFieldTruncated => "Check that expected WitnessArgs field offsets plus field lengths stay within loaded witness size.",
         }
     }
 
@@ -260,6 +268,8 @@ impl CellScriptRuntimeError {
             39 => Some(Self::MetaPointMismatch),
             40 => Some(Self::MetaPointCardinalityMismatch),
             41 => Some(Self::ScriptIdentityMismatch),
+            42 => Some(Self::WitnessMalformed),
+            43 => Some(Self::WitnessFieldTruncated),
             _ => None,
         }
     }
@@ -314,6 +324,8 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::MetaPointMismatch,
     CellScriptRuntimeError::MetaPointCardinalityMismatch,
     CellScriptRuntimeError::ScriptIdentityMismatch,
+    CellScriptRuntimeError::WitnessMalformed,
+    CellScriptRuntimeError::WitnessFieldTruncated,
 ];
 
 pub fn runtime_error_info(error: CellScriptRuntimeError) -> CellScriptRuntimeErrorInfo {
