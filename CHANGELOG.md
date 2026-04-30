@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.0 - Unreleased
+## 0.13.0 - 2026-04-30
 
 - Add builder-backed local CKB valid-spend and invalid-spend acceptance coverage
   for all 16 bundled lock entries, in the same production gate as the 43 action

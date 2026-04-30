@@ -357,7 +357,26 @@ impl LspServer {
         // Built-in namespace methods.
         match type_name {
             "Vec" => {
-                for (name, insert) in [("new", "Vec::new()"), ("push", "push($0)"), ("len", "len()"), ("get", "get($0)")] {
+                for (name, insert) in [
+                    ("new", "Vec::new()"),
+                    ("with_capacity", "Vec::with_capacity($0)"),
+                    ("capacity", "capacity()"),
+                    ("push", "push($0)"),
+                    ("extend_from_slice", "extend_from_slice($0)"),
+                    ("len", "len()"),
+                    ("is_empty", "is_empty()"),
+                    ("first", "first()"),
+                    ("last", "last()"),
+                    ("contains", "contains($0)"),
+                    ("set", "set($0)"),
+                    ("remove", "remove($0)"),
+                    ("pop", "pop()"),
+                    ("insert", "insert($0)"),
+                    ("reverse", "reverse()"),
+                    ("truncate", "truncate($0)"),
+                    ("swap", "swap($0)"),
+                    ("clear", "clear()"),
+                ] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Method,
@@ -1993,6 +2012,37 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
+    }
+
+    #[test]
+    fn test_vec_member_completions_match_supported_helpers() {
+        let server = LspServer::new();
+        let completions = server.member_completions("file:///test.cell", "Vec");
+        let labels = completions.iter().map(|item| item.label.as_str()).collect::<std::collections::BTreeSet<_>>();
+
+        for helper in [
+            "new",
+            "with_capacity",
+            "capacity",
+            "push",
+            "extend_from_slice",
+            "len",
+            "is_empty",
+            "first",
+            "last",
+            "contains",
+            "set",
+            "remove",
+            "pop",
+            "insert",
+            "reverse",
+            "truncate",
+            "swap",
+            "clear",
+        ] {
+            assert!(labels.contains(helper), "missing Vec completion for {helper}");
+        }
+        assert!(!labels.contains("get"), "Vec completion should not advertise unsupported get()");
     }
 
     #[test]

@@ -2221,6 +2221,23 @@ impl<'a> TypeChecker<'a> {
         None
     }
 
+    fn supports_collection_len(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(_, _) => true,
+            Type::Ref(inner) | Type::MutRef(inner) => self.supports_collection_len(inner),
+            Type::Named(name) => name == "Vec" || self.parse_named_collection_item_type(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn slice_item_type(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(inner, _) => Some((**inner).clone()),
+            Type::Ref(inner) | Type::MutRef(inner) => Self::slice_item_type(inner),
+            _ => None,
+        }
+    }
+
     fn parse_named_type_repr(&self, repr: &str) -> Type {
         match repr.trim() {
             "u8" => Type::U8,
@@ -2351,11 +2368,19 @@ impl<'a> TypeChecker<'a> {
                     }
                     "len" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::U64)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::U64)
+                        } else {
+                            Err(CompileError::new("len is only supported on array or Vec values", call.span))
+                        }
                     }
                     "is_empty" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::Bool)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::Bool)
+                        } else {
+                            Err(CompileError::new("is_empty is only supported on array or Vec values", call.span))
+                        }
                     }
                     "capacity" => {
                         self.validate_builtin_arity("Vec.capacity", 0, arg_types, call.span)?;
@@ -2593,7 +2618,42 @@ impl<'a> TypeChecker<'a> {
                     }
                     "extend_from_slice" => {
                         self.validate_builtin_arity("Vec.extend_from_slice", 1, arg_types, call.span)?;
-                        Ok(Type::Unit)
+                        let Some(slice_item_ty) = Self::slice_item_type(&arg_types[0]) else {
+                            return Err(CompileError::new("Vec.extend_from_slice expects an array or byte-slice source", call.span));
+                        };
+                        if self.type_contains_reference(&slice_item_ty) {
+                            return Err(CompileError::new(
+                                format!(
+                                    "Vec.extend_from_slice cannot store reference type {}; Vec<T> values must use owned non-reference items",
+                                    type_repr(&slice_item_ty)
+                                ),
+                                call.span,
+                            ));
+                        }
+                        match &receiver_ty {
+                            Type::Named(name) if name == "Vec" => {
+                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            Type::Named(name) => {
+                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
+                                    return Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span));
+                                };
+                                if !self.types_equal(&item_ty, &slice_item_ty) {
+                                    return Err(CompileError::new(
+                                        format!(
+                                            "Vec.extend_from_slice type mismatch: expected {:?}, found {:?}",
+                                            item_ty, slice_item_ty
+                                        ),
+                                        call.span,
+                                    ));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            _ => Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span)),
+                        }
                     }
                     _ => self.lookup_field_type(&receiver_ty, &field.field, field.span),
                 }

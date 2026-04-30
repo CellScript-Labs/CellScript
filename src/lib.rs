@@ -14903,7 +14903,7 @@ module test
 
 action pack(bytes: [u8; 3]) -> u64 {
     let mut data = Vec::new()
-    data.push(1)
+    data.push(bytes[0])
     data.extend_from_slice(bytes)
     return data.len()
 }
@@ -17611,9 +17611,15 @@ action grant(config: read_ref Config, token: Token) -> Grant {
         );
         assert!(asm.contains("# length"), "len() did not stay on builtin length path:\n{}", asm);
         assert!(
-            asm.contains("# cellscript abi: collection push is not needed for verifier execution")
-                || asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
-            "collection push/extend fail-closed comment not found:\n{}",
+            asm.contains("# cellscript abi: stack collection push element_size=1")
+                && asm.contains("# cellscript abi: stack collection extend bytes=3 elements=3 element_size=1"),
+            "collection push/extend did not use stack-backed Vec<u8> paths:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: collection push is not needed for verifier execution")
+                && !asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
+            "collection push/extend should not hit old fail-closed comments:\n{}",
             asm
         );
         assert!(!asm.contains("# call push"), "push() leaked through generic call path:\n{}", asm);
@@ -17624,6 +17630,68 @@ action grant(config: read_ref Config, token: Token) -> Grant {
     #[test]
     fn compile_rejects_unsupported_vec_helper_type_combinations() {
         let cases = [
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let value = 7
+    return value.len()
+}
+"#,
+                "len is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> bool {
+    let value = 7
+    return value.is_empty()
+}
+"#,
+                "is_empty is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let value = 7
+    value.extend_from_slice([1, 2])
+    return value
+}
+"#,
+                "extend_from_slice is only supported on Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let mut values: Vec<u64> = []
+    values.extend_from_slice([true])
+    return values.len()
+}
+"#,
+                "Vec.extend_from_slice type mismatch",
+            ),
+            (
+                r#"
+module test
+
+struct Point {
+    x: u64,
+}
+
+action bad(point: Point) -> u64 {
+    let mut points = Vec::new()
+    points.extend_from_slice([&point])
+    return 0
+}
+"#,
+                "Vec.extend_from_slice cannot store reference type &Point",
+            ),
             (
                 r#"
 module test
