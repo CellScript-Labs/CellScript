@@ -606,6 +606,9 @@ cellscript/
     └── vscode-cellscript/
 ```
 
+Development style and backend/codegen rules are tracked in
+[`CODING_STYLE.md`](CODING_STYLE.md).
+
 ## License
 
 License metadata is declared in [`Cargo.toml`](Cargo.toml). The repository

@@ -10297,6 +10297,88 @@ fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
 mod tests {
     use super::*;
 
+    const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
+        ("add", "add t0, a0, a1"),
+        ("addi", "addi t0, t0, -1"),
+        ("and", "and t2, a0, a1"),
+        ("beq", "beq a0, a1, branch_target"),
+        ("bge", "bge a0, a1, branch_target"),
+        ("bgeu", "bgeu a0, a1, branch_target"),
+        ("bgez", "bgez a0, branch_target"),
+        ("bgt", "bgt a0, a1, branch_target"),
+        ("blt", "blt a1, a0, branch_target"),
+        ("bltu", "bltu a1, a0, branch_target"),
+        ("bne", "bne a0, a1, branch_target"),
+        ("bnez", "bnez a0, branch_target"),
+        ("beqz", "beqz a0, branch_target"),
+        ("call", "call helper"),
+        ("div", "div t5, a0, a1"),
+        ("ecall", "ecall"),
+        ("j", "j done"),
+        ("la", "la t3, data_label"),
+        ("lbu", "lbu t2, 8(sp)"),
+        ("ld", "ld t1, 0(sp)"),
+        ("li", "li a0, 8"),
+        ("mul", "mul t4, a0, a1"),
+        ("mv", "mv s9, a0"),
+        ("neg", "neg s6, a0"),
+        ("or", "or t3, a0, a1"),
+        ("rem", "rem t6, a0, a1"),
+        ("ret", "ret"),
+        ("sb", "sb t1, 8(sp)"),
+        ("sd", "sd t0, 0(sp)"),
+        ("seqz", "seqz s4, a0"),
+        ("sgt", "sgt s2, a0, a1"),
+        ("sh", "sh t1, 10(sp)"),
+        ("slli", "slli s7, a0, 3"),
+        ("slt", "slt s0, a1, a0"),
+        ("sltu", "sltu s1, a1, a0"),
+        ("snez", "snez s5, a0"),
+        ("srli", "srli s8, a0, 1"),
+        ("sub", "sub t1, a0, a1"),
+        ("sw", "sw t1, 12(sp)"),
+        ("xori", "xori s3, a0, 1"),
+    ];
+
+    const INTENTIONALLY_UNSUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
+        ("addiw", "addiw a0, a0, 1"),
+        ("addw", "addw a0, a0, a1"),
+        ("andi", "andi a0, a0, 1"),
+        ("amoadd.w", "amoadd.w a0, a1, (a2)"),
+        ("auipc", "auipc a0, 0"),
+        ("ble", "ble a0, a1, target"),
+        ("bleu", "bleu a0, a1, target"),
+        ("blez", "blez a0, target"),
+        ("bgtu", "bgtu a0, a1, target"),
+        ("bgtz", "bgtz a0, target"),
+        ("bltz", "bltz a0, target"),
+        ("c.nop", "c.nop"),
+        ("csrr", "csrr a0, cycle"),
+        ("fence", "fence"),
+        ("flw", "flw fa0, 0(sp)"),
+        ("jal", "jal ra, target"),
+        ("jalr", "jalr zero, 0(ra)"),
+        ("jr", "jr ra"),
+        ("lb", "lb a0, 0(sp)"),
+        ("lh", "lh a0, 0(sp)"),
+        ("lhu", "lhu a0, 0(sp)"),
+        ("lui", "lui a0, 1"),
+        ("lw", "lw a0, 0(sp)"),
+        ("lwu", "lwu a0, 0(sp)"),
+        ("nop", "nop"),
+        ("not", "not a0, a1"),
+        ("ori", "ori a0, a0, 1"),
+        ("sll", "sll a0, a0, a1"),
+        ("slti", "slti a0, a0, 1"),
+        ("sltiu", "sltiu a0, a0, 1"),
+        ("sra", "sra a0, a0, a1"),
+        ("srai", "srai a0, a0, 1"),
+        ("srl", "srl a0, a0, a1"),
+        ("subw", "subw a0, a0, a1"),
+        ("tail", "tail target"),
+        ("xor", "xor a0, a0, a1"),
+    ];
+
     #[test]
     fn internal_assembler_relaxes_out_of_range_conditional_branch() {
         let mut lines = vec![
@@ -10338,49 +10420,66 @@ mod tests {
 
     #[test]
     fn internal_assembler_encodes_emitted_instruction_surface() {
-        let lines = vec![
-            ".section .text".to_string(),
-            ".global entry".to_string(),
-            "entry:".to_string(),
-            "li a0, 8".to_string(),
-            "li a1, 4".to_string(),
-            "add t0, a0, a1".to_string(),
-            "addi t0, t0, -1".to_string(),
-            "sub t1, a0, a1".to_string(),
-            "and t2, a0, a1".to_string(),
-            "or t3, a0, a1".to_string(),
-            "mul t4, a0, a1".to_string(),
-            "div t5, a0, a1".to_string(),
-            "rem t6, a0, a1".to_string(),
-            "slt s0, a1, a0".to_string(),
-            "sltu s1, a1, a0".to_string(),
-            "sgt s2, a0, a1".to_string(),
-            "xori s3, a0, 1".to_string(),
-            "seqz s4, a0".to_string(),
-            "snez s5, a0".to_string(),
-            "neg s6, a0".to_string(),
-            "slli s7, a0, 3".to_string(),
-            "srli s8, a0, 1".to_string(),
-            "mv s9, a0".to_string(),
-            "sd t0, 0(sp)".to_string(),
-            "ld t1, 0(sp)".to_string(),
-            "sb t1, 8(sp)".to_string(),
-            "sh t1, 10(sp)".to_string(),
-            "sw t1, 12(sp)".to_string(),
-            "lbu t2, 8(sp)".to_string(),
-            "la t3, data_label".to_string(),
-            "call helper".to_string(),
-            "beq a0, a1, branch_target".to_string(),
-            "bne a0, a1, branch_target".to_string(),
-            "blt a1, a0, branch_target".to_string(),
-            "bge a0, a1, branch_target".to_string(),
-            "bltu a1, a0, branch_target".to_string(),
-            "bgeu a0, a1, branch_target".to_string(),
-            "bgt a0, a1, branch_target".to_string(),
-            "bgez a0, branch_target".to_string(),
-            "beqz a0, branch_target".to_string(),
-            "bnez a0, branch_target".to_string(),
-            "j done".to_string(),
+        let lines = supported_instruction_surface_lines();
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should encode the emitted instruction surface");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn internal_assembler_rejects_intentionally_unsupported_mnemonics() {
+        for (mnemonic, instruction) in INTENTIONALLY_UNSUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS {
+            let lines = vec![
+                ".section .text".to_string(),
+                ".global entry".to_string(),
+                "entry:".to_string(),
+                (*instruction).to_string(),
+                "target:".to_string(),
+                "ret".to_string(),
+            ];
+            let err = match assemble_elf_internal(&lines) {
+                Ok(_) => panic!("internal assembler unexpectedly accepted unsupported mnemonic {mnemonic}"),
+                Err(err) => err,
+            };
+            assert!(
+                err.message.contains("unsupported assembly instruction"),
+                "unexpected error for unsupported mnemonic {mnemonic}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_public_assembly_mnemonics_are_declared() {
+        let surfaces = [
+            ("stdlib", crate::stdlib::StdLib::generate_assembly()),
+            ("collections", crate::stdlib::collections::Collections::generate_assembly()),
+        ];
+        let supported = SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS.iter().map(|(mnemonic, _)| *mnemonic).collect::<BTreeSet<_>>();
+        let mut undeclared = Vec::new();
+
+        for (surface, assembly) in surfaces {
+            for (line_number, mnemonic) in emitted_mnemonics(&assembly).into_iter() {
+                if !supported.contains(mnemonic.as_str()) {
+                    undeclared.push(format!("{surface}:{line_number}: {mnemonic}"));
+                }
+            }
+        }
+
+        assert!(
+            undeclared.is_empty(),
+            "generated public assembly used mnemonics outside the declared internal assembler surface:\n{}",
+            undeclared.join("\n")
+        );
+    }
+
+    fn supported_instruction_surface_lines() -> Vec<String> {
+        let mut lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "li a1, 4".to_string()];
+        for (mnemonic, instruction) in SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS {
+            if !matches!(*mnemonic, "ecall" | "ret") {
+                lines.push((*instruction).to_string());
+            }
+        }
+        lines.extend([
             "branch_target:".to_string(),
             "ecall".to_string(),
             "helper:".to_string(),
@@ -10393,10 +10492,23 @@ mod tests {
             ".byte 1".to_string(),
             ".ascii \"x\"".to_string(),
             ".align 3".to_string(),
-        ];
+        ]);
+        lines
+    }
 
-        let elf = assemble_elf_internal(&lines).expect("internal assembler should encode the emitted instruction surface");
-        assert!(elf.starts_with(b"\x7fELF"));
+    fn emitted_mnemonics(assembly: &str) -> Vec<(usize, String)> {
+        assembly
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let clean = strip_comment(line)?;
+                if clean.is_empty() || clean.starts_with('.') || clean.ends_with(':') {
+                    return None;
+                }
+                let mnemonic = clean.split_whitespace().next()?.trim_end_matches(',');
+                Some((index + 1, mnemonic.to_string()))
+            })
+            .collect()
     }
 
     #[test]
