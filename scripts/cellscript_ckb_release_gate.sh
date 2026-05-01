@@ -113,6 +113,7 @@ run_common_gate() {
     run cargo fmt --all --check
     run cargo check --locked --all-targets
     run cargo test --locked -- --test-threads=1
+    run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run python3 scripts/validate_cellscript_tooling_release.py
     run bash -n scripts/ckb_cellscript_acceptance.sh
     run bash -n scripts/cellscript_ckb_release_gate.sh
