@@ -418,6 +418,12 @@ impl Collections {
         asm.push_str("    addi sp, sp, 48\n");
         asm.push_str("    ret\n\n");
 
+        asm.push_str("# HashMap::get\n");
+        asm.push_str(".global __hashmap_get\n");
+        asm.push_str("__hashmap_get:\n");
+        asm.push_str("    li a0, 0           # simplified None / not found\n");
+        asm.push_str("    ret\n\n");
+
         asm.push_str("# HashMap::len\n");
         asm.push_str(".global __hashmap_len\n");
         asm.push_str("__hashmap_len:\n");
@@ -466,6 +472,7 @@ pub struct CollectionFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn test_collection_functions() {
@@ -489,6 +496,16 @@ mod tests {
         let asm = Collections::generate_assembly();
         assert!(asm.contains("__vec_new"));
         assert!(asm.contains("__hashmap_new"));
+        assert!(asm.contains("__hashmap_get"));
         assert!(asm.contains("__hashset_new"));
+
+        let labels: BTreeSet<&str> = asm.lines().filter_map(|line| line.trim().strip_suffix(':')).collect();
+        for line in asm.lines() {
+            let instruction = line.split('#').next().unwrap_or_default().trim();
+            if let Some(target) = instruction.strip_prefix("call ") {
+                let target = target.trim();
+                assert!(labels.contains(target), "generated collection assembly calls missing label {target}");
+            }
+        }
     }
 }

@@ -10136,6 +10136,15 @@ mod tests {
     }
 
     #[test]
+    fn generated_collection_assembly_is_internal_assembler_clean() {
+        let lines =
+            crate::stdlib::collections::Collections::generate_assembly().lines().map(|line| line.to_string()).collect::<Vec<_>>();
+
+        let elf = assemble_elf_internal(&lines).expect("generated collection assembly should assemble internally");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn internal_assembler_relaxes_out_of_range_register_conditional_branch() {
         for mnemonic in ["beq", "bne", "blt", "bge", "bltu", "bgeu"] {
             let mut lines = vec![
