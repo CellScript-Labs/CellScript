@@ -102,6 +102,8 @@
 - Made external RISC-V toolchains explicit opt-in via `CELLSCRIPT_RISCV_CC` or
   `CELLSCRIPT_RISCV_AS`/`CELLSCRIPT_RISCV_LD`, so production ELF output and
   backend shape budgets no longer depend on tools accidentally present in PATH.
+- Hardened those external toolchain overrides to require absolute paths to
+  existing executable files instead of accepting relative command names.
 - Rebased the multisig bundled-example ELF budget on the deterministic internal
   ELF artifact size while keeping the assembly text/CFG budgets unchanged.
 - Removed the executable Wasm pseudo-lowering path; the Wasm module now remains

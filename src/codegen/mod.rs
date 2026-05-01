@@ -8964,9 +8964,9 @@ enum ExternalToolchainMode {
 }
 
 fn discover_external_toolchain() -> Result<Option<ExternalToolchain>> {
-    let explicit_compiler = env::var_os("CELLSCRIPT_RISCV_CC").map(PathBuf::from);
-    let explicit_assembler = env::var_os("CELLSCRIPT_RISCV_AS").map(PathBuf::from);
-    let explicit_linker = env::var_os("CELLSCRIPT_RISCV_LD").map(PathBuf::from);
+    let explicit_compiler = explicit_toolchain_path("CELLSCRIPT_RISCV_CC")?;
+    let explicit_assembler = explicit_toolchain_path("CELLSCRIPT_RISCV_AS")?;
+    let explicit_linker = explicit_toolchain_path("CELLSCRIPT_RISCV_LD")?;
 
     if let Some(compiler) = explicit_compiler {
         if explicit_assembler.is_some() || explicit_linker.is_some() {
@@ -8992,6 +8992,45 @@ fn discover_external_toolchain() -> Result<Option<ExternalToolchain>> {
     }
 
     Ok(None)
+}
+
+fn explicit_toolchain_path(var: &str) -> Result<Option<PathBuf>> {
+    env::var_os(var).map(PathBuf::from).map(|path| validate_explicit_toolchain_path(var, path)).transpose()
+}
+
+fn validate_explicit_toolchain_path(var: &str, path: PathBuf) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(CompileError::new(
+            format!("{} must be an absolute path, got '{}'", var, path.display()),
+            crate::error::Span::default(),
+        ));
+    }
+
+    let metadata = fs::metadata(&path).map_err(|err| {
+        CompileError::new(
+            format!("{} points to unreadable toolchain path '{}': {}", var, path.display(), err),
+            crate::error::Span::default(),
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(CompileError::new(
+            format!("{} must point to an executable file, got '{}'", var, path.display()),
+            crate::error::Span::default(),
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(CompileError::new(
+                format!("{} path '{}' is not executable", var, path.display()),
+                crate::error::Span::default(),
+            ));
+        }
+    }
+
+    Ok(path)
 }
 
 fn run_external_command(command: &mut Command, label: &str) -> Result<()> {
@@ -10775,6 +10814,20 @@ mod tests {
         assert_eq!(generator.schema_pointer_size_offsets.get(&dest.id), Some(&size_offset));
         assert_eq!(generator.cell_buffer_size_offsets.get(&dest.id), Some(&size_offset));
         assert_eq!(generator.cell_buffer_offsets.get(&dest.id), Some(&buffer_offset));
+    }
+
+    #[test]
+    fn explicit_external_toolchain_paths_are_strict() {
+        let err = validate_explicit_toolchain_path("CELLSCRIPT_RISCV_CC", PathBuf::from("riscv64-unknown-elf-gcc")).unwrap_err();
+        assert!(err.message.contains("must be an absolute path"), "unexpected error: {}", err.message);
+
+        let err = validate_explicit_toolchain_path("CELLSCRIPT_RISCV_CC", std::env::temp_dir()).unwrap_err();
+        assert!(err.message.contains("must point to an executable file"), "unexpected error: {}", err.message);
+
+        let current_exe = std::env::current_exe().expect("test executable path should be available");
+        let validated =
+            validate_explicit_toolchain_path("CELLSCRIPT_RISCV_CC", current_exe.clone()).expect("current test binary is executable");
+        assert_eq!(validated, current_exe);
     }
 
     #[test]

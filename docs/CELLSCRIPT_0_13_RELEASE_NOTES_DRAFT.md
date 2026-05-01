@@ -211,6 +211,9 @@ New in 0.13:
   cell-backed state as preplanned read refs.
 - External RISC-V toolchain fallback now cleans its temporary directory on both
   success and error paths.
+- External RISC-V toolchain overrides must now be absolute paths to existing
+  executable files. Relative command names and directories are rejected before
+  the backend launches a process.
 
 Important boundary:
 
