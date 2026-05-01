@@ -140,6 +140,21 @@ New in 0.13:
 - Conditional branch relaxation is covered for both zero-compare and register
   branch forms, so generated local `Vec<T>` helpers such as `insert` and
   `contains` can compile to ELF without relying on an external assembler.
+- Large immediates emitted by CellScript lowering are normalized before internal
+  ELF assembly. This covers full-width `u64` `li` literals, large stack-frame
+  offsets, and fixed schema field offsets beyond the RISC-V 12-bit load/store
+  or `addi` immediate range, including non-`sp` base registers used for
+  schema/data pointers.
+- Stack-frame load/store emission is centralized behind stack helpers instead
+  of scattered handwritten `offset(sp)` formatting. This makes large stack
+  offset handling a codegen invariant, with a regression test guarding against
+  direct stack pointer memory/access emission outside the helpers.
+- Large `addi` lowering now chooses a scratch register that does not overwrite
+  the source/base register, preventing large fixed-byte collection copy paths
+  from losing a live pointer when it is held in `t6`.
+- Large fixed schema field regression coverage now includes both scalar loads
+  and fixed-byte field pointer paths, so valid DSL such as a schema with a
+  2048-byte prefix field compiles through `riscv64-elf`.
 
 Important boundary:
 

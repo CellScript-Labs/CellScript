@@ -19133,6 +19133,61 @@ action max_value() -> u64 {
     }
 
     #[test]
+    fn compile_riscv_elf_accepts_large_schema_field_offsets() {
+        let scalar_program = r#"
+module vm::large_schema_scalar
+
+struct Big {
+    pad: [u8; 2048],
+    amount: u64,
+}
+
+action inspect(snapshot: Big) -> u64 {
+    return snapshot.amount
+}
+"#;
+
+        let scalar_asm =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let scalar_asm = String::from_utf8(scalar_asm.artifact_bytes).unwrap();
+        assert!(
+            !scalar_asm.contains("lbu t2, 2048(t4)"),
+            "large schema scalar field offset should be expanded before assembly:\n{}",
+            scalar_asm
+        );
+        let scalar_elf =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(scalar_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(scalar_elf.artifact_bytes.starts_with(b"\x7fELF"));
+
+        let bytes_program = r#"
+module vm::large_schema_bytes
+
+struct Big {
+    pad: [u8; 2048],
+    marker: [u8; 1],
+}
+
+action get_marker(snapshot: Big) -> [u8; 1] {
+    return snapshot.marker
+}
+"#;
+
+        let bytes_asm =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let bytes_asm = String::from_utf8(bytes_asm.artifact_bytes).unwrap();
+        assert!(
+            !bytes_asm.contains("addi t0, t4, 2048"),
+            "large schema fixed-byte field pointer offset should be expanded before assembly:\n{}",
+            bytes_asm
+        );
+        let bytes_elf =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(bytes_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(bytes_elf.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn compile_produces_ckb_elf_without_vm_abi_trailer() {
         let result = compile(
             SIMPLE_PROGRAM,

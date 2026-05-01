@@ -687,13 +687,13 @@ impl CodeGenerator {
 
     fn emit(&mut self, instruction: impl Into<String>) {
         let instruction = instruction.into();
-        if self.emit_large_stack_access_if_needed(&instruction) {
+        if self.emit_large_immediate_access_if_needed(&instruction) {
             return;
         }
         self.assembly.push(format!("    {}", instruction));
     }
 
-    fn emit_large_stack_access_if_needed(&mut self, instruction: &str) -> bool {
+    fn emit_large_immediate_access_if_needed(&mut self, instruction: &str) -> bool {
         let Some(clean) = strip_comment(instruction) else {
             return false;
         };
@@ -708,41 +708,50 @@ impl CodeGenerator {
 
         match opcode {
             "ld" | "lbu" if args.len() == 2 => {
-                let Some(offset) = stack_pointer_offset(args[1]) else {
+                let Some((offset, base)) = memory_operand_offset_and_base(args[1]) else {
                     return false;
                 };
+                if parse_register(args[0]).is_err() || parse_register(base).is_err() {
+                    return false;
+                }
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0]]);
+                let scratch = scratch_register_avoiding(&[args[0], base]);
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, sp, {}", scratch, scratch));
+                self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
                 self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
                 true
             }
             "sb" | "sh" | "sw" | "sd" if args.len() == 2 => {
-                let Some(offset) = stack_pointer_offset(args[1]) else {
+                let Some((offset, base)) = memory_operand_offset_and_base(args[1]) else {
                     return false;
                 };
+                if parse_register(args[0]).is_err() || parse_register(base).is_err() {
+                    return false;
+                }
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0]]);
+                let scratch = scratch_register_avoiding(&[args[0], base]);
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, sp, {}", scratch, scratch));
+                self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
                 self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
                 true
             }
-            "addi" if args.len() == 3 && args[1] == "sp" => {
-                let Ok(offset) = args[2].parse::<i64>() else {
+            "addi" if args.len() == 3 => {
+                let Ok(offset) = parse_immediate(args[2]) else {
                     return false;
                 };
+                if parse_register(args[0]).is_err() || parse_register(args[1]).is_err() {
+                    return false;
+                }
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0]]);
+                let scratch = scratch_register_avoiding(&[args[0], args[1]]);
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
-                self.assembly.push(format!("    add {}, sp, {}", args[0], scratch));
+                self.assembly.push(format!("    add {}, {}, {}", args[0], args[1], scratch));
                 true
             }
             _ => false,
@@ -778,7 +787,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript entry abi: {} loads GroupInput witness args for {}", ENTRY_WITNESS_LABEL, target));
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
-        self.emit_stack_sd("ra", ENTRY_WITNESS_RA_OFFSET);
+        self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
         self.emit_load_witness_syscall_to_offsets(
             "entry_args",
             self.runtime_abi().source_group_input,
@@ -791,7 +800,7 @@ impl CodeGenerator {
         self.emit(format!("j {}", fail_label));
         self.emit_label(&loaded_label);
 
-        self.emit_stack_ld("t0", ENTRY_WITNESS_SIZE_OFFSET);
+        self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
         self.emit(format!("li t1, {}", min_witness_len));
         self.emit("sltu t2, t0, t1");
         self.emit(format!("beqz t2, {}", size_ok_label));
@@ -799,7 +808,7 @@ impl CodeGenerator {
         self.emit_label(&size_ok_label);
 
         for (index, byte) in ENTRY_WITNESS_MAGIC.iter().enumerate() {
-            self.emit(format!("lbu t0, {}(sp)", ENTRY_WITNESS_BUFFER_OFFSET + index));
+            self.emit_stack_load_byte("t0", ENTRY_WITNESS_BUFFER_OFFSET + index);
             self.emit(format!("li t1, {}", byte));
             self.emit("sub t2, t0, t1");
             self.emit(format!("bnez t2, {}", fail_label));
@@ -811,7 +820,7 @@ impl CodeGenerator {
         } else if has_dynamic_payload {
             let mut abi_index = 0usize;
             self.emit("# cellscript entry abi: witness payload contains schema-backed dynamic segments");
-            self.emit_stack_ld("t5", ENTRY_WITNESS_SIZE_OFFSET);
+            self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
             self.emit(format!("li t6, {}", ENTRY_WITNESS_HEADER_SIZE));
             for (param_index, param) in params.iter().enumerate() {
                 if runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
@@ -918,7 +927,7 @@ impl CodeGenerator {
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
                         ));
-                        self.emit(format!("sd t3, {}(sp)", caller_stack_offset));
+                        self.emit_stack_store("t3", caller_stack_offset);
                     }
                     self.emit(format!("addi t6, t6, {}", width));
                     abi_index += 1;
@@ -995,7 +1004,7 @@ impl CodeGenerator {
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
                         ));
-                        self.emit(format!("sd t3, {}(sp)", caller_stack_offset));
+                        self.emit_stack_store("t3", caller_stack_offset);
                     }
                     payload_cursor += width;
                     abi_index += 1;
@@ -1012,7 +1021,7 @@ impl CodeGenerator {
         self.emit_runtime_error_comment(CellScriptRuntimeError::EntryWitnessAbiInvalid);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::EntryWitnessAbiInvalid.code()));
         self.emit_label(&done_label);
-        self.emit_stack_ld("ra", ENTRY_WITNESS_RA_OFFSET);
+        self.emit_stack_load("ra", ENTRY_WITNESS_RA_OFFSET);
         self.emit_large_addi("sp", "sp", ENTRY_WITNESS_FRAME_SIZE as i64);
         self.emit("ret");
         Ok(())
@@ -1027,7 +1036,7 @@ impl CodeGenerator {
             self.emit(format!("addi a{}, {}, 0", abi_index, source_reg));
         } else {
             let caller_stack_offset = (abi_index - 8) * 8;
-            self.emit(format!("sd {}, {}(sp)", source_reg, caller_stack_offset));
+            self.emit_stack_store(source_reg, caller_stack_offset);
         }
     }
 
@@ -1038,7 +1047,7 @@ impl CodeGenerator {
             let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript entry abi: stack arg{} <- {}", abi_index, value));
             self.emit(format!("li t0, {}", value));
-            self.emit(format!("sd t0, {}(sp)", caller_stack_offset));
+            self.emit_stack_store("t0", caller_stack_offset);
         }
     }
 
@@ -1049,7 +1058,7 @@ impl CodeGenerator {
             let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript entry abi: stack arg{} <- sp+{}", abi_index, stack_offset));
             self.emit_sp_addi("t0", stack_offset);
-            self.emit(format!("sd t0, {}(sp)", caller_stack_offset));
+            self.emit_stack_store("t0", caller_stack_offset);
         }
     }
 
@@ -1064,7 +1073,7 @@ impl CodeGenerator {
     fn emit_entry_witness_scalar_load(&mut self, dest_reg: &str, stack_offset: usize, width: usize) {
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..width {
-            self.emit(format!("lbu t0, {}(sp)", stack_offset + byte_index));
+            self.emit_stack_load_byte("t0", stack_offset + byte_index);
             if byte_index != 0 {
                 self.emit(format!("slli t0, t0, {}", byte_index * 8));
             }
@@ -2005,7 +2014,7 @@ impl CodeGenerator {
             );
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit(format!("sd t0, {}(sp)", var_id * 8));
+            self.emit_stack_store("t0", var_id * 8);
         }
 
         let mut dep_bindings = self
@@ -2034,7 +2043,7 @@ impl CodeGenerator {
             );
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit(format!("sd t0, {}(sp)", var_id * 8));
+            self.emit_stack_store("t0", var_id * 8);
         }
     }
 
@@ -2055,7 +2064,7 @@ impl CodeGenerator {
                 );
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
-                self.emit(format!("sd t0, {}(sp)", var_id * 8));
+                self.emit_stack_store("t0", var_id * 8);
                 if self.should_emit_claim_witness_authorization_domain_check(pattern, var_id) {
                     let signer_source = self.claim_signer_pubkey_hash_source(var_id);
                     self.emit_claim_witness_authorization_domain_check(input_index, &pattern.binding, signer_source.as_ref());
@@ -2101,7 +2110,7 @@ impl CodeGenerator {
                 );
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
-                self.emit(format!("sd t0, {}(sp)", var_id * 8));
+                self.emit_stack_store("t0", var_id * 8);
                 return Ok(());
             }
         }
@@ -2193,7 +2202,7 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit(format!("sd t0, {}(sp)", var_id * 8));
+        self.emit_stack_store("t0", var_id * 8);
     }
 
     fn generate_block(&mut self, block: &IrBlock) -> Result<()> {
@@ -2364,7 +2373,7 @@ impl CodeGenerator {
                     }
                 }
                 IrOperand::Var(v) => {
-                    self.emit(format!("ld t0, {}(sp)", v.id * 8));
+                    self.emit_stack_load("t0", v.id * 8);
                     self.emit(format!("beqz t0, .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
                     self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
                 }
@@ -2378,8 +2387,8 @@ impl CodeGenerator {
 
     fn emit_prologue(&mut self) {
         self.emit_large_addi("sp", "sp", -(self.frame_size as i64));
-        self.emit_stack_sd("ra", self.frame_size - 8);
-        self.emit_stack_sd("fp", self.frame_size - 16);
+        self.emit_stack_store("ra", self.frame_size - 8);
+        self.emit_stack_store("fp", self.frame_size - 16);
         self.emit_sp_addi("fp", self.frame_size);
     }
 
@@ -2422,8 +2431,8 @@ impl CodeGenerator {
     }
 
     fn emit_epilogue_body(&mut self) {
-        self.emit_stack_ld("ra", self.frame_size - 8);
-        self.emit_stack_ld("fp", self.frame_size - 16);
+        self.emit_stack_load("ra", self.frame_size - 8);
+        self.emit_stack_load("fp", self.frame_size - 16);
         self.emit_large_addi("sp", "sp", self.frame_size as i64);
         self.emit("ret");
     }
@@ -2433,30 +2442,41 @@ impl CodeGenerator {
         if (-2048..=2047).contains(&imm) {
             self.emit(format!("addi {}, {}, {}", rd, rs1, imm));
         } else {
-            self.emit(format!("li t6, {}", imm));
-            self.emit(format!("add {}, {}, t6", rd, rs1));
+            let scratch = scratch_register_avoiding(&[rs1]);
+            self.emit(format!("li {}, {}", scratch, imm));
+            self.emit(format!("add {}, {}, {}", rd, rs1, scratch));
         }
     }
 
-    /// Emit `ld rd, offset(sp)` handling offsets that don't fit in 12 bits.
-    fn emit_stack_ld(&mut self, rd: &str, offset: usize) {
-        if offset <= 2047 {
-            self.emit(format!("ld {}, {}(sp)", rd, offset));
-        } else {
-            self.emit(format!("li t6, {}", offset));
-            self.emit("add t6, sp, t6");
-            self.emit(format!("ld {}, 0(t6)", rd));
-        }
+    /// Emit `ld rd, offset(sp)` through the centralized stack-offset gate.
+    fn emit_stack_load(&mut self, rd: &str, offset: usize) {
+        self.emit_stack_access("ld", rd, offset);
     }
 
-    /// Emit `sd rs2, offset(sp)` handling offsets that don't fit in 12 bits.
-    fn emit_stack_sd(&mut self, rs2: &str, offset: usize) {
-        if offset <= 2047 {
-            self.emit(format!("sd {}, {}(sp)", rs2, offset));
+    /// Emit `lbu rd, offset(sp)` through the centralized stack-offset gate.
+    fn emit_stack_load_byte(&mut self, rd: &str, offset: usize) {
+        self.emit_stack_access("lbu", rd, offset);
+    }
+
+    /// Emit `sd rs2, offset(sp)` through the centralized stack-offset gate.
+    fn emit_stack_store(&mut self, rs2: &str, offset: usize) {
+        self.emit_stack_access("sd", rs2, offset);
+    }
+
+    /// Emit `sb rs2, offset(sp)` through the centralized stack-offset gate.
+    fn emit_stack_store_byte(&mut self, rs2: &str, offset: usize) {
+        self.emit_stack_access("sb", rs2, offset);
+    }
+
+    fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
+        let offset = i64::try_from(offset).expect("stack offset should fit in i64");
+        if small_signed_immediate(offset) {
+            self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
         } else {
-            self.emit(format!("li t6, {}", offset));
-            self.emit("add t6, sp, t6");
-            self.emit(format!("sd {}, 0(t6)", rs2));
+            let scratch = scratch_register_avoiding(&[register]);
+            self.emit(format!("li {}, {}", scratch, offset));
+            self.emit(format!("add {}, sp, {}", scratch, scratch));
+            self.emit(format!("{} {}, 0({})", opcode, register, scratch));
         }
     }
 
@@ -2702,7 +2722,7 @@ impl CodeGenerator {
 
     fn emit_store_data_args_at(&mut self, max_bytes: usize, size_offset: usize, buffer_offset: usize) {
         self.emit(format!("li t0, {}", max_bytes));
-        self.emit_stack_sd("t0", size_offset);
+        self.emit_stack_store("t0", size_offset);
         self.emit_sp_addi("a0", buffer_offset);
         self.emit_sp_addi("a1", size_offset);
         self.emit("li a2, 0");
@@ -2838,7 +2858,7 @@ impl CodeGenerator {
     fn emit_loaded_schema_bounds_check(&mut self, size_offset: usize, required_size: usize, context: &str) {
         self.emit(format!("# cellscript abi: bounds check {} required={}", context, required_size));
         let ok_label = self.fresh_label("schema_bounds_ok");
-        self.emit_stack_ld("a0", size_offset);
+        self.emit_stack_load("a0", size_offset);
         self.emit(format!("li a1, {}", required_size));
         self.emit("call __cellscript_require_min_size");
         self.emit(format!("beqz a0, {}", ok_label));
@@ -2849,7 +2869,7 @@ impl CodeGenerator {
     fn emit_loaded_schema_exact_size_check(&mut self, size_offset: usize, expected_size: usize, context: &str) {
         self.emit(format!("# cellscript abi: exact size check {} expected={}", context, expected_size));
         let ok_label = self.fresh_label("schema_size_ok");
-        self.emit_stack_ld("a0", size_offset);
+        self.emit_stack_load("a0", size_offset);
         self.emit(format!("li a1, {}", expected_size));
         self.emit("call __cellscript_require_exact_size");
         self.emit(format!("beqz a0, {}", ok_label));
@@ -2870,7 +2890,7 @@ impl CodeGenerator {
         let header_size = 4 + 4 * field_count;
         self.emit_loaded_schema_bounds_check(size_offset, header_size, context);
 
-        self.emit_stack_ld("a0", size_offset);
+        self.emit_stack_load("a0", size_offset);
         let total_ok = self.fresh_label("molecule_table_total_ok");
         self.emit_unaligned_scalar_load(base_reg, "t0", "t2", 0, 4);
         self.emit("sub t2, t0, a0");
@@ -2917,7 +2937,7 @@ impl CodeGenerator {
         let header_size = 4 + 4 * field_count;
         self.emit_loaded_schema_bounds_check(size_offset, header_size, context);
 
-        self.emit_stack_ld("a0", size_offset);
+        self.emit_stack_load("a0", size_offset);
         let total_ok = self.fresh_label("molecule_table_total_ok");
         self.emit_unaligned_scalar_load(base_reg, "t0", "t2", 0, 4);
         self.emit("sub t2, t0, a0");
@@ -3129,7 +3149,7 @@ impl CodeGenerator {
         let hash_type_from_witness_label = self.fresh_label("claim_witness_hash_type");
         let ok_label = self.fresh_label("claim_witness_size_ok");
         self.emit("# cellscript abi: claim witness signature length check accepted=65|66");
-        self.emit_stack_ld("t0", size_offset);
+        self.emit_stack_load("t0", size_offset);
         self.emit(format!("li t1, {}", 65));
         self.emit("sub t2, t0, t1");
         self.emit(format!("li t3, {}", CKB_SIG_HASH_ALL));
@@ -3169,7 +3189,7 @@ impl CodeGenerator {
             "# cellscript abi: SECP256K1_VERIFY reason=claim_signature source=Input field={}.{} witness=GroupInput index={}",
             signer_source.type_name, signer_source.field, group_input_index
         ));
-        self.emit(format!("ld t4, {}(sp)", signer_source.obj_var_id * 8));
+        self.emit_stack_load("t4", signer_source.obj_var_id * 8);
         self.emit(format!("addi a0, t4, {}", signer_source.layout.offset));
         self.emit_sp_addi("a1", witness_buffer_offset);
         self.emit_sp_addi("a2", sighash_buffer_offset);
@@ -3514,7 +3534,7 @@ impl CodeGenerator {
                 output_start_offset,
             );
             self.emit(format!("li t0, {}", width));
-            self.emit_stack_sd("t0", len_offset);
+            self.emit_stack_store("t0", len_offset);
         } else {
             self.emit_dynamic_table_field_span_to_stack(
                 input_size_offset,
@@ -3534,8 +3554,8 @@ impl CodeGenerator {
                 output_start_offset,
                 self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"),
             );
-            self.emit_stack_ld("t0", len_offset);
-            self.emit_stack_ld("t1", self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"));
+            self.emit_stack_load("t0", len_offset);
+            self.emit_stack_load("t1", self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"));
             self.emit("sub t2, t0, t1");
             let len_ok = self.fresh_label("mutate_table_field_len_ok");
             self.emit(format!("beqz t2, {}", len_ok));
@@ -3548,9 +3568,9 @@ impl CodeGenerator {
             type_name, field, 0, 1
         ));
         let mismatch_label = self.fresh_label("mutate_table_field_mismatch");
-        self.emit_stack_ld("a0", start_offset);
-        self.emit_stack_ld("a1", output_start_offset);
-        self.emit_stack_ld("a2", len_offset);
+        self.emit_stack_load("a0", start_offset);
+        self.emit_stack_load("a1", output_start_offset);
+        self.emit_stack_load("a2", len_offset);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("bnez a0, {}", mismatch_label));
         self.emit_fixed_byte_mismatch_fail(&mismatch_label, fail_code);
@@ -3572,8 +3592,8 @@ impl CodeGenerator {
         self.emit("add t5, t4, t5");
         self.emit("add t6, t4, t6");
         self.emit("sub t0, t6, t5");
-        self.emit_stack_sd("t5", start_stack_offset);
-        self.emit_stack_sd("t0", len_stack_offset);
+        self.emit_stack_store("t5", start_stack_offset);
+        self.emit_stack_store("t0", len_stack_offset);
     }
 
     fn emit_dynamic_table_fixed_field_pointer_to_stack(
@@ -3589,7 +3609,7 @@ impl CodeGenerator {
         self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, layout.index, width, context);
         self.emit_sp_addi("t4", buffer_offset);
         self.emit("add t5, t4, t5");
-        self.emit_stack_sd("t5", start_stack_offset);
+        self.emit_stack_store("t5", start_stack_offset);
     }
 
     fn emit_mutate_replacement_dynamic_table_append_checks(&mut self, pattern: &MutatePattern) -> bool {
@@ -3744,9 +3764,9 @@ impl CodeGenerator {
         self.emit_loaded_schema_bounds_check(input_len_offset, 4, &format!("{} input.{} vector", type_name, field));
         self.emit_loaded_schema_bounds_check(output_len_offset, 4 + element_width, &format!("{} output.{} vector", type_name, field));
 
-        self.emit_stack_ld("t4", input_start_offset);
+        self.emit_stack_load("t4", input_start_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, 4);
-        self.emit_stack_ld("t1", input_len_offset);
+        self.emit_stack_load("t1", input_len_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t3, t0, t2");
         self.emit("addi t3, t3, 4");
@@ -3756,7 +3776,7 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
         self.emit_label(&input_size_ok);
 
-        self.emit_stack_ld("t4", output_start_offset);
+        self.emit_stack_load("t4", output_start_offset);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", 0, 4);
         self.emit("addi t0, t0, 1");
         self.emit("sub t2, t1, t0");
@@ -3765,10 +3785,10 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
         self.emit_label(&count_ok);
 
-        self.emit_stack_ld("t0", input_len_offset);
+        self.emit_stack_load("t0", input_len_offset);
         self.emit(format!("li t1, {}", element_width));
         self.emit("add t0, t0, t1");
-        self.emit_stack_ld("t1", output_len_offset);
+        self.emit_stack_load("t1", output_len_offset);
         self.emit("sub t2, t1, t0");
         let len_ok = self.fresh_label("molecule_append_len_ok");
         self.emit(format!("beqz t2, {}", len_ok));
@@ -3776,21 +3796,21 @@ impl CodeGenerator {
         self.emit_label(&len_ok);
 
         let prefix_ok = self.fresh_label("molecule_append_prefix_ok");
-        self.emit_stack_ld("a0", input_start_offset);
+        self.emit_stack_load("a0", input_start_offset);
         self.emit("addi a0, a0, 4");
-        self.emit_stack_ld("a1", output_start_offset);
+        self.emit_stack_load("a1", output_start_offset);
         self.emit("addi a1, a1, 4");
-        self.emit_stack_ld("a2", input_len_offset);
+        self.emit_stack_load("a2", input_len_offset);
         self.emit("addi a2, a2, -4");
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("beqz a0, {}", prefix_ok));
         self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
         self.emit_label(&prefix_ok);
 
-        self.emit_stack_ld("t0", output_start_offset);
-        self.emit_stack_ld("t1", input_len_offset);
+        self.emit_stack_load("t0", output_start_offset);
+        self.emit_stack_load("t1", input_len_offset);
         self.emit("add t0, t0, t1");
-        self.emit_stack_sd("t0", output_start_offset);
+        self.emit_stack_store("t0", output_start_offset);
         for (operand, field_layout, width) in fields {
             let Some(source) = self.expected_fixed_byte_source(operand, *width) else {
                 self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
@@ -3818,7 +3838,7 @@ impl CodeGenerator {
         let mismatch_label = self.fresh_label("fixed_byte_mismatch");
         match source {
             ExpectedFixedByteSource::Const(bytes) => {
-                self.emit_stack_ld("t4", output_pointer_stack_offset);
+                self.emit_stack_load("t4", output_pointer_stack_offset);
                 for (byte_index, byte) in bytes.iter().take(width).enumerate() {
                     self.emit(format!("lbu t0, {}(t4)", output_field_offset + byte_index));
                     self.emit(format!("li t1, {}", byte));
@@ -3828,7 +3848,7 @@ impl CodeGenerator {
             }
             ExpectedFixedByteSource::SchemaField(source) => {
                 if self.emit_schema_field_source_pointer_to("a1", source, width) {
-                    self.emit_stack_ld("a0", output_pointer_stack_offset);
+                    self.emit_stack_load("a0", output_pointer_stack_offset);
                     if output_field_offset != 0 {
                         self.emit_large_addi("a0", "a0", output_field_offset as i64);
                     }
@@ -3840,7 +3860,7 @@ impl CodeGenerator {
                 }
             }
             ExpectedFixedByteSource::StackSlot { var_id, .. } => {
-                self.emit_stack_ld("a0", output_pointer_stack_offset);
+                self.emit_stack_load("a0", output_pointer_stack_offset);
                 if output_field_offset != 0 {
                     self.emit_large_addi("a0", "a0", output_field_offset as i64);
                 }
@@ -3852,11 +3872,11 @@ impl CodeGenerator {
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
-                self.emit_stack_ld("a0", output_pointer_stack_offset);
+                self.emit_stack_load("a0", output_pointer_stack_offset);
                 if output_field_offset != 0 {
                     self.emit_large_addi("a0", "a0", output_field_offset as i64);
                 }
-                self.emit(format!("ld a1, {}(sp)", var_id * 8));
+                self.emit_stack_load("a1", var_id * 8);
                 self.emit(format!("li a2, {}", width));
                 self.emit("call __cellscript_memcmp_fixed");
                 self.emit(format!("bnez a0, {}", mismatch_label));
@@ -3895,8 +3915,8 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         let size_ok_label = self.fresh_label("mutate_preserved_data_size_ok");
-        self.emit_stack_ld("t0", input_size_offset);
-        self.emit_stack_ld("t1", output_size_offset);
+        self.emit_stack_load("t0", input_size_offset);
+        self.emit_stack_load("t1", output_size_offset);
         self.emit("sub t2, t0, t1");
         self.emit(format!("beqz t2, {}", size_ok_label));
         self.emit_fail(CellScriptRuntimeError::FieldPreservationMismatch);
@@ -4098,9 +4118,9 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
             let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
             self.emit("# cellscript abi: preserve mutate input scalar before transition expression");
-            self.emit_stack_sd("t0", input_value_offset);
+            self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
-            self.emit_stack_ld("t0", input_value_offset);
+            self.emit_stack_load("t0", input_value_offset);
             match transition.op {
                 MutateTransitionOp::Add => self.emit("add t1, t0, t1"),
                 MutateTransitionOp::Sub => self.emit("sub t1, t0, t1"),
@@ -4113,10 +4133,10 @@ impl CodeGenerator {
             }
             let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
             self.emit("# cellscript abi: preserve mutate expected scalar across output field load");
-            self.emit_stack_sd("t1", expected_value_offset);
+            self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
-            self.emit_stack_ld("t1", expected_value_offset);
+            self.emit_stack_load("t1", expected_value_offset);
             self.emit("sub t2, t0, t1");
             let ok_label = self.fresh_label("mutate_transition_ok");
             self.emit(format!("beqz t2, {}", ok_label));
@@ -4189,9 +4209,9 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
             let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
             self.emit("# cellscript abi: preserve mutate table input scalar before transition expression");
-            self.emit_stack_sd("t0", input_value_offset);
+            self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
-            self.emit_stack_ld("t0", input_value_offset);
+            self.emit_stack_load("t0", input_value_offset);
             match transition.op {
                 MutateTransitionOp::Add => self.emit("add t1, t0, t1"),
                 MutateTransitionOp::Sub => self.emit("sub t1, t0, t1"),
@@ -4200,7 +4220,7 @@ impl CodeGenerator {
             }
             let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
             self.emit("# cellscript abi: preserve mutate table expected scalar across output field load");
-            self.emit_stack_sd("t1", expected_value_offset);
+            self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
             self.emit_molecule_table_field_bounds_to_t5(
                 "t4",
@@ -4211,7 +4231,7 @@ impl CodeGenerator {
             );
             self.emit("add t4, t4, t5");
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
-            self.emit_stack_ld("t1", expected_value_offset);
+            self.emit_stack_load("t1", expected_value_offset);
             self.emit("sub t2, t0, t1");
             let ok_label = self.fresh_label("mutate_table_transition_ok");
             self.emit(format!("beqz t2, {}", ok_label));
@@ -4398,9 +4418,9 @@ impl CodeGenerator {
         self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
         let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
         self.emit("# cellscript abi: preserve output scalar before expected expression");
-        self.emit_stack_sd("t0", actual_value_offset);
+        self.emit_stack_store("t0", actual_value_offset);
         self.emit_expected_operand_to_t1(expected);
-        self.emit_stack_ld("t0", actual_value_offset);
+        self.emit_stack_load("t0", actual_value_offset);
         self.emit("sub t2, t0, t1");
         let ok_label = self.fresh_label("output_field_ok");
         self.emit(format!("beqz t2, {}", ok_label));
@@ -4480,7 +4500,7 @@ impl CodeGenerator {
         self.emit_sp_addi("a0", output_buffer_offset + output_field_offset);
         match source {
             SourcePointer::LoadedStackPointer { var_id, offset } => {
-                self.emit(format!("ld a1, {}(sp)", var_id * 8));
+                self.emit_stack_load("a1", var_id * 8);
                 if offset != 0 {
                     self.emit_large_addi("a1", "a1", offset as i64);
                 }
@@ -4646,7 +4666,7 @@ impl CodeGenerator {
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
-                self.emit(format!("ld {}, {}(sp)", base_reg, var_id * 8));
+                self.emit_stack_load(base_reg, var_id * 8);
                 self.emit(format!("lbu {}, {}({})", dest_reg, byte_index, base_reg));
             }
         }
@@ -4667,7 +4687,7 @@ impl CodeGenerator {
             ExpectedFixedByteSource::PointerBytes { var_id, .. }
             | ExpectedFixedByteSource::ParamBytes { var_id, .. }
             | ExpectedFixedByteSource::LoadedBytes { var_id, .. } => {
-                self.emit(format!("ld {}, {}(sp)", dest_reg, var_id * 8));
+                self.emit_stack_load(dest_reg, var_id * 8);
                 true
             }
             ExpectedFixedByteSource::Const(_) => false,
@@ -4716,7 +4736,7 @@ impl CodeGenerator {
         self.emit_label(&mismatch_label);
         self.emit(format!("li t3, {}", mismatch_value));
         self.emit_label(&done_label);
-        self.emit(format!("sd t3, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t3", dest.id * 8);
         true
     }
 
@@ -4751,11 +4771,11 @@ impl CodeGenerator {
                 let Some(left_pointer_offset) = self.runtime_expr_temp_offset(0) else {
                     return false;
                 };
-                self.emit_stack_sd("a0", left_pointer_offset);
+                self.emit_stack_store("a0", left_pointer_offset);
                 if !self.emit_fixed_byte_source_pointer_to("a1", right_source) {
                     return false;
                 }
-                self.emit_stack_ld("a0", left_pointer_offset);
+                self.emit_stack_load("a0", left_pointer_offset);
                 self.emit(format!("li a2, {}", width));
                 self.emit("call __cellscript_memcmp_fixed");
             }
@@ -4765,7 +4785,7 @@ impl CodeGenerator {
         } else {
             self.emit("snez t3, a0");
         }
-        self.emit(format!("sd t3, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t3", dest.id * 8);
         true
     }
 
@@ -4863,7 +4883,7 @@ impl CodeGenerator {
 
         // Load left pointer to t4
         if let Some(v) = left_var {
-            self.emit(format!("ld t4, {}(sp)", v.id * 8));
+            self.emit_stack_load("t4", v.id * 8);
         } else {
             // Left is a constant – store it to scratch buffer and point t4 there
             let size_offset = self.runtime_scratch_size_offset();
@@ -4874,7 +4894,7 @@ impl CodeGenerator {
 
         // Load right pointer to t5
         if let Some(v) = right_var {
-            self.emit(format!("ld t5, {}(sp)", v.id * 8));
+            self.emit_stack_load("t5", v.id * 8);
         } else {
             let size_offset = self.runtime_scratch2_size_offset();
             let buffer_offset = self.runtime_scratch2_buffer_offset();
@@ -4897,7 +4917,7 @@ impl CodeGenerator {
         self.emit_label(&mismatch_label);
         self.emit(format!("li t3, {}", mismatch_value));
         self.emit_label(&done_label);
-        self.emit(format!("sd t3, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t3", dest.id * 8);
         true
     }
 
@@ -4907,11 +4927,11 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::Address(bytes)) | IrOperand::Const(IrConst::Hash(bytes)) => {
                 self.emit(format!("# cellscript abi: store fixed-byte const size={}", width));
                 self.emit(format!("li t0, {}", width));
-                self.emit_stack_sd("t0", size_offset);
+                self.emit_stack_store("t0", size_offset);
                 for (i, byte) in bytes.iter().enumerate() {
                     self.emit(format!("li t0, {}", byte));
                     if buffer_offset + i <= 2047 {
-                        self.emit(format!("sb t0, {}(sp)", buffer_offset + i));
+                        self.emit_stack_store_byte("t0", buffer_offset + i);
                     } else {
                         self.emit(format!("li t6, {}", buffer_offset + i));
                         self.emit("add t6, sp, t6");
@@ -4922,12 +4942,12 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::Array(values)) => {
                 self.emit(format!("# cellscript abi: store fixed-byte array const size={}", width));
                 self.emit(format!("li t0, {}", width));
-                self.emit_stack_sd("t0", size_offset);
+                self.emit_stack_store("t0", size_offset);
                 for (i, value) in values.iter().enumerate() {
                     if let IrConst::U8(byte) = value {
                         self.emit(format!("li t0, {}", byte));
                         if buffer_offset + i <= 2047 {
-                            self.emit(format!("sb t0, {}(sp)", buffer_offset + i));
+                            self.emit_stack_store_byte("t0", buffer_offset + i);
                         } else {
                             self.emit(format!("li t6, {}", buffer_offset + i));
                             self.emit("add t6, sp, t6");
@@ -4955,11 +4975,11 @@ impl CodeGenerator {
                 } else if let Some(source) = self.prelude_u64_value_sources.get(&var.id).cloned() {
                     self.emit_prelude_u64_value_source_to_t1(&source);
                 } else if matches!(var.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64) {
-                    self.emit(format!("ld t1, {}(sp)", var.id * 8));
+                    self.emit_stack_load("t1", var.id * 8);
                 } else if let Some(value) = self.prelude_scalar_immediates.get(&var.id).copied() {
                     self.emit(format!("li t1, {}", value));
                 } else {
-                    self.emit(format!("ld t1, {}(sp)", var.id * 8));
+                    self.emit_stack_load("t1", var.id * 8);
                 }
             }
             _ => self.emit("li t1, 0"),
@@ -4973,8 +4993,8 @@ impl CodeGenerator {
     fn emit_prelude_u64_value_source_to_t1_at_depth(&mut self, source: &PreludeU64ValueSource, _depth: usize) {
         match source {
             PreludeU64ValueSource::Const(n) => self.emit(format!("li t1, {}", n)),
-            PreludeU64ValueSource::ParamVar(var_id) => self.emit(format!("ld t1, {}(sp)", var_id * 8)),
-            PreludeU64ValueSource::StackVar(var_id) => self.emit(format!("ld t1, {}(sp)", var_id * 8)),
+            PreludeU64ValueSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+            PreludeU64ValueSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
             PreludeU64ValueSource::Field(source) => self.emit_schema_field_source_to_t1(source),
             PreludeU64ValueSource::Binary { op, left, right } => {
                 self.emit(format!("# cellscript abi: expected expression u64 {:?}", op));
@@ -4984,9 +5004,9 @@ impl CodeGenerator {
                     return;
                 };
                 self.emit_prelude_u64_value_source_to_t1_at_depth(left, _depth + 1);
-                self.emit_stack_sd("t1", temp_offset);
+                self.emit_stack_store("t1", temp_offset);
                 self.emit_prelude_u64_operand_source_to_t1_at_depth(right, _depth + 1);
-                self.emit_stack_ld("t3", temp_offset);
+                self.emit_stack_load("t3", temp_offset);
                 match op {
                     BinaryOp::Add => self.emit("add t1, t3, t1"),
                     BinaryOp::Sub => self.emit("sub t1, t3, t1"),
@@ -5003,9 +5023,9 @@ impl CodeGenerator {
                     return;
                 };
                 self.emit_prelude_u64_value_source_to_t1_at_depth(left, _depth + 1);
-                self.emit_stack_sd("t1", temp_offset);
+                self.emit_stack_store("t1", temp_offset);
                 self.emit_prelude_u64_operand_source_to_t1_at_depth(right, _depth + 1);
-                self.emit_stack_ld("t3", temp_offset);
+                self.emit_stack_load("t3", temp_offset);
                 self.emit("slt t2, t3, t1");
                 let right_ok_label = self.fresh_label("prelude_min_right_ok");
                 self.emit(format!("beqz t2, {}", right_ok_label));
@@ -5022,8 +5042,8 @@ impl CodeGenerator {
     fn emit_prelude_u64_operand_source_to_t1_at_depth(&mut self, source: &PreludeU64OperandSource, _depth: usize) {
         match source {
             PreludeU64OperandSource::Const(n) => self.emit(format!("li t1, {}", n)),
-            PreludeU64OperandSource::ParamVar(var_id) => self.emit(format!("ld t1, {}(sp)", var_id * 8)),
-            PreludeU64OperandSource::StackVar(var_id) => self.emit(format!("ld t1, {}(sp)", var_id * 8)),
+            PreludeU64OperandSource::ParamVar(var_id) => self.emit_stack_load("t1", var_id * 8),
+            PreludeU64OperandSource::StackVar(var_id) => self.emit_stack_load("t1", var_id * 8),
             PreludeU64OperandSource::Field(source) => self.emit_schema_field_source_to_t1(source),
             PreludeU64OperandSource::Expr(source) => self.emit_prelude_u64_value_source_to_t1_at_depth(source, _depth),
         }
@@ -5051,7 +5071,7 @@ impl CodeGenerator {
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         }
         self.emit(format!("# cellscript abi: expected field {} offset={} size={}", context, source.layout.offset, width));
-        self.emit(format!("ld t4, {}(sp)", source.obj_var_id * 8));
+        self.emit_stack_load("t4", source.obj_var_id * 8);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", source.layout.offset, width);
     }
 
@@ -5064,7 +5084,7 @@ impl CodeGenerator {
             self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &source.type_name);
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         } else {
-            self.emit(format!("ld t4, {}(sp)", source.obj_var_id * 8));
+            self.emit_stack_load("t4", source.obj_var_id * 8);
             self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
         }
     }
@@ -5075,12 +5095,12 @@ impl CodeGenerator {
             if let Some(expected_size) = self.type_fixed_sizes.get(&source.type_name).copied() {
                 self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &source.type_name);
                 self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
-                self.emit(format!("ld {}, {}(sp)", dest_reg, source.obj_var_id * 8));
+                self.emit_stack_load(dest_reg, source.obj_var_id * 8);
                 if source.layout.offset != 0 {
                     self.emit_large_addi(dest_reg, dest_reg, source.layout.offset as i64);
                 }
             } else {
-                self.emit(format!("ld t4, {}(sp)", source.obj_var_id * 8));
+                self.emit_stack_load("t4", source.obj_var_id * 8);
                 self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
                 self.emit(format!("add {}, t4, t5", dest_reg));
             }
@@ -5088,7 +5108,7 @@ impl CodeGenerator {
         } else if self.aggregate_pointer_sources.contains_key(&source.obj_var_id)
             || self.type_fixed_sizes.contains_key(&source.type_name)
         {
-            self.emit(format!("ld {}, {}(sp)", dest_reg, source.obj_var_id * 8));
+            self.emit_stack_load(dest_reg, source.obj_var_id * 8);
             if source.layout.offset != 0 {
                 self.emit_large_addi(dest_reg, dest_reg, source.layout.offset as i64);
             }
@@ -5223,7 +5243,7 @@ impl CodeGenerator {
             output_start_offset,
             output_len_offset,
         );
-        self.emit_stack_ld("t0", output_len_offset);
+        self.emit_stack_load("t0", output_len_offset);
         self.emit(format!("li t1, {}", width));
         self.emit("sub t2, t0, t1");
         let len_ok = self.fresh_label("create_fixed_table_field_len_ok");
@@ -5236,13 +5256,13 @@ impl CodeGenerator {
                 "# cellscript abi: verify output Molecule table scalar field {}.{} index={} size={}",
                 type_name, field, layout.index, width
             ));
-            self.emit_stack_ld("t4", output_start_offset);
+            self.emit_stack_load("t4", output_start_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
             let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
             self.emit("# cellscript abi: preserve output table scalar before expected expression");
-            self.emit_stack_sd("t0", actual_value_offset);
+            self.emit_stack_store("t0", actual_value_offset);
             self.emit_expected_operand_to_t1(expected);
-            self.emit_stack_ld("t0", actual_value_offset);
+            self.emit_stack_load("t0", actual_value_offset);
             self.emit("sub t2, t0, t1");
             let ok_label = self.fresh_label("output_table_field_ok");
             self.emit(format!("beqz t2, {}", ok_label));
@@ -5324,8 +5344,8 @@ impl CodeGenerator {
         let Some(expected_size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied() else {
             return false;
         };
-        self.emit_stack_ld("t0", output_len_offset);
-        self.emit_stack_ld("t1", expected_size_offset);
+        self.emit_stack_load("t0", output_len_offset);
+        self.emit_stack_load("t1", expected_size_offset);
         self.emit("sub t2, t0, t1");
         let len_ok = self.fresh_label("create_dynamic_field_len_ok");
         self.emit(format!("beqz t2, {}", len_ok));
@@ -5334,9 +5354,9 @@ impl CodeGenerator {
 
         self.emit(format!("# cellscript abi: verify output dynamic field {}.{} as Molecule bytes", type_name, field));
         let mismatch_label = self.fresh_label("create_dynamic_field_mismatch");
-        self.emit_stack_ld("a0", output_start_offset);
-        self.emit(format!("ld a1, {}(sp)", var.id * 8));
-        self.emit_stack_ld("a2", output_len_offset);
+        self.emit_stack_load("a0", output_start_offset);
+        self.emit_stack_load("a1", var.id * 8);
+        self.emit_stack_load("a2", output_len_offset);
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("bnez a0, {}", mismatch_label));
         self.emit_fixed_byte_mismatch_fail(&mismatch_label, CellScriptRuntimeError::CellLoadFailed);
@@ -5351,14 +5371,14 @@ impl CodeGenerator {
         output_len_offset: usize,
     ) {
         self.emit(format!("# cellscript abi: verify output dynamic field {}.{} as empty Molecule vector", type_name, field));
-        self.emit_stack_ld("t0", output_len_offset);
+        self.emit_stack_load("t0", output_len_offset);
         self.emit("li t1, 4");
         self.emit("sub t2, t0, t1");
         let len_ok = self.fresh_label("create_empty_vector_len_ok");
         self.emit(format!("beqz t2, {}", len_ok));
         self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
         self.emit_label(&len_ok);
-        self.emit_stack_ld("t0", output_start_offset);
+        self.emit_stack_load("t0", output_start_offset);
         for offset in 0..4 {
             self.emit(format!("lbu t1, {}(t0)", offset));
             let byte_ok = self.fresh_label("create_empty_vector_byte_ok");
@@ -5400,7 +5420,7 @@ impl CodeGenerator {
                 type_name, field, expected_elements, expected_bytes, element_width
             ));
         }
-        self.emit_stack_ld("t0", output_len_offset);
+        self.emit_stack_load("t0", output_len_offset);
         self.emit(format!("li t1, {}", expected_len));
         self.emit("sub t2, t0, t1");
         let len_ok = self.fresh_label("create_constructed_vector_len_ok");
@@ -5408,7 +5428,7 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::CellLoadFailed);
         self.emit_label(&len_ok);
 
-        self.emit_stack_ld("t4", output_start_offset);
+        self.emit_stack_load("t4", output_start_offset);
         for (offset, byte) in (expected_elements as u32).to_le_bytes().iter().enumerate() {
             self.emit(format!("lbu t0, {}(t4)", offset));
             self.emit(format!("li t1, {}", byte));
@@ -5677,12 +5697,12 @@ impl CodeGenerator {
 
     fn emit_spill_abi_arg(&mut self, abi_index: usize, stack_offset: usize) {
         if abi_index < 8 {
-            self.emit_stack_sd(&format!("a{}", abi_index), stack_offset);
+            self.emit_stack_store(&format!("a{}", abi_index), stack_offset);
         } else {
             let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript abi: arg{} loaded from caller stack +{}", abi_index, caller_stack_offset));
             self.emit(format!("ld t0, {}(fp)", caller_stack_offset));
-            self.emit_stack_sd("t0", stack_offset);
+            self.emit_stack_store("t0", stack_offset);
         }
     }
 
@@ -5830,13 +5850,13 @@ impl CodeGenerator {
                 self.emit("la t0, __const_data");
             }
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
     fn emit_load_var(&mut self, dest: &IrVar, name: &str) -> Result<()> {
         self.emit(format!("# load var {}", name));
-        self.emit(format!("ld t0, {}(sp)", dest.id * 8));
+        self.emit_stack_load("t0", dest.id * 8);
         Ok(())
     }
 
@@ -5848,7 +5868,7 @@ impl CodeGenerator {
                 _ => self.emit("li t0, 0"),
             },
             IrOperand::Var(v) => {
-                self.emit(format!("ld t0, {}(sp)", v.id * 8));
+                self.emit_stack_load("t0", v.id * 8);
             }
         }
         Ok(())
@@ -5873,13 +5893,13 @@ impl CodeGenerator {
 
         match left {
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit(format!("ld t0, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
             _ => self.emit("li t0, 0"),
         }
 
         match right {
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t1, {}", n)),
-            IrOperand::Var(v) => self.emit(format!("ld t1, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
             _ => self.emit("li t1, 0"),
         }
 
@@ -5911,14 +5931,14 @@ impl CodeGenerator {
             BinaryOp::Or => self.emit("or t0, t0, t1"),
         }
 
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
     fn emit_unary(&mut self, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
         match operand {
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit(format!("ld t0, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
             _ => self.emit("li t0, 0"),
         }
 
@@ -5928,7 +5948,7 @@ impl CodeGenerator {
             UnaryOp::Ref | UnaryOp::Deref => self.emit("# reference conversion (no-op in asm backend)"),
         }
 
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
@@ -5971,7 +5991,7 @@ impl CodeGenerator {
 
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: schema field {}.{} offset={} size={}", type_name, field, layout.offset, width));
-        self.emit(format!("ld t4, {}(sp)", var.id * 8));
+        self.emit_stack_load("t4", var.id * 8);
         if let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied() {
             if let Some(expected_size) = self.type_fixed_sizes.get(type_name).copied() {
                 self.emit_loaded_schema_exact_size_check(size_offset, expected_size, type_name);
@@ -6006,7 +6026,7 @@ impl CodeGenerator {
                 self.emit(format!("addi t0, t4, {}", layout.offset));
             }
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6034,12 +6054,12 @@ impl CodeGenerator {
         let context = format!("{}.{}", type_name, field);
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: dynamic schema field {} index={} as Molecule vector bytes", context, layout.index));
-        self.emit(format!("ld t4, {}(sp)", obj.id * 8));
+        self.emit_stack_load("t4", obj.id * 8);
         self.emit_molecule_table_field_span_to_t5_t6("t4", size_offset, layout.index, field_count, &context);
         self.emit("add t0, t4, t5");
         self.emit("sub t1, t6, t5");
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
-        self.emit_stack_sd("t1", dest_size_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_stack_store("t1", dest_size_offset);
         true
     }
 
@@ -6066,13 +6086,13 @@ impl CodeGenerator {
             layout.offset,
             width
         ));
-        self.emit(format!("ld t4, {}(sp)", var.id * 8));
+        self.emit_stack_load("t4", var.id * 8);
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6125,13 +6145,13 @@ impl CodeGenerator {
         }
 
         // Load the object pointer from the stack slot
-        self.emit(format!("ld t4, {}(sp)", var.id * 8));
+        self.emit_stack_load("t4", var.id * 8);
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6181,13 +6201,13 @@ impl CodeGenerator {
             self.emit_loaded_schema_exact_size_check(size_offset, total_width, "fixed aggregate param");
             self.emit_loaded_schema_bounds_check(size_offset, offset + element_width, "fixed aggregate index");
         }
-        self.emit(format!("ld t4, {}(sp)", arr_var.id * 8));
+        self.emit_stack_load("t4", arr_var.id * 8);
         if let Some(width) = fixed_scalar_width(inner, Some(element_width)) {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", offset, width);
         } else {
             self.emit(format!("addi t0, t4, {}", offset));
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6214,10 +6234,10 @@ impl CodeGenerator {
             element_width, size_offset
         ));
         self.emit_loaded_schema_bounds_check(size_offset, 4, "dynamic Molecule vector index");
-        self.emit(format!("ld t4, {}(sp)", arr_var.id * 8));
+        self.emit_stack_load("t4", arr_var.id * 8);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, 4);
 
-        self.emit_stack_ld("t3", size_offset);
+        self.emit_stack_load("t3", size_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t5, t0, t2");
         self.emit("addi t5, t5, 4");
@@ -6228,7 +6248,7 @@ impl CodeGenerator {
         self.emit_label(&size_ok);
 
         match idx {
-            IrOperand::Var(v) => self.emit(format!("ld t1, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
@@ -6251,7 +6271,7 @@ impl CodeGenerator {
         } else {
             self.emit("addi t0, t4, 0");
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6274,7 +6294,7 @@ impl CodeGenerator {
 
         self.emit("# index access");
         self.emit(format!("# cellscript abi: stack collection index element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", arr_var.id * 8));
+        self.emit_stack_load("t4", arr_var.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", idx);
 
@@ -6292,7 +6312,7 @@ impl CodeGenerator {
         } else {
             self.emit("addi t0, t4, 0");
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6322,11 +6342,11 @@ impl CodeGenerator {
         }
 
         // Load array base pointer
-        self.emit(format!("ld t4, {}(sp)", arr_var.id * 8));
+        self.emit_stack_load("t4", arr_var.id * 8);
 
         // Load index value into t1
         match idx {
-            IrOperand::Var(v) => self.emit(format!("ld t1, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
@@ -6354,7 +6374,7 @@ impl CodeGenerator {
             // Pointer-sized element: compute base + offset
             self.emit("add t0, t4, t1");
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6367,13 +6387,13 @@ impl CodeGenerator {
             // For schema-backed or fixed-byte params, the actual size word is already
             // stored at the size offset; load it directly.
             self.emit(format!("# cellscript abi: dynamic length from size word at offset={}", size_offset));
-            self.emit_stack_ld("t0", size_offset);
+            self.emit_stack_load("t0", size_offset);
         } else {
             self.emit("# cellscript abi: fail closed because dynamic length is not available");
             self.emit_fail(CellScriptRuntimeError::ClaimSignatureFailed);
             return Ok(());
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
@@ -6385,7 +6405,7 @@ impl CodeGenerator {
             return false;
         }
         self.emit("# cellscript abi: stack collection length");
-        self.emit(format!("ld t4, {}(sp)", var.id * 8));
+        self.emit_stack_load("t4", var.id * 8);
         self.emit("ld t0, -8(t4)");
         true
     }
@@ -6408,10 +6428,10 @@ impl CodeGenerator {
             element_width, size_offset
         ));
         self.emit_loaded_schema_bounds_check(size_offset, 4, "dynamic Molecule vector length");
-        self.emit(format!("ld t4, {}(sp)", var.id * 8));
+        self.emit_stack_load("t4", var.id * 8);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, 4);
 
-        self.emit_stack_ld("t1", size_offset);
+        self.emit_stack_load("t1", size_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t3, t0, t2");
         self.emit("addi t3, t3, 4");
@@ -6465,7 +6485,7 @@ impl CodeGenerator {
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_loaded_schema_exact_size_check(size_offset, 32, "output type hash");
             self.emit_sp_addi("t0", buffer_offset);
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t0", dest.id * 8);
             return Ok(());
         }
         if self.emit_runtime_type_hash(dest, operand) {
@@ -6481,8 +6501,8 @@ impl CodeGenerator {
             self.emit("# type_hash");
             self.emit_operand_comment("type_hash source", operand);
             self.emit_loaded_schema_exact_size_check(size_offset, 32, "param type hash");
-            self.emit_stack_ld("t0", pointer_offset);
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.emit_stack_load("t0", pointer_offset);
+            self.emit_stack_store("t0", dest.id * 8);
             return Ok(());
         }
 
@@ -6527,7 +6547,7 @@ impl CodeGenerator {
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_loaded_schema_exact_size_check(size_offset, 32, "runtime type hash");
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6551,9 +6571,9 @@ impl CodeGenerator {
         }
 
         // Initialize length to 0
-        self.emit_stack_sd("zero", length_offset);
+        self.emit_stack_store("zero", length_offset);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         self.empty_molecule_vector_vars.insert(dest.id);
         self.stack_collection_vars.insert(dest.id);
         self.next_collection_slot += 1;
@@ -6591,7 +6611,7 @@ impl CodeGenerator {
 
         self.emit(format!("# cellscript abi: stack collection capacity element_size={}", element_width));
         self.emit(format!("li t0, {}", RUNTIME_COLLECTION_BUFFER_SIZE / element_width));
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         true
     }
 
@@ -6637,7 +6657,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection push element_size={}", width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit(format!("li t1, {}", width));
         self.emit("mul t2, t0, t1");
@@ -6667,7 +6687,7 @@ impl CodeGenerator {
             self.emit(format!("# cellscript abi: stack collection copy fixed bytes size={}", width));
             for byte_index in 0..width {
                 self.emit_fixed_byte_source_byte_to("t1", "t6", &source, byte_index);
-                self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+                self.emit_stack_load("t4", collection.id * 8);
                 self.emit("ld t0, -8(t4)");
                 self.emit(format!("li t2, {}", width));
                 self.emit("mul t2, t0, t2");
@@ -6680,7 +6700,7 @@ impl CodeGenerator {
                 }
             }
         }
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, 1");
         self.emit("sd t0, -8(t4)");
@@ -6731,7 +6751,7 @@ impl CodeGenerator {
             "# cellscript abi: stack collection extend bytes={} elements={} element_size={}",
             width, element_count, element_width
         ));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit(format!("li t1, {}", element_width));
         self.emit("mul t2, t0, t1");
@@ -6748,7 +6768,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: stack collection extend copy fixed bytes size={}", width));
         for byte_index in 0..width {
             self.emit_fixed_byte_source_byte_to("t1", "t6", &source, byte_index);
-            self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+            self.emit_stack_load("t4", collection.id * 8);
             self.emit("ld t0, -8(t4)");
             self.emit(format!("li t2, {}", element_width));
             self.emit("mul t2, t0, t2");
@@ -6760,7 +6780,7 @@ impl CodeGenerator {
                 self.emit("sb t1, 0(t0)");
             }
         }
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit(format!("addi t0, t0, {}", element_count));
         self.emit("sd t0, -8(t4)");
@@ -6791,7 +6811,7 @@ impl CodeGenerator {
             return false;
         }
         self.emit("# cellscript abi: stack collection clear");
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("sd zero, -8(t4)");
         true
     }
@@ -6823,7 +6843,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection reverse element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         let done_label = self.fresh_label("stack_collection_reverse_done");
         self.emit("li t1, 2");
@@ -6832,18 +6852,18 @@ impl CodeGenerator {
 
         let left_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
         let right_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        self.emit_stack_sd("zero", left_offset);
+        self.emit_stack_store("zero", left_offset);
         self.emit("addi t0, t0, -1");
-        self.emit_stack_sd("t0", right_offset);
+        self.emit_stack_store("t0", right_offset);
 
         let loop_label = self.fresh_label("stack_collection_reverse_loop");
         self.emit_label(&loop_label);
-        self.emit_stack_ld("t0", left_offset);
-        self.emit_stack_ld("t1", right_offset);
+        self.emit_stack_load("t0", left_offset);
+        self.emit_stack_load("t1", right_offset);
         self.emit("sltu t2, t0, t1");
         self.emit(format!("beqz t2, {}", done_label));
 
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit(format!("li t3, {}", element_width));
         self.emit("mul t5, t0, t3");
         self.emit("add t5, t4, t5");
@@ -6865,12 +6885,12 @@ impl CodeGenerator {
                 self.emit("sb t0, 0(t3)");
             }
         }
-        self.emit_stack_ld("t0", left_offset);
+        self.emit_stack_load("t0", left_offset);
         self.emit("addi t0, t0, 1");
-        self.emit_stack_sd("t0", left_offset);
-        self.emit_stack_ld("t1", right_offset);
+        self.emit_stack_store("t0", left_offset);
+        self.emit_stack_load("t1", right_offset);
         self.emit("addi t1, t1, -1");
-        self.emit_stack_sd("t1", right_offset);
+        self.emit_stack_store("t1", right_offset);
         self.emit(format!("j {}", loop_label));
         self.emit_label(&done_label);
         true
@@ -6897,7 +6917,7 @@ impl CodeGenerator {
         }
 
         self.emit("# cellscript abi: stack collection truncate");
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", len);
         let done_label = self.fresh_label("stack_collection_truncate_done");
@@ -6937,7 +6957,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection swap element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", left);
         self.emit_operand_to_register("t2", right);
@@ -7008,15 +7028,15 @@ impl CodeGenerator {
 
         self.emit(format!("# cellscript abi: stack collection contains element_size={}", element_width));
         let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        self.emit_stack_sd("zero", index_offset);
-        self.emit(format!("sd zero, {}(sp)", dest.id * 8));
+        self.emit_stack_store("zero", index_offset);
+        self.emit_stack_store("zero", dest.id * 8);
         let loop_label = self.fresh_label("stack_collection_contains_loop");
         let next_label = self.fresh_label("stack_collection_contains_next");
         let found_label = self.fresh_label("stack_collection_contains_found");
         let done_label = self.fresh_label("stack_collection_contains_done");
         self.emit_label(&loop_label);
-        self.emit_stack_ld("t1", index_offset);
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t1", index_offset);
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t2, -8(t4)");
         self.emit(format!("beq t1, t2, {}", done_label));
 
@@ -7034,8 +7054,8 @@ impl CodeGenerator {
             };
             self.emit_prepare_fixed_byte_source(&source, element_width, "stack collection contains");
             for byte_index in 0..element_width {
-                self.emit_stack_ld("t1", index_offset);
-                self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+                self.emit_stack_load("t1", index_offset);
+                self.emit_stack_load("t4", collection.id * 8);
                 self.emit(format!("li t2, {}", element_width));
                 self.emit("mul t3, t1, t2");
                 self.emit("add t4, t4, t3");
@@ -7053,13 +7073,13 @@ impl CodeGenerator {
         }
 
         self.emit_label(&next_label);
-        self.emit_stack_ld("t1", index_offset);
+        self.emit_stack_load("t1", index_offset);
         self.emit("addi t1, t1, 1");
-        self.emit_stack_sd("t1", index_offset);
+        self.emit_stack_store("t1", index_offset);
         self.emit(format!("j {}", loop_label));
         self.emit_label(&found_label);
         self.emit("li t0, 1");
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         self.emit_label(&done_label);
         true
     }
@@ -7098,7 +7118,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection remove element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 
@@ -7113,7 +7133,7 @@ impl CodeGenerator {
         self.emit("add t5, t4, t3");
         if dest_scalar {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
-            self.emit(format!("sd t6, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t6", dest.id * 8);
         } else {
             let removed_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
             self.emit(format!("# cellscript abi: stack collection remove snapshot fixed bytes size={}", element_width));
@@ -7128,18 +7148,18 @@ impl CodeGenerator {
                 self.emit("sb t6, 0(t2)");
             }
             self.emit_sp_addi("t6", removed_offset);
-            self.emit(format!("sd t6, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t6", dest.id * 8);
         }
 
         let index_offset = self.runtime_expr_temp_offset(removed_value_slots).expect("runtime temp slot");
-        self.emit_stack_sd("t1", index_offset);
+        self.emit_stack_store("t1", index_offset);
         let shift_loop = self.fresh_label("stack_collection_remove_shift_loop");
         let shift_done = self.fresh_label("stack_collection_remove_shift_done");
         self.emit(format!("# cellscript abi: stack collection remove shift element_size={}", element_width));
         self.emit_label(&shift_loop);
-        self.emit_stack_ld("t1", index_offset);
+        self.emit_stack_load("t1", index_offset);
         self.emit("addi t2, t1, 1");
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit("sltu t3, t2, t0");
         self.emit(format!("beqz t3, {}", shift_done));
@@ -7159,12 +7179,12 @@ impl CodeGenerator {
                 self.emit("sb t0, 0(t2)");
             }
         }
-        self.emit_stack_ld("t1", index_offset);
+        self.emit_stack_load("t1", index_offset);
         self.emit("addi t1, t1, 1");
-        self.emit_stack_sd("t1", index_offset);
+        self.emit_stack_store("t1", index_offset);
         self.emit(format!("j {}", shift_loop));
         self.emit_label(&shift_done);
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, -1");
         self.emit("sd t0, -8(t4)");
@@ -7200,7 +7220,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection pop element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         let bounds_ok = self.fresh_label("stack_collection_pop_bounds_ok");
         self.emit(format!("bnez t0, {}", bounds_ok));
@@ -7213,10 +7233,10 @@ impl CodeGenerator {
         self.emit("add t5, t4, t3");
         if dest_scalar {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
-            self.emit(format!("sd t6, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t6", dest.id * 8);
         } else {
             self.emit("# cellscript abi: stack collection pop fixed bytes");
-            self.emit(format!("sd t5, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t5", dest.id * 8);
         }
         self.emit("sd t1, -8(t4)");
         true
@@ -7266,7 +7286,7 @@ impl CodeGenerator {
         };
 
         self.emit(format!("# cellscript abi: stack collection insert element_size={}", element_width));
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 
@@ -7288,8 +7308,8 @@ impl CodeGenerator {
 
         let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
         let current_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        self.emit_stack_sd("t1", index_offset);
-        self.emit_stack_sd("t0", current_offset);
+        self.emit_stack_store("t1", index_offset);
+        self.emit_stack_store("t0", current_offset);
         if let Some(source) = fixed_byte_source.as_ref() {
             self.emit_prepare_fixed_byte_source(source, element_width, "stack collection insert");
             let value_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
@@ -7304,11 +7324,11 @@ impl CodeGenerator {
         let shift_done = self.fresh_label("stack_collection_insert_shift_done");
         self.emit(format!("# cellscript abi: stack collection insert shift element_size={}", element_width));
         self.emit_label(&shift_loop);
-        self.emit_stack_ld("t0", current_offset);
-        self.emit_stack_ld("t1", index_offset);
+        self.emit_stack_load("t0", current_offset);
+        self.emit_stack_load("t1", index_offset);
         self.emit(format!("beq t0, t1, {}", shift_done));
         self.emit("addi t2, t0, -1");
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit(format!("li t3, {}", element_width));
         self.emit("mul t5, t0, t3");
         self.emit("add t5, t4, t5");
@@ -7336,14 +7356,14 @@ impl CodeGenerator {
                 }
             }
         }
-        self.emit_stack_ld("t0", current_offset);
+        self.emit_stack_load("t0", current_offset);
         self.emit("addi t0, t0, -1");
-        self.emit_stack_sd("t0", current_offset);
+        self.emit_stack_store("t0", current_offset);
         self.emit(format!("j {}", shift_loop));
         self.emit_label(&shift_done);
 
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
-        self.emit_stack_ld("t0", index_offset);
+        self.emit_stack_load("t4", collection.id * 8);
+        self.emit_stack_load("t0", index_offset);
         self.emit(format!("li t2, {}", element_width));
         self.emit("mul t3, t0, t2");
         self.emit("add t5, t4, t3");
@@ -7370,7 +7390,7 @@ impl CodeGenerator {
                 }
             }
         }
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit("addi t0, t0, 1");
         self.emit("sd t0, -8(t4)");
@@ -7421,7 +7441,7 @@ impl CodeGenerator {
         if let Some(source) = fixed_byte_source.as_ref() {
             self.emit_prepare_fixed_byte_source(source, element_width, "stack collection set");
         }
-        self.emit(format!("ld t4, {}(sp)", collection.id * 8));
+        self.emit_stack_load("t4", collection.id * 8);
         self.emit("ld t0, -8(t4)");
         self.emit_operand_to_register("t1", index);
 
@@ -7492,15 +7512,15 @@ impl CodeGenerator {
 
         if let Some(d) = dest {
             if let IrType::Tuple(items) = &d.ty {
-                self.emit(format!("sd a0, {}(sp)", d.id * 8));
+                self.emit_stack_store("a0", d.id * 8);
                 for index in 0..items.len().min(8) {
                     let field = index.to_string();
                     if let Some(field_var_id) = self.tuple_call_return_field_slots.get(&(d.id, field)).copied() {
-                        self.emit(format!("sd a{}, {}(sp)", index, field_var_id * 8));
+                        self.emit_stack_store(&format!("a{}", index), field_var_id * 8);
                     }
                 }
             } else {
-                self.emit(format!("sd a0, {}(sp)", d.id * 8));
+                self.emit_stack_store("a0", d.id * 8);
             }
         }
 
@@ -7613,7 +7633,7 @@ impl CodeGenerator {
             _ => None,
         };
         if let Some(size_offset) = size_offset {
-            self.emit_stack_ld(&register, size_offset);
+            self.emit_stack_load(&register, size_offset);
         } else if let CallLengthKind::FixedBytes = kind {
             if matches!(arg, IrOperand::Const(_)) {
                 self.emit(format!(
@@ -7645,7 +7665,7 @@ impl CodeGenerator {
         };
         if let IrOperand::Var(var) = arg {
             if let Some(pointer_offset) = self.param_type_hash_pointer_offsets.get(&var.id).copied() {
-                self.emit_stack_ld(&register, pointer_offset);
+                self.emit_stack_load(&register, pointer_offset);
             } else {
                 self.emit(format!(
                     "# cellscript abi: call {} schema param {} has no tracked TypeHash pointer; pass null pointer",
@@ -7670,7 +7690,7 @@ impl CodeGenerator {
         };
         if let IrOperand::Var(var) = arg {
             if let Some(size_offset) = self.param_type_hash_size_offsets.get(&var.id).copied() {
-                self.emit_stack_ld(&register, size_offset);
+                self.emit_stack_load(&register, size_offset);
             } else {
                 self.emit(format!(
                     "# cellscript abi: call {} schema param {} has no tracked TypeHash length; pass zero length to fail closed",
@@ -7725,7 +7745,7 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_sp_addi("t0", buffer_offset);
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
 
         // Also store the size so that subsequent schema operations can use it
         self.schema_pointer_size_offsets.insert(dest.id, size_offset);
@@ -7738,16 +7758,16 @@ impl CodeGenerator {
         match src {
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
             IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("li t0, {}", if *b { 1 } else { 0 })),
-            IrOperand::Var(v) => self.emit(format!("ld t0, {}(sp)", v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
             _ => self.emit("li t0, 0"),
         }
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
     fn emit_tuple(&mut self, dest: &IrVar, fields: &[IrOperand]) -> Result<()> {
         self.emit(format!("# cellscript abi: construct tuple aggregate var{} fields={}", dest.id, fields.len()));
-        self.emit(format!("sd zero, {}(sp)", dest.id * 8));
+        self.emit_stack_store("zero", dest.id * 8);
         Ok(())
     }
 
@@ -7758,7 +7778,7 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("li {}, {}", register, if *b { 1 } else { 0 })),
-            IrOperand::Var(v) => self.emit(format!("ld {}, {}(sp)", register, v.id * 8)),
+            IrOperand::Var(v) => self.emit_stack_load(register, v.id * 8),
             _ => self.emit(format!("li {}, 0", register)),
         }
     }
@@ -7774,7 +7794,7 @@ impl CodeGenerator {
             // Consume a local variable: the actual LOAD_CELL input data loading
             // already happened in the action prelude (generate_consume).
             // Here we only zero out the local binding to enforce linear ownership.
-            self.emit(format!("sd zero, {}(sp)", var.id * 8));
+            self.emit_stack_store("zero", var.id * 8);
             return Ok(());
         }
         // Non-Var consume: this should not happen in valid IR, but fail with
@@ -7800,7 +7820,7 @@ impl CodeGenerator {
             self.emit("#   with_lock <expr>");
         }
         self.emit(format!("li t0, {}", self.next_virtual_output));
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         self.next_virtual_output += 1;
         Ok(())
     }
@@ -7818,7 +7838,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t0", dest.id * 8);
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -7882,7 +7902,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: claim output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t0", dest.id * 8);
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -7902,7 +7922,7 @@ impl CodeGenerator {
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
             self.emit(format!("# cellscript abi: settle output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
-            self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+            self.emit_stack_store("t0", dest.id * 8);
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
@@ -7918,7 +7938,7 @@ impl CodeGenerator {
         let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
         self.emit(format!("# cellscript abi: {} output relation verified by prelude Output#{}", operation, output_index));
         self.emit(format!("li t0, {}", output_index));
-        self.emit(format!("sd t0, {}(sp)", dest.id * 8));
+        self.emit_stack_store("t0", dest.id * 8);
         self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         true
     }
@@ -8039,22 +8059,22 @@ impl CodeGenerator {
         }
 
         let abi = self.runtime_abi();
-        self.emit("addi sp, sp, -32");
-        self.emit("sd ra, 24(sp)");
+        self.emit_large_addi("sp", "sp", -32);
+        self.emit_stack_store("ra", 24);
         self.emit(format!("# cellscript abi: LOAD_HEADER_BY_FIELD field={} source=HeaderDep index=0", field_name));
         self.emit("li t0, 8");
-        self.emit("sd t0, 8(sp)");
-        self.emit("addi a0, sp, 16");
-        self.emit("addi a1, sp, 8");
+        self.emit_stack_store("t0", 8);
+        self.emit_sp_addi("a0", 16);
+        self.emit_sp_addi("a1", 8);
         self.emit("li a2, 0");
         self.emit("li a3, 0");
         self.emit(format!("li a4, {}", abi.source_header_dep));
         self.emit(format!("li a5, {}", field_id));
         self.emit(format!("li a7, {}", abi.load_header_by_field));
         self.emit("ecall");
-        self.emit("ld a0, 16(sp)");
-        self.emit("ld ra, 24(sp)");
-        self.emit("addi sp, sp, 32");
+        self.emit_stack_load("a0", 16);
+        self.emit_stack_load("ra", 24);
+        self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");
     }
 
@@ -8070,22 +8090,22 @@ impl CodeGenerator {
         }
 
         let abi = self.runtime_abi();
-        self.emit("addi sp, sp, -32");
-        self.emit("sd ra, 24(sp)");
+        self.emit_large_addi("sp", "sp", -32);
+        self.emit_stack_store("ra", 24);
         self.emit(format!("# cellscript abi: LOAD_INPUT_BY_FIELD field={} source=GroupInput index=0", field_name));
         self.emit("li t0, 8");
-        self.emit("sd t0, 8(sp)");
-        self.emit("addi a0, sp, 16");
-        self.emit("addi a1, sp, 8");
+        self.emit_stack_store("t0", 8);
+        self.emit_sp_addi("a0", 16);
+        self.emit_sp_addi("a1", 8);
         self.emit("li a2, 0");
         self.emit("li a3, 0");
         self.emit(format!("li a4, {}", abi.source_group_input));
         self.emit(format!("li a5, {}", field_id));
         self.emit(format!("li a7, {}", abi.load_input_by_field));
         self.emit("ecall");
-        self.emit("ld a0, 16(sp)");
-        self.emit("ld ra, 24(sp)");
-        self.emit("addi sp, sp, 32");
+        self.emit_stack_load("a0", 16);
+        self.emit_stack_load("ra", 24);
+        self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");
     }
 
@@ -9731,13 +9751,12 @@ fn parse_memory_operand(value: &str) -> Result<(i64, u8)> {
     Ok((imm, rs1))
 }
 
-fn stack_pointer_offset(value: &str) -> Option<i64> {
+fn memory_operand_offset_and_base(value: &str) -> Option<(i64, &str)> {
     let open = value.find('(')?;
     let close = value.rfind(')')?;
-    if value[open + 1..close].trim() != "sp" {
-        return None;
-    }
-    value[..open].trim().parse::<i64>().ok()
+    let offset = parse_immediate(value[..open].trim()).ok()?;
+    let base = value[open + 1..close].trim();
+    (!base.is_empty()).then_some((offset, base))
 }
 
 fn small_signed_immediate(value: i64) -> bool {
@@ -9745,12 +9764,13 @@ fn small_signed_immediate(value: i64) -> bool {
 }
 
 fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
-    let uses_t6 = registers.iter().any(|register| parse_register(register).ok() == Some(31));
-    if uses_t6 {
-        "t5"
-    } else {
-        "t6"
+    for candidate in ["t6", "t5", "t3", "t2", "t1", "t0"] {
+        let candidate_id = parse_register(candidate).expect("scratch register name should be valid");
+        if registers.iter().all(|register| parse_register(register).ok() != Some(candidate_id)) {
+            return candidate;
+        }
     }
+    "t6"
 }
 
 fn parse_register(name: &str) -> Result<u8> {
@@ -10109,10 +10129,43 @@ mod tests {
     }
 
     #[test]
-    fn generated_large_stack_offsets_are_normalized_before_assembly() {
+    fn stack_pointer_offsets_are_emitted_through_helpers() {
+        let implementation = include_str!("mod.rs").split("\n#[cfg(test)]").next().expect("source should contain implementation");
+        let offenders = implementation
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let emits_stack_memory =
+                    (line.contains("self.emit(format!(") || line.contains("self.emit(\"")) && line.contains("(sp)");
+                let emits_stack_addi =
+                    (line.contains("self.emit(\"addi ") || line.contains("self.emit(format!(\"addi ")) && line.contains(", sp,");
+                let allowed_stack_memory = line.contains("self.emit(format!(\"{} {}, {}(sp)\", opcode, register, offset))");
+                let allowed_stack_addi = line.contains("self.emit(format!(\"addi {}, sp, {}\", rd, offset))");
+                ((emits_stack_memory && !allowed_stack_memory) || (emits_stack_addi && !allowed_stack_addi))
+                    .then(|| format!("{}: {}", index + 1, line.trim()))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(offenders.is_empty(), "stack pointer accesses must go through stack helpers:\n{}", offenders.join("\n"));
+    }
+
+    #[test]
+    fn large_addi_avoids_clobbering_source_register() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_large_addi("t0", "t6", 2048);
+        generator.emit_large_addi("t6", "t6", 4096);
+
+        assert_eq!(generator.assembly, vec!["    li t5, 2048", "    add t0, t6, t5", "    li t5, 4096", "    add t6, t6, t5",]);
+    }
+
+    #[test]
+    fn generated_large_offsets_are_normalized_before_assembly() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.emit("sd t0, 2048(sp)");
         generator.emit("ld t6, 2056(sp)");
+        generator.emit("lbu t2, 2048(t4)");
+        generator.emit("addi t0, t4, 2048");
+        generator.emit("sb t0, 4096(t6)");
 
         assert_eq!(
             generator.assembly,
@@ -10123,6 +10176,14 @@ mod tests {
                 "    li t5, 2056",
                 "    add t5, sp, t5",
                 "    ld t6, 0(t5)",
+                "    li t6, 2048",
+                "    add t6, t4, t6",
+                "    lbu t2, 0(t6)",
+                "    li t6, 2048",
+                "    add t0, t4, t6",
+                "    li t5, 4096",
+                "    add t5, t6, t5",
+                "    sb t0, 0(t5)",
             ]
         );
     }
