@@ -186,6 +186,9 @@ New in 0.13:
   than the legacy undefined `__const_data` placeholder, so local
   `Address::zero()`, `Hash::zero()`, array, and `u128` constants can round-trip
   through internal ELF emission.
+- IR join moves now use the same operand materialization path as normal loads,
+  so fixed-byte constants selected by `if`/join control flow keep their rodata
+  pointers instead of degrading to a null pointer.
 - Generic `u128` comparison and supported `u128 +/- u64` lowering now use
   explicit 16-byte storage/comparison and carry/borrow arithmetic instead of
   falling through the old 8-byte register model.

@@ -8081,12 +8081,7 @@ impl CodeGenerator {
     }
 
     fn emit_move(&mut self, dest: &IrVar, src: &IrOperand) -> Result<()> {
-        match src {
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("li t0, {}", if *b { 1 } else { 0 })),
-            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
-            _ => self.emit("li t0, 0"),
-        }
+        self.emit_operand_to_register("t0", src);
         self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }

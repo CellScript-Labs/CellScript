@@ -12451,6 +12451,15 @@ action choose(flag: bool, x: u64) -> u64 {
 }
 "#;
 
+    const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
+module test
+
+action choose_zero(flag: bool, target: Address) -> bool {
+    let selected = if flag { Address::zero() } else { Address::zero() }
+    return target == selected
+}
+"#;
+
     const WHILE_PROGRAM: &str = r#"
 module test
 
@@ -15919,6 +15928,18 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains("beqz t0, .Lchoose_block_2"), "missing conditional branch for if expression:\n{}", asm);
         assert!(asm.contains(".Lchoose_block_3:"), "missing join block for if expression:\n{}", asm);
         assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_if_expression_fixed_byte_const_join_move() {
+        let result = compile(IF_EXPR_FIXED_BYTE_CONST_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("la t0, __cellscript_const_data_"),
+            "fixed-byte constant moves must materialize a rodata pointer instead of a null pointer:\n{}",
+            asm
+        );
     }
 
     #[test]
