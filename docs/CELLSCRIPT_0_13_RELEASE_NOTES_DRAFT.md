@@ -135,10 +135,11 @@ New in 0.13:
 - The internal ELF assembler covers the emitted instruction surface used by the
   current compiler and stdlib tests.
 - The assembler support surface is now guarded by an explicit supported
-  mnemonic allowlist plus an intentionally unsupported mnemonic list. Generated
-  stdlib and collection assembly must stay inside the declared supported
-  surface, so public generated assembly cannot quietly drift into GNU assembler
-  mnemonics that the internal assembler does not encode.
+  mnemonic allowlist plus an intentionally unsupported mnemonic list. Bundled
+  example codegen output, generated stdlib assembly, and generated collection
+  assembly must stay inside the declared supported surface, so public generated
+  assembly cannot quietly drift into GNU assembler mnemonics that the internal
+  assembler does not encode.
 - Register conditional branches `beq`, `bne`, `blt`, `bge`, `bltu`, and `bgeu`
   are accepted and encoded.
 - Zero-compare branches `beqz` and `bnez` remain supported.
