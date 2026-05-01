@@ -2448,6 +2448,22 @@ impl CodeGenerator {
         }
     }
 
+    fn emit_memory_load_with_avoid(&mut self, opcode: &str, dst: &str, base: &str, offset: usize, avoid: &[&str]) {
+        let offset = i64::try_from(offset).expect("memory offset should fit in i64");
+        if small_signed_immediate(offset) {
+            self.emit(format!("{} {}, {}({})", opcode, dst, offset, base));
+        } else {
+            let mut registers = Vec::with_capacity(2 + avoid.len());
+            registers.push(dst);
+            registers.push(base);
+            registers.extend_from_slice(avoid);
+            let scratch = scratch_register_avoiding(&registers);
+            self.emit(format!("li {}, {}", scratch, offset));
+            self.emit(format!("add {}, {}, {}", scratch, base, scratch));
+            self.emit(format!("{} {}, 0({})", opcode, dst, scratch));
+        }
+    }
+
     /// Emit `ld rd, offset(sp)` through the centralized stack-offset gate.
     fn emit_stack_load(&mut self, rd: &str, offset: usize) {
         self.emit_stack_access("ld", rd, offset);
@@ -5617,7 +5633,7 @@ impl CodeGenerator {
     fn emit_unaligned_scalar_load(&mut self, base_reg: &str, dest_reg: &str, scratch_reg: &str, offset: usize, width: usize) {
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..width {
-            self.emit(format!("lbu {}, {}({})", scratch_reg, offset + byte_index, base_reg));
+            self.emit_memory_load_with_avoid("lbu", scratch_reg, base_reg, offset + byte_index, &[dest_reg, scratch_reg, base_reg]);
             if byte_index != 0 {
                 self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
             }
@@ -9551,7 +9567,7 @@ fn encode_instruction(
 
 fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
     if let Some(signed) = li_signed_i64(imm) {
-        if li_fits_32_bit_split(signed) {
+        if li_fits_lui_addi_rv64(signed) {
             let (hi, lo) = split_hi_lo(signed)?;
             out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
             out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
@@ -9629,7 +9645,7 @@ fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: us
 }
 
 fn li_sequence_size(imm: i128) -> usize {
-    if li_signed_i64(imm).is_some_and(li_fits_32_bit_split) {
+    if li_signed_i64(imm).is_some_and(li_fits_lui_addi_rv64) {
         8
     } else {
         60
@@ -9933,9 +9949,9 @@ fn signed_bits_fit(value: i64, bits: u32) -> bool {
 }
 
 fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
-    if !li_fits_32_bit_split(value) {
+    if !li_fits_lui_addi_rv64(value) {
         return Err(CompileError::new(
-            format!("value '{}' is outside the supported 32-bit immediate range", value),
+            format!("value '{}' is outside the supported RV64 LUI/ADDI immediate range", value),
             crate::error::Span::default(),
         ));
     }
@@ -9947,8 +9963,12 @@ fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
     Ok((hi, lo))
 }
 
-fn li_fits_32_bit_split(value: i64) -> bool {
-    (i32::MIN as i64..=i32::MAX as i64).contains(&value)
+fn li_fits_lui_addi_rv64(value: i64) -> bool {
+    if !(i32::MIN as i64..=i32::MAX as i64).contains(&value) {
+        return false;
+    }
+    let hi = (value + 0x800) >> 12;
+    (-0x80000..=0x7ffff).contains(&hi)
 }
 
 fn relative_offset(pc: u64, target: u64) -> Result<i64> {
@@ -10129,6 +10149,50 @@ mod tests {
     }
 
     #[test]
+    fn rv64_li_boundary_values_materialize_correct_bits() {
+        let cases = [(0x7fff_f7ffi128, 8usize), (0x7fff_f800i128, 60usize), (0x7fff_ffffi128, 60usize), (0x8000_0000i128, 60usize)];
+
+        for (value, expected_size) in cases {
+            let mut bytes = Vec::new();
+            encode_li_sequence(&mut bytes, 10, value).expect("li should encode");
+            assert_eq!(bytes.len(), expected_size, "unexpected li size for {value:#x}");
+            assert_eq!(simulate_li_sequence(&bytes, 10), value as u64, "li materialized wrong bits for {value:#x}");
+        }
+    }
+
+    fn simulate_li_sequence(bytes: &[u8], register: usize) -> u64 {
+        let mut regs = [0u64; 32];
+        for chunk in bytes.chunks_exact(4) {
+            let inst = u32::from_le_bytes(chunk.try_into().expect("instruction chunk should be four bytes"));
+            let opcode = inst & 0x7f;
+            let rd = ((inst >> 7) & 0x1f) as usize;
+            let funct3 = (inst >> 12) & 0x7;
+            let rs1 = ((inst >> 15) & 0x1f) as usize;
+            match (opcode, funct3) {
+                (0x37, _) => {
+                    regs[rd] = ((inst & 0xffff_f000) as i32 as i64) as u64;
+                }
+                (0x13, 0b000) => {
+                    let imm = sign_extend(inst >> 20, 12);
+                    regs[rd] = regs[rs1].wrapping_add(imm as u64);
+                }
+                (0x13, 0b001) => {
+                    let shamt = (inst >> 20) & 0x3f;
+                    regs[rd] = regs[rs1] << shamt;
+                }
+                _ => panic!("unexpected instruction in li sequence: 0x{inst:08x}"),
+            }
+            regs[0] = 0;
+        }
+        regs[register]
+    }
+
+    fn sign_extend(value: u32, bits: u32) -> i64 {
+        let shift = 64 - bits;
+        ((u64::from(value) << shift) as i64) >> shift
+    }
+
+    #[test]
     fn stack_pointer_offsets_are_emitted_through_helpers() {
         let implementation = include_str!("mod.rs").split("\n#[cfg(test)]").next().expect("source should contain implementation");
         let offenders = implementation
@@ -10156,6 +10220,28 @@ mod tests {
         generator.emit_large_addi("t6", "t6", 4096);
 
         assert_eq!(generator.assembly, vec!["    li t5, 2048", "    add t0, t6, t5", "    li t5, 4096", "    add t6, t6, t5",]);
+    }
+
+    #[test]
+    fn unaligned_scalar_load_large_offsets_preserve_live_accumulator() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_unaligned_scalar_load("t4", "t6", "t2", 2048, 2);
+
+        assert_eq!(
+            generator.assembly,
+            vec![
+                "    li t6, 0",
+                "    li t5, 2048",
+                "    add t5, t4, t5",
+                "    lbu t2, 0(t5)",
+                "    or t6, t6, t2",
+                "    li t5, 2049",
+                "    add t5, t4, t5",
+                "    lbu t2, 0(t5)",
+                "    slli t2, t2, 8",
+                "    or t6, t6, t2",
+            ]
+        );
     }
 
     #[test]

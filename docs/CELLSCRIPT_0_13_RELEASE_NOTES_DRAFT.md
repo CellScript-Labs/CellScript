@@ -152,6 +152,13 @@ New in 0.13:
 - Large `addi` lowering now chooses a scratch register that does not overwrite
   the source/base register, preventing large fixed-byte collection copy paths
   from losing a live pointer when it is held in `t6`.
+- RV64 `li` materialization avoids the `lui` sign-extension cliff near the
+  positive 32-bit boundary. Values such as `0x7ffff800` and `0x7fffffff` now
+  use the long materialization path instead of silently producing sign-extended
+  wrong-code.
+- Large-offset unaligned scalar loads now materialize the load address with an
+  explicit live-register avoid set, so accumulator registers such as `t6` are
+  not clobbered by the fallback address scratch.
 - Large fixed schema field regression coverage now includes both scalar loads
   and fixed-byte field pointer paths, so valid DSL such as a schema with a
   2048-byte prefix field compiles through `riscv64-elf`.
