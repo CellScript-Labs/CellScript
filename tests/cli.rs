@@ -1924,6 +1924,7 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
     assert_invariant(token_a.symbol != token_b.symbol, "same token")
     assert_invariant(token_a.amount > 0 && token_b.amount > 0, "zero liquidity")
     assert_invariant(fee_rate_bps <= 10000, "fee too high")
+    assert_invariant(token_a.type_hash() != token_b.type_hash(), "same token type")
 
     let initial_lp: u64 = token_a.amount
     consume token_a

@@ -162,6 +162,20 @@ New in 0.13:
   positive 32-bit boundary. Values such as `0x7ffff800` and `0x7fffffff` now
   use the long materialization path instead of silently producing sign-extended
   wrong-code.
+- Pool token-pair TypeHash admission is no longer emitted from a `seed_pool`
+  function-name hook in codegen. AMM examples express the rule as a normal DSL
+  `token_a.type_hash() != token_b.type_hash()` invariant, which lowers through
+  the generic runtime `type_hash()` and fixed-byte comparison paths.
+- Internal function calls and parameterized entry wrappers now stage ABI
+  arguments beyond `a7` on the outgoing call stack, so callees that require
+  schema pointer/length plus TypeHash ABI pairs do not silently turn into
+  fail-closed "arg beyond register" paths.
+- Entry-witness wrappers stage those outgoing stack arguments below the local
+  witness frame before adjusting `sp` for the call, preventing stack-spill ABI
+  slots from overwriting decoded witness payload bytes such as fixed-byte
+  `Address` parameters.
+- `env::current_timepoint()` is documented as the CKB HeaderDep#0 epoch number
+  under the CKB profile, not as a Unix timestamp.
 - Large-offset unaligned scalar loads now materialize the load address with an
   explicit live-register avoid set, so accumulator registers such as `t6` are
   not clobbered by the fallback address scratch.
@@ -183,6 +197,9 @@ New in 0.13:
 - `read_ref` runtime fallback no longer reuses the output counter as a CellDep
   index. If a CellDep index was not allocated, the generated verifier fails
   closed.
+- `read_ref` runtime fallback also records the loaded CellDep buffer and size
+  offsets consistently, so later schema and type-hash operations see the same
+  cell-backed state as preplanned read refs.
 - External RISC-V toolchain fallback now cleans its temporary directory on both
   success and error paths.
 

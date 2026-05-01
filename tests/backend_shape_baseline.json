@@ -13,15 +13,15 @@
   },
   {
     "example": "launch.cell",
-    "line_count": 5659,
-    "text_size": 21320,
+    "line_count": 5728,
+    "text_size": 21880,
     "relaxed_branch_count": 0,
-    "max_cond_branch_abs_distance": 2192,
-    "machine_block_count": 763,
+    "max_cond_branch_abs_distance": 2732,
+    "machine_block_count": 738,
     "max_machine_block_size": 492,
-    "machine_cfg_edge_count": 1309,
-    "machine_call_edge_count": 216,
-    "unreachable_machine_block_count": 348
+    "machine_cfg_edge_count": 1260,
+    "machine_call_edge_count": 219,
+    "unreachable_machine_block_count": 347
   },
   {
     "example": "multisig.cell",

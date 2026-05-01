@@ -61,6 +61,10 @@ where practical and must not make the implicit backend contracts more implicit.
 - Do not hand-write stack offsets. All stack access must go through
   `emit_stack_load`, `emit_stack_load_byte`, `emit_stack_store`, or
   `emit_stack_store_byte`.
+- Outgoing call-stack ABI arguments are the exception to the local-frame helper
+  rule: stage them through the dedicated outgoing stack-argument helpers before
+  adjusting `sp`, so caller-local buffers such as entry witness payloads are not
+  overwritten.
 - Do not hand-write large pointer arithmetic. Use `emit_large_addi` or a helper
   that takes an explicit live-register avoid set.
 - Do not rely on blind textual normalization when structured codegen knows
@@ -76,6 +80,9 @@ where practical and must not make the implicit backend contracts more implicit.
   stack slot model.
 - Unsupported runtime semantics must fail closed with a specific
   `CellScriptRuntimeError`; do not emit a clean success path for unsupported DSL.
+- Do not add domain-specific verifier rules by matching action/function names in
+  codegen. Business rules must be explicit in DSL source, structured IR, or
+  metadata before the backend lowers them.
 
 ## CKB Semantics
 

@@ -365,6 +365,39 @@ fn abi_arg_label(index: usize) -> String {
     }
 }
 
+fn call_abi_arg_count(abi: Option<&CallableAbi>, args: &[IrOperand]) -> usize {
+    let mut count = 0usize;
+    for (arg_index, _) in args.iter().enumerate() {
+        if let Some(abi) = abi {
+            if let Some(param) = abi.params.get(arg_index) {
+                count += call_param_abi_arg_count(param, abi.type_hash_param_indices.contains(&arg_index));
+                continue;
+            }
+        }
+        count += 1;
+    }
+    count
+}
+
+fn entry_abi_arg_count(params: &[IrParam], abi: Option<&CallableAbi>) -> usize {
+    let type_hash_param_indices = abi.map(|abi| &abi.type_hash_param_indices);
+    params
+        .iter()
+        .enumerate()
+        .map(|(index, param)| call_param_abi_arg_count(param, type_hash_param_indices.is_some_and(|indices| indices.contains(&index))))
+        .sum()
+}
+
+fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -> usize {
+    if named_type_name(&param.ty).is_some() {
+        return 2 + usize::from(needs_type_hash) * 2;
+    }
+    if fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)).is_some() {
+        return 2;
+    }
+    1
+}
+
 #[derive(Debug, Clone)]
 enum PreludeU64OperandSource {
     Const(u64),
@@ -812,6 +845,7 @@ impl CodeGenerator {
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
+        let outgoing_stack_arg_bytes = entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8;
         let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
@@ -871,16 +905,16 @@ impl CodeGenerator {
             for (param_index, param) in params.iter().enumerate() {
                 if runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
                     self.emit(format!("# cellscript entry abi: runtime-bound param {} is loaded from transaction cells", param.name));
-                    self.emit_entry_abi_zero_arg(abi_index);
-                    self.emit_entry_abi_zero_arg(abi_index + 1);
+                    self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                     abi_index += 2;
                     if type_hash_param_indices.contains(&param_index) {
                         self.emit(format!(
                             "# cellscript entry abi: runtime-bound param {} TypeHash witness bytes unavailable; pass null ABI bytes",
                             param.name
                         ));
-                        self.emit_entry_abi_zero_arg(abi_index);
-                        self.emit_entry_abi_zero_arg(abi_index + 1);
+                        self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                        self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
                 } else if entry_witness_dynamic_schema_param(&param.ty) {
@@ -915,8 +949,8 @@ impl CodeGenerator {
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
-                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 4, "t0");
-                    self.emit_entry_abi_reg_arg(abi_index + 1, "t4");
+                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 4, "t0", outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_reg_arg(abi_index + 1, "t4", outgoing_stack_arg_bytes);
                     abi_index += 2;
                     self.emit("addi t6, t6, 4");
                     self.emit("add t6, t6, t4");
@@ -925,8 +959,8 @@ impl CodeGenerator {
                             "# cellscript entry abi: schema param {} TypeHash witness bytes unavailable; pass null ABI bytes",
                             param.name
                         ));
-                        self.emit_entry_abi_zero_arg(abi_index);
-                        self.emit_entry_abi_zero_arg(abi_index + 1);
+                        self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                        self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
                 } else if let Some(width) =
@@ -945,8 +979,8 @@ impl CodeGenerator {
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
-                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 0, "t0");
-                    self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64);
+                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 0, "t0", outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64, outgoing_stack_arg_bytes);
                     self.emit(format!("addi t6, t6, {}", width));
                     abi_index += 2;
                 } else if let Some(width) = entry_witness_register_param_width(&param.ty) {
@@ -973,7 +1007,7 @@ impl CodeGenerator {
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
                         ));
-                        self.emit_stack_store("t3", caller_stack_offset);
+                        self.emit_entry_abi_reg_arg(abi_index, "t3", outgoing_stack_arg_bytes);
                     }
                     self.emit(format!("addi t6, t6, {}", width));
                     abi_index += 1;
@@ -982,7 +1016,7 @@ impl CodeGenerator {
                     self.emit(format!("j {}", fail_label));
                 }
             }
-            self.emit(format!("call {}", target));
+            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
             self.emit(format!("j {}", done_label));
         } else {
             let mut abi_index = 0usize;
@@ -990,30 +1024,30 @@ impl CodeGenerator {
             for (param_index, param) in params.iter().enumerate() {
                 if runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
                     self.emit(format!("# cellscript entry abi: runtime-bound param {} is loaded from transaction cells", param.name));
-                    self.emit_entry_abi_zero_arg(abi_index);
-                    self.emit_entry_abi_zero_arg(abi_index + 1);
+                    self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                     abi_index += 2;
                     if type_hash_param_indices.contains(&param_index) {
                         self.emit(format!(
                             "# cellscript entry abi: runtime-bound param {} TypeHash witness bytes unavailable; pass null ABI bytes",
                             param.name
                         ));
-                        self.emit_entry_abi_zero_arg(abi_index);
-                        self.emit_entry_abi_zero_arg(abi_index + 1);
+                        self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                        self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
                 } else if entry_witness_dynamic_schema_param(&param.ty) {
                     self.emit(format!("# cellscript entry abi: schema param {} is runtime-loaded; pass null ABI bytes", param.name));
-                    self.emit_entry_abi_zero_arg(abi_index);
-                    self.emit_entry_abi_zero_arg(abi_index + 1);
+                    self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                     abi_index += 2;
                     if type_hash_param_indices.contains(&param_index) {
                         self.emit(format!(
                             "# cellscript entry abi: schema param {} TypeHash witness bytes unavailable; pass null ABI bytes",
                             param.name
                         ));
-                        self.emit_entry_abi_zero_arg(abi_index);
-                        self.emit_entry_abi_zero_arg(abi_index + 1);
+                        self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
+                        self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
                 } else if let Some(width) =
@@ -1029,8 +1063,9 @@ impl CodeGenerator {
                     self.emit_entry_abi_pointer_arg(
                         abi_index,
                         ENTRY_WITNESS_BUFFER_OFFSET + ENTRY_WITNESS_HEADER_SIZE + payload_cursor,
+                        outgoing_stack_arg_bytes,
                     );
-                    self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64);
+                    self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64, outgoing_stack_arg_bytes);
                     payload_cursor += width;
                     abi_index += 2;
                 } else if let Some(width) = entry_witness_register_param_width(&param.ty) {
@@ -1050,7 +1085,7 @@ impl CodeGenerator {
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
                         ));
-                        self.emit_stack_store("t3", caller_stack_offset);
+                        self.emit_entry_abi_reg_arg(abi_index, "t3", outgoing_stack_arg_bytes);
                     }
                     payload_cursor += width;
                     abi_index += 1;
@@ -1059,7 +1094,7 @@ impl CodeGenerator {
                     self.emit(format!("j {}", fail_label));
                 }
             }
-            self.emit(format!("call {}", target));
+            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
             self.emit(format!("j {}", done_label));
         }
 
@@ -1073,47 +1108,75 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn emit_entry_abi_zero_arg(&mut self, abi_index: usize) {
-        self.emit_entry_abi_immediate_arg(abi_index, 0);
+    fn emit_entry_call_target(&mut self, target: &str, outgoing_stack_arg_bytes: usize) {
+        if outgoing_stack_arg_bytes > 0 {
+            self.emit(format!("# cellscript entry abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
+            self.emit_large_addi("sp", "sp", -(outgoing_stack_arg_bytes as i64));
+        }
+        self.emit(format!("call {}", target));
+        if outgoing_stack_arg_bytes > 0 {
+            self.emit_large_addi("sp", "sp", outgoing_stack_arg_bytes as i64);
+        }
     }
 
-    fn emit_entry_abi_reg_arg(&mut self, abi_index: usize, source_reg: &str) {
+    fn emit_entry_abi_zero_arg(&mut self, abi_index: usize, outgoing_stack_arg_bytes: usize) {
+        self.emit_entry_abi_immediate_arg(abi_index, 0, outgoing_stack_arg_bytes);
+    }
+
+    fn emit_entry_abi_reg_arg(&mut self, abi_index: usize, source_reg: &str, outgoing_stack_arg_bytes: usize) {
         if abi_index < 8 {
             self.emit(format!("addi a{}, {}, 0", abi_index, source_reg));
         } else {
-            let caller_stack_offset = (abi_index - 8) * 8;
-            self.emit_stack_store(source_reg, caller_stack_offset);
+            self.emit_entry_outgoing_stack_arg_store(source_reg, abi_index, outgoing_stack_arg_bytes);
         }
     }
 
-    fn emit_entry_abi_immediate_arg(&mut self, abi_index: usize, value: u64) {
+    fn emit_entry_abi_immediate_arg(&mut self, abi_index: usize, value: u64, outgoing_stack_arg_bytes: usize) {
         if abi_index < 8 {
             self.emit(format!("li a{}, {}", abi_index, value));
         } else {
-            let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript entry abi: stack arg{} <- {}", abi_index, value));
             self.emit(format!("li t0, {}", value));
-            self.emit_stack_store("t0", caller_stack_offset);
+            self.emit_entry_outgoing_stack_arg_store("t0", abi_index, outgoing_stack_arg_bytes);
         }
     }
 
-    fn emit_entry_abi_pointer_arg(&mut self, abi_index: usize, stack_offset: usize) {
+    fn emit_entry_abi_pointer_arg(&mut self, abi_index: usize, stack_offset: usize, outgoing_stack_arg_bytes: usize) {
         if abi_index < 8 {
             self.emit_sp_addi(&format!("a{}", abi_index), stack_offset);
         } else {
-            let caller_stack_offset = (abi_index - 8) * 8;
             self.emit(format!("# cellscript entry abi: stack arg{} <- sp+{}", abi_index, stack_offset));
             self.emit_sp_addi("t0", stack_offset);
-            self.emit_stack_store("t0", caller_stack_offset);
+            self.emit_entry_outgoing_stack_arg_store("t0", abi_index, outgoing_stack_arg_bytes);
         }
     }
 
-    fn emit_entry_abi_pointer_from_dynamic_offset(&mut self, abi_index: usize, offset_reg: &str, extra_offset: usize, temp_reg: &str) {
+    fn emit_entry_abi_pointer_from_dynamic_offset(
+        &mut self,
+        abi_index: usize,
+        offset_reg: &str,
+        extra_offset: usize,
+        temp_reg: &str,
+        outgoing_stack_arg_bytes: usize,
+    ) {
         self.emit(format!("add {}, sp, {}", temp_reg, offset_reg));
         if ENTRY_WITNESS_BUFFER_OFFSET + extra_offset != 0 {
             self.emit(format!("addi {}, {}, {}", temp_reg, temp_reg, ENTRY_WITNESS_BUFFER_OFFSET + extra_offset));
         }
-        self.emit_entry_abi_reg_arg(abi_index, temp_reg);
+        self.emit_entry_abi_reg_arg(abi_index, temp_reg, outgoing_stack_arg_bytes);
+    }
+
+    fn emit_entry_outgoing_stack_arg_store(&mut self, register: &str, abi_index: usize, outgoing_stack_arg_bytes: usize) {
+        let stack_slot_offset = (abi_index - 8) * 8;
+        let offset = i64::try_from(stack_slot_offset).expect("entry call stack slot should fit in i64")
+            - i64::try_from(outgoing_stack_arg_bytes).expect("entry call stack argument area should fit in i64");
+        self.emit(format!(
+            "# cellscript entry abi: stage stack arg{} at pre-call sp{}{}",
+            abi_index,
+            if offset < 0 { "" } else { "+" },
+            offset
+        ));
+        self.emit_sp_store_signed(register, offset);
     }
 
     fn emit_entry_witness_scalar_load(&mut self, dest_reg: &str, stack_offset: usize, width: usize) {
@@ -2001,7 +2064,6 @@ impl CodeGenerator {
         for (index, pattern) in body.consume_set.iter().enumerate() {
             self.generate_consume(pattern, index)?;
         }
-        self.emit_pool_seed_token_pair_identity_check(body);
 
         let mut read_ref_index = 0usize;
         for pattern in &body.read_refs {
@@ -3281,68 +3343,6 @@ impl CodeGenerator {
         self.emit(format!("beqz a0, {}", ok_label));
         self.emit_fail(CellScriptRuntimeError::ClaimSignatureFailed);
         self.emit_label(&ok_label);
-    }
-
-    fn emit_pool_seed_token_pair_identity_check(&mut self, body: &IrBody) {
-        if self.current_function.as_deref().is_none_or(|name| name != "seed_pool") {
-            return;
-        }
-        if !body.create_set.iter().any(|pattern| pattern.operation == "create" && pattern.ty == "Pool") {
-            return;
-        }
-        let Some((left_index, left)) =
-            body.consume_set.iter().enumerate().find(|(_, pattern)| pattern.operation == "consume" && pattern.binding == "token_a")
-        else {
-            return;
-        };
-        let Some((right_index, right)) =
-            body.consume_set.iter().enumerate().find(|(_, pattern)| pattern.operation == "consume" && pattern.binding == "token_b")
-        else {
-            return;
-        };
-
-        let left_size_offset = self.runtime_scratch_size_offset();
-        let left_buffer_offset = self.runtime_scratch_buffer_offset();
-        let right_size_offset = self.runtime_scratch2_size_offset();
-        let right_buffer_offset = self.runtime_scratch2_buffer_offset();
-        self.emit(format!(
-            "# cellscript abi: pool token-pair identity admission source=Input left={}#{} right={}#{} field=type_hash size=32",
-            left.binding, left_index, right.binding, right_index
-        ));
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            "pool_token_pair_left_type_hash",
-            CKB_SOURCE_INPUT,
-            left_index,
-            CKB_CELL_FIELD_TYPE_HASH,
-            left_size_offset,
-            left_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::ConsumeInvalidOperand);
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            "pool_token_pair_right_type_hash",
-            CKB_SOURCE_INPUT,
-            right_index,
-            CKB_CELL_FIELD_TYPE_HASH,
-            right_size_offset,
-            right_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::ConsumeInvalidOperand);
-        self.emit_loaded_schema_exact_size_check(left_size_offset, 32, "pool token_a input type hash");
-        self.emit_loaded_schema_exact_size_check(right_size_offset, 32, "pool token_b input type hash");
-        self.emit("# cellscript abi: reject seed_pool when token_a and token_b Input TypeHash values are equal");
-        self.emit_sp_addi("t4", left_buffer_offset);
-        self.emit_sp_addi("t5", right_buffer_offset);
-        let distinct_label = self.fresh_label("pool_token_pair_type_hash_distinct");
-        for byte_index in 0..32 {
-            self.emit(format!("lbu t0, {}(t4)", byte_index));
-            self.emit(format!("lbu t1, {}(t5)", byte_index));
-            self.emit("sub t2, t0, t1");
-            self.emit(format!("bnez t2, {}", distinct_label));
-        }
-        self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
-        self.emit_label(&distinct_label);
     }
 
     fn emit_destroy_group_output_absence_scan(&mut self, pattern: &CellPattern, input_index: usize) {
@@ -7756,23 +7756,31 @@ impl CodeGenerator {
         self.emit(format!("# call {}", func));
 
         let abi = self.callable_abis.get(func).cloned();
+        let outgoing_stack_arg_bytes = call_abi_arg_count(abi.as_ref(), args).saturating_sub(8) * 8;
         let mut abi_index = 0usize;
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi {
                 if let Some(param) = abi.params.get(arg_index) {
                     let needs_type_hash = abi.type_hash_param_indices.contains(&arg_index);
-                    if !self.emit_call_param_arg(func, param, needs_type_hash, &mut abi_index, arg) {
+                    if !self.emit_call_param_arg(func, param, needs_type_hash, &mut abi_index, arg, outgoing_stack_arg_bytes) {
                         return Ok(());
                     }
                     continue;
                 }
             }
-            if !self.emit_call_scalar_arg(func, &format!("arg{}", arg_index), &mut abi_index, arg) {
+            if !self.emit_call_scalar_arg(func, &format!("arg{}", arg_index), &mut abi_index, arg, outgoing_stack_arg_bytes) {
                 return Ok(());
             }
         }
 
+        if outgoing_stack_arg_bytes > 0 {
+            self.emit(format!("# cellscript abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
+            self.emit_large_addi("sp", "sp", -(outgoing_stack_arg_bytes as i64));
+        }
         self.emit(format!("call {}", func));
+        if outgoing_stack_arg_bytes > 0 {
+            self.emit_large_addi("sp", "sp", outgoing_stack_arg_bytes as i64);
+        }
 
         if let Some(d) = dest {
             if let IrType::Tuple(items) = &d.ty {
@@ -7798,6 +7806,7 @@ impl CodeGenerator {
         needs_type_hash: bool,
         abi_index: &mut usize,
         arg: &IrOperand,
+        outgoing_stack_arg_bytes: usize,
     ) -> bool {
         if named_type_name(&param.ty).is_some() {
             self.emit(format!(
@@ -7807,10 +7816,10 @@ impl CodeGenerator {
                 abi_arg_label(*abi_index),
                 abi_arg_label(*abi_index + 1)
             ));
-            if !self.emit_call_pointer_arg(func, &param.name, abi_index, arg, None) {
+            if !self.emit_call_pointer_arg(func, &param.name, abi_index, arg, None, outgoing_stack_arg_bytes) {
                 return false;
             }
-            if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::Schema) {
+            if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::Schema, outgoing_stack_arg_bytes) {
                 return false;
             }
             if needs_type_hash {
@@ -7821,10 +7830,10 @@ impl CodeGenerator {
                     abi_arg_label(*abi_index),
                     abi_arg_label(*abi_index + 1)
                 ));
-                if !self.emit_call_type_hash_pointer_arg(func, &param.name, abi_index, arg) {
+                if !self.emit_call_type_hash_pointer_arg(func, &param.name, abi_index, arg, outgoing_stack_arg_bytes) {
                     return false;
                 }
-                if !self.emit_call_type_hash_length_arg(func, &param.name, abi_index, arg) {
+                if !self.emit_call_type_hash_length_arg(func, &param.name, abi_index, arg, outgoing_stack_arg_bytes) {
                     return false;
                 }
             }
@@ -7841,24 +7850,30 @@ impl CodeGenerator {
                 abi_arg_label(*abi_index + 1),
                 width
             ));
-            if !self.emit_call_pointer_arg(func, &param.name, abi_index, arg, Some(width)) {
+            if !self.emit_call_pointer_arg(func, &param.name, abi_index, arg, Some(width), outgoing_stack_arg_bytes) {
                 return false;
             }
-            if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::FixedBytes) {
+            if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::FixedBytes, outgoing_stack_arg_bytes) {
                 return false;
             }
             return true;
         }
 
-        self.emit_call_scalar_arg(func, &param.name, abi_index, arg)
+        self.emit_call_scalar_arg(func, &param.name, abi_index, arg, outgoing_stack_arg_bytes)
     }
 
-    fn emit_call_scalar_arg(&mut self, func: &str, label: &str, abi_index: &mut usize, arg: &IrOperand) -> bool {
-        let Some(register) = self.call_abi_register(func, label, *abi_index) else {
-            return false;
-        };
+    fn emit_call_scalar_arg(
+        &mut self,
+        func: &str,
+        label: &str,
+        abi_index: &mut usize,
+        arg: &IrOperand,
+        outgoing_stack_arg_bytes: usize,
+    ) -> bool {
+        let register = self.call_abi_register(*abi_index);
         self.emit(format!("# cellscript abi: call {} scalar {} -> {}", func, label, register));
         self.emit_operand_to_register(&register, arg);
+        self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
     }
@@ -7870,10 +7885,9 @@ impl CodeGenerator {
         abi_index: &mut usize,
         arg: &IrOperand,
         const_width: Option<usize>,
+        outgoing_stack_arg_bytes: usize,
     ) -> bool {
-        let Some(register) = self.call_abi_register(func, label, *abi_index) else {
-            return false;
-        };
+        let register = self.call_abi_register(*abi_index);
         if const_width.is_some() && matches!(arg, IrOperand::Const(_)) {
             self.emit(format!(
                 "# cellscript abi: call {} pointer param {} uses a constant unsupported by the call ABI; pass null pointer",
@@ -7883,14 +7897,21 @@ impl CodeGenerator {
         } else {
             self.emit_operand_to_register(&register, arg);
         }
+        self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
     }
 
-    fn emit_call_length_arg(&mut self, func: &str, label: &str, abi_index: &mut usize, arg: &IrOperand, kind: CallLengthKind) -> bool {
-        let Some(register) = self.call_abi_register(func, label, *abi_index) else {
-            return false;
-        };
+    fn emit_call_length_arg(
+        &mut self,
+        func: &str,
+        label: &str,
+        abi_index: &mut usize,
+        arg: &IrOperand,
+        kind: CallLengthKind,
+        outgoing_stack_arg_bytes: usize,
+    ) -> bool {
+        let register = self.call_abi_register(*abi_index);
         let size_offset = match (arg, kind) {
             (IrOperand::Var(var), CallLengthKind::Schema) => self.schema_pointer_size_offsets.get(&var.id).copied(),
             (IrOperand::Var(var), CallLengthKind::FixedBytes) => self.fixed_byte_param_size_offsets.get(&var.id).copied(),
@@ -7919,14 +7940,20 @@ impl CodeGenerator {
             ));
             self.emit(format!("li {}, 0", register));
         }
+        self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
     }
 
-    fn emit_call_type_hash_pointer_arg(&mut self, func: &str, label: &str, abi_index: &mut usize, arg: &IrOperand) -> bool {
-        let Some(register) = self.call_abi_register(func, label, *abi_index) else {
-            return false;
-        };
+    fn emit_call_type_hash_pointer_arg(
+        &mut self,
+        func: &str,
+        label: &str,
+        abi_index: &mut usize,
+        arg: &IrOperand,
+        outgoing_stack_arg_bytes: usize,
+    ) -> bool {
+        let register = self.call_abi_register(*abi_index);
         if let IrOperand::Var(var) = arg {
             if let Some(pointer_offset) = self.param_type_hash_pointer_offsets.get(&var.id).copied() {
                 self.emit_stack_load(&register, pointer_offset);
@@ -7944,14 +7971,20 @@ impl CodeGenerator {
             ));
             self.emit(format!("li {}, 0", register));
         }
+        self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
     }
 
-    fn emit_call_type_hash_length_arg(&mut self, func: &str, label: &str, abi_index: &mut usize, arg: &IrOperand) -> bool {
-        let Some(register) = self.call_abi_register(func, label, *abi_index) else {
-            return false;
-        };
+    fn emit_call_type_hash_length_arg(
+        &mut self,
+        func: &str,
+        label: &str,
+        abi_index: &mut usize,
+        arg: &IrOperand,
+        outgoing_stack_arg_bytes: usize,
+    ) -> bool {
+        let register = self.call_abi_register(*abi_index);
         if let IrOperand::Var(var) = arg {
             if let Some(size_offset) = self.param_type_hash_size_offsets.get(&var.id).copied() {
                 self.emit_stack_load(&register, size_offset);
@@ -7969,20 +8002,44 @@ impl CodeGenerator {
             ));
             self.emit(format!("li {}, 0", register));
         }
+        self.emit_outgoing_call_stack_arg_store(&register, *abi_index, outgoing_stack_arg_bytes);
         *abi_index += 1;
         true
     }
 
-    fn call_abi_register(&mut self, func: &str, label: &str, abi_index: usize) -> Option<String> {
+    fn emit_outgoing_call_stack_arg_store(&mut self, register: &str, abi_index: usize, outgoing_stack_arg_bytes: usize) {
         if abi_index < 8 {
-            return Some(format!("a{}", abi_index));
+            return;
         }
+        let stack_slot_offset = (abi_index - 8) * 8;
+        let offset = i64::try_from(stack_slot_offset).expect("call stack slot should fit in i64")
+            - i64::try_from(outgoing_stack_arg_bytes).expect("call stack argument area should fit in i64");
         self.emit(format!(
-            "# cellscript abi: call {} param {} requires ABI arg{} beyond register call lowering",
-            func, label, abi_index
+            "# cellscript abi: stage outgoing stack arg{} at pre-call sp{}{}",
+            abi_index,
+            if offset < 0 { "" } else { "+" },
+            offset
         ));
-        self.emit_fail(CellScriptRuntimeError::EntryWitnessAbiInvalid);
-        None
+        self.emit_sp_store_signed(register, offset);
+    }
+
+    fn emit_sp_store_signed(&mut self, register: &str, offset: i64) {
+        if small_signed_immediate(offset) {
+            self.emit(format!("sd {}, {}(sp)", register, offset));
+        } else {
+            let scratch = scratch_register_avoiding(&[register]);
+            self.emit(format!("li {}, {}", scratch, offset));
+            self.emit(format!("add {}, sp, {}", scratch, scratch));
+            self.emit(format!("sd {}, 0({})", register, scratch));
+        }
+    }
+
+    fn call_abi_register(&self, abi_index: usize) -> String {
+        if abi_index < 8 {
+            format!("a{}", abi_index)
+        } else {
+            "t0".to_string()
+        }
     }
 
     fn emit_read_ref(&mut self, dest: &IrVar, ty: &str) -> Result<()> {
@@ -8017,6 +8074,8 @@ impl CodeGenerator {
 
         // Also store the size so that subsequent schema operations can use it
         self.schema_pointer_size_offsets.insert(dest.id, size_offset);
+        self.cell_buffer_size_offsets.insert(dest.id, size_offset);
+        self.cell_buffer_offsets.insert(dest.id, buffer_offset);
 
         Ok(())
     }
@@ -8222,7 +8281,7 @@ impl CodeGenerator {
         self.emit_runtime_memcmp_fixed();
         self.emit_runtime_memzero_fixed();
         self.emit_runtime_size_guards();
-        // Only CKB timepoint is supported via __env_current_timepoint.
+        // CKB exposes epoch-number based timepoints here, not Unix timestamps.
         self.emit_runtime_header_field_u64(
             "__env_current_timepoint",
             "ckb_epoch_number",
@@ -10612,8 +10671,10 @@ mod tests {
                 let emits_stack_addi =
                     (line.contains("self.emit(\"addi ") || line.contains("self.emit(format!(\"addi ")) && line.contains(", sp,");
                 let allowed_stack_memory = line.contains("self.emit(format!(\"{} {}, {}(sp)\", opcode, register, offset))");
+                let allowed_outgoing_stack_memory = line.contains("self.emit(format!(\"sd {}, {}(sp)\", register, offset))");
                 let allowed_stack_addi = line.contains("self.emit(format!(\"addi {}, sp, {}\", rd, offset))");
-                ((emits_stack_memory && !allowed_stack_memory) || (emits_stack_addi && !allowed_stack_addi))
+                ((emits_stack_memory && !allowed_stack_memory && !allowed_outgoing_stack_memory)
+                    || (emits_stack_addi && !allowed_stack_addi))
                     .then(|| format!("{}: {}", index + 1, line.trim()))
             })
             .collect::<Vec<_>>();
@@ -10680,6 +10741,22 @@ mod tests {
                 "    sb t0, 0(t5)",
             ]
         );
+    }
+
+    #[test]
+    fn read_ref_runtime_fallback_records_cell_buffer_state() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.frame_size = align_frame(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
+        let dest = IrVar { id: 42, name: "cfg".to_string(), ty: IrType::Named("Config".to_string()) };
+        generator.read_ref_indices.insert(dest.id, 0);
+
+        generator.emit_read_ref(&dest, "Config").expect("read_ref fallback should lower");
+
+        let size_offset = generator.runtime_scratch_size_offset();
+        let buffer_offset = generator.runtime_scratch_buffer_offset();
+        assert_eq!(generator.schema_pointer_size_offsets.get(&dest.id), Some(&size_offset));
+        assert_eq!(generator.cell_buffer_size_offsets.get(&dest.id), Some(&size_offset));
+        assert_eq!(generator.cell_buffer_offsets.get(&dest.id), Some(&buffer_offset));
     }
 
     #[test]

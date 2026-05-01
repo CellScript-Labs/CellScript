@@ -6875,7 +6875,7 @@ fn pool_checked_invariant_guard_names(name: &str, operation: &str, source_invari
     }
 
     let named_guards = match (operation, name) {
-        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound"][..],
+        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound", "token-pair-identity-distinct"][..],
         ("mutation-invariants", "swap_a_for_b") => &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
         ("mutation-invariants", "add_liquidity") => &["deposit-token-a-match", "deposit-token-b-match"][..],
         ("mutation-invariants", "remove_liquidity") => &["lp-receipt-pool-id-match"][..],
@@ -7384,7 +7384,78 @@ fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrB
     if name != "seed_pool" || pool_pattern.ty != "Pool" {
         return false;
     }
-    consumed_input_pattern(body, "token_a").is_some() && consumed_input_pattern(body, "token_b").is_some()
+    consumed_input_pattern(body, "token_a").is_some()
+        && consumed_input_pattern(body, "token_b").is_some()
+        && body_has_asserted_type_hash_inequality(body, "token_a", "token_b")
+}
+
+fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str, right_binding: &str) -> bool {
+    let assert_fail_blocks = body
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(7))))))
+        .map(|block| block.id)
+        .collect::<HashSet<_>>();
+    let mut type_hash_sources = HashMap::<usize, String>::new();
+    let mut named_type_hash_sources = HashMap::<String, String>::new();
+    let mut checked_inequality_vars = HashSet::<usize>::new();
+
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::TypeHash { dest, operand: ir::IrOperand::Var(var) } => {
+                    if var.name == left_binding || var.name == right_binding {
+                        type_hash_sources.insert(dest.id, var.name.clone());
+                    }
+                }
+                ir::IrInstruction::Move { dest, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        named_type_hash_sources.insert(name.clone(), source);
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } => {
+                    if let Some(source) = named_type_hash_sources.get(name).cloned() {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Ne, left, right } => {
+                    let Some(left_source) = type_hash_source(left, &type_hash_sources) else {
+                        continue;
+                    };
+                    let Some(right_source) = type_hash_source(right, &type_hash_sources) else {
+                        continue;
+                    };
+                    if type_hash_sources_are_pair(&left_source, &right_source, left_binding, right_binding) {
+                        checked_inequality_vars.insert(dest.id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    body.blocks.iter().any(|block| {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            return false;
+        };
+        checked_inequality_vars.contains(&cond.id) && assert_fail_blocks.contains(else_block)
+    })
+}
+
+fn type_hash_source(operand: &ir::IrOperand, type_hash_sources: &HashMap<usize, String>) -> Option<String> {
+    let ir::IrOperand::Var(var) = operand else {
+        return None;
+    };
+    type_hash_sources.get(&var.id).cloned()
+}
+
+fn type_hash_sources_are_pair(left: &str, right: &str, left_binding: &str, right_binding: &str) -> bool {
+    (left == left_binding && right == right_binding) || (left == right_binding && right == left_binding)
 }
 
 fn pool_seed_lp_supply_invariant_is_checked(
@@ -8681,7 +8752,7 @@ fn pool_invariant_families(
 
 fn pool_checked_protocol_component_source(component: &str) -> &'static str {
     match component {
-        "token-pair-identity-admission" => "input-type-id-abi+load-cell-by-field",
+        "token-pair-identity-admission" => "assert-invariant-cfg+input-type-id-abi",
         "token-pair-symbol-admission" => "assert-invariant-cfg+create-output-symbol-fields",
         "lp-supply-invariant" => "create-output-field-coupling",
         "lp-supply-consistency" => "mutate-preserved-field-equality",
@@ -22051,11 +22122,12 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: scalar param required stored to caller stack +0"),
-            "entry wrapper did not store the stack scalar argument before calling the action:\n{}",
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
+                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, 0(sp)"), "entry wrapper did not emit the stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];

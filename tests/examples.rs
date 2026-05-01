@@ -46,7 +46,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 4,
             max_text_bytes: 24 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_500,
+            max_cond_branch_abs_distance: 2_800,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -1610,28 +1610,29 @@ fn amm_pool_mutable_shared_params_are_scheduler_visible() {
     assert_eq!(seed_pool_primitive.binding.as_deref(), Some("create_Pool"));
     assert_eq!(seed_pool_primitive.output_source.as_deref(), Some("Output"));
     assert_eq!(seed_pool_primitive.output_index, Some(0));
-    assert_eq!(seed_pool_primitive.source_invariant_count, 3);
+    assert_eq!(seed_pool_primitive.source_invariant_count, 4);
     assert_pool_component(seed_pool_primitive, "ordinary-shared-create-summary", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=3", "seed_pool");
+    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=4", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-distinct=checked-runtime", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:positive-reserves=checked-runtime", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:fee-bps-bound=checked-runtime", "seed_pool");
+    assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-identity-distinct=checked-runtime", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "token-pair-distinct", "checked-runtime", "assert-invariant-cfg", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "positive-reserves", "checked-runtime", "assert-invariant-cfg", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "fee-bps-bound", "checked-runtime", "assert-invariant-cfg", "seed_pool");
+    assert_pool_invariant_family(
+        seed_pool_primitive,
+        "token-pair-identity-distinct",
+        "checked-runtime",
+        "assert-invariant-cfg",
+        "seed_pool",
+    );
     assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-symbol-admission=checked-runtime", "seed_pool");
     assert!(
-        asm.contains(
-            "# cellscript abi: pool token-pair identity admission source=Input left=token_a#0 right=token_b#1 field=type_hash size=32"
-        ),
-        "seed_pool should emit executable token-pair TypeHash identity admission:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_left_type_hash source=Input index=0 field=5")
-            && asm
-                .contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_right_type_hash source=Input index=1 field=5"),
-        "seed_pool should load both consumed token TypeHash fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=0 field=5")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=1 field=5")
+            && asm.contains("# cellscript abi: fixed-byte Ne comparison size=32"),
+        "seed_pool should express token-pair TypeHash identity through source type_hash() inequality, not a function-name codegen hook:\n{}",
         asm
     );
     assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-identity-admission=checked-runtime", "seed_pool");
@@ -1639,7 +1640,7 @@ fn amm_pool_mutable_shared_params_are_scheduler_visible() {
         seed_pool_primitive,
         "token-pair-identity-admission",
         "checked-runtime",
-        "input-type-id-abi+load-cell-by-field",
+        "assert-invariant-cfg+input-type-id-abi",
         "seed_pool",
     );
     assert!(
@@ -2144,13 +2145,19 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a2 length=a3"),
-        "launch_token -> seed_pool must preserve the second Token pointer+length ABI:\n{}",
+        asm.contains("# cellscript abi: call seed_pool schema param token_a type_hash pointer=a2 length=a3 size=32")
+            && asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a4 length=a5")
+            && asm.contains("# cellscript abi: call seed_pool schema param token_b type_hash pointer=a6 length=a7 size=32"),
+        "launch_token -> seed_pool must preserve Token pointer/length and TypeHash ABI slots:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=a5 length=a6 size=32"),
-        "launch_token -> seed_pool must preserve Address pointer+length ABI:\n{}",
+        asm.contains("# cellscript abi: call seed_pool scalar fee_rate_bps -> t0")
+            && asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-24")
+            && asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=stack+8 length=stack+16 size=32")
+            && asm.contains("# cellscript abi: reserve 24 bytes for outgoing stack call arguments")
+            && !asm.contains("requires ABI arg"),
+        "launch_token -> seed_pool must stage ABI args beyond a7 on the outgoing call stack:\n{}",
         asm
     );
     assert!(
