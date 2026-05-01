@@ -10472,6 +10472,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn bundled_example_codegen_mnemonics_are_declared() {
+        let examples = ["amm_pool.cell", "launch.cell", "multisig.cell", "nft.cell", "timelock.cell", "token.cell", "vesting.cell"];
+        let supported = SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS.iter().map(|(mnemonic, _)| *mnemonic).collect::<BTreeSet<_>>();
+        let mut undeclared = Vec::new();
+
+        for example in examples {
+            let path = camino::Utf8PathBuf::from(format!("{}/examples/{}", env!("CARGO_MANIFEST_DIR"), example));
+            let result = crate::compile_file(
+                path,
+                crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+            )
+            .unwrap_or_else(|err| panic!("{example} should compile to assembly: {}", err.message));
+            let assembly = std::str::from_utf8(&result.artifact_bytes)
+                .unwrap_or_else(|err| panic!("{example} emitted invalid utf-8 assembly: {err}"));
+
+            for (line_number, mnemonic) in emitted_mnemonics(assembly).into_iter() {
+                if !supported.contains(mnemonic.as_str()) {
+                    undeclared.push(format!("{example}:{line_number}: {mnemonic}"));
+                }
+            }
+        }
+
+        assert!(
+            undeclared.is_empty(),
+            "bundled examples used mnemonics outside the declared internal assembler surface:\n{}",
+            undeclared.join("\n")
+        );
+    }
+
     fn supported_instruction_surface_lines() -> Vec<String> {
         let mut lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "li a1, 4".to_string()];
         for (mnemonic, instruction) in SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS {
