@@ -15903,6 +15903,49 @@ action make() -> Ticket {
 }
 "#;
 
+    const LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+action activate(ticket: Ticket) -> Ticket {
+    assert_invariant(ticket.state < Ticket::Active, "already active")
+    consume ticket
+    return create Ticket {
+        state: Ticket::Active,
+        id: ticket.id,
+    }
+}
+"#;
+
+    const LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+#[lifecycle(Draft -> Live)]
+receipt OtherTicket has store {
+    state: u8,
+    id: u64,
+}
+
+action activate(ticket: Ticket) -> Ticket {
+    consume ticket
+    return create Ticket {
+        state: OtherTicket::Live,
+        id: ticket.id,
+    }
+}
+"#;
+
     #[test]
     fn compile_produces_non_empty_riscv_assembly() {
         let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
@@ -20775,6 +20818,31 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
             asm.contains("# cellscript abi: verify output field Ticket.state offset=0 size=1"),
             "state-name initializer should still verify the explicit state field:\n{}",
             asm
+        );
+    }
+
+    #[test]
+    fn compile_accepts_qualified_lifecycle_state_names() {
+        let result = compile(LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
+
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "lifecycle-transition"
+                && obligation.feature == "Ticket.state"
+                && obligation.status == "checked-runtime"
+        }));
+        assert!(asm.contains("state_count=2"), "qualified lifecycle state names should preserve verifier metadata:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_wrong_qualified_lifecycle_state_field_initializer() {
+        let err = compile(LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(
+            err.message.contains("lifecycle state field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
+            "unexpected error: {}",
+            err.message
         );
     }
 

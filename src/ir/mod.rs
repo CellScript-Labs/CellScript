@@ -1558,6 +1558,8 @@ impl IrGenerator {
                     LoweredExpr { operand: zero, current: Some(current) }
                 } else if let Some(enum_variant) = self.lower_enum_variant(name) {
                     LoweredExpr { operand: enum_variant, current: Some(current) }
+                } else if let Some(lifecycle_state) = self.lower_lifecycle_state_name(name) {
+                    LoweredExpr { operand: lifecycle_state, current: Some(current) }
                 } else {
                     self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), Span::default());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -2252,7 +2254,7 @@ impl IrGenerator {
         let Expr::Identifier(state_name) = expr else {
             return None;
         };
-        let index = self.lifecycle_states.get(type_name)?.iter().position(|state| state == state_name)?;
+        let index = self.lifecycle_state_index(type_name, state_name)?;
         Some(IrOperand::Const(IrConst::U64(index as u64)))
     }
 
@@ -3450,6 +3452,24 @@ impl IrGenerator {
         let (enum_name, variant_name) = name.rsplit_once("::")?;
         let ordinal = self.enum_variants.get(enum_name)?.get(variant_name).copied()?;
         Some(IrOperand::Const(IrConst::U64(ordinal)))
+    }
+
+    fn lower_lifecycle_state_name(&self, name: &str) -> Option<IrOperand> {
+        let (type_name, _) = name.rsplit_once("::")?;
+        let index = self.lifecycle_state_index(type_name, name)?;
+        Some(IrOperand::Const(IrConst::U64(index as u64)))
+    }
+
+    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.lifecycle_states.get(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
     }
 
     fn lookup_field_ir_type(&self, ty: &IrType, field: &str) -> Option<IrType> {

@@ -1262,6 +1262,8 @@ impl<'a> TypeChecker<'a> {
                     Ok(constant.ty)
                 } else if let Some(ty) = self.enum_variant_expr_type(name, expr_span(expr))? {
                     Ok(ty)
+                } else if let Some(ty) = self.lifecycle_state_expr_type(name, expr_span(expr))? {
+                    Ok(ty)
                 } else if let Some((prefix, _)) = name.split_once("::") {
                     Ok(Type::Named(prefix.to_string()))
                 } else {
@@ -1639,7 +1641,7 @@ impl<'a> TypeChecker<'a> {
                 return Err(CompileError::new(format!("unknown field '{}' in {} for '{}'", field_name, context, type_name), span));
             };
             let actual_ty =
-                if let Some(lifecycle_ty) = self.lifecycle_state_initializer_type(type_name, field_name, value, expected_ty) {
+                if let Some(lifecycle_ty) = self.lifecycle_state_initializer_type(type_name, field_name, value, expected_ty)? {
                     lifecycle_ty
                 } else {
                     self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
@@ -1673,14 +1675,66 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
-    fn lifecycle_state_initializer_type(&self, type_name: &str, field_name: &str, value: &Expr, expected_ty: &Type) -> Option<Type> {
+    fn lifecycle_state_initializer_type(
+        &self,
+        type_name: &str,
+        field_name: &str,
+        value: &Expr,
+        expected_ty: &Type,
+    ) -> Result<Option<Type>> {
         if field_name != LIFECYCLE_STATE_FIELD_NAME || !matches!(expected_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
-            return None;
+            return Ok(None);
         }
         let Expr::Identifier(state_name) = value else {
-            return None;
+            return Ok(None);
         };
-        self.resolve_lifecycle_states(type_name)?.iter().any(|state| state == state_name).then(|| expected_ty.clone())
+        let Some((qualified_type, qualified_state)) = state_name.rsplit_once("::") else {
+            return Ok(self.lifecycle_state_index(type_name, state_name).map(|_| expected_ty.clone()));
+        };
+        if qualified_type == type_name {
+            if self.lifecycle_state_index(type_name, state_name).is_some() {
+                return Ok(Some(expected_ty.clone()));
+            }
+            return Err(CompileError::new(
+                format!("unknown lifecycle state '{}::{}'", qualified_type, qualified_state),
+                expr_span(value),
+            ));
+        }
+        if self.resolve_lifecycle_states(qualified_type).is_some() {
+            return Err(CompileError::new(
+                format!(
+                    "lifecycle state field '{}.{}' cannot be initialized with '{}::{}'",
+                    type_name, field_name, qualified_type, qualified_state
+                ),
+                expr_span(value),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn lifecycle_state_expr_type(&self, name: &str, span: Span) -> Result<Option<Type>> {
+        let Some((type_name, state_name)) = name.rsplit_once("::") else {
+            return Ok(None);
+        };
+        let Some(states) = self.resolve_lifecycle_states(type_name) else {
+            return Ok(None);
+        };
+        if states.iter().any(|state| state == state_name) {
+            return Ok(Some(Type::U64));
+        }
+        Err(CompileError::new(format!("unknown lifecycle state '{}::{}'", type_name, state_name), span))
+    }
+
+    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.resolve_lifecycle_states(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
     }
 
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {

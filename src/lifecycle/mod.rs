@@ -639,7 +639,7 @@ fn validate_lifecycle_create(
     };
 
     let updates_existing = context.consumed_lifecycle_types.contains(&create.ty);
-    let Some(state_index) = static_lifecycle_state_value(state_expr, context, &spec.states) else {
+    let Some(state_index) = static_lifecycle_state_value(state_expr, context, &create.ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
                 format!("initial create of lifecycle receipt '{}' must use statically known initial state index 0", create.ty),
@@ -687,9 +687,19 @@ fn static_integer_value(expr: &Expr, context: &ActionLifecycleContext) -> Option
     }
 }
 
-fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, states: &[String]) -> Option<u64> {
+fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
-        Expr::Identifier(name) => states.iter().position(|state| state == name).map(|index| index as u64),
+        Expr::Identifier(name) => {
+            let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+                if qualified_type != type_name {
+                    return None;
+                }
+                state_name
+            } else {
+                name.as_str()
+            };
+            states.iter().position(|state| state == state_name).map(|index| index as u64)
+        }
         _ => None,
     })
 }

@@ -1304,7 +1304,7 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
     let now = env::current_timepoint()
 
     assert_invariant(now >= grant.cliff_timepoint, "cliff not reached")
-    assert_invariant(grant.state < 2, "already fully claimed")
+    assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
 
     let vested_total = grant.total_amount
     let claimable = vested_total - grant.claimed_amount
@@ -1312,7 +1312,7 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
 
     consume grant
 
-    let new_state: u8 = if vested_total == grant.total_amount { 2 } else { 1 }
+    let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
 
     let tokens = create Token {
         amount: claimable,
