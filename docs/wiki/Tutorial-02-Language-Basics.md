@@ -138,8 +138,8 @@ resource Token has store, transfer, destroy {
 ```
 
 Resources are linear values. When an action receives one, the action must say
-where it goes: consume it, create a replacement, transfer it, return it, claim
-it, settle it, or destroy it.
+where it goes: consume it, validate a replacement output, transfer it, return
+it, claim it, settle it, or destroy it.
 
 Persistent declarations can also declare the default CKB script hash type used
 for their type identity metadata:
@@ -191,8 +191,27 @@ settlement proofs, and claim flows.
 
 ## Actions
 
-Use `action` for type-script style transition logic. An action says what inputs
-are required, what checks must pass, and what output Cell state is produced.
+Use `action` for type-script style transition logic. The semantic core is a
+verifier over proposed transaction Cells: an input parameter is evidence from an
+input Cell, an output parameter is evidence from an output Cell, and `require`
+states the guard conditions that must pass.
+
+For state-machine transitions, prefer the explicit input/output form. Given an
+`Offer.state` graph such as `Live -> Filled`, the action names both Cell views:
+
+```cellscript
+action fill_offer(input: Offer, output: Offer)
+    moves input.state Live -> output.state Filled
+{
+    require input.price == output.price
+    require input.seller == output.seller
+}
+```
+
+The `moves` clause only proves the state edge. Authorization, preservation, and
+conservation checks still belong in explicit `require` statements.
+
+Legacy ownership-style actions remain valid as front-end sugar:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> Token {
@@ -206,8 +225,9 @@ action transfer_token(token: Token, to: Address) -> Token {
 }
 ```
 
-Read this as a Cell transition: spend one token input, then create a replacement
-token output under a new lock.
+Read this as a Cell transition: spend one token input, then validate a
+replacement token output under a new lock. The verifier checks a proposed
+transaction; it does not allocate Cells inside CKB-VM.
 
 ## Locks
 
@@ -216,7 +236,7 @@ sources obvious:
 
 - `protected` marks the typed input Cell guarded by this lock invocation;
 - `witness` marks decoded transaction witness data;
-- `require` marks a condition that fails the current script validation.
+- `require` marks a verifier guard that fails the current script validation.
 
 ```cellscript
 shared Wallet has store {
@@ -246,12 +266,12 @@ of hiding it behind account-style authorization language.
 |---|---|---|
 | `protected T` | Typed view of the Cell state guarded by this lock invocation. | One selected input Cell in the current script group, not an output Cell and not a transaction-wide scan. |
 | `witness T` | Typed value decoded from transaction witness data. | User-supplied witness bytes decoded by the entry ABI. It is not a signer proof. |
-| `require expr` | Lock predicate failure point. | If `expr` is false, the current script validation fails. |
+| `require expr` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. |
 | `lock_args T` | Reserved spelling for typed script args. | Future typed decoding of the executing lock script's args; currently fail-closed until binding is implemented. |
 
-Use `require` inside locks. Use `assert_invariant` inside actions for state
-transition checks. This keeps authorization predicates separate from business
-state invariants.
+Use `require` for verifier guards inside actions and locks. Use
+`assert_invariant` for ordinary internal sanity checks where the condition is not
+part of the protocol boundary you want metadata and reviews to read as a guard.
 
 This lock checks equality between protected Cell state and witness data:
 

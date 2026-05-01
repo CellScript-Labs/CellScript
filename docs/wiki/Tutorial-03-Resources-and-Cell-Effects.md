@@ -1,7 +1,7 @@
 CellScript is built around explicit Cell movement. An effect is not just a
-helper call. It is a statement about the transaction you expect to build: which
-inputs are consumed, which outputs are created, which dependencies are read, and
-which state transition is being proved.
+helper call. It is a statement about the transaction you expect to validate:
+which inputs are consumed, which outputs are proposed, which dependencies are
+read, and which state transition is being proved.
 
 If you come from account-style smart contracts, this is the chapter where the
 mental model changes. In CellScript, persistent state does not quietly update in
@@ -11,6 +11,8 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
+- how `action(input: T, output: T)` expresses the verifier core for
+  replacement-style transitions;
 - how `&mut` source syntax still maps to replacement-output style transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
@@ -19,7 +21,7 @@ place. A transaction spends Cells and creates new Cells.
 | Effect | Read it as |
 |---|---|
 | `consume value` | Spend an input-backed linear value. |
-| `create T { ... }` | Create a typed output Cell. |
+| `create T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read_ref T` | Read dependency-backed state without consuming it. |
 | `transfer value to` | Move a value to a new lock or owner. |
 | `destroy value` | Consume a value without replacement, if the type allows `destroy`. |
@@ -27,7 +29,9 @@ place. A transaction spends Cells and creates new Cells.
 | `settle receipt` | Finalize a receipt-backed process. |
 
 The effects are deliberately visible. They make the source read like a
-transaction plan instead of a hidden storage mutation.
+transaction plan instead of a hidden storage mutation. The core verifier form
+can also name proposed Cells directly as action parameters; `consume` and
+`create` remain convenient source syntax over that transaction evidence.
 
 ## Linear Values
 
@@ -105,7 +109,7 @@ the same verifier shape.
 
 ## Creating Output Cells
 
-`create` constructs typed output data and a corresponding Cell output. In the
+`create` describes typed output data and a corresponding Cell output. In the
 verifier model this is sugar for selecting and checking a proposed transaction
 output; the script still validates an existing transaction, it does not allocate
 Cells inside CKB-VM.
@@ -117,9 +121,10 @@ create Token {
 } with_lock(to)
 ```
 
-Persistent state is created only by explicit `create`. Local variables are just
-local variables. They do not become on-chain storage unless they are placed into
-a created Cell.
+Persistent state enters the transaction output set only through explicit output
+evidence: either a core `output: T` parameter or a `create T { ... }` sugar
+expression. Local variables are just local variables. They do not become
+on-chain storage unless they are tied to a proposed output Cell.
 
 The `with_lock(to)` part matters. It says which lock will guard the newly
 created Cell. If a later transaction wants to spend that Cell, the lock must
@@ -127,14 +132,14 @@ accept the spend.
 
 ## Consuming And Replacing State
 
-A common CellScript pattern is:
+A common CellScript sugar pattern is:
 
 1. read or consume an input Cell;
 2. check the transition;
-3. create a replacement output Cell.
+3. validate a replacement output Cell.
 
-For example, a transfer consumes one token and creates a replacement token under
-a different lock:
+For example, a transfer consumes one token and validates a replacement token
+under a different lock:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> Token {
@@ -148,7 +153,7 @@ action transfer_token(token: Token, to: Address) -> Token {
 ```
 
 This is closer to CKB than an account-style assignment. The old Cell is spent;
-the new Cell is created.
+the new Cell is a proposed output that the verifier checks.
 
 ## Mutating Existing State
 

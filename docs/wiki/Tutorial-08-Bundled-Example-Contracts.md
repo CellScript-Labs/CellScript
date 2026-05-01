@@ -91,7 +91,7 @@ resource MintAuthority has store {
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
 minted.
 
-`mint` mutates authority state and creates a new token:
+`mint` mutates authority state and validates a proposed new token output:
 
 ```cellscript
 action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
@@ -106,12 +106,12 @@ action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
 }
 ```
 
-Read `auth: &mut MintAuthority` as a replacement-output obligation. The source
-is pleasant to read, but CKB still needs an input state Cell and a replacement
-state Cell.
+Read `auth: &mut MintAuthority` as replacement-output sugar. The source is
+pleasant to read, but CKB still needs an input state Cell and a replacement
+state Cell in the proposed transaction.
 
-`transfer_token` consumes an input token and creates a replacement output under
-a new lock:
+`transfer_token` consumes an input token and validates a replacement output
+under a new lock:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> Token {
@@ -133,7 +133,8 @@ action burn(token: Token) {
 }
 ```
 
-These three actions show the basic resource lifecycle: create, replace, destroy.
+These three actions show the basic resource lifecycle: propose an output,
+replace state, destroy state.
 
 ## Locks In The Examples
 
