@@ -24,6 +24,7 @@ receipt VestingGrant has store {
 
 state VestingGrant.state {
     Granted -> Claimable;
+    Granted -> FullyClaimed;
     Claimable -> FullyClaimed;
 }
 

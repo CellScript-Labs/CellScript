@@ -371,17 +371,6 @@ impl LspServer {
         let mut items = Vec::new();
         for item in &module.items {
             match item {
-                Item::Receipt(receipt) if receipt.name == type_name => {
-                    if let Some(lifecycle) = &receipt.lifecycle {
-                        items.extend(lifecycle.states.iter().enumerate().map(|(index, state)| CompletionItem {
-                            label: state.clone(),
-                            kind: CompletionItemKind::EnumMember,
-                            detail: Some(format!("lifecycle state {}::{}", receipt.name, state)),
-                            documentation: Some(format!("State index {} for lifecycle receipt `{}`.", index, receipt.name)),
-                            insert_text: Some(state.clone()),
-                        }));
-                    }
-                }
                 Item::Enum(enum_def) if enum_def.name == type_name => {
                     items.extend(enum_def.variants.iter().filter(|variant| variant.fields.is_empty()).map(|variant| CompletionItem {
                         label: variant.name.clone(),
@@ -1802,18 +1791,13 @@ fn receipt_lifecycle_hover(receipt: &ReceiptDef, metadata: Option<&crate::Compil
         };
 
         return format!(
-            "\n\n**Lifecycle metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
+            "\n\n**State machine metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
             type_metadata.lifecycle_states.join(" -> "),
             transitions
         );
     }
 
-    let Some(lifecycle) = &receipt.lifecycle else {
-        return String::new();
-    };
-    let transitions = lifecycle.states.windows(2).map(|window| format!("{} -> {}", window[0], window[1])).collect::<Vec<_>>();
-    let transitions = if transitions.is_empty() { "none".to_string() } else { transitions.join(", ") };
-    format!("\n\n**Lifecycle**\n\nStates: `{}`\n\nTransitions: `{}`", lifecycle.states.join(" -> "), transitions)
+    String::new()
 }
 
 fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) -> String {
@@ -2169,25 +2153,32 @@ mod tests {
     }
 
     #[test]
-    fn test_lifecycle_namespace_completions() {
+    fn test_state_machine_u8_namespace_completions() {
         let mut server = LspServer::new();
         let uri = "file:///lifecycle_completion.cell".to_string();
         let source = r#"
 module lifecycle_completion
 
-#[lifecycle(Created -> Active -> Closed)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-#[lifecycle(Draft -> Live)]
 receipt OtherTicket has store {
     state: u8,
     id: u64,
 }
 
-action activate(ticket: Ticket) -> Ticket {
+state Ticket.state {
+    Created -> Active;
+    Active -> Closed;
+}
+
+state OtherTicket.state {
+    Draft -> Live;
+}
+
+action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
     assert_invariant(ticket.state < Ticket::Closed, "closed")
     consume ticket
     return create Ticket {
@@ -2208,11 +2199,11 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(labels.contains("Created"));
         assert!(labels.contains("Active"));
         assert!(labels.contains("Closed"));
-        assert!(!labels.contains("Live"), "Ticket:: completion must not leak OtherTicket lifecycle states");
+        assert!(!labels.contains("Live"), "Ticket:: completion must not leak OtherTicket state-machine states");
         assert!(completions.iter().any(|item| {
             item.label == "Active"
                 && item.kind == CompletionItemKind::EnumMember
-                && item.detail.as_deref() == Some("lifecycle state Ticket::Active")
+                && item.detail.as_deref() == Some("state machine state Ticket::Active")
         }));
     }
 
@@ -2341,20 +2332,23 @@ action update(amount: u64) -> u64 {
     }
 
     #[test]
-    fn test_receipt_hover_includes_lifecycle_metadata() {
+    fn test_receipt_hover_includes_state_machine_metadata() {
         let mut server = LspServer::new();
         let uri = "file:///lifecycle_hover.cell".to_string();
         let source = r#"
 module lifecycle_hover
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action activate(ticket: Ticket) -> Ticket {
-    let active = 1
+state Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
+    let active = Ticket::Active
     consume ticket
     return create Ticket {
         state: active,
@@ -2364,15 +2358,16 @@ action activate(ticket: Ticket) -> Ticket {
 "#;
         server.open_document(uri.clone(), source.to_string());
 
-        let hover = server.hover(&uri, Position { line: 4, character: 9 }).expect("hover");
+        let offset = source.find("Ticket has").expect("receipt name");
+        let hover = server.hover(&uri, offset_to_position(source, offset)).expect("hover");
         assert!(hover.contents.contains("receipt Ticket"));
-        assert!(hover.contents.contains("Lifecycle metadata"));
+        assert!(hover.contents.contains("State machine metadata"));
         assert!(hover.contents.contains("States: `Created -> Active`"));
         assert!(hover.contents.contains("Created[0] -> Active[1]"));
     }
 
     #[test]
-    fn test_lifecycle_errors_become_lsp_diagnostics() {
+    fn test_legacy_lifecycle_attribute_becomes_lsp_diagnostic() {
         let mut server = LspServer::new();
         let uri = "file:///bad_lifecycle.cell".to_string();
         let source = r#"
@@ -2389,7 +2384,7 @@ receipt Ticket has store {
         let diagnostics = server.get_diagnostics(&uri);
         let error = diagnostics.iter().find(|diagnostic| diagnostic.source == "cellscript").expect("lifecycle diagnostic");
         assert_eq!(error.severity, DiagnosticSeverity::Error);
-        assert!(error.message.contains("duplicate lifecycle state: Created"));
+        assert!(error.message.contains("legacy #[lifecycle(...)] has been removed"));
     }
 
     #[test]

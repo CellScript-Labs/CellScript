@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
-use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use std::collections::{HashMap, HashSet};
 
@@ -434,10 +433,6 @@ impl<'a> TypeChecker<'a> {
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
-                    if let Some(lifecycle) = &receipt.lifecycle {
-                        self.lifecycle_states.insert(receipt.name.clone(), lifecycle.states.clone());
-                        self.lifecycle_state_fields.insert(receipt.name.clone(), LIFECYCLE_STATE_FIELD_NAME.to_string());
-                    }
                     self.type_fields.insert(
                         receipt.name.clone(),
                         receipt.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
@@ -500,6 +495,7 @@ impl<'a> TypeChecker<'a> {
 
         self.register_imported_type_ids(&mut seen_type_ids)?;
         self.register_state_machines(module)?;
+        self.validate_state_machine_action_edges(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
@@ -542,7 +538,13 @@ impl<'a> TypeChecker<'a> {
             }
             if self.lifecycle_states.contains_key(&type_name) {
                 return Err(CompileError::new(
-                    format!("type '{}' already has lifecycle states; use either #[lifecycle] or state_machine, not both", type_name),
+                    format!("type '{}' already has state-machine policy; declare one state machine per Cell type", type_name),
+                    machine.target.span,
+                ));
+            }
+            if self.resolve_cell_type_kind(&type_name).is_none() {
+                return Err(CompileError::new(
+                    format!("state machine target type '{}' must be a resource, shared, or receipt Cell type", type_name),
                     machine.target.span,
                 ));
             }
@@ -609,6 +611,63 @@ impl<'a> TypeChecker<'a> {
             );
         }
 
+        Ok(())
+    }
+
+    fn validate_state_machine_action_edges(&self, module: &Module) -> Result<()> {
+        let actions = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Action(action) => Some((action.name.as_str(), action)),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+
+        for spec in self.state_machines.values() {
+            for transition in &spec.transitions {
+                let Some(action_name) = &transition.action else {
+                    continue;
+                };
+                let Some(action) = actions.get(action_name.as_str()).copied() else {
+                    continue;
+                };
+                let has_explicit_binding = action.state_moves.iter().any(|state_move| {
+                    state_move.path.as_ref().is_some_and(|path| {
+                        path.field == spec.field_name
+                            && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
+                    })
+                });
+                if !has_explicit_binding {
+                    let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
+                    if consumed.len() != 1 {
+                        return Err(CompileError::new(
+                            format!(
+                                "state transition action '{}' for '{}.{}' must consume exactly one '{}' input or declare an explicit moves binding",
+                                action.name, spec.type_name, spec.field_name, spec.type_name
+                            ),
+                            transition.span,
+                        ));
+                    }
+                }
+                self.validate_action_creates_single_state_output(action, &spec.type_name, transition.span)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_action_creates_single_state_output(&self, action: &ActionDef, type_name: &str, span: Span) -> Result<()> {
+        let create_count = action_created_type_counts(action).get(type_name).copied().unwrap_or(0);
+        if create_count != 1 {
+            return Err(CompileError::new(
+                format!(
+                    "state transition action '{}' for '{}' must create exactly one replacement output, found {}",
+                    action.name, type_name, create_count
+                ),
+                span,
+            ));
+        }
         Ok(())
     }
 
@@ -819,11 +878,35 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_action_state_moves(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
+        let consumed_bindings = action_consumed_bindings(action);
+        let created_type_counts = action_created_type_counts(action);
+
         for state_move in &action.state_moves {
             let (type_name, field_name, field_enum_type) = if let Some(path) = &state_move.path {
                 let ty = env
                     .lookup(&path.base)
                     .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
+                let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
+                    return Err(CompileError::new(
+                        format!("state move binding '{}' must name an action input parameter", path.base),
+                        path.span,
+                    ));
+                };
+                if param.source != ParamSource::Default || param.is_read_ref || !matches!(param.ty, Type::Named(_)) {
+                    return Err(CompileError::new(
+                        format!(
+                            "state move binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, or read_ref parameter",
+                            path.base
+                        ),
+                        path.span,
+                    ));
+                }
+                if !consumed_bindings.contains(&path.base) {
+                    return Err(CompileError::new(
+                        format!("state move binding '{}' must be consumed by action '{}'", path.base, action.name),
+                        path.span,
+                    ));
+                }
                 let type_name = Self::base_type_name(ty)
                     .ok_or_else(|| {
                         CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span)
@@ -840,6 +923,16 @@ impl<'a> TypeChecker<'a> {
                             path.base, path.field, type_name, spec.field_name
                         ),
                         path.span,
+                    ));
+                }
+                let create_count = created_type_counts.get(&type_name).copied().unwrap_or(0);
+                if create_count != 1 {
+                    return Err(CompileError::new(
+                        format!(
+                            "state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
+                            type_name, path.field, type_name, create_count
+                        ),
+                        state_move.span,
                     ));
                 }
                 (type_name, path.field.clone(), spec.field_enum_type.clone())
@@ -880,6 +973,26 @@ impl<'a> TypeChecker<'a> {
                     ));
                 }
                 let spec = matches.pop().expect("exactly one state machine");
+                let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
+                if consumed.len() != 1 {
+                    return Err(CompileError::new(
+                        format!(
+                            "shorthand state move for '{}.{}' must consume exactly one '{}' input; write moves input.state From -> To to disambiguate",
+                            spec.type_name, spec.field_name, spec.type_name
+                        ),
+                        state_move.span,
+                    ));
+                }
+                let create_count = created_type_counts.get(&spec.type_name).copied().unwrap_or(0);
+                if create_count != 1 {
+                    return Err(CompileError::new(
+                        format!(
+                            "shorthand state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
+                            spec.type_name, spec.field_name, spec.type_name, create_count
+                        ),
+                        state_move.span,
+                    ));
+                }
                 (spec.type_name.clone(), spec.field_name.clone(), spec.field_enum_type.clone())
             };
 
@@ -1999,14 +2112,14 @@ impl<'a> TypeChecker<'a> {
                 return Ok(Some(expected_ty.clone()));
             }
             return Err(CompileError::new(
-                format!("unknown lifecycle state '{}::{}'", qualified_type, qualified_state),
+                format!("unknown state-machine state '{}::{}'", qualified_type, qualified_state),
                 expr_span(value),
             ));
         }
         if self.resolve_lifecycle_states(qualified_type).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "lifecycle state field '{}.{}' cannot be initialized with '{}::{}'",
+                    "state-machine field '{}.{}' cannot be initialized with '{}::{}'",
                     type_name, field_name, qualified_type, qualified_state
                 ),
                 expr_span(value),
@@ -2028,7 +2141,7 @@ impl<'a> TypeChecker<'a> {
             }
             return Ok(Some(Type::U64));
         }
-        Err(CompileError::new(format!("unknown lifecycle state '{}::{}'", type_name, state_name), span))
+        Err(CompileError::new(format!("unknown state-machine state '{}::{}'", type_name, state_name), span))
     }
 
     fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
@@ -2677,11 +2790,7 @@ impl<'a> TypeChecker<'a> {
         if let Some(states) = self.lifecycle_states.get(base_name) {
             return Some(states.clone());
         }
-        let (resolver, module) = (self.resolver?, self.current_module.as_deref()?);
-        match resolver.resolve_type(module, base_name)? {
-            TypeDef::Receipt(receipt) => receipt.lifecycle.map(|lifecycle| lifecycle.states),
-            _ => None,
-        }
+        None
     }
 
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
@@ -3522,6 +3631,243 @@ fn assignment_root_name(expr: &Expr) -> Option<&str> {
         Expr::FieldAccess(field) => assignment_root_name(&field.expr),
         Expr::Index(index) => assignment_root_name(&index.expr),
         _ => None,
+    }
+}
+
+fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
+    action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
+        Type::Named(type_name) if param.source == ParamSource::Default && !param.is_read_ref => {
+            Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
+        }
+        _ => None,
+    })
+}
+
+fn action_consumed_bindings_for_type(action: &ActionDef, type_name: &str) -> Vec<String> {
+    let consumed = action_consumed_bindings(action);
+    action
+        .params
+        .iter()
+        .filter(|param| consumed.contains(&param.name))
+        .filter_map(|param| action_param_owned_named_type(action, &param.name).map(|ty| (param.name.clone(), ty)))
+        .filter(|(_, ty)| *ty == type_name)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    collect_consumed_bindings_from_stmts(&action.body, &mut bindings);
+    bindings
+}
+
+fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_consumed_bindings_from_stmts(else_branch, bindings);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_consumed_bindings_from_expr(&for_stmt.iterable, bindings);
+                collect_consumed_bindings_from_stmts(&for_stmt.body, bindings);
+            }
+            Stmt::While(while_stmt) => {
+                collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
+            }
+        }
+    }
+}
+
+fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
+    match expr {
+        Expr::Consume(consume) => {
+            if let Expr::Identifier(name) = consume.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&consume.expr, bindings);
+        }
+        Expr::Assign(assign) => {
+            collect_consumed_bindings_from_expr(&assign.target, bindings);
+            collect_consumed_bindings_from_expr(&assign.value, bindings);
+        }
+        Expr::Binary(binary) => {
+            collect_consumed_bindings_from_expr(&binary.left, bindings);
+            collect_consumed_bindings_from_expr(&binary.right, bindings);
+        }
+        Expr::Unary(unary) => collect_consumed_bindings_from_expr(&unary.expr, bindings),
+        Expr::Call(call) => {
+            collect_consumed_bindings_from_expr(&call.func, bindings);
+            for arg in &call.args {
+                collect_consumed_bindings_from_expr(arg, bindings);
+            }
+        }
+        Expr::FieldAccess(field) => collect_consumed_bindings_from_expr(&field.expr, bindings),
+        Expr::Index(index) => {
+            collect_consumed_bindings_from_expr(&index.expr, bindings);
+            collect_consumed_bindings_from_expr(&index.index, bindings);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::Transfer(transfer) => {
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
+        Expr::Destroy(destroy) => collect_consumed_bindings_from_expr(&destroy.expr, bindings),
+        Expr::Claim(claim) => collect_consumed_bindings_from_expr(&claim.receipt, bindings),
+        Expr::Settle(settle) => collect_consumed_bindings_from_expr(&settle.expr, bindings),
+        Expr::Assert(assert_expr) => {
+            collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
+        }
+        Expr::Require(require_expr) => collect_consumed_bindings_from_expr(&require_expr.condition, bindings),
+        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_consumed_bindings_from_expr(item, bindings);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_consumed_bindings_from_expr(&if_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.then_branch, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.else_branch, bindings);
+        }
+        Expr::Cast(cast) => collect_consumed_bindings_from_expr(&cast.expr, bindings),
+        Expr::Range(range) => {
+            collect_consumed_bindings_from_expr(&range.start, bindings);
+            collect_consumed_bindings_from_expr(&range.end, bindings);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
+            for arm in &match_expr.arms {
+                collect_consumed_bindings_from_expr(&arm.value, bindings);
+            }
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+    }
+}
+
+fn action_created_type_counts(action: &ActionDef) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    collect_created_type_counts_from_stmts(&action.body, &mut counts);
+    counts
+}
+
+fn collect_created_type_counts_from_stmts(stmts: &[Stmt], counts: &mut HashMap<String, usize>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => collect_created_type_counts_from_expr(&let_stmt.value, counts),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_created_type_counts_from_expr(expr, counts),
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                collect_created_type_counts_from_expr(&if_stmt.condition, counts);
+                collect_created_type_counts_from_stmts(&if_stmt.then_branch, counts);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_created_type_counts_from_stmts(else_branch, counts);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_created_type_counts_from_expr(&for_stmt.iterable, counts);
+                collect_created_type_counts_from_stmts(&for_stmt.body, counts);
+            }
+            Stmt::While(while_stmt) => {
+                collect_created_type_counts_from_expr(&while_stmt.condition, counts);
+                collect_created_type_counts_from_stmts(&while_stmt.body, counts);
+            }
+        }
+    }
+}
+
+fn collect_created_type_counts_from_expr(expr: &Expr, counts: &mut HashMap<String, usize>) {
+    match expr {
+        Expr::Create(create) => {
+            *counts.entry(create.ty.clone()).or_insert(0) += 1;
+            for (_, value) in &create.fields {
+                collect_created_type_counts_from_expr(value, counts);
+            }
+            if let Some(lock) = &create.lock {
+                collect_created_type_counts_from_expr(lock, counts);
+            }
+        }
+        Expr::Assign(assign) => {
+            collect_created_type_counts_from_expr(&assign.target, counts);
+            collect_created_type_counts_from_expr(&assign.value, counts);
+        }
+        Expr::Binary(binary) => {
+            collect_created_type_counts_from_expr(&binary.left, counts);
+            collect_created_type_counts_from_expr(&binary.right, counts);
+        }
+        Expr::Unary(unary) => collect_created_type_counts_from_expr(&unary.expr, counts),
+        Expr::Call(call) => {
+            collect_created_type_counts_from_expr(&call.func, counts);
+            for arg in &call.args {
+                collect_created_type_counts_from_expr(arg, counts);
+            }
+        }
+        Expr::FieldAccess(field) => collect_created_type_counts_from_expr(&field.expr, counts),
+        Expr::Index(index) => {
+            collect_created_type_counts_from_expr(&index.expr, counts);
+            collect_created_type_counts_from_expr(&index.index, counts);
+        }
+        Expr::Consume(consume) => collect_created_type_counts_from_expr(&consume.expr, counts),
+        Expr::Transfer(transfer) => {
+            collect_created_type_counts_from_expr(&transfer.expr, counts);
+            collect_created_type_counts_from_expr(&transfer.to, counts);
+        }
+        Expr::Destroy(destroy) => collect_created_type_counts_from_expr(&destroy.expr, counts),
+        Expr::Claim(claim) => collect_created_type_counts_from_expr(&claim.receipt, counts),
+        Expr::Settle(settle) => collect_created_type_counts_from_expr(&settle.expr, counts),
+        Expr::Assert(assert_expr) => {
+            collect_created_type_counts_from_expr(&assert_expr.condition, counts);
+            collect_created_type_counts_from_expr(&assert_expr.message, counts);
+        }
+        Expr::Require(require_expr) => collect_created_type_counts_from_expr(&require_expr.condition, counts),
+        Expr::Block(stmts) => collect_created_type_counts_from_stmts(stmts, counts),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_created_type_counts_from_expr(item, counts);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_created_type_counts_from_expr(&if_expr.condition, counts);
+            collect_created_type_counts_from_expr(&if_expr.then_branch, counts);
+            collect_created_type_counts_from_expr(&if_expr.else_branch, counts);
+        }
+        Expr::Cast(cast) => collect_created_type_counts_from_expr(&cast.expr, counts),
+        Expr::Range(range) => {
+            collect_created_type_counts_from_expr(&range.start, counts);
+            collect_created_type_counts_from_expr(&range.end, counts);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_created_type_counts_from_expr(value, counts);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_created_type_counts_from_expr(&match_expr.expr, counts);
+            for arm in &match_expr.arms {
+                collect_created_type_counts_from_expr(&arm.value, counts);
+            }
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
     }
 }
 

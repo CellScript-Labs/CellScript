@@ -4679,7 +4679,7 @@ fn body_verifier_obligations(
             &mut obligations,
             &mut seen,
             &scope,
-            "lifecycle-transition",
+            "state-transition",
             &format!("{}.{}", check.feature, check.field),
             &check.status,
             &check.detail,
@@ -9020,7 +9020,7 @@ fn body_lifecycle_transition_checks(
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime state graph and old/new state range checks, and the lifecycle output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and old/new state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
             });
         } else {
             checks.push(LifecycleTransitionCheck {
@@ -15661,10 +15661,13 @@ action redeem(receipt: VestingReceipt) -> Token {
     const SETTLE_LIFECYCLE_FINAL_STATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Pending -> Settled)]
 receipt Settlement has store {
     state: u8,
     amount: u64,
+}
+
+state Settlement.state {
+    Pending -> Settled;
 }
 
 action finalize(settlement: Settlement) -> Settlement {
@@ -15804,7 +15807,7 @@ action finalize(snapshot: Snapshot) -> Snapshot {
 }
 "#;
 
-    const LIFECYCLE_DUPLICATE_STATE_PROGRAM: &str = r#"
+    const LEGACY_LIFECYCLE_ATTRIBUTE_PROGRAM: &str = r#"
 module test
 
 #[lifecycle(Created -> Created)]
@@ -15818,13 +15821,33 @@ action noop() -> u64 {
 }
 "#;
 
-    const LIFECYCLE_MISSING_STATE_CREATE_PROGRAM: &str = r#"
+    const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Created;
+}
+
+action noop() -> u64 {
+    return 0
+}
+"#;
+
+    const LIFECYCLE_MISSING_STATE_CREATE_PROGRAM: &str = r#"
+module test
+
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action make() -> Ticket {
@@ -15837,9 +15860,12 @@ action make() -> Ticket {
     const LIFECYCLE_MISSING_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action noop() -> u64 {
@@ -15850,10 +15876,13 @@ action noop() -> u64 {
     const LIFECYCLE_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: bool,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action noop() -> u64 {
@@ -15864,10 +15893,13 @@ action noop() -> u64 {
     const LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action make() -> Ticket {
@@ -15881,10 +15913,13 @@ action make() -> Ticket {
     const LIFECYCLE_NON_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action make() -> Ticket {
@@ -15898,10 +15933,13 @@ action make() -> Ticket {
     const LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action make(state: u8) -> Ticket {
@@ -15915,10 +15953,13 @@ action make(state: u8) -> Ticket {
     const LIFECYCLE_RESET_UPDATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action reset(ticket: Ticket) -> Ticket {
@@ -15933,13 +15974,16 @@ action reset(ticket: Ticket) -> Ticket {
     const LIFECYCLE_STATIC_UPDATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action activate(ticket: Ticket) -> Ticket {
+state Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
     consume ticket
     return create Ticket {
         state: Active,
@@ -15951,10 +15995,13 @@ action activate(ticket: Ticket) -> Ticket {
     const LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
 }
 
 action make() -> Ticket {
@@ -15968,13 +16015,16 @@ action make() -> Ticket {
     const LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action activate(ticket: Ticket) -> Ticket {
+state Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
     assert_invariant(ticket.state < Ticket::Active, "already active")
     consume ticket
     return create Ticket {
@@ -15987,16 +16037,22 @@ action activate(ticket: Ticket) -> Ticket {
     const LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-#[lifecycle(Draft -> Live)]
 receipt OtherTicket has store {
     state: u8,
     id: u64,
+}
+
+state Ticket.state {
+    Created -> Active;
+}
+
+state OtherTicket.state {
+    Draft -> Live;
 }
 
 action activate(ticket: Ticket) -> Ticket {
@@ -20792,28 +20848,31 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_rejects_duplicate_lifecycle_states_on_main_path() {
-        let err = compile(LIFECYCLE_DUPLICATE_STATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_legacy_lifecycle_attribute() {
+        let err = compile(LEGACY_LIFECYCLE_ATTRIBUTE_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("duplicate lifecycle state: Created"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("legacy #[lifecycle(...)] has been removed"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_noop_state_machine_transition_on_main_path() {
+        let err = compile(STATE_MACHINE_NOOP_TRANSITION_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("state machine must mention at least two states"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_missing_lifecycle_state_create_on_main_path() {
         let err = compile(LIFECYCLE_MISSING_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(
-            err.message.contains("create of lifecycle receipt 'Ticket' must set its state field"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("create for 'Ticket' is missing field(s): state"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_lifecycle_receipt_without_state_field() {
         let err = compile(LIFECYCLE_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("lifecycle receipt 'Ticket' must declare a state field"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("state machine target field 'Ticket.state' is not defined"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -20821,7 +20880,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("lifecycle receipt 'Ticket' state field must be an unsigned integer type"),
+            err.message.contains("state machine field 'Ticket.state' must be an unsigned integer or no-payload enum"),
             "unexpected error: {}",
             err.message
         );
@@ -20832,21 +20891,15 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("lifecycle state index 2 is out of range for 'Ticket' with 2 states"),
+            err.message.contains("state-machine state index 2 is out of range for 'Ticket' with 2 states"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_non_initial_lifecycle_create_without_consumed_prior_state() {
-        let err = compile(LIFECYCLE_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(
-            err.message.contains("initial create of lifecycle receipt 'Ticket' must use initial state index 0, got 1"),
-            "unexpected error: {}",
-            err.message
-        );
+    fn compile_accepts_non_initial_state_machine_create_without_consumed_prior_state() {
+        compile(LIFECYCLE_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap();
     }
 
     #[test]
@@ -20854,21 +20907,15 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("initial create of lifecycle receipt 'Ticket' must use statically known initial state index 0"),
+            err.message.contains("initial create of state-machine type 'Ticket' must use a statically known declared state"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_static_lifecycle_update_reset_to_initial_state() {
-        let err = compile(LIFECYCLE_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(
-            err.message.contains("lifecycle update of 'Ticket' cannot reset to initial state index 0"),
-            "unexpected error: {}",
-            err.message
-        );
+    fn compile_allows_state_machine_update_to_declared_initial_state_at_type_check() {
+        compile(LIFECYCLE_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
     }
 
     #[test]
@@ -20890,11 +20937,9 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
 
         assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
-                && obligation.feature == "Ticket.state"
-                && obligation.status == "checked-runtime"
+            obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
-        assert!(asm.contains("state_count=2"), "qualified lifecycle state names should preserve verifier metadata:\n{}", asm);
+        assert!(asm.contains("state_count=2"), "qualified state-machine state names should preserve verifier metadata:\n{}", asm);
     }
 
     #[test]
@@ -20902,7 +20947,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("lifecycle state field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
+            err.message.contains("state-machine field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
             "unexpected error: {}",
             err.message
         );
@@ -20923,26 +20968,24 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         assert_eq!(ticket.lifecycle_transitions[0].from_index, 0);
         assert_eq!(ticket.lifecycle_transitions[0].to_index, 1);
         assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
-                && obligation.feature == "Ticket.state"
-                && obligation.status == "checked-runtime"
+            obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
         assert!(result.metadata.runtime.verifier_obligations.iter().any(|obligation| {
             obligation.scope == "action:activate"
-                && obligation.category == "lifecycle-transition"
+                && obligation.category == "state-transition"
                 && obligation.feature == "Ticket.state"
                 && obligation.status == "checked-runtime"
         }));
         assert!(
-            asm.contains("# cellscript abi: lifecycle transition Ticket.state state_count=2"),
+            asm.contains("# cellscript abi: state transition Ticket.state state_count=2"),
             "missing lifecycle runtime transition verifier:\n{}",
             asm
         );
-        assert!(asm.contains("li a0, 7"), "missing lifecycle transition failure code in verifier:\n{}", asm);
-        assert!(asm.contains("state_count=2"), "missing lifecycle state-count marker in verifier:\n{}", asm);
-        assert!(asm.contains("li a0, 9"), "missing lifecycle old-state range failure code:\n{}", asm);
-        assert!(asm.contains("li t3, 2"), "missing lifecycle output state range check:\n{}", asm);
-        assert!(asm.contains("li a0, 8"), "missing lifecycle output state range failure code:\n{}", asm);
+        assert!(asm.contains("li a0, 7"), "missing state transition failure code in verifier:\n{}", asm);
+        assert!(asm.contains("state_count=2"), "missing state-count marker in verifier:\n{}", asm);
+        assert!(asm.contains("li a0, 9"), "missing old-state range failure code:\n{}", asm);
+        assert!(asm.contains("li t3, 2"), "missing output state range check:\n{}", asm);
+        assert!(asm.contains("li a0, 8"), "missing output state range failure code:\n{}", asm);
     }
 
     #[test]
@@ -20986,12 +21029,10 @@ action accept(input: Offer) moves input.state Live -> Filled {
         assert_eq!(offer.lifecycle_state_field.as_deref(), Some("state"));
         assert!(offer.lifecycle_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
-                && obligation.feature == "Offer.state"
-                && obligation.status == "checked-runtime"
+            obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
         }));
         assert!(
-            asm.contains("# cellscript abi: lifecycle transition Offer.state state_count=4"),
+            asm.contains("# cellscript abi: state transition Offer.state state_count=4"),
             "missing explicit state machine runtime transition marker:\n{}",
             asm
         );
@@ -21036,15 +21077,207 @@ action accept(input: Offer) moves input.status Live -> Filled {
 
         assert_eq!(offer.lifecycle_state_field.as_deref(), Some("status"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
-                && obligation.feature == "Offer.status"
-                && obligation.status == "checked-runtime"
+            obligation.category == "state-transition" && obligation.feature == "Offer.status" && obligation.status == "checked-runtime"
         }));
         assert!(
-            asm.contains("# cellscript abi: lifecycle transition Offer.status state_count=3"),
+            asm.contains("# cellscript abi: state transition Offer.status state_count=3"),
             "custom state field should be used by runtime verifier:\n{}",
             asm
         );
+    }
+
+    #[test]
+    fn compile_accepts_state_machine_initial_create_at_any_declared_state() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Created -> Live;
+    Live -> Filled;
+}
+
+action seed_live() -> Offer {
+    create Offer {
+        state: OfferState::Live,
+        amount: 1,
+    }
+}
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_accepts_state_machine_edge_returning_to_first_state() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Created;
+}
+
+action reset(input: Offer) moves input.state Live -> Created {
+    let amount = input.amount
+    consume input
+    create Offer {
+        state: OfferState::Created,
+        amount,
+    }
+}
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_rejects_state_move_that_does_not_consume_binding() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Filled;
+}
+
+action accept(input: &Offer) moves input.state Live -> Filled {
+    create Offer {
+        state: OfferState::Filled,
+        amount: input.amount,
+    }
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(
+            err.message.contains("must be an owned Cell input parameter") || err.message.contains("must be consumed"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_rejects_state_transition_action_without_single_replacement_output() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state_machine OfferFlow for Offer.state {
+    Live -> Filled by accept;
+}
+
+action accept(input: Offer) {
+    consume input
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must create exactly one replacement output"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_state_machine_by_action_without_moves_clause() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state_machine OfferFlow for Offer.state {
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(input: Offer) {
+    let amount = input.amount
+    consume input
+    create Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(asm.contains("li t3, 0"), "by-action transition should check Live=0:\n{}", asm);
+        assert!(asm.contains("li t3, 1"), "by-action transition should check Filled=1:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_by_action_with_ambiguous_consumed_inputs() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state_machine OfferFlow for Offer.state {
+    Live -> Filled by accept;
+}
+
+action accept(left: Offer, right: Offer) {
+    let amount = left.amount
+    consume left
+    consume right
+    create Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must consume exactly one 'Offer' input"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21100,6 +21333,24 @@ state Offer.state {
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("must not have payload variants"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_state_machine_on_plain_struct() {
+        let source = r#"
+module test
+
+struct Offer {
+    state: u8
+    amount: u64
+}
+
+state Offer.state {
+    Created -> Live;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must be a resource, shared, or receipt Cell type"), "unexpected error: {}", err.message);
     }
 
     #[test]

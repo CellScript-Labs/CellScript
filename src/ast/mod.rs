@@ -48,7 +48,6 @@ pub struct ReceiptDef {
     pub type_id: Option<TypeIdentity>,
     pub default_hash_type: Option<HashTypeDecl>,
     pub claim_output: Option<Type>,
-    pub lifecycle: Option<Lifecycle>,
     pub capabilities: Vec<Capability>,
     pub fields: Vec<Field>,
     pub span: Span,
@@ -94,12 +93,6 @@ pub struct EnumDef {
 pub struct EnumVariant {
     pub name: String,
     pub fields: Vec<Type>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct Lifecycle {
-    pub states: Vec<String>,
     pub span: Span,
 }
 

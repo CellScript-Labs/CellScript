@@ -224,7 +224,7 @@ action burn(token: Token) {
 | `examples/timelock.cell` | 时间门控状态转换、延迟 claim 路径 |
 | `examples/multisig.cell` | 授权阈值、签名导向的 lock 逻辑 |
 | `examples/nft.cell` | 唯一资产、metadata、所有权转移 |
-| `examples/vesting.cell` | Receipt-style grants 和 claim lifecycle |
+| `examples/vesting.cell` | Receipt-style grants 和显式 claim 状态转换 |
 | `examples/amm_pool.cell` | Shared pool state、swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
@@ -299,7 +299,7 @@ CellScript 是一个多遍编译器，把 `.cell` 源码通过五个定义明确
 graph LR
     Source["Source (.cell)"] --> Lexer
     Lexer --> Parser
-    Parser --> TypeCheck["Type Checker\n+ Lifecycle"]
+    Parser --> TypeCheck["Type Checker\n+ State Checks"]
     TypeCheck --> IRLower["IR Lowering\n+ Optimize"]
     IRLower --> Codegen["Codegen (RISC-V)"]
     IRLower --> Metadata["Metadata (JSON)"]
@@ -323,7 +323,7 @@ graph LR
   体退出前必须被 consume、transfer、destroy、claim 或 settle。同时验证
   shared-state 可变性规则、capability gates、effect 分类（`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`）和调用签名。
-- *生命周期检查* — 验证显式 state 字段、`state_machine` 转换图、action
+- *状态转换检查* — 验证显式 state 字段、`state_machine` 转换图、action
   `moves` 子句、合法状态转换和静态 create-site 检查。
 
 **4. IR 降低**（`ir/` + `optimize/` + `resolve/`）
@@ -397,7 +397,7 @@ CKB 假设暴露出来。
 ```mermaid
 flowchart TB
     Source[".cell source + Cell.toml\n--target-profile ckb"] --> Frontend["Lexer + parser\n稳定 source span"]
-    Frontend --> Semantics["Type + lifecycle checks\n线性资源、lock-only require、\nprotected/witness/lock_args 分类"]
+    Frontend --> Semantics["Type + state checks\n线性资源、lock-only require、\nprotected/witness/lock_args 分类"]
     Semantics --> Policy["CKB policy gate\n对不支持的 runtime 或状态形状 fail closed"]
 
     subgraph Rules["CKB profile rules"]
@@ -424,7 +424,7 @@ flowchart TB
 
 这里分成三条边界：
 
-- **编译器边界** — parse、type/lifecycle checks、CKB policy rejection、IR、
+- **编译器边界** — parse、type/state checks、CKB policy rejection、IR、
   codegen 和 metadata；
 - **artifact 边界** — `cellc verify-artifact` 证明 artifact、sidecar、源码
   hash、target profile 和选定 policy flags 一致；

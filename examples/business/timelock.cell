@@ -38,12 +38,6 @@ receipt ReleaseRequest has destroy {
     state: u8,
 }
 
-state ReleaseRequest.state {
-    Created -> Processing;
-    Processing -> Released;
-    Released -> Cancelled;
-}
-
 receipt ReleaseRecord {
     lock_hash: Hash,
     released_at: u64,
@@ -57,12 +51,6 @@ receipt EmergencyRelease has destroy {
     requested_at: u64,
     approvers: Vec<Address>,
     state: u8,
-}
-
-state EmergencyRelease.state {
-    Created -> Pending;
-    Pending -> Approved;
-    Approved -> Rejected;
 }
 
 
@@ -135,7 +123,7 @@ action request_release(
         lock_hash: hash_lock(time_lock),
         requester,
         requested_at: current_height,
-        state: Created,
+        state: 0,
     };
     
     request
@@ -191,7 +179,7 @@ action request_emergency_release(
         reason,
         requested_at: current_height,
         approvers: [],
-        state: Created,
+        state: 0,
     };
     
     emergency

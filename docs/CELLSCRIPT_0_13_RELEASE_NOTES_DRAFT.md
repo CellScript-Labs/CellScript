@@ -198,20 +198,26 @@ New in 0.13:
   local witness buffer before decoding dynamic payload lengths, and reject
   trailing payload bytes after all static or dynamic witness arguments are
   consumed.
-- Lifecycle receipts now fail compilation unless they declare a scalar unsigned
-  `state` field, matching the runtime verifier's lifecycle state contract.
-- Lifecycle state storage remains explicit cell data: the compiler does not
+- Legacy `#[lifecycle(...)]` receipt syntax has been removed. State remains
+  explicit schema data, and transition policy is declared with `state` /
+  `state_machine` plus action-level `moves`.
+- State-machine storage remains explicit cell data: the compiler does not
   inject hidden state fields or mutate Molecule layout. `create` initializers
-  may now use declared lifecycle state names such as `state: Created`, while
+  may now use declared state names such as `state: Created`, while
   guards and computed expressions can use qualified names such as
   `Ticket::Active` instead of numeric state indexes. The LSP now completes
-  those qualified lifecycle states after `Type::`.
+  those qualified state-machine states after `Type::`.
 - Declarative state machines can now be expressed without hidden layout changes:
   `state_machine Name for Type.field { A -> B by action; }` and compact
   `state Type.field { A -> B; }` declare the graph, while action signatures can
   bind the edge they prove with `moves input.field A -> B`. The type checker,
-  lifecycle static checks, IR metadata, runtime verifier, formatter, docs
+  state static checks, IR metadata, runtime verifier, formatter, docs
   generator, and LSP all carry the explicit state field name.
+- State-machine checking no longer treats enum or declaration order as a hidden
+  linear state sequence: initial creates may use any declared state, and declared
+  edges may return to the first state. `moves` and `by action` edges now fail at
+  compile time unless the action consumes the corresponding owned input and
+  creates exactly one replacement output.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.

@@ -761,14 +761,6 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             if let Some(output) = &receipt.claim_output {
                 summary.push_str(&format!("Claim output: {}. ", format_type(output)));
             }
-            if let Some(lifecycle) = &receipt.lifecycle {
-                summary.push_str(&format!("Lifecycle: {}. ", lifecycle.states.join(" -> ")));
-                let transitions =
-                    lifecycle.states.windows(2).map(|window| format!("{} -> {}", window[0], window[1])).collect::<Vec<_>>();
-                if !transitions.is_empty() {
-                    summary.push_str(&format!("Transitions: {}. ", transitions.join(", ")));
-                }
-            }
             summary.push_str(&format!("Fields: {}", format_fields(&receipt.fields)));
             Some(ItemDoc {
                 kind: "receipt".to_string(),

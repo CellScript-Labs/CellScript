@@ -18,42 +18,10 @@ struct ActionLifecycleContext {
     integer_aliases: HashMap<String, u64>,
 }
 
-/// Validate all lifecycle declarations and statically check lifecycle-aware
-/// creates that can be decided from source.
+/// Validate declared state-machine transitions and statically check
+/// lifecycle-aware creates that can be decided from source.
 pub fn check(module: &Module) -> Result<()> {
-    let mut checker = LifecycleChecker::new();
     let mut specs = HashMap::new();
-
-    for item in &module.items {
-        let Item::Receipt(receipt) = item else {
-            continue;
-        };
-        let Some(lifecycle) = extract_lifecycle(receipt) else {
-            continue;
-        };
-
-        checker.register_lifecycle(&receipt.name, lifecycle)?;
-
-        let state_field = receipt.fields.iter().find(|field| field.name == LIFECYCLE_STATE_FIELD_NAME);
-        let Some(field) = state_field else {
-            return Err(CompileError::new(format!("lifecycle receipt '{}' must declare a state field", receipt.name), lifecycle.span));
-        };
-        if !is_lifecycle_state_type(&field.ty) {
-            return Err(CompileError::new(
-                format!("lifecycle receipt '{}' state field must be an unsigned integer type", receipt.name),
-                field.span,
-            ));
-        }
-
-        specs.insert(
-            receipt.name.clone(),
-            LifecycleSpec {
-                states: lifecycle.states.clone(),
-                state_field_name: LIFECYCLE_STATE_FIELD_NAME.to_string(),
-                state_field_span: Some(field.span),
-            },
-        );
-    }
 
     for item in &module.items {
         let Item::StateMachine(machine) = item else {
@@ -82,7 +50,6 @@ pub fn check(module: &Module) -> Result<()> {
             Item::Action(action) => {
                 let context = action_lifecycle_context(&specs, action);
                 validate_stmt_list(&specs, &context, &action.body)?;
-                checker.validate_action(action)?;
             }
             Item::Function(function) => {
                 validate_stmt_list(&specs, &ActionLifecycleContext::default(), &function.body)?;
@@ -93,304 +60,6 @@ pub fn check(module: &Module) -> Result<()> {
     }
 
     Ok(())
-}
-
-pub struct LifecycleChecker {
-    states: HashMap<String, Vec<String>>,
-    transitions: HashMap<String, HashMap<String, Vec<TransitionRule>>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TransitionRule {
-    pub from: String,
-    pub to: String,
-    pub condition: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LifecycleInfo {
-    pub resource_name: String,
-    pub states: Vec<String>,
-    pub initial_state: String,
-    pub final_states: Vec<String>,
-}
-
-impl Default for LifecycleChecker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LifecycleChecker {
-    pub fn new() -> Self {
-        Self { states: HashMap::new(), transitions: HashMap::new() }
-    }
-
-    pub fn register_lifecycle(&mut self, resource_name: &str, lifecycle: &Lifecycle) -> Result<()> {
-        let states = lifecycle.states.clone();
-
-        if states.len() < 2 {
-            return Err(CompileError::new("lifecycle must have at least 2 states", lifecycle.span));
-        }
-
-        let mut seen = HashSet::new();
-        for state in &states {
-            if !seen.insert(state.clone()) {
-                return Err(CompileError::new(format!("duplicate lifecycle state: {}", state), lifecycle.span));
-            }
-        }
-
-        let mut transitions = HashMap::new();
-        for i in 0..states.len() - 1 {
-            let from = states[i].clone();
-            let to = states[i + 1].clone();
-
-            transitions.entry(from.clone()).or_insert_with(Vec::new).push(TransitionRule {
-                from: from.clone(),
-                to: to.clone(),
-                condition: None,
-            });
-        }
-
-        self.states.insert(resource_name.to_string(), states);
-        self.transitions.insert(resource_name.to_string(), transitions);
-
-        Ok(())
-    }
-
-    pub fn validate_transition(&self, resource_name: &str, from: &str, to: &str, span: Span) -> Result<()> {
-        let states = self
-            .states
-            .get(resource_name)
-            .ok_or_else(|| CompileError::new(format!("resource '{}' has no lifecycle defined", resource_name), span))?;
-
-        if !states.contains(&from.to_string()) {
-            return Err(CompileError::new(format!("invalid from state: {}", from), span));
-        }
-
-        if !states.contains(&to.to_string()) {
-            return Err(CompileError::new(format!("invalid to state: {}", to), span));
-        }
-
-        let transitions = self.transitions.get(resource_name).unwrap();
-
-        if let Some(allowed) = transitions.get(from) {
-            if allowed.iter().any(|t| t.to == to) {
-                return Ok(());
-            }
-        }
-
-        let from_idx = states.iter().position(|s| s == from).unwrap();
-        let to_idx = states.iter().position(|s| s == to).unwrap();
-
-        if to_idx < from_idx {
-            return Err(CompileError::new(format!("invalid lifecycle transition: cannot go from '{}' back to '{}'", from, to), span));
-        }
-
-        if to_idx == from_idx {
-            return Err(CompileError::new(format!("invalid lifecycle transition: '{}' to itself", from), span));
-        }
-
-        Err(CompileError::new(format!("invalid lifecycle transition: cannot skip from '{}' to '{}'", from, to), span))
-    }
-
-    pub fn get_lifecycle_info(&self, resource_name: &str) -> Option<LifecycleInfo> {
-        let states = self.states.get(resource_name)?;
-
-        Some(LifecycleInfo {
-            resource_name: resource_name.to_string(),
-            states: states.clone(),
-            initial_state: states.first()?.clone(),
-            final_states: vec![states.last()?.clone()],
-        })
-    }
-
-    pub fn is_final_state(&self, resource_name: &str, state: &str) -> bool {
-        if let Some(states) = self.states.get(resource_name) {
-            if let Some(last) = states.last() {
-                return last == state;
-            }
-        }
-        false
-    }
-
-    pub fn get_next_states(&self, resource_name: &str, from: &str) -> Vec<String> {
-        let mut next_states = Vec::new();
-
-        if let Some(transitions) = self.transitions.get(resource_name) {
-            if let Some(rules) = transitions.get(from) {
-                for rule in rules {
-                    next_states.push(rule.to.clone());
-                }
-            }
-        }
-
-        next_states
-    }
-
-    pub fn validate_action(&self, action: &ActionDef) -> Result<()> {
-        for stmt in &action.body {
-            self.validate_stmt(stmt)?;
-        }
-
-        Ok(())
-    }
-
-    fn validate_stmt(&self, stmt: &Stmt) -> Result<()> {
-        match stmt {
-            Stmt::Let(let_stmt) => {
-                self.validate_expr(&let_stmt.value)?;
-            }
-            Stmt::Expr(expr) => {
-                self.validate_expr(expr)?;
-            }
-            Stmt::Return(Some(expr)) => {
-                self.validate_expr(expr)?;
-            }
-            Stmt::If(if_stmt) => {
-                self.validate_expr(&if_stmt.condition)?;
-                for stmt in &if_stmt.then_branch {
-                    self.validate_stmt(stmt)?;
-                }
-                if let Some(else_branch) = &if_stmt.else_branch {
-                    for stmt in else_branch {
-                        self.validate_stmt(stmt)?;
-                    }
-                }
-            }
-            Stmt::For(for_stmt) => {
-                self.validate_expr(&for_stmt.iterable)?;
-                for stmt in &for_stmt.body {
-                    self.validate_stmt(stmt)?;
-                }
-            }
-            Stmt::While(while_stmt) => {
-                self.validate_expr(&while_stmt.condition)?;
-                for stmt in &while_stmt.body {
-                    self.validate_stmt(stmt)?;
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    fn validate_expr(&self, expr: &Expr) -> Result<()> {
-        match expr {
-            Expr::Create(create) => {
-                for (_, value) in &create.fields {
-                    self.validate_expr(value)?;
-                }
-                if let Some(lock) = &create.lock {
-                    self.validate_expr(lock)?;
-                }
-            }
-            Expr::Assign(assign) => {
-                self.validate_expr(&assign.target)?;
-                self.validate_expr(&assign.value)?;
-            }
-            Expr::Consume(consume) => {
-                self.validate_expr(&consume.expr)?;
-            }
-            Expr::Transfer(transfer) => {
-                self.validate_expr(&transfer.expr)?;
-                self.validate_expr(&transfer.to)?;
-            }
-            Expr::Destroy(destroy) => {
-                self.validate_expr(&destroy.expr)?;
-            }
-            Expr::Claim(claim) => {
-                self.validate_expr(&claim.receipt)?;
-            }
-            Expr::Settle(settle) => {
-                self.validate_expr(&settle.expr)?;
-            }
-            Expr::Binary(bin) => {
-                self.validate_expr(&bin.left)?;
-                self.validate_expr(&bin.right)?;
-            }
-            Expr::Unary(unary) => {
-                self.validate_expr(&unary.expr)?;
-            }
-            Expr::Call(call) => {
-                for arg in &call.args {
-                    self.validate_expr(arg)?;
-                }
-            }
-            Expr::FieldAccess(field) => {
-                self.validate_expr(&field.expr)?;
-            }
-            Expr::Index(index) => {
-                self.validate_expr(&index.expr)?;
-                self.validate_expr(&index.index)?;
-            }
-            Expr::If(if_expr) => {
-                self.validate_expr(&if_expr.condition)?;
-                self.validate_expr(&if_expr.then_branch)?;
-                self.validate_expr(&if_expr.else_branch)?;
-            }
-            Expr::Cast(cast) => {
-                self.validate_expr(&cast.expr)?;
-            }
-            Expr::Range(range) => {
-                self.validate_expr(&range.start)?;
-                self.validate_expr(&range.end)?;
-            }
-            Expr::StructInit(init) => {
-                for (_, value) in &init.fields {
-                    self.validate_expr(value)?;
-                }
-            }
-            Expr::Match(match_expr) => {
-                self.validate_expr(&match_expr.expr)?;
-                for arm in &match_expr.arms {
-                    self.validate_expr(&arm.value)?;
-                }
-            }
-            Expr::Block(stmts) => {
-                for stmt in stmts {
-                    self.validate_stmt(stmt)?;
-                }
-            }
-            Expr::Tuple(elems) | Expr::Array(elems) => {
-                for elem in elems {
-                    self.validate_expr(elem)?;
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    pub fn generate_validation_code(&self, resource_name: &str) -> String {
-        let mut code = String::new();
-
-        code.push_str(&format!("// Lifecycle validation for {}\n", resource_name));
-
-        if let Some(states) = self.states.get(resource_name) {
-            code.push_str("// Valid states:\n");
-            for (i, state) in states.iter().enumerate() {
-                code.push_str(&format!("//   {}: {}\n", i, state));
-            }
-
-            code.push_str("\n// Valid transitions:\n");
-            if let Some(transitions) = self.transitions.get(resource_name) {
-                for (from, rules) in transitions {
-                    for rule in rules {
-                        code.push_str(&format!("//   {} -> {}\n", from, rule.to));
-                    }
-                }
-            }
-        }
-
-        code
-    }
-}
-
-pub fn extract_lifecycle(receipt: &ReceiptDef) -> Option<&Lifecycle> {
-    receipt.lifecycle.as_ref()
 }
 
 fn action_lifecycle_context(specs: &HashMap<String, LifecycleSpec>, action: &ActionDef) -> ActionLifecycleContext {
@@ -665,14 +334,14 @@ fn validate_lifecycle_create(
     }
 
     let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == &spec.state_field_name) else {
-        return Err(CompileError::new(format!("create of lifecycle receipt '{}' must set its state field", create.ty), create.span));
+        return Err(CompileError::new(format!("create of state-machine type '{}' must set its state field", create.ty), create.span));
     };
 
     let updates_existing = context.consumed_lifecycle_types.contains(&create.ty);
     let Some(state_index) = static_lifecycle_state_value(state_expr, context, &create.ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
-                format!("initial create of lifecycle receipt '{}' must use statically known initial state index 0", create.ty),
+                format!("initial create of state-machine type '{}' must use a statically known declared state", create.ty),
                 create.span,
             ));
         }
@@ -681,20 +350,7 @@ fn validate_lifecycle_create(
 
     if state_index as usize >= spec.states.len() {
         return Err(CompileError::new(
-            format!("lifecycle state index {} is out of range for '{}' with {} states", state_index, create.ty, spec.states.len()),
-            create.span,
-        ));
-    }
-
-    if updates_existing && state_index == 0 {
-        return Err(CompileError::new(
-            format!("lifecycle update of '{}' cannot reset to initial state index 0", create.ty),
-            create.span,
-        ));
-    }
-    if !updates_existing && state_index != 0 {
-        return Err(CompileError::new(
-            format!("initial create of lifecycle receipt '{}' must use initial state index 0, got {}", create.ty, state_index),
+            format!("state-machine state index {} is out of range for '{}' with {} states", state_index, create.ty, spec.states.len()),
             create.span,
         ));
     }
@@ -730,47 +386,4 @@ fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, _
         }
         _ => None,
     })
-}
-
-fn is_lifecycle_state_type(ty: &Type) -> bool {
-    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_lifecycle_registration() {
-        let mut checker = LifecycleChecker::new();
-
-        let lifecycle =
-            Lifecycle { states: vec!["Created".to_string(), "Active".to_string(), "Settled".to_string()], span: Span::default() };
-
-        checker.register_lifecycle("VestingGrant", &lifecycle).unwrap();
-
-        assert!(checker.validate_transition("VestingGrant", "Created", "Active", Span::default()).is_ok());
-        assert!(checker.validate_transition("VestingGrant", "Active", "Settled", Span::default()).is_ok());
-
-        assert!(checker.validate_transition("VestingGrant", "Settled", "Active", Span::default()).is_err());
-        assert!(checker.validate_transition("VestingGrant", "Created", "Settled", Span::default()).is_err());
-    }
-
-    #[test]
-    fn test_lifecycle_info() {
-        let mut checker = LifecycleChecker::new();
-
-        let lifecycle = Lifecycle {
-            states: vec!["Granted".to_string(), "Claimable".to_string(), "FullyClaimed".to_string()],
-            span: Span::default(),
-        };
-
-        checker.register_lifecycle("Grant", &lifecycle).unwrap();
-
-        let info = checker.get_lifecycle_info("Grant").unwrap();
-        assert_eq!(info.initial_state, "Granted");
-        assert_eq!(info.final_states, vec!["FullyClaimed"]);
-        assert!(checker.is_final_state("Grant", "FullyClaimed"));
-        assert!(!checker.is_final_state("Grant", "Granted"));
-    }
 }

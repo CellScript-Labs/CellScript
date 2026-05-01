@@ -11,7 +11,6 @@ pub struct Parser<'a> {
 struct PendingAttrs {
     type_id: Option<TypeIdentity>,
     capabilities: Option<Vec<Capability>>,
-    lifecycle: Option<Lifecycle>,
     effect: Option<EffectClass>,
     scheduler_hint: Option<SchedulerHint>,
 }
@@ -228,20 +227,10 @@ impl<'a> Parser<'a> {
                     attrs.type_id = Some(TypeIdentity { value, span });
                 }
                 "lifecycle" => {
-                    let start_span = self.current().span;
-                    let mut states = Vec::new();
-                    while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        states.push(self.parse_name_path()?);
-                        if self.check(&TokenKind::Arrow) || self.check(&TokenKind::Comma) {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    attrs.lifecycle = Some(Lifecycle {
-                        states,
-                        span: Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column),
-                    });
+                    return Err(CompileError::new(
+                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use state/state_machine plus action moves",
+                        self.current().span,
+                    ));
                 }
                 "effect" => {
                     let mut has_mutating = false;
@@ -358,7 +347,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Resource => Ok(Item::Resource(self.parse_resource(attrs.type_id, attrs.capabilities)?)),
             TokenKind::Shared => Ok(Item::Shared(self.parse_shared(attrs.type_id, attrs.capabilities)?)),
-            TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id, attrs.lifecycle, attrs.capabilities)?)),
+            TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id, attrs.capabilities)?)),
             TokenKind::Struct => Ok(Item::Struct(self.parse_struct(attrs.type_id)?)),
             TokenKind::Identifier(name) if name == "state_machine" => {
                 self.reject_type_id_attr(&attrs)?;
@@ -528,12 +517,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_receipt(
-        &mut self,
-        type_id: Option<TypeIdentity>,
-        attr_lifecycle: Option<Lifecycle>,
-        attr_capabilities: Option<Vec<Capability>>,
-    ) -> Result<ReceiptDef> {
+    fn parse_receipt(&mut self, type_id: Option<TypeIdentity>, attr_capabilities: Option<Vec<Capability>>) -> Result<ReceiptDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Receipt)?;
 
@@ -546,13 +530,12 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let lifecycle = if let Some(lifecycle) = attr_lifecycle {
-            Some(lifecycle)
-        } else if self.check(&TokenKind::LBracket) {
-            Some(self.parse_lifecycle_attr()?)
-        } else {
-            None
-        };
+        if self.check(&TokenKind::LBracket) {
+            return Err(CompileError::new(
+                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use state/state_machine plus action moves",
+                self.current().span,
+            ));
+        }
 
         let capabilities = merge_capabilities(attr_capabilities, self.parse_capabilities()?);
         self.skip_newlines();
@@ -566,35 +549,10 @@ impl<'a> Parser<'a> {
             type_id,
             default_hash_type,
             claim_output,
-            lifecycle,
             capabilities,
             fields,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
-    }
-
-    fn parse_lifecycle_attr(&mut self) -> Result<Lifecycle> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::LBracket)?;
-        self.expect(TokenKind::Identifier("lifecycle".to_string()))?;
-        self.expect(TokenKind::LParen)?;
-
-        let mut states = Vec::new();
-        while let TokenKind::Identifier(n) = &self.current().kind {
-            states.push(n.clone());
-            self.advance();
-            if self.check(&TokenKind::Arrow) {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
-        self.expect(TokenKind::RParen)?;
-        self.expect(TokenKind::RBracket)?;
-
-        let end_span = self.current().span;
-        Ok(Lifecycle { states, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
     fn parse_struct(&mut self, type_id: Option<TypeIdentity>) -> Result<StructDef> {

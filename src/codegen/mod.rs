@@ -472,9 +472,9 @@ pub struct CodeGenerator {
     receipt_type_names: BTreeSet<String>,
     /// Named types that are transaction cell-backed values.
     cell_type_names: BTreeSet<String>,
-    /// Lifecycle state names for schemas that declared lifecycle/state-machine policy.
+    /// State names for schemas that declared state-machine policy.
     lifecycle_states: HashMap<String, Vec<String>>,
-    /// Lifecycle state field name keyed by schema type.
+    /// State-machine field name keyed by schema type.
     lifecycle_state_fields: HashMap<String, String>,
     /// Declared lifecycle/state-machine transition graph keyed by schema type.
     lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
@@ -5742,7 +5742,7 @@ impl CodeGenerator {
             return;
         };
 
-        self.emit(format!("# cellscript abi: lifecycle transition {}.{} state_count={}", pattern.ty, state_field, state_count));
+        self.emit(format!("# cellscript abi: state transition {}.{} state_count={}", pattern.ty, state_field, state_count));
         self.emit_loaded_schema_exact_size_check(input_size_offset, expected_size, &format!("{} input", pattern.ty));
         self.emit_loaded_schema_bounds_check(
             input_size_offset,

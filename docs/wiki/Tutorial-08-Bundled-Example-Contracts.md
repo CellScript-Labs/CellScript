@@ -12,8 +12,8 @@ example.
 |---|---|
 | `examples/token.cell` | Minting, transfer, burn, and guarded token merge. |
 | `examples/nft.cell` | Unique assets, metadata, ownership transitions, and owner locks. |
-| `examples/timelock.cell` | Time-gated state transitions, release requests, and approval flow. |
-| `examples/multisig.cell` | Threshold policy, proposals, signatures-as-data, and lock-boundary predicates. |
+| `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
+| `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
 | `examples/vesting.cell` | Vesting grants, receipts, claim lifecycle, and admin-boundary comments. |
 | `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
 | `examples/launch.cell` | Launch/pool composition patterns. |
@@ -46,8 +46,8 @@ If you are learning the language, read them in this order:
 1. `token.cell`: start here. It is the smallest example with a clear resource
    lifecycle.
 2. `nft.cell`: learn unique assets and ownership-style locks.
-3. `timelock.cell`: learn time guards and replacement state.
-4. `multisig.cell`: learn proposal lifecycle and threshold logic.
+3. `timelock.cell`: learn time guards and release evidence.
+4. `multisig.cell`: learn proposal records and threshold logic.
 5. `vesting.cell`: learn receipt-style claim flows.
 6. `amm_pool.cell`: learn shared pool state after you understand resources.
 7. `launch.cell`: read this last because it composes multiple patterns.

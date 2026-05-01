@@ -27,7 +27,7 @@ verifier obligations, runtime requirements, and target-profile policy flags.
 
 The language is intentionally narrow: it is not a new VM, and it is not an
 account-storage contract language. CellScript gives protocol authors a typed
-way to describe assets, shared Cell state, receipts, lifecycle transitions,
+way to describe assets, shared Cell state, receipts, explicit state transitions,
 locks, and transaction-shaped effects — while still mapping directly to the
 Cell model used by CKB.
 
@@ -169,7 +169,8 @@ CellScript programs are written in terms of Cell lifecycle operations:
 - **Capability gates** — `has store, transfer, destroy` makes asset permissions
   explicit instead of implicit.
 - **Declarative state machines** — state remains explicit schema data, while
-  `state_machine Type.field { A -> B by action; }` declares allowed edges and
+  `state_machine Name for Type.field { A -> B by action; }` or compact
+  `state Type.field { A -> B; }` declares allowed edges, and
   `action ... moves input.field A -> B` binds an action to the edge it proves.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
@@ -292,10 +293,10 @@ action burn(token: Token) {
 | Example | What it shows |
 |---|---|
 | `examples/token.cell` | Mint, transfer, burn, guarded same-symbol merge |
-| `examples/timelock.cell` | Time-gated state transitions, delayed claim paths |
+| `examples/timelock.cell` | Time-gated release checks, delayed claim paths |
 | `examples/multisig.cell` | Authorization thresholds, signature-oriented locks |
 | `examples/nft.cell` | Unique assets, metadata, ownership transfer |
-| `examples/vesting.cell` | Receipt-style grants and claim lifecycle |
+| `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
@@ -317,7 +318,7 @@ chain-specific VM:
 |---|---|---|---|---|
 | Execution target | RISC-V ELF / asm on ckb-vm | EVM bytecode | Move bytecode | FuelVM bytecode |
 | State model | Typed Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
-| Asset model | Native `resource`, lifecycle, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
+| Asset model | Native `resource`, state transitions, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
 | Linear ownership | Compiler-enforced | No | Yes (abilities) | No general user-defined |
 | Shared state | Explicit `shared` Cells | Implicit contract storage | Shared objects (some chains) | No shared Cell analogue |
 | Reentrancy | No callback-style reentrancy | Common risk surface | Lower by design | Lower predicate risk |
@@ -337,7 +338,7 @@ CellScript includes production-style local language tooling for early users:
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
   references, rename, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
-  `tower-lsp` JSON-RPC transport over stdio. Completions include lifecycle
+  `tower-lsp` JSON-RPC transport over stdio. Completions include state-machine
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
@@ -376,7 +377,7 @@ crate (`cellscript`) with its own `mod.rs` entry point under `src/`.
 graph LR
     Source["Source (.cell)"] --> Lexer
     Lexer --> Parser
-    Parser --> TypeCheck["Type Checker\n+ Lifecycle"]
+    Parser --> TypeCheck["Type Checker\n+ State Checks"]
     TypeCheck --> IRLower["IR Lowering\n+ Optimize"]
     IRLower --> Codegen["Codegen (RISC-V)"]
     IRLower --> Metadata["Metadata (JSON)"]
@@ -402,9 +403,9 @@ action `moves` clauses, and all statement/expression forms.
   or settled before the action body exits. Also validates shared-state
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
-- *Lifecycle checking* — validates explicit state fields, `state_machine`
-  transition graphs, action `moves` clauses, legal state transitions, and static
-  create-site checks.
+- *State transition checking* — validates explicit state fields,
+  `state_machine` transition graphs, action `moves` clauses, legal state
+  transitions, and static create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)
 - *`resolve/`* — builds per-module symbol tables and resolves `use` imports
@@ -482,7 +483,7 @@ treated as deployable.
 ```mermaid
 flowchart TB
     Source[".cell source + Cell.toml\n--target-profile ckb"] --> Frontend["Lexer + parser\nstable source spans"]
-    Frontend --> Semantics["Type + lifecycle checks\nlinear resources, lock-only require,\nprotected/witness/lock_args classification"]
+    Frontend --> Semantics["Type + state checks\nlinear resources, lock-only require,\nprotected/witness/lock_args classification"]
     Semantics --> Policy["CKB policy gate\nfail closed on unsupported runtime or state shapes"]
 
     subgraph Rules["CKB profile rules"]
@@ -509,7 +510,7 @@ flowchart TB
 
 This separates three boundaries:
 
-- **compiler boundary** — parse, type/lifecycle checks, CKB policy rejection, IR,
+- **compiler boundary** — parse, type/state checks, CKB policy rejection, IR,
   codegen, and metadata;
 - **artifact boundary** — `cellc verify-artifact` proves the artifact, sidecar,
   source hash, target profile, and selected policy flags agree;

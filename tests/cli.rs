@@ -1290,7 +1290,6 @@ resource Token has store {
     owner: Address
 }
 
-#[lifecycle(Granted -> Claimable -> FullyClaimed)]
 receipt VestingGrant has store {
     state: u8
     beneficiary: Address
@@ -1298,6 +1297,12 @@ receipt VestingGrant has store {
     claimed_amount: u64
     cliff_timepoint: u64
     end_timepoint: u64
+}
+
+state VestingGrant.state {
+    Granted -> Claimable;
+    Granted -> FullyClaimed;
+    Claimable -> FullyClaimed;
 }
 
 action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {

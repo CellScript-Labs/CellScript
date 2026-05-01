@@ -43,13 +43,7 @@ receipt Proposal has destroy {
     signatures: Vec<Signature>,
     created_at: u64,
     expires_at: u64,
-    state: u8,
-}
-
-state Proposal.state {
-    Created -> Pending;
-    Pending -> Executed;
-    Executed -> Cancelled;
+    state: ProposalStatus,
 }
 
 struct Signature {
@@ -132,7 +126,7 @@ action propose_transfer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: Created,
+        state: ProposalStatus::Pending,
     };
     
     
@@ -253,7 +247,7 @@ action propose_add_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: Created,
+        state: ProposalStatus::Pending,
     };
     
     proposal
@@ -289,7 +283,7 @@ action propose_remove_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: Created,
+        state: ProposalStatus::Pending,
     };
     
     proposal
@@ -326,7 +320,7 @@ action propose_change_threshold(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: Created,
+        state: ProposalStatus::Pending,
     };
     
     proposal

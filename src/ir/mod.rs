@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
-use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -433,11 +432,6 @@ impl IrGenerator {
                 Item::Receipt(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Receipt);
                     self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(Self::convert_type));
-                    if let Some(lifecycle) = &r.lifecycle {
-                        self.lifecycle_states.insert(r.name.clone(), lifecycle.states.clone());
-                        self.lifecycle_state_fields.insert(r.name.clone(), crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME.to_string());
-                        self.lifecycle_rules.insert(r.name.clone(), Self::lifecycle_rules_from_states(&lifecycle.states));
-                    }
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -642,19 +636,9 @@ impl IrGenerator {
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(Self::convert_type),
-            lifecycle_states: self
-                .lifecycle_states
-                .get(&receipt.name)
-                .cloned()
-                .or_else(|| receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone())),
-            lifecycle_state_field: self
-                .lifecycle_state_fields
-                .get(&receipt.name)
-                .cloned()
-                .or_else(|| receipt.lifecycle.as_ref().map(|_| crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME.to_string())),
-            lifecycle_rules: self.lifecycle_rules.get(&receipt.name).cloned().unwrap_or_else(|| {
-                receipt.lifecycle.as_ref().map(|lifecycle| Self::lifecycle_rules_from_states(&lifecycle.states)).unwrap_or_default()
-            }),
+            lifecycle_states: self.lifecycle_states.get(&receipt.name).cloned(),
+            lifecycle_state_field: self.lifecycle_state_fields.get(&receipt.name).cloned(),
+            lifecycle_rules: self.lifecycle_rules.get(&receipt.name).cloned().unwrap_or_default(),
         }
     }
 
@@ -671,19 +655,6 @@ impl IrGenerator {
             lifecycle_state_field: self.lifecycle_state_fields.get(&struct_def.name).cloned(),
             lifecycle_rules: self.lifecycle_rules.get(&struct_def.name).cloned().unwrap_or_default(),
         }
-    }
-
-    fn lifecycle_rules_from_states(states: &[String]) -> Vec<IrLifecycleRule> {
-        states
-            .windows(2)
-            .enumerate()
-            .map(|(index, window)| IrLifecycleRule {
-                from: window[0].clone(),
-                to: window[1].clone(),
-                from_index: index,
-                to_index: index + 1,
-            })
-            .collect()
     }
 
     fn infer_module_function_effects(&mut self, items: &[Item]) {
@@ -4356,19 +4327,6 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
     Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
 }
 
-fn lifecycle_states_to_rules(states: &[String]) -> Vec<IrLifecycleRule> {
-    states
-        .windows(2)
-        .enumerate()
-        .map(|(index, window)| IrLifecycleRule {
-            from: window[0].clone(),
-            to: window[1].clone(),
-            from_index: index,
-            to_index: index + 1,
-        })
-        .collect()
-}
-
 fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTypeDef> {
     match type_def {
         TypeDef::Resource(resource) => Some(IrTypeDef {
@@ -4403,13 +4361,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
-            lifecycle_states: receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone()),
-            lifecycle_state_field: receipt.lifecycle.as_ref().map(|_| LIFECYCLE_STATE_FIELD_NAME.to_string()),
-            lifecycle_rules: receipt
-                .lifecycle
-                .as_ref()
-                .map(|lifecycle| lifecycle_states_to_rules(&lifecycle.states))
-                .unwrap_or_default(),
+            lifecycle_states: None,
+            lifecycle_state_field: None,
+            lifecycle_rules: Vec::new(),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4475,8 +4429,8 @@ fn resolver_receipt_claim_output_to_ir(type_def: &TypeDef) -> Option<Option<IrTy
 
 fn resolver_lifecycle_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
     match type_def {
-        TypeDef::Receipt(receipt) => receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone()),
         TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
+        TypeDef::Receipt(_) => None,
     }
 }
 

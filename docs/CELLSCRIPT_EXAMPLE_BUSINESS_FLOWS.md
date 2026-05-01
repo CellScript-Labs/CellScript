@@ -127,7 +127,7 @@ are no lock entries in this example.
 
 ## `multisig.cell`
 
-Business purpose: threshold wallet creation, proposal lifecycle, signature
+Business purpose: threshold wallet creation, proposal records, signature
 collection, execution, cancellation, and signer/threshold governance proposals.
 
 ```mermaid

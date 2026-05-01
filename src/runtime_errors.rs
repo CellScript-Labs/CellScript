@@ -75,9 +75,9 @@ impl CellScriptRuntimeError {
             Self::CellLoadFailed => "Cell data or field loading failed or returned an unusable result.",
             Self::ExactSizeMismatch => "Loaded bytes did not match the exact fixed-size schema requirement.",
             Self::AssertionFailed => "A source-level assert or invariant check evaluated to false.",
-            Self::LifecycleTransitionMismatch => "A lifecycle state transition did not match the declared transition rule.",
-            Self::LifecycleNewStateInvalid => "A created or replacement lifecycle state was outside the declared state range.",
-            Self::LifecycleOldStateInvalid => "A consumed lifecycle state was outside the declared state range.",
+            Self::LifecycleTransitionMismatch => "A state-machine transition did not match the declared transition rule.",
+            Self::LifecycleNewStateInvalid => "A created or replacement state value was outside the declared state range.",
+            Self::LifecycleOldStateInvalid => "A consumed state value was outside the declared state range.",
             Self::EntryWitnessMagicMismatch => "Entry witness bytes did not start with the CellScript witness ABI magic.",
             Self::TypeHashPreservationMismatch => "A replacement output did not preserve the consumed input type hash.",
             Self::LockHashPreservationMismatch => "A replacement output did not preserve the consumed input lock hash.",
@@ -112,10 +112,10 @@ impl CellScriptRuntimeError {
             }
             Self::AssertionFailed => "Inspect the action invariant or assert expression and the transaction values that feed it.",
             Self::LifecycleTransitionMismatch => {
-                "Compare consumed and produced lifecycle state fields with the declared lifecycle transitions."
+                "Compare consumed and produced state fields with the declared state-machine transitions."
             }
-            Self::LifecycleNewStateInvalid => "Check created output lifecycle state values and declared lifecycle states.",
-            Self::LifecycleOldStateInvalid => "Check consumed input lifecycle state values and declared lifecycle states.",
+            Self::LifecycleNewStateInvalid => "Check created output state values and declared state-machine states.",
+            Self::LifecycleOldStateInvalid => "Check consumed input state values and declared state-machine states.",
             Self::EntryWitnessMagicMismatch => {
                 "Encode entry witnesses with cellc entry-witness or the documented CSARGv1 wire format."
             }

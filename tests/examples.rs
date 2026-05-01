@@ -1065,11 +1065,11 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
     );
     assert!(
         claim_vested.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
+            obligation.category == "state-transition"
                 && obligation.feature == "VestingGrant.state"
                 && obligation.status == "checked-runtime"
         }),
-        "claim_vested should expose the runtime-checked lifecycle transition obligation"
+        "claim_vested should expose the runtime-checked state transition obligation"
     );
     let claim_conditions = claim_vested
         .verifier_obligations

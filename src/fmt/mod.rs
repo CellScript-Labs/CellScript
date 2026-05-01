@@ -72,12 +72,7 @@ impl Formatter {
                 self.format_type_def("resource", &resource.name, &resource.fields, Some(&resource.capabilities))
             }
             Item::Shared(shared) => self.format_type_def("shared", &shared.name, &shared.fields, Some(&shared.capabilities)),
-            Item::Receipt(receipt) => {
-                if let Some(lifecycle) = &receipt.lifecycle {
-                    self.push_line(&format!("#[lifecycle({})]", lifecycle.states.join(", ")));
-                }
-                self.format_receipt_def(receipt)
-            }
+            Item::Receipt(receipt) => self.format_receipt_def(receipt),
             Item::Struct(struct_def) => self.format_type_def("struct", &struct_def.name, &struct_def.fields, None),
             Item::StateMachine(machine) => self.format_state_machine(machine),
             Item::Const(constant) => {
