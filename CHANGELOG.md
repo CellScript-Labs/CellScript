@@ -115,6 +115,7 @@
   state names in `create` initializers and qualified expressions such as
   `Ticket::Active`, avoiding hidden layout changes and numeric state
   boilerplate.
+- Added LSP completions for qualified lifecycle states such as `Ticket::Active`.
 - Clarified README CLI docs that `cellc test` is a compiler/policy harness, not
   trusted runtime execution.
 - Removed the old CKB acceptance policy exception path so the CKB target

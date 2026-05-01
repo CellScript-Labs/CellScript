@@ -204,7 +204,8 @@ New in 0.13:
   inject hidden state fields or mutate Molecule layout. `create` initializers
   may now use declared lifecycle state names such as `state: Created`, while
   guards and computed expressions can use qualified names such as
-  `Ticket::Active` instead of numeric state indexes.
+  `Ticket::Active` instead of numeric state indexes. The LSP now completes
+  those qualified lifecycle states after `Type::`.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.
