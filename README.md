@@ -139,7 +139,10 @@ CellScript programs are written in terms of Cell lifecycle operations:
 - **Capability gates** — `has store, transfer, destroy` makes asset permissions
   explicit instead of implicit.
 - **Lifecycle rules** — `#[lifecycle(...)]` lets a Cell-backed value describe a
-  state machine, e.g. `Granted -> Claimable -> FullyClaimed`.
+  state machine, e.g. `Granted -> Claimable -> FullyClaimed`. Lifecycle state
+  is still explicit data: declare a scalar `state` field, initialize it with a
+  declared state name such as `state: Granted`, and use qualified names such as
+  `VestingGrant::FullyClaimed` in guards and computed expressions.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -306,7 +309,8 @@ CellScript includes production-grade local language tooling:
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
   references, rename, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
-  `tower-lsp` JSON-RPC transport over stdio.
+  `tower-lsp` JSON-RPC transport over stdio. Completions include lifecycle
+  states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
   reports, CKB target-profile arguments, and status-bar feedback. It shells out to

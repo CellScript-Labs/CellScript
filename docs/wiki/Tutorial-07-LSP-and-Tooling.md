@@ -23,7 +23,8 @@ contract:
 - diagnostics for parse, type, lifecycle, and lowering errors;
 - hover information for actions, receipts, fields, local variables, lifecycle
   states, and lowering metadata;
-- keyword, type, symbol, field, and local completions;
+- keyword, type, symbol, field, local, enum variant, and qualified lifecycle
+  state completions such as `Ticket::Active`;
 - go-to-definition;
 - find-references;
 - workspace rename with identifier-boundary checks;
