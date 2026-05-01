@@ -686,7 +686,67 @@ impl CodeGenerator {
     }
 
     fn emit(&mut self, instruction: impl Into<String>) {
-        self.assembly.push(format!("    {}", instruction.into()));
+        let instruction = instruction.into();
+        if self.emit_large_stack_access_if_needed(&instruction) {
+            return;
+        }
+        self.assembly.push(format!("    {}", instruction));
+    }
+
+    fn emit_large_stack_access_if_needed(&mut self, instruction: &str) -> bool {
+        let Some(clean) = strip_comment(instruction) else {
+            return false;
+        };
+        if clean.is_empty() || clean.starts_with('.') || clean.ends_with(':') {
+            return false;
+        }
+
+        let mut parts = clean.splitn(2, char::is_whitespace);
+        let opcode = parts.next().unwrap_or_default();
+        let args = parts.next().unwrap_or("").trim();
+        let args = if args.is_empty() { Vec::new() } else { args.split(',').map(str::trim).collect::<Vec<_>>() };
+
+        match opcode {
+            "ld" | "lbu" if args.len() == 2 => {
+                let Some(offset) = stack_pointer_offset(args[1]) else {
+                    return false;
+                };
+                if small_signed_immediate(offset) {
+                    return false;
+                }
+                let scratch = scratch_register_avoiding(&[args[0]]);
+                self.assembly.push(format!("    li {}, {}", scratch, offset));
+                self.assembly.push(format!("    add {}, sp, {}", scratch, scratch));
+                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
+                true
+            }
+            "sb" | "sh" | "sw" | "sd" if args.len() == 2 => {
+                let Some(offset) = stack_pointer_offset(args[1]) else {
+                    return false;
+                };
+                if small_signed_immediate(offset) {
+                    return false;
+                }
+                let scratch = scratch_register_avoiding(&[args[0]]);
+                self.assembly.push(format!("    li {}, {}", scratch, offset));
+                self.assembly.push(format!("    add {}, sp, {}", scratch, scratch));
+                self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
+                true
+            }
+            "addi" if args.len() == 3 && args[1] == "sp" => {
+                let Ok(offset) = args[2].parse::<i64>() else {
+                    return false;
+                };
+                if small_signed_immediate(offset) {
+                    return false;
+                }
+                let scratch = scratch_register_avoiding(&[args[0]]);
+                self.assembly.push(format!("    li {}, {}", scratch, offset));
+                self.assembly.push(format!("    add {}, sp, {}", args[0], scratch));
+                true
+            }
+            _ => false,
+        }
     }
 
     fn emit_entry_abi_marker(&mut self, name: &str) {
@@ -8286,7 +8346,8 @@ enum Instruction {
     Sw { rs2: u8, rs1: u8, imm: i64 },
     Sd { rs2: u8, rs1: u8, imm: i64 },
     Slli { rd: u8, rs1: u8, shamt: i64 },
-    Li { rd: u8, imm: i64 },
+    Srli { rd: u8, rs1: u8, shamt: i64 },
+    Li { rd: u8, imm: i128 },
     La { rd: u8, label: String },
     Call { label: String },
     Jump { label: String },
@@ -8372,14 +8433,14 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let rodata_size = plan.metrics.rodata_size;
     let rodata_offset = layout.rodata_offset()?;
     let mut text_bytes = Vec::with_capacity(START_TRAMPOLINE_SIZE + text_user_size);
-    encode_li_sequence(&mut text_bytes, 2, CKB_SCRIPT_STACK_TOP)?;
+    encode_li_sequence(&mut text_bytes, 2, i128::from(CKB_SCRIPT_STACK_TOP))?;
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         encode_li_sequence(&mut text_bytes, 10, 25)?;
     } else {
         let entry_addr = parsed.symbol_address(entry_label, &layout)?;
         encode_call_sequence(&mut text_bytes, layout.text_base + 8, entry_addr)?;
     }
-    encode_li_sequence(&mut text_bytes, 17, EXIT_SYSCALL_NUMBER)?;
+    encode_li_sequence(&mut text_bytes, 17, i128::from(EXIT_SYSCALL_NUMBER))?;
     text_bytes.extend_from_slice(&encode_ecall().to_le_bytes());
     parsed.encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)?;
 
@@ -9280,10 +9341,22 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs1: parse_register(arg(&args, 1)?)?,
             shamt: parse_immediate(arg(&args, 2)?)?,
         }),
-        "li" => Ok(Instruction::Li { rd: parse_register(arg(&args, 0)?)?, imm: parse_immediate(arg(&args, 1)?)? }),
+        "srli" => Ok(Instruction::Srli {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            shamt: parse_immediate(arg(&args, 2)?)?,
+        }),
+        "li" => Ok(Instruction::Li { rd: parse_register(arg(&args, 0)?)?, imm: parse_li_immediate(arg(&args, 1)?)? }),
+        "mv" => Ok(Instruction::Addi { rd: parse_register(arg(&args, 0)?)?, rs1: parse_register(arg(&args, 1)?)?, imm: 0 }),
         "la" => Ok(Instruction::La { rd: parse_register(arg(&args, 0)?)?, label: arg(&args, 1)?.to_string() }),
         "call" => Ok(Instruction::Call { label: arg(&args, 0)?.to_string() }),
         "j" => Ok(Instruction::Jump { label: arg(&args, 0)?.to_string() }),
+        "bgt" => Ok(Instruction::Blt {
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 0)?)?,
+            label: arg(&args, 2)?.to_string(),
+        }),
+        "bgez" => Ok(Instruction::Bge { rs1: parse_register(arg(&args, 0)?)?, rs2: 0, label: arg(&args, 1)?.to_string() }),
         "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu" => {
             let rs1 = parse_register(arg(&args, 0)?)?;
             let rs2 = parse_register(arg(&args, 1)?)?;
@@ -9411,6 +9484,12 @@ fn encode_instruction(
             }
             out.extend_from_slice(&encode_i_type(0x13, *rd, 0b001, *rs1, *shamt)?.to_le_bytes());
         }
+        Instruction::Srli { rd, rs1, shamt } => {
+            if !(0..=63).contains(shamt) {
+                return Err(CompileError::new("srli shift amount must be in 0..=63", crate::error::Span::default()));
+            }
+            out.extend_from_slice(&encode_i_type(0x13, *rd, 0b101, *rs1, *shamt)?.to_le_bytes());
+        }
         Instruction::Li { rd, imm } => encode_li_sequence(out, *rd, *imm)?,
         Instruction::La { rd, label } => encode_address_sequence(out, *rd, pc, parsed.symbol_address(label, layout)?)?,
         Instruction::Call { label } => {
@@ -9450,24 +9529,41 @@ fn encode_instruction(
     Ok(())
 }
 
-fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i64) -> Result<()> {
-    if !li_fits_32_bit_split(imm) {
-        return encode_large_li_sequence(out, rd, imm);
+fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result<()> {
+    if let Some(signed) = li_signed_i64(imm) {
+        if li_fits_32_bit_split(signed) {
+            let (hi, lo) = split_hi_lo(signed)?;
+            out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
+            out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
+            return Ok(());
+        }
     }
-    let (hi, lo) = split_hi_lo(imm)?;
-    out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
-    out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
-    Ok(())
+    encode_large_li_sequence(out, rd, li_bits(imm)?)
 }
 
-fn encode_large_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i64) -> Result<()> {
-    let bytes = (imm as u64).to_be_bytes();
+fn encode_large_li_sequence(out: &mut Vec<u8>, rd: u8, bits: u64) -> Result<()> {
+    let bytes = bits.to_be_bytes();
     out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, 0, i64::from(bytes[0]))?.to_le_bytes());
     for byte in bytes.iter().skip(1) {
         out.extend_from_slice(&encode_i_type(0x13, rd, 0b001, rd, 8)?.to_le_bytes());
         out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, i64::from(*byte))?.to_le_bytes());
     }
     Ok(())
+}
+
+fn li_signed_i64(imm: i128) -> Option<i64> {
+    i64::try_from(imm).ok()
+}
+
+fn li_bits(imm: i128) -> Result<u64> {
+    if imm < i128::from(i64::MIN) || imm > i128::from(u64::MAX) {
+        return Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", imm), crate::error::Span::default()));
+    }
+    if imm < 0 {
+        Ok((imm as i64) as u64)
+    } else {
+        Ok(imm as u64)
+    }
 }
 
 fn encode_address_sequence(out: &mut Vec<u8>, rd: u8, pc: u64, target: u64) -> Result<()> {
@@ -9512,8 +9608,8 @@ fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: us
     }
 }
 
-fn li_sequence_size(imm: i64) -> usize {
-    if li_fits_32_bit_split(imm) {
+fn li_sequence_size(imm: i128) -> usize {
+    if li_signed_i64(imm).is_some_and(li_fits_32_bit_split) {
         8
     } else {
         60
@@ -9635,6 +9731,28 @@ fn parse_memory_operand(value: &str) -> Result<(i64, u8)> {
     Ok((imm, rs1))
 }
 
+fn stack_pointer_offset(value: &str) -> Option<i64> {
+    let open = value.find('(')?;
+    let close = value.rfind(')')?;
+    if value[open + 1..close].trim() != "sp" {
+        return None;
+    }
+    value[..open].trim().parse::<i64>().ok()
+}
+
+fn small_signed_immediate(value: i64) -> bool {
+    (-2048..=2047).contains(&value)
+}
+
+fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
+    let uses_t6 = registers.iter().any(|register| parse_register(register).ok() == Some(31));
+    if uses_t6 {
+        "t5"
+    } else {
+        "t6"
+    }
+}
+
 fn parse_register(name: &str) -> Result<u8> {
     let reg = match name {
         "zero" | "x0" => 0,
@@ -9685,6 +9803,36 @@ fn parse_immediate(value: &str) -> Result<i64> {
             .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()));
     }
     value.parse::<i64>().map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))
+}
+
+fn parse_li_immediate(value: &str) -> Result<i128> {
+    if let Some(hex) = value.strip_prefix("-0x") {
+        return i128::from_str_radix(hex, 16)
+            .map(|value| -value)
+            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()));
+    }
+    if let Some(hex) = value.strip_prefix("0x") {
+        let parsed = u128::from_str_radix(hex, 16)
+            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))?;
+        if parsed <= u128::from(u64::MAX) {
+            return Ok(parsed as i128);
+        }
+        return Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", value), crate::error::Span::default()));
+    }
+    if value.starts_with('-') {
+        value.parse::<i128>().map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))
+    } else {
+        value
+            .parse::<u128>()
+            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))
+            .and_then(|parsed| {
+                if parsed <= u128::from(u64::MAX) {
+                    Ok(parsed as i128)
+                } else {
+                    Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", value), crate::error::Span::default()))
+                }
+            })
+    }
 }
 
 fn arg(args: &[String], index: usize) -> Result<&str> {
@@ -9906,6 +10054,8 @@ mod tests {
             "snez s5, a0".to_string(),
             "neg s6, a0".to_string(),
             "slli s7, a0, 3".to_string(),
+            "srli s8, a0, 1".to_string(),
+            "mv s9, a0".to_string(),
             "sd t0, 0(sp)".to_string(),
             "ld t1, 0(sp)".to_string(),
             "sb t1, 8(sp)".to_string(),
@@ -9920,6 +10070,8 @@ mod tests {
             "bge a0, a1, branch_target".to_string(),
             "bltu a1, a0, branch_target".to_string(),
             "bgeu a0, a1, branch_target".to_string(),
+            "bgt a0, a1, branch_target".to_string(),
+            "bgez a0, branch_target".to_string(),
             "beqz a0, branch_target".to_string(),
             "bnez a0, branch_target".to_string(),
             "j done".to_string(),
@@ -9938,6 +10090,48 @@ mod tests {
         ];
 
         let elf = assemble_elf_internal(&lines).expect("internal assembler should encode the emitted instruction surface");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn internal_assembler_encodes_full_width_li_literals() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "li a0, 9223372036854775808".to_string(),
+            "li a1, 18446744073709551615".to_string(),
+            "ret".to_string(),
+        ];
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should encode u64-width li literals");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn generated_large_stack_offsets_are_normalized_before_assembly() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit("sd t0, 2048(sp)");
+        generator.emit("ld t6, 2056(sp)");
+
+        assert_eq!(
+            generator.assembly,
+            vec![
+                "    li t6, 2048",
+                "    add t6, sp, t6",
+                "    sd t0, 0(t6)",
+                "    li t5, 2056",
+                "    add t5, sp, t5",
+                "    ld t6, 0(t5)",
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_stdlib_assembly_is_internal_assembler_clean() {
+        let lines = crate::stdlib::StdLib::generate_assembly().lines().map(|line| line.to_string()).collect::<Vec<_>>();
+
+        let elf = assemble_elf_internal(&lines).expect("generated stdlib assembly should assemble internally");
         assert!(elf.starts_with(b"\x7fELF"));
     }
 

@@ -19095,6 +19095,44 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
     }
 
     #[test]
+    fn compile_riscv_elf_accepts_full_width_u64_literals() {
+        let program = r#"
+module vm::u64_literals
+
+action high_bit() -> u64 {
+    return 9223372036854775808
+}
+
+action max_value() -> u64 {
+    return 18446744073709551615
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+
+        assert_eq!(result.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_large_stack_offsets() {
+        let mut program = String::from("module vm::large_stack\n\naction main() -> u64 {\n");
+        for index in 0..260 {
+            program.push_str(&format!("    let x{} = {}\n", index, index));
+        }
+        program.push_str("    return x259\n}\n");
+
+        let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(asm.artifact_bytes).unwrap();
+        assert!(!asm.contains("2048(sp)") && !asm.contains("2072(sp)"), "large stack offsets should be expanded:\n{}", asm);
+
+        let elf = compile(&program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(elf.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn compile_produces_ckb_elf_without_vm_abi_trailer() {
         let result = compile(
             SIMPLE_PROGRAM,

@@ -1502,9 +1502,15 @@ def verify_artifact(artifact):
     except json.JSONDecodeError as error:
         raise RuntimeError(f"verify-artifact did not return JSON for {artifact}: {clipped(completed.stdout)}") from error
 
+def internal_assembler_env():
+    env = os.environ.copy()
+    for key in ("CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"):
+        env.pop(key, None)
+    return env
+
 def compile_artifact(name, kind, source, artifact, *, entry_args=None):
     entry_args = entry_args or []
-    env = os.environ.copy()
+    env = internal_assembler_env()
     result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", *entry_args, "-o", artifact], env=env)
     if result["returncode"] != 0:
         raise RuntimeError(f"CKB artifact compile failed for {name}: {result['stderr']}")
@@ -1548,7 +1554,7 @@ validate_source_coverage_matrix()
 def strict_original_compile(name):
     source = acceptance_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact])
+    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact], env=internal_assembler_env())
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -1568,7 +1574,10 @@ def strict_original_compile(name):
 
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact])
+    result = run(
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact],
+        env=internal_assembler_env(),
+    )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
