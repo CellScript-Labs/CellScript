@@ -1,7 +1,18 @@
 # Changelog
 
-## 0.13.0 - Unreleased
+## 0.13.0 - 2026-04-30
 
+- Complete the internal RISC-V ELF assembler branch surface used by current
+  codegen, including `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `beqz`,
+  `bnez`, and branch relaxation coverage.
+- Harden the stack-backed `Vec<T>` helper boundary so unsupported receivers,
+  invalid `extend_from_slice` element types, and unrefined `Vec::new()` slice
+  extension cases fail at compile time instead of drifting into hidden runtime
+  paths.
+- Add `examples/language/order_book.cell` as a non-production language example
+  for local stack-backed order vectors.
+- Add the CKB release-gate wrapper script and document the difference between
+  quick compile-only evidence and full production acceptance.
 - Add builder-backed local CKB valid-spend and invalid-spend acceptance coverage
   for all 16 bundled lock entries, in the same production gate as the 43 action
   flows.
@@ -91,6 +102,8 @@
 - Made external RISC-V toolchains explicit opt-in via `CELLSCRIPT_RISCV_CC` or
   `CELLSCRIPT_RISCV_AS`/`CELLSCRIPT_RISCV_LD`, so production ELF output and
   backend shape budgets no longer depend on tools accidentally present in PATH.
+- Hardened those external toolchain overrides to require absolute paths to
+  existing executable files instead of accepting relative command names.
 - Rebased the multisig bundled-example ELF budget on the deterministic internal
   ELF artifact size while keeping the assembly text/CFG budgets unchanged.
 - Removed the executable Wasm pseudo-lowering path; the Wasm module now remains
@@ -98,6 +111,11 @@
   code.
 - Removed empty module doc comments and simplified duplicated verifier branches
   reported by clippy.
+- Kept lifecycle state storage explicit in cell data while allowing lifecycle
+  state names in `create` initializers and qualified expressions such as
+  `Ticket::Active`, avoiding hidden layout changes and numeric state
+  boilerplate.
+- Added LSP completions for qualified lifecycle states such as `Ticket::Active`.
 - Clarified README CLI docs that `cellc test` is a compiler/policy harness, not
   trusted runtime execution.
 - Removed the old CKB acceptance policy exception path so the CKB target

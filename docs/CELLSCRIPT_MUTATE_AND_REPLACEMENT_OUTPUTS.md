@@ -1,6 +1,6 @@
 # CellScript Mutate And Replacement Outputs
 
-**Status**: production semantics for CellScript 0.12.
+**Status**: production semantics for the current CellScript CKB profile.
 
 CellScript `&mut Shared` does not mean physical in-place mutation on CKB or
 Cells are immutable. A mutable shared parameter lowers to:
@@ -66,4 +66,3 @@ output at the indexes declared by metadata. Production reports must retain:
 
 If the builder cannot prove this mapping, the artifact is not production-ready
 even if it compiles.
-

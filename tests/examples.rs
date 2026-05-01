@@ -14,7 +14,7 @@ const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.j
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 40 * 1024),
     ("launch.cell", 28 * 1024),
-    ("multisig.cell", 80 * 1024),
+    ("multisig.cell", 84 * 1024),
     ("nft.cell", 54 * 1024),
     ("timelock.cell", 44 * 1024),
     ("token.cell", 16 * 1024),
@@ -46,7 +46,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 4,
             max_text_bytes: 24 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_500,
+            max_cond_branch_abs_distance: 2_800,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -57,12 +57,12 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 20_500,
+            max_lines: 21_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 20,
             max_text_bytes: 80 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_000,
+            max_cond_branch_abs_distance: 7_300,
             max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 5_800,
@@ -89,7 +89,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 10_500,
+            max_lines: 10_900,
             max_fail_handlers: 64,
             max_shared_epilogues: 22,
             max_text_bytes: 40 * 1024,
@@ -99,7 +99,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_block_bytes: 320,
             max_cfg_edges: 3_100,
             max_call_edges: 260,
-            max_unreachable_machine_blocks: 1_800,
+            max_unreachable_machine_blocks: 1_850,
         },
     ),
     (
@@ -536,6 +536,88 @@ fn registry_example_uses_bounded_local_vec_helpers_without_collection_debt() {
             hash_vec.helpers
         );
     }
+}
+
+#[test]
+fn registry_example_with_insert_contains_compiles_to_elf() {
+    let result = compile_file(
+        language_example_path("registry.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("registry example should compile to ELF through the internal assembler");
+
+    assert!(!result.artifact_bytes.is_empty(), "registry ELF artifact should be non-empty");
+}
+
+#[test]
+fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() {
+    let result =
+        compile_file(language_example_path("order_book.cell"), CompileOptions::default()).expect("order book example should compile");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("order book asm should be utf8");
+
+    for marker in [
+        "# cellscript abi: stack collection push element_size=56",
+        "# cellscript abi: stack collection insert element_size=56",
+        "# cellscript abi: stack collection contains element_size=56",
+        "# cellscript abi: stack collection remove element_size=56",
+        "# cellscript abi: stack collection pop element_size=56",
+        "# cellscript abi: stack collection reverse element_size=56",
+        "# cellscript abi: stack collection swap element_size=56",
+        "# cellscript abi: stack collection clear",
+    ] {
+        assert!(asm.contains(marker), "order book example should lower bounded Vec helper marker {marker}:\n{asm}");
+    }
+
+    for name in ["local_book_seed", "local_bid_priority", "local_cancel_order", "local_match_quote"] {
+        let action = action(&result.metadata, name);
+        assert!(
+            action.fail_closed_runtime_features.is_empty(),
+            "order book {name} should not carry collection fail-closed debt: {:?}",
+            action.fail_closed_runtime_features
+        );
+    }
+
+    let order_vecs = result
+        .metadata
+        .runtime
+        .collection_instantiations
+        .iter()
+        .filter(|instantiation| instantiation.collection_ty == "Vec<Order>")
+        .collect::<Vec<_>>();
+    assert!(!order_vecs.is_empty(), "order book should expose Vec<Order> monomorphization metadata");
+    for instantiation in &order_vecs {
+        assert_eq!(instantiation.element_ty, "Order");
+        assert_eq!(instantiation.element_width_bytes, 56);
+        assert_eq!(instantiation.backing, "stack-fixed-buffer:256");
+        assert_eq!(instantiation.status, "checked-runtime");
+    }
+
+    let bid_priority = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_bid_priority")
+        .expect("bid priority should expose Vec<Order> metadata");
+    for helper in ["new", "push", "insert", "swap", "reverse", "index", "len"] {
+        assert!(
+            bid_priority.helpers.contains(&helper.to_string()),
+            "order book bid priority should expose helper {helper}: {:?}",
+            bid_priority.helpers
+        );
+    }
+
+    let cancel = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_cancel_order")
+        .expect("cancel should expose Vec<Order> metadata");
+    for helper in ["new", "push", "contains", "remove", "clear", "len"] {
+        assert!(cancel.helpers.contains(&helper.to_string()), "order book cancel should expose helper {helper}: {:?}", cancel.helpers);
+    }
+
+    let elf = compile_file(
+        language_example_path("order_book.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("order book example should compile to ELF through the internal assembler");
+    assert!(!elf.artifact_bytes.is_empty(), "order book ELF artifact should be non-empty");
 }
 
 fn assert_create(action: &cellscript::ActionMetadata, ty: &str, context: &str) {
@@ -1528,28 +1610,29 @@ fn amm_pool_mutable_shared_params_are_scheduler_visible() {
     assert_eq!(seed_pool_primitive.binding.as_deref(), Some("create_Pool"));
     assert_eq!(seed_pool_primitive.output_source.as_deref(), Some("Output"));
     assert_eq!(seed_pool_primitive.output_index, Some(0));
-    assert_eq!(seed_pool_primitive.source_invariant_count, 3);
+    assert_eq!(seed_pool_primitive.source_invariant_count, 4);
     assert_pool_component(seed_pool_primitive, "ordinary-shared-create-summary", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=3", "seed_pool");
+    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=4", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-distinct=checked-runtime", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:positive-reserves=checked-runtime", "seed_pool");
     assert_pool_component(seed_pool_primitive, "source-invariant:fee-bps-bound=checked-runtime", "seed_pool");
+    assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-identity-distinct=checked-runtime", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "token-pair-distinct", "checked-runtime", "assert-invariant-cfg", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "positive-reserves", "checked-runtime", "assert-invariant-cfg", "seed_pool");
     assert_pool_invariant_family(seed_pool_primitive, "fee-bps-bound", "checked-runtime", "assert-invariant-cfg", "seed_pool");
+    assert_pool_invariant_family(
+        seed_pool_primitive,
+        "token-pair-identity-distinct",
+        "checked-runtime",
+        "assert-invariant-cfg",
+        "seed_pool",
+    );
     assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-symbol-admission=checked-runtime", "seed_pool");
     assert!(
-        asm.contains(
-            "# cellscript abi: pool token-pair identity admission source=Input left=token_a#0 right=token_b#1 field=type_hash size=32"
-        ),
-        "seed_pool should emit executable token-pair TypeHash identity admission:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_left_type_hash source=Input index=0 field=5")
-            && asm
-                .contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_right_type_hash source=Input index=1 field=5"),
-        "seed_pool should load both consumed token TypeHash fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=0 field=5")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=1 field=5")
+            && asm.contains("# cellscript abi: fixed-byte Ne comparison size=32"),
+        "seed_pool should express token-pair TypeHash identity through source type_hash() inequality, not a function-name codegen hook:\n{}",
         asm
     );
     assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-identity-admission=checked-runtime", "seed_pool");
@@ -1557,7 +1640,7 @@ fn amm_pool_mutable_shared_params_are_scheduler_visible() {
         seed_pool_primitive,
         "token-pair-identity-admission",
         "checked-runtime",
-        "input-type-id-abi+load-cell-by-field",
+        "assert-invariant-cfg+input-type-id-abi",
         "seed_pool",
     );
     assert!(
@@ -2062,13 +2145,19 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a2 length=a3"),
-        "launch_token -> seed_pool must preserve the second Token pointer+length ABI:\n{}",
+        asm.contains("# cellscript abi: call seed_pool schema param token_a type_hash pointer=a2 length=a3 size=32")
+            && asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a4 length=a5")
+            && asm.contains("# cellscript abi: call seed_pool schema param token_b type_hash pointer=a6 length=a7 size=32"),
+        "launch_token -> seed_pool must preserve Token pointer/length and TypeHash ABI slots:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=a5 length=a6 size=32"),
-        "launch_token -> seed_pool must preserve Address pointer+length ABI:\n{}",
+        asm.contains("# cellscript abi: call seed_pool scalar fee_rate_bps -> t0")
+            && asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-24")
+            && asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=stack+8 length=stack+16 size=32")
+            && asm.contains("# cellscript abi: reserve 24 bytes for outgoing stack call arguments")
+            && !asm.contains("requires ABI arg"),
+        "launch_token -> seed_pool must stage ABI args beyond a7 on the outgoing call stack:\n{}",
         asm
     );
     assert!(

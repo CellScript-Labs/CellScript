@@ -1502,9 +1502,15 @@ def verify_artifact(artifact):
     except json.JSONDecodeError as error:
         raise RuntimeError(f"verify-artifact did not return JSON for {artifact}: {clipped(completed.stdout)}") from error
 
+def internal_assembler_env():
+    env = os.environ.copy()
+    for key in ("CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"):
+        env.pop(key, None)
+    return env
+
 def compile_artifact(name, kind, source, artifact, *, entry_args=None):
     entry_args = entry_args or []
-    env = os.environ.copy()
+    env = internal_assembler_env()
     result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", *entry_args, "-o", artifact], env=env)
     if result["returncode"] != 0:
         raise RuntimeError(f"CKB artifact compile failed for {name}: {result['stderr']}")
@@ -1548,7 +1554,7 @@ validate_source_coverage_matrix()
 def strict_original_compile(name):
     source = acceptance_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact])
+    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact], env=internal_assembler_env())
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -1568,7 +1574,10 @@ def strict_original_compile(name):
 
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact])
+    result = run(
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact],
+        env=internal_assembler_env(),
+    )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -2041,6 +2050,10 @@ report.update({
 })
 report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
+  if [[ "$ACCEPTANCE_MODE" == "production" ]]; then
+    python3 "$REPO_ROOT/scripts/validate_ckb_cellscript_production_evidence.py" "$REPORT_JSON" --compile-only
+    echo "CKB compile-only production evidence is not sufficient for external release; run without --compile-only for final hardening." >&2
+  fi
   echo "CKB CellScript $ACCEPTANCE_MODE compile-only acceptance passed: $REPORT_JSON"
   exit 0
 fi
@@ -2383,15 +2396,21 @@ def collection_molecule_data(creator, total_supply, max_supply, name=b"Acceptanc
         molecule_bytes(base_uri),
     ])
 
-def listing_data(token_id, seller, price, created_at):
+def listing_data(token_id, seller, price, created_at, state=None):
     if len(seller) != 32:
         raise RuntimeError(f"Listing seller must be exactly 32 bytes, got {len(seller)}")
-    return token_id.to_bytes(8, "little") + seller + price.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"Listing state must fit in u8, got {state}")
+    payload = token_id.to_bytes(8, "little") + seller + price.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
-def offer_data(token_id, buyer, price, expires_at):
+def offer_data(token_id, buyer, price, expires_at, state=None):
     if len(buyer) != 32:
         raise RuntimeError(f"Offer buyer must be exactly 32 bytes, got {len(buyer)}")
-    return token_id.to_bytes(8, "little") + buyer + price.to_bytes(8, "little") + expires_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"Offer state must fit in u8, got {state}")
+    payload = token_id.to_bytes(8, "little") + buyer + price.to_bytes(8, "little") + expires_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
 def royalty_payment_data(token_id, recipient, amount):
     if len(recipient) != 32:
@@ -2419,12 +2438,15 @@ def locked_asset_molecule_data(asset_type, amount, lock_hash):
         lock_hash,
     ])
 
-def release_request_data(lock_hash, requester, requested_at):
+def release_request_data(lock_hash, requester, requested_at, state=None):
     if len(lock_hash) != 32:
         raise RuntimeError(f"ReleaseRequest lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
     if len(requester) != 32:
         raise RuntimeError(f"ReleaseRequest requester must be exactly 32 bytes, got {len(requester)}")
-    return lock_hash + requester + requested_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"ReleaseRequest state must fit in u8, got {state}")
+    payload = lock_hash + requester + requested_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
 def emergency_release_data(lock_hash, requester, requested_at, approvals):
     if len(lock_hash) != 32:
@@ -2435,11 +2457,13 @@ def emergency_release_data(lock_hash, requester, requested_at, approvals):
         raise RuntimeError(f"EmergencyRelease approvals must fit in u8, got {approvals}")
     return lock_hash + requester + requested_at.to_bytes(8, "little") + bytes([approvals])
 
-def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, approvers):
+def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, approvers, state=0):
     if len(lock_hash) != 32:
         raise RuntimeError(f"EmergencyRelease lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
     if len(requester) != 32:
         raise RuntimeError(f"EmergencyRelease requester must be exactly 32 bytes, got {len(requester)}")
+    if not 0 <= state <= 255:
+        raise RuntimeError(f"EmergencyRelease state must fit in u8, got {state}")
     for approver in approvers:
         if len(approver) != 32:
             raise RuntimeError(f"EmergencyRelease approver must be exactly 32 bytes, got {len(approver)}")
@@ -2449,6 +2473,7 @@ def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, 
         reason,
         requested_at.to_bytes(8, "little"),
         molecule_fixvec(approvers),
+        bytes([state]),
     ])
 
 def release_record_data(lock_hash, released_at, released_by):
@@ -2482,7 +2507,7 @@ def multisig_wallet_molecule_data(signers, threshold, nonce, created_at):
         created_at.to_bytes(8, "little"),
     ])
 
-def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at):
+def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at, state=0):
     if len(wallet_hash) != 32:
         raise RuntimeError(f"Proposal wallet_hash must be exactly 32 bytes, got {len(wallet_hash)}")
     if len(proposer) != 32:
@@ -2493,6 +2518,8 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
         raise RuntimeError(f"Proposal operation must fit in u8, got {operation}")
     if not 0 <= required_signatures <= 255:
         raise RuntimeError(f"Proposal required_signatures must fit in u8, got {required_signatures}")
+    if not 0 <= state <= 255:
+        raise RuntimeError(f"Proposal state must fit in u8, got {state}")
     encoded_signatures = []
     for signer, signature in signatures:
         if len(signer) != 32:
@@ -2512,6 +2539,7 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
         molecule_fixvec(encoded_signatures),
         created_at.to_bytes(8, "little"),
         expires_at.to_bytes(8, "little"),
+        bytes([state]),
     ])
 
 def multisig_proposal_data(wallet_hash, proposal_id, proposer, operation, target, amount, required_signatures, signature_count, created_at, expires_at):
@@ -3158,15 +3186,15 @@ def lock_spend_case_specs(example, lock_name, lock_script):
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "listing_seller"): {
-            "valid_cells": [cell(listing_data(1, addr_a, 500, 10))],
+            "valid_cells": [cell(listing_data(1, addr_a, 500, 10, state=0))],
             "valid_witnesses": [entry_witness(addr_a)],
-            "invalid_cells": [cell(listing_data(1, addr_a, 500, 10))],
+            "invalid_cells": [cell(listing_data(1, addr_a, 500, 10, state=0))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "offer_buyer"): {
-            "valid_cells": [cell(offer_data(1, addr_b, 500, 2000))],
+            "valid_cells": [cell(offer_data(1, addr_b, 500, 2000, state=0))],
             "valid_witnesses": [entry_witness(addr_b)],
-            "invalid_cells": [cell(offer_data(1, addr_b, 500, 2000))],
+            "invalid_cells": [cell(offer_data(1, addr_b, 500, 2000, state=0))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "valid_royalty"): {
@@ -3475,6 +3503,7 @@ def run_token_action(action_record, always_success_dep):
 def build_nft_action_case(action_record, cellscript_lock, cellscript_type, destination_lock, current_owner, destination_owner, metadata_hash, royalty_recipient, nft_type, listing_type, offer_type, royalty_payment_type, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
+    lifecycle_state = 0 if original_scoped else None
 
     if action == "mint":
         input_collection_payload = (
@@ -3545,22 +3574,22 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
             {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
         ]
         witness = [entry_witness(price, current_time)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price, current_time).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price + 1, current_time).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price, current_time, state=lifecycle_state).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price + 1, current_time, state=lifecycle_state).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
     elif action == "cancel_listing":
         token_id = 4
         price = 120
         created_at = 60
         initial = create_script_locked_cells(
             "nft.cancel_listing",
-            [{"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at)}],
+            [{"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=lifecycle_state)}],
             cell_deps,
         )
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": None}]
         witness = [entry_witness()]
         valid_tx = transaction(input_cell, outputs, ["0x"], cell_deps, witness)
-        malformed_tx = transaction(input_cell, [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": listing_type}], ["0x" + listing_data(token_id, current_owner, price, created_at).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": listing_type}], ["0x" + listing_data(token_id, current_owner, price, created_at, state=lifecycle_state).hex()], cell_deps, witness)
     elif action == "buy_from_listing":
         token_id = 6
         price = 10_000
@@ -3572,7 +3601,7 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         initial = create_script_locked_cells(
             "nft.buy_from_listing",
             [
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at)},
+                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=lifecycle_state)},
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
             ],
             cell_deps,
@@ -3605,8 +3634,8 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": offer_type}]
         witness = [entry_witness(token_id, destination_owner, price, expires_at)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price, expires_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price + 1, expires_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price, expires_at, state=lifecycle_state).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price + 1, expires_at, state=lifecycle_state).hex()], cell_deps, witness)
     elif action == "accept_offer":
         token_id = 7
         price = 10_000
@@ -3618,7 +3647,7 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         initial = create_script_locked_cells(
             "nft.accept_offer",
             [
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at)},
+                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at, state=lifecycle_state)},
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
             ],
             cell_deps,
@@ -4591,6 +4620,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
 def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, owner, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
+    lifecycle_state = 0 if original_scoped else None
 
     if action == "create_absolute_lock":
         current_height = 50
@@ -4657,8 +4687,8 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
         ]
         witness = [entry_witness(owner, current_height)] if original_scoped else [entry_witness(lock_hash, owner, current_height)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height + 1).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height, state=lifecycle_state).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height + 1, state=lifecycle_state).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
     elif action == "request_emergency_release":
         unlock_height = 500
         current_height = 125
@@ -4734,7 +4764,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             [
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": locked_asset_type, "data": locked_asset_payload},
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": release_request_type, "data": release_request_data(lock_hash, owner, 120)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": release_request_type, "data": release_request_data(lock_hash, owner, 120, state=lifecycle_state)},
             ],
             cell_deps,
         )

@@ -2,6 +2,8 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use std::collections::{HashMap, HashSet};
 
+pub const LIFECYCLE_STATE_FIELD_NAME: &str = "state";
+
 #[derive(Debug, Clone)]
 struct LifecycleSpec {
     states: Vec<String>,
@@ -31,20 +33,18 @@ pub fn check(module: &Module) -> Result<()> {
 
         checker.register_lifecycle(&receipt.name, lifecycle)?;
 
-        let state_field = receipt.fields.iter().find(|field| field.name == "state");
-        if let Some(field) = state_field {
-            if !is_lifecycle_state_type(&field.ty) {
-                return Err(CompileError::new(
-                    format!("lifecycle receipt '{}' state field must be an unsigned integer type", receipt.name),
-                    field.span,
-                ));
-            }
+        let state_field = receipt.fields.iter().find(|field| field.name == LIFECYCLE_STATE_FIELD_NAME);
+        let Some(field) = state_field else {
+            return Err(CompileError::new(format!("lifecycle receipt '{}' must declare a state field", receipt.name), lifecycle.span));
+        };
+        if !is_lifecycle_state_type(&field.ty) {
+            return Err(CompileError::new(
+                format!("lifecycle receipt '{}' state field must be an unsigned integer type", receipt.name),
+                field.span,
+            ));
         }
 
-        specs.insert(
-            receipt.name.clone(),
-            LifecycleSpec { states: lifecycle.states.clone(), state_field_span: state_field.map(|field| field.span) },
-        );
+        specs.insert(receipt.name.clone(), LifecycleSpec { states: lifecycle.states.clone(), state_field_span: Some(field.span) });
     }
 
     for item in &module.items {
@@ -634,12 +634,12 @@ fn validate_lifecycle_create(
         return Ok(());
     }
 
-    let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == "state") else {
+    let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == LIFECYCLE_STATE_FIELD_NAME) else {
         return Err(CompileError::new(format!("create of lifecycle receipt '{}' must set its state field", create.ty), create.span));
     };
 
     let updates_existing = context.consumed_lifecycle_types.contains(&create.ty);
-    let Some(state_index) = static_integer_value(state_expr, context) else {
+    let Some(state_index) = static_lifecycle_state_value(state_expr, context, &create.ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
                 format!("initial create of lifecycle receipt '{}' must use statically known initial state index 0", create.ty),
@@ -685,6 +685,23 @@ fn static_integer_value(expr: &Expr, context: &ActionLifecycleContext) -> Option
         Expr::Identifier(name) => context.integer_aliases.get(name).copied(),
         _ => integer_literal(expr),
     }
+}
+
+fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, type_name: &str, states: &[String]) -> Option<u64> {
+    static_integer_value(expr, context).or_else(|| match expr {
+        Expr::Identifier(name) => {
+            let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+                if qualified_type != type_name {
+                    return None;
+                }
+                state_name
+            } else {
+                name.as_str()
+            };
+            states.iter().position(|state| state == state_name).map(|index| index as u64)
+        }
+        _ => None,
+    })
 }
 
 fn is_lifecycle_state_type(ty: &Type) -> bool {

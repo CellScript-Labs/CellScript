@@ -37,4 +37,4 @@ let data_hash = cellscript::ckb_blake2b256(artifact_bytes);
 ```
 
 This does not imply arbitrary in-script dynamic Blake2b support. It is the
-0.12 builder and release-evidence surface.
+builder and release-evidence surface, not a general on-chain hashing primitive.

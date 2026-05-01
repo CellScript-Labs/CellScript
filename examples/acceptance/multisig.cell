@@ -44,6 +44,7 @@ receipt Proposal has destroy {
     signatures: Vec<Signature>,
     created_at: u64,
     expires_at: u64,
+    state: u8,
 }
 
 struct Signature {
@@ -130,6 +131,7 @@ action propose_transfer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
+        state: Created,
     };
     
     
@@ -258,6 +260,7 @@ action propose_add_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
+        state: Created,
     };
     
     proposal
@@ -295,6 +298,7 @@ action propose_remove_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
+        state: Created,
     };
     
     proposal
@@ -333,6 +337,7 @@ action propose_change_threshold(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
+        state: Created,
     };
     
     proposal

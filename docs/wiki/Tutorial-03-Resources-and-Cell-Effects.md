@@ -45,6 +45,50 @@ The `Token` cannot simply disappear. It must be consumed, returned, transferred,
 claimed, settled, or destroyed. Silent loss is rejected because silent loss would
 make the Cell lifecycle unclear.
 
+## Lifecycle State Is Explicit Data
+
+`#[lifecycle(...)]` declares the allowed state order for a Cell-backed receipt,
+but it does not hide storage or change Molecule layout behind the user's back.
+Declare the state field in the schema:
+
+```cellscript
+#[lifecycle(Granted -> Claimable -> FullyClaimed)]
+receipt VestingGrant has store {
+    state: u8,
+    beneficiary: Address,
+    total_amount: u64,
+    claimed_amount: u64
+}
+```
+
+When creating an initial output, use the state name instead of a numeric index:
+
+```cellscript
+create VestingGrant {
+    state: Granted,
+    beneficiary,
+    total_amount,
+    claimed_amount: 0
+}
+```
+
+In guards and computed expressions, prefer the qualified form so the state
+machine is clear at the use site:
+
+```cellscript
+assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
+
+let next_state: u8 = if claimed == grant.total_amount {
+    VestingGrant::FullyClaimed
+} else {
+    VestingGrant::Claimable
+}
+```
+
+The compiler lowers lifecycle states to their declared ordinal values, verifies
+the explicit `state` field at runtime, and rejects a state from another
+lifecycle, such as assigning `OtherGrant::Live` to `VestingGrant.state`.
+
 ## Creating Output Cells
 
 `create` constructs typed output data and a corresponding Cell output:

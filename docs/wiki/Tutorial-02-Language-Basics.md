@@ -92,6 +92,39 @@ A struct is a shape. It does not create on-chain storage by itself. A local
 `Config` value is transaction-local unless you embed it in a `resource`,
 `shared`, or `receipt`.
 
+Struct literals and Cell `create` literals both support field shorthand when the
+field name and local variable name match:
+
+```cellscript
+let config = Config { threshold }
+
+create Token {
+    amount,
+    symbol
+}
+```
+
+The shorthand is exactly `field: field`; it does not infer or rename fields.
+
+## Typed Vec Literals
+
+Use `[]` and `[x, y]` for local `Vec<T>` construction only where the expected
+type is already known:
+
+```cellscript
+let mut keys: Vec<Hash> = []
+let mut owners: Vec<Address> = [primary_owner, backup_owner]
+
+create Proposal {
+    data: [],
+    signatures: []
+}
+```
+
+These literals lower to the same bounded, stack-backed `Vec<T>` helpers as
+`Vec::new()` plus pushes. Untyped `[]` remains rejected, and cell-backed
+collection ownership remains outside the supported production surface.
+
 ## Resources
 
 Use `resource` for linear Cell-backed assets. If your protocol should not be
@@ -107,6 +140,23 @@ resource Token has store, transfer, destroy {
 Resources are linear values. When an action receives one, the action must say
 where it goes: consume it, create a replacement, transfer it, return it, claim
 it, settle it, or destroy it.
+
+Persistent declarations can also declare the default CKB script hash type used
+for their type identity metadata:
+
+```cellscript
+#[type_id("cellscript::asset::Token:v1")]
+resource Token has store
+with_default_hash_type(Data1)
+{
+    amount: u64
+    symbol: [u8; 8]
+}
+```
+
+Supported spellings are `Data`, `Data1`, `Data2`, and `Type`. The lowercase CKB
+forms are accepted too. Unknown hash types are compile errors, not deployment
+warnings.
 
 ## Shared State
 

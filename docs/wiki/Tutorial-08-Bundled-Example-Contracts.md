@@ -28,10 +28,11 @@ Subdirectory copies use `cellscript::business::*` and
 `cellscript::acceptance::*` module namespaces so they can coexist with the
 top-level examples during module loading.
 
-`examples/registry.cell` is intentionally outside the bundled production matrix.
-It is a bounded-collection language example for local `Vec<Address>` and
-`Vec<Hash>` helpers, covered by compiler/tooling tests rather than CKB
-production action acceptance.
+`examples/language/registry.cell`, its top-level compatibility mirror
+`examples/registry.cell`, and `examples/language/order_book.cell` are
+intentionally outside the bundled production matrix. They are
+bounded-collection language examples for local stack-backed `Vec<T>` helpers,
+covered by compiler/tooling tests rather than CKB production action acceptance.
 
 For a visual business-flow map of every bundled example, see
 [`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
@@ -193,6 +194,7 @@ cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-pr
 For release-facing CKB evidence, run the CellScript acceptance gate:
 
 ```bash
+./scripts/cellscript_ckb_release_gate.sh production
 ./scripts/ckb_cellscript_acceptance.sh --production
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json

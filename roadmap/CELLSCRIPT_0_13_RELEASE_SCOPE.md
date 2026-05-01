@@ -1,4 +1,4 @@
-# CellScript 0.13 Roadmap
+# CellScript 0.13 Release Scope
 
 **Updated**: 2026-04-27
 
@@ -75,7 +75,7 @@ Important boundaries:
 Detailed tracker:
 
 - [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
-- [Collections support matrix](CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 
 ## Surface Syntax And Examples
 
@@ -100,8 +100,8 @@ Design boundary:
 
 Detailed design:
 
-- [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [Wiki cookbook](wiki/Cookbook-Recipes.md)
+- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [Wiki cookbook](../docs/wiki/Cookbook-Recipes.md)
 
 ## Lock Boundary Surface
 
@@ -138,9 +138,9 @@ Deferred authorization roadmap:
 
 Detailed design:
 
-- [Surface elegance RFC](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
-- [CKB glossary](wiki/CKB-Glossary.md)
+- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB glossary](../docs/wiki/CKB-Glossary.md)
 
 ## CKB Production Evidence
 
@@ -162,9 +162,9 @@ Required evidence for the bundled suite:
 
 Detailed evidence docs:
 
-- [Metadata verification and production gates wiki](wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [Capacity and builder contract](CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [CKB language audit](CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [Metadata verification and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ## Documentation And Tooling
 
@@ -180,7 +180,7 @@ Detailed evidence docs:
 Detailed docs:
 
 - [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
-- [0.13 release notes draft](CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
+- [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
 
 ## Explicit Non-Goals
 

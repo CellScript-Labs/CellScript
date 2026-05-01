@@ -9,6 +9,7 @@ export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
 export CELLSCRIPT_BACKEND_SHAPE_REPORT="${CELLSCRIPT_BACKEND_SHAPE_REPORT:-$ROOT_DIR/target/cellscript-backend-shape/backend-shape-report-$MODE.json}"
 export CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT="${CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT:-$ROOT_DIR/target/cellscript-schema-manifest/schema-manifest-report-$MODE.json}"
+unset CELLSCRIPT_RISCV_CC CELLSCRIPT_RISCV_AS CELLSCRIPT_RISCV_LD
 
 cd "$ROOT_DIR"
 mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
@@ -113,6 +114,7 @@ run_common_gate() {
     run cargo fmt --all --check
     run cargo check --locked --all-targets
     run cargo test --locked -- --test-threads=1
+    run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run python3 scripts/validate_cellscript_tooling_release.py
     run bash -n scripts/ckb_cellscript_acceptance.sh
     run bash -n scripts/cellscript_ckb_release_gate.sh

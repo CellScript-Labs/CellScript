@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
+use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -316,6 +317,7 @@ pub struct IrGenerator {
     type_fields: HashMap<String, HashMap<String, IrType>>,
     type_kinds: HashMap<String, IrTypeKind>,
     receipt_claim_outputs: HashMap<String, Option<IrType>>,
+    lifecycle_states: HashMap<String, Vec<String>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, Expr>,
     function_effects: HashMap<String, EffectClass>,
@@ -353,6 +355,7 @@ impl IrGenerator {
             type_fields: HashMap::new(),
             type_kinds: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
+            lifecycle_states: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -375,12 +378,14 @@ impl IrGenerator {
         type_fields: HashMap<String, HashMap<String, IrType>>,
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
+        lifecycle_states: HashMap<String, Vec<String>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_return_types: HashMap<String, Option<IrType>>,
     ) -> Self {
         let mut generator = Self::with_type_fields(module_name, type_fields);
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
+        generator.lifecycle_states.extend(lifecycle_states);
         generator.external_function_effects = external_function_effects;
         generator.external_function_return_types = external_function_return_types;
         generator
@@ -409,6 +414,9 @@ impl IrGenerator {
                 Item::Receipt(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Receipt);
                     self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(Self::convert_type));
+                    if let Some(lifecycle) = &r.lifecycle {
+                        self.lifecycle_states.insert(r.name.clone(), lifecycle.states.clone());
+                    }
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -1550,6 +1558,8 @@ impl IrGenerator {
                     LoweredExpr { operand: zero, current: Some(current) }
                 } else if let Some(enum_variant) = self.lower_enum_variant(name) {
                     LoweredExpr { operand: enum_variant, current: Some(current) }
+                } else if let Some(lifecycle_state) = self.lower_lifecycle_state_name(name) {
+                    LoweredExpr { operand: lifecycle_state, current: Some(current) }
                 } else {
                     self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), Span::default());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -1565,7 +1575,7 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
-                let dest = self.new_var("tmp", self.binary_result_type(binary.op));
+                let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left.operand, &right.operand));
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Binary {
                     dest: dest.clone(),
@@ -1702,12 +1712,19 @@ impl IrGenerator {
         }
     }
 
-    fn binary_result_type(&self, op: BinaryOp) -> IrType {
+    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::And | BinaryOp::Or => {
-                IrType::U64
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty == IrType::U128 || right_ty == IrType::U128 {
+                    IrType::U128
+                } else {
+                    IrType::U64
+                }
             }
+            BinaryOp::And | BinaryOp::Or => IrType::Bool,
         }
     }
 
@@ -2185,7 +2202,9 @@ impl IrGenerator {
 
         for (field_name, field_expr) in &create.fields {
             let expected_ty = self.type_fields.get(&create.ty).and_then(|fields| fields.get(field_name)).cloned();
-            let lowered = if let Some(expected_ty) = expected_ty {
+            let lowered = if let Some(state_operand) = self.lower_lifecycle_state_initializer(&create.ty, field_name, field_expr) {
+                LoweredExpr { operand: state_operand, current: Some(active) }
+            } else if let Some(expected_ty) = expected_ty {
                 self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
             } else {
                 self.lower_expr(field_expr, active, blocks, vars)
@@ -2226,6 +2245,17 @@ impl IrGenerator {
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_lifecycle_state_initializer(&self, type_name: &str, field_name: &str, expr: &Expr) -> Option<IrOperand> {
+        if field_name != LIFECYCLE_STATE_FIELD_NAME {
+            return None;
+        }
+        let Expr::Identifier(state_name) = expr else {
+            return None;
+        };
+        let index = self.lifecycle_state_index(type_name, state_name)?;
+        Some(IrOperand::Const(IrConst::U64(index as u64)))
     }
 
     fn lower_consume_expr(
@@ -3424,6 +3454,24 @@ impl IrGenerator {
         Some(IrOperand::Const(IrConst::U64(ordinal)))
     }
 
+    fn lower_lifecycle_state_name(&self, name: &str) -> Option<IrOperand> {
+        let (type_name, _) = name.rsplit_once("::")?;
+        let index = self.lifecycle_state_index(type_name, name)?;
+        Some(IrOperand::Const(IrConst::U64(index as u64)))
+    }
+
+    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.lifecycle_states.get(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
+    }
+
     fn lookup_field_ir_type(&self, ty: &IrType, field: &str) -> Option<IrType> {
         match ty {
             IrType::Tuple(items) => field.parse::<usize>().ok().and_then(|index| items.get(index)).cloned(),
@@ -3586,6 +3634,7 @@ fn generate_with_resolver_inner(
     let mut type_fields = HashMap::new();
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
+    let mut lifecycle_states = HashMap::new();
     let mut external_type_defs = Vec::new();
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
@@ -3606,6 +3655,9 @@ fn generate_with_resolver_inner(
                 }
                 if let Some(output) = resolver_receipt_claim_output_to_ir(&type_def) {
                     receipt_claim_outputs.insert(local_name.clone(), output);
+                }
+                if let Some(states) = resolver_lifecycle_states_to_ir(&type_def) {
+                    lifecycle_states.insert(local_name.clone(), states);
                 }
                 if let Some(fields) = resolver_type_fields_to_ir(&type_def) {
                     type_fields.insert(local_name.clone(), fields);
@@ -3636,6 +3688,7 @@ fn generate_with_resolver_inner(
         type_fields,
         type_kinds,
         receipt_claim_outputs,
+        lifecycle_states,
         external_function_effects,
         external_function_return_types,
     );
@@ -4233,6 +4286,13 @@ fn resolver_type_kind(type_def: &TypeDef) -> Option<IrTypeKind> {
 fn resolver_receipt_claim_output_to_ir(type_def: &TypeDef) -> Option<Option<IrType>> {
     match type_def {
         TypeDef::Receipt(receipt) => Some(receipt.claim_output.as_ref().map(ast_type_to_ir_type)),
+        TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
+    }
+}
+
+fn resolver_lifecycle_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
+    match type_def {
+        TypeDef::Receipt(receipt) => receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone()),
         TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
     }
 }

@@ -237,6 +237,11 @@ impl LspServer {
             CompletionContext::Member { type_name } => {
                 items.extend(self.member_completions(uri, &type_name));
             }
+            CompletionContext::Namespace { type_name } => {
+                if let Some(ast) = self.ast_cache.get(uri) {
+                    items.extend(self.namespace_symbol_completions(ast, &type_name));
+                }
+            }
             CompletionContext::Declaration => {
                 items.extend(self.declaration_keyword_completions());
             }
@@ -262,6 +267,16 @@ impl LspServer {
         let line_start = self.line_start_offset(content, position.line);
         let offset = position_to_offset(content, position).unwrap_or(line_start);
         let prefix = &content[line_start..offset];
+
+        // Check for namespace access: `Type::Variant`.
+        if let Some(scope_pos) = prefix.rfind("::") {
+            let suffix = &prefix[scope_pos + 2..];
+            if suffix.chars().all(is_ident_char) {
+                let before_scope = &prefix[..scope_pos];
+                let type_name = word_before_offset(before_scope, before_scope.len()).unwrap_or_default();
+                return CompletionContext::Namespace { type_name };
+            }
+        }
 
         // Check for member access: `expr.field`
         if let Some(dot_pos) = prefix.rfind('.') {
@@ -350,6 +365,36 @@ impl LspServer {
         items
     }
 
+    fn namespace_symbol_completions(&self, module: &Module, type_name: &str) -> Vec<CompletionItem> {
+        let mut items = Vec::new();
+        for item in &module.items {
+            match item {
+                Item::Receipt(receipt) if receipt.name == type_name => {
+                    if let Some(lifecycle) = &receipt.lifecycle {
+                        items.extend(lifecycle.states.iter().enumerate().map(|(index, state)| CompletionItem {
+                            label: state.clone(),
+                            kind: CompletionItemKind::EnumMember,
+                            detail: Some(format!("lifecycle state {}::{}", receipt.name, state)),
+                            documentation: Some(format!("State index {} for lifecycle receipt `{}`.", index, receipt.name)),
+                            insert_text: Some(state.clone()),
+                        }));
+                    }
+                }
+                Item::Enum(enum_def) if enum_def.name == type_name => {
+                    items.extend(enum_def.variants.iter().filter(|variant| variant.fields.is_empty()).map(|variant| CompletionItem {
+                        label: variant.name.clone(),
+                        kind: CompletionItemKind::EnumMember,
+                        detail: Some(format!("enum variant {}::{}", enum_def.name, variant.name)),
+                        documentation: None,
+                        insert_text: Some(variant.name.clone()),
+                    }));
+                }
+                _ => {}
+            }
+        }
+        items
+    }
+
     /// Member completions for a given type name (after `.`).
     fn member_completions(&self, uri: &str, type_name: &str) -> Vec<CompletionItem> {
         let mut items = Vec::new();
@@ -357,7 +402,26 @@ impl LspServer {
         // Built-in namespace methods.
         match type_name {
             "Vec" => {
-                for (name, insert) in [("new", "Vec::new()"), ("push", "push($0)"), ("len", "len()"), ("get", "get($0)")] {
+                for (name, insert) in [
+                    ("new", "Vec::new()"),
+                    ("with_capacity", "Vec::with_capacity($0)"),
+                    ("capacity", "capacity()"),
+                    ("push", "push($0)"),
+                    ("extend_from_slice", "extend_from_slice($0)"),
+                    ("len", "len()"),
+                    ("is_empty", "is_empty()"),
+                    ("first", "first()"),
+                    ("last", "last()"),
+                    ("contains", "contains($0)"),
+                    ("set", "set($0)"),
+                    ("remove", "remove($0)"),
+                    ("pop", "pop()"),
+                    ("insert", "insert($0)"),
+                    ("reverse", "reverse()"),
+                    ("truncate", "truncate($0)"),
+                    ("swap", "swap($0)"),
+                    ("clear", "clear()"),
+                ] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Method,
@@ -1447,6 +1511,8 @@ enum CompletionContext {
     Type,
     /// At a member access position (after `.`), with the type name before the dot.
     Member { type_name: String },
+    /// At a namespace access position (after `::`), with the type name before the scope separator.
+    Namespace { type_name: String },
     /// At a top-level declaration position.
     Declaration,
     /// Inside an expression body.
@@ -1993,6 +2059,85 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
+    }
+
+    #[test]
+    fn test_vec_member_completions_match_supported_helpers() {
+        let server = LspServer::new();
+        let completions = server.member_completions("file:///test.cell", "Vec");
+        let labels = completions.iter().map(|item| item.label.as_str()).collect::<std::collections::BTreeSet<_>>();
+
+        for helper in [
+            "new",
+            "with_capacity",
+            "capacity",
+            "push",
+            "extend_from_slice",
+            "len",
+            "is_empty",
+            "first",
+            "last",
+            "contains",
+            "set",
+            "remove",
+            "pop",
+            "insert",
+            "reverse",
+            "truncate",
+            "swap",
+            "clear",
+        ] {
+            assert!(labels.contains(helper), "missing Vec completion for {helper}");
+        }
+        assert!(!labels.contains("get"), "Vec completion should not advertise unsupported get()");
+    }
+
+    #[test]
+    fn test_lifecycle_namespace_completions() {
+        let mut server = LspServer::new();
+        let uri = "file:///lifecycle_completion.cell".to_string();
+        let source = r#"
+module lifecycle_completion
+
+#[lifecycle(Created -> Active -> Closed)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+#[lifecycle(Draft -> Live)]
+receipt OtherTicket has store {
+    state: u8,
+    id: u64,
+}
+
+action activate(ticket: Ticket) -> Ticket {
+    assert_invariant(ticket.state < Ticket::Closed, "closed")
+    consume ticket
+    return create Ticket {
+        state: Ticket::Active,
+        id: ticket.id,
+    }
+}
+"#
+        .to_string();
+
+        server.open_document(uri.clone(), source.clone());
+        assert!(server.get_diagnostics(&uri).is_empty());
+
+        let offset = source.find("Ticket::Active").expect("qualified state") + "Ticket::".len();
+        let completions = server.completion(&uri, offset_to_position(&source, offset));
+        let labels = completions.iter().map(|item| item.label.as_str()).collect::<std::collections::BTreeSet<_>>();
+
+        assert!(labels.contains("Created"));
+        assert!(labels.contains("Active"));
+        assert!(labels.contains("Closed"));
+        assert!(!labels.contains("Live"), "Ticket:: completion must not leak OtherTicket lifecycle states");
+        assert!(completions.iter().any(|item| {
+            item.label == "Active"
+                && item.kind == CompletionItemKind::EnumMember
+                && item.detail.as_deref() == Some("lifecycle state Ticket::Active")
+        }));
     }
 
     #[test]

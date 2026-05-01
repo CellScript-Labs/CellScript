@@ -36,6 +36,7 @@ receipt ReleaseRequest has destroy {
     lock_hash: Hash,
     requester: Address,
     requested_at: u64,
+    state: u8,
 }
 
 receipt ReleaseRecord {
@@ -51,6 +52,7 @@ receipt EmergencyRelease has destroy {
     reason: String,
     requested_at: u64,
     approvers: Vec<Address>,
+    state: u8,
 }
 
 
@@ -131,6 +133,7 @@ action request_release(
         lock_hash: hash_lock(time_lock),
         requester,
         requested_at: current_height,
+        state: Created,
     };
     
     request
@@ -190,6 +193,7 @@ action request_emergency_release(
         reason,
         requested_at: current_height,
         approvers: [],
+        state: Created,
     };
     
     emergency

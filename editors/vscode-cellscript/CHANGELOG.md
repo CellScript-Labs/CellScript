@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.0
+
+- Updated extension package metadata for the CellScript 0.13 release.
+- Added editor completion coverage for the 0.13 Vec helper surface.
+
 ## 0.12.0
 
 - Replaced direct CLI diagnostics with a full LSP language server integration

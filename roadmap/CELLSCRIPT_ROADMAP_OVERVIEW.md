@@ -13,14 +13,14 @@ CellScript's mission is to make the power of CKB's Cell model — linear resourc
 | Version | Theme | One-liner | Status |
 |---------|-------|-----------|--------|
 | v0.12 | Production Foundation | "Write real CKB contracts safely" | ✅ Released |
-| v0.13 | Performance & Expressiveness | "Write less, run faster" | 🚧 In Progress |
+| v0.13 | Bounded Helpers & Evidence-Gated Optimization | "Write less while keeping helper boundaries explicit" | 🚧 In Progress |
 | v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse" | 📋 Planned |
 | v0.15 | Scoped Invariants & Covenant ProofPlan | "Show when constraints run, what they read, and who they protect" | 📋 Planned |
 | v0.16 | Formal Semantics & Production Tooling | "Prove, validate, deploy, and audit" | 📋 Planned |
 
 **Evolution arc**:
 - **v0.12** — *Can we use it?* Prove CellScript can compile production-grade CKB contracts.
-- **v0.13** — *Is it good to use?* Make contracts smaller, faster, and the CLI friendlier.
+- **v0.13** — *Is it good to use?* Improve bounded helper ergonomics, CLI workflows, and optimization evidence without turning benchmark ideas into release promises.
 - **v0.14** — *Is the CKB surface complete?* Cover Spawn as bounded verifier composition, WitnessArgs, Source views, ScriptGroup, outputs_data binding, TYPE_ID metadata validation, script references, capacity, and time constraints.
 - **v0.15** — *Is the safety boundary auditable?* Model scoped invariants, covenant triggers, coverage, builder assumptions, and ProofPlan output without hiding lock/type semantics.
 - **v0.16** — *Can we trust it in production?* Add formal semantics, ProofPlan soundness checks, standard CKB compatibility suites, transaction solving, deployment governance, and audit tooling.
@@ -77,28 +77,29 @@ mutate pool { reserve_a: pool.reserve_a + delta }   // atomic in-place update
 
 ---
 
-## 3. v0.13 — Performance & Expressiveness (In Progress)
+## 3. v0.13 — Bounded Helpers & Evidence-Gated Optimization (In Progress)
 
-**Theme**: Write less code, generate faster contracts.
+**Theme**: Write less code, keep ownership boundaries explicit, and make optimization evidence auditable.
 
 ### 3.1 Bounded Value-Vector Helpers (P0)
 
 - Stack-backed `Vec<Address>`, `Vec<Hash>`, `Vec<u64>` and other fixed-width value-vector helpers
 - Helps simple registries, whitelists, fixed membership sets, and AMM helper patterns
 - Proof-backed maps, order books, and cell-backed collection ownership remain explicit future work
-- Compile-time monomorphization with zero runtime overhead
+- Compile-time monomorphization for supported value helpers without hidden ownership semantics
 - Value-level generics only — linear/cell-backed ownership remains explicit and fail-closed
 
 ### 3.2 Zero-Cost Abstractions (P0)
 
-| Optimization | Expected Improvement |
-|-------------|---------------------|
-| Deserialization specialization | −20% ELF size |
-| Function inlining (core lib) | −15% instruction count |
-| Dead code elimination | −10-20% ELF size |
-| Constant propagation | −5-10% instruction count |
+| Optimization | Evidence Required Before Performance Claim |
+|-------------|---------------------------------------------|
+| Deserialization specialization | Tagged v0.12 comparison plus backend shape and CKB cycle data |
+| Function inlining (core lib) | Instruction/backend shape delta under the same target profile |
+| Dead code elimination | ELF/text-size delta plus regression guard for all bundled examples |
+| Constant propagation | Assembly/backend shape delta for representative examples |
 
-Target: `token.elf` 15 KB → 12 KB; AMM `swap` cycles −30%.
+No fixed v0.13 size or cycle target is claimed here; comparative benchmark
+reports are future/evidence-gated release material.
 
 ### 3.3 CLI Ergonomics (P0)
 
@@ -452,7 +453,7 @@ dates, quarters, week counts, and effort estimates.
 
 **Today (v0.12)**: You can write safe CKB contracts in CellScript right now. The compiler prevents double-spend at compile time, records capacity evidence, and generates optimized RISC-V ELF binaries. Seven example contracts cover token, AMM, vesting, timelock, multisig, NFT, and launch patterns.
 
-**Soon (v0.13)**: Your contracts will be smaller and faster. Bounded value-vector helpers make whitelists, fixed membership sets, simple registries, and AMM helper code easier to write. Proof-backed maps and order books stay explicit future work instead of being hidden inside generic collection syntax.
+**Soon (v0.13)**: Bounded value-vector helpers make whitelists, fixed membership sets, simple registries, and AMM helper code easier to write while keeping performance claims tied to release evidence. Proof-backed maps and order books stay explicit future work instead of being hidden inside generic collection syntax.
 
 **Next (v0.14)**: CellScript will cover CKB's complete execution surface. Spawn/IPC enables bounded verifier reuse and delegated checks within explicit lock/type boundaries; it is not a promise of multi-tenant type-script composition. WitnessArgs, Source views, ScriptGroup, outputs_data binding, TYPE_ID metadata validation, script references, Capacity, and time constraints become explicit and testable.
 

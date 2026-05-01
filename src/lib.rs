@@ -4654,7 +4654,7 @@ fn body_verifier_obligations(
             &mut seen,
             &scope,
             "lifecycle-transition",
-            &format!("{}.state", check.feature),
+            &format!("{}.{}", check.feature, lifecycle::LIFECYCLE_STATE_FIELD_NAME),
             &check.status,
             &check.detail,
         );
@@ -6491,9 +6491,9 @@ fn metadata_can_verify_settle_final_state(
     lifecycle_states: &HashMap<String, Vec<String>>,
 ) -> bool {
     lifecycle_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
-        && type_layouts
-            .get(&pattern.ty)
-            .is_some_and(|layouts| layouts.get("state").and_then(metadata_layout_fixed_scalar_width).is_some())
+        && type_layouts.get(&pattern.ty).is_some_and(|layouts| {
+            layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME).and_then(metadata_layout_fixed_scalar_width).is_some()
+        })
         && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
 
@@ -6875,7 +6875,7 @@ fn pool_checked_invariant_guard_names(name: &str, operation: &str, source_invari
     }
 
     let named_guards = match (operation, name) {
-        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound"][..],
+        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound", "token-pair-identity-distinct"][..],
         ("mutation-invariants", "swap_a_for_b") => &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
         ("mutation-invariants", "add_liquidity") => &["deposit-token-a-match", "deposit-token-b-match"][..],
         ("mutation-invariants", "remove_liquidity") => &["lp-receipt-pool-id-match"][..],
@@ -7384,7 +7384,78 @@ fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrB
     if name != "seed_pool" || pool_pattern.ty != "Pool" {
         return false;
     }
-    consumed_input_pattern(body, "token_a").is_some() && consumed_input_pattern(body, "token_b").is_some()
+    consumed_input_pattern(body, "token_a").is_some()
+        && consumed_input_pattern(body, "token_b").is_some()
+        && body_has_asserted_type_hash_inequality(body, "token_a", "token_b")
+}
+
+fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str, right_binding: &str) -> bool {
+    let assert_fail_blocks = body
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(7))))))
+        .map(|block| block.id)
+        .collect::<HashSet<_>>();
+    let mut type_hash_sources = HashMap::<usize, String>::new();
+    let mut named_type_hash_sources = HashMap::<String, String>::new();
+    let mut checked_inequality_vars = HashSet::<usize>::new();
+
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::TypeHash { dest, operand: ir::IrOperand::Var(var) } => {
+                    if var.name == left_binding || var.name == right_binding {
+                        type_hash_sources.insert(dest.id, var.name.clone());
+                    }
+                }
+                ir::IrInstruction::Move { dest, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        named_type_hash_sources.insert(name.clone(), source);
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } => {
+                    if let Some(source) = named_type_hash_sources.get(name).cloned() {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Ne, left, right } => {
+                    let Some(left_source) = type_hash_source(left, &type_hash_sources) else {
+                        continue;
+                    };
+                    let Some(right_source) = type_hash_source(right, &type_hash_sources) else {
+                        continue;
+                    };
+                    if type_hash_sources_are_pair(&left_source, &right_source, left_binding, right_binding) {
+                        checked_inequality_vars.insert(dest.id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    body.blocks.iter().any(|block| {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            return false;
+        };
+        checked_inequality_vars.contains(&cond.id) && assert_fail_blocks.contains(else_block)
+    })
+}
+
+fn type_hash_source(operand: &ir::IrOperand, type_hash_sources: &HashMap<usize, String>) -> Option<String> {
+    let ir::IrOperand::Var(var) = operand else {
+        return None;
+    };
+    type_hash_sources.get(&var.id).cloned()
+}
+
+fn type_hash_sources_are_pair(left: &str, right: &str, left_binding: &str, right_binding: &str) -> bool {
+    (left == left_binding && right == right_binding) || (left == right_binding && right == left_binding)
 }
 
 fn pool_seed_lp_supply_invariant_is_checked(
@@ -8681,7 +8752,7 @@ fn pool_invariant_families(
 
 fn pool_checked_protocol_component_source(component: &str) -> &'static str {
     match component {
-        "token-pair-identity-admission" => "input-type-id-abi+load-cell-by-field",
+        "token-pair-identity-admission" => "assert-invariant-cfg+input-type-id-abi",
         "token-pair-symbol-admission" => "assert-invariant-cfg+create-output-symbol-fields",
         "lp-supply-invariant" => "create-output-field-coupling",
         "lp-supply-consistency" => "mutate-preserved-field-equality",
@@ -8933,7 +9004,7 @@ fn metadata_can_verify_lifecycle_transition(
     if metadata_type_encoded_size_from_layouts(layouts).is_none() {
         return false;
     }
-    let Some(state_layout) = layouts.get("state") else {
+    let Some(state_layout) = layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME) else {
         return false;
     };
     if metadata_layout_fixed_scalar_width(state_layout).is_none() {
@@ -11869,16 +11940,17 @@ fn mutate_preserved_data_except_transition_is_verifier_coverable(
     let Some(fields) = type_layouts.get(&pattern.ty) else {
         return false;
     };
-    let dynamic_table = metadata_type_encoded_size_from_layouts(fields).is_none();
+    let Some(type_size) = metadata_type_encoded_size_from_layouts(fields) else {
+        return false;
+    };
+    if type_size > METADATA_MUTATE_CELL_BUFFER_SIZE {
+        return false;
+    }
     pattern.transitions.iter().all(|transition| {
         fields.get(&transition.field).is_some_and(|layout| {
-            if dynamic_table {
-                metadata_layout_fixed_byte_width(layout).is_some()
-            } else {
-                metadata_layout_fixed_byte_width(layout)
-                    .map(|width| layout.offset + width)
-                    .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
-            }
+            metadata_layout_fixed_byte_width(layout)
+                .map(|width| layout.offset + width)
+                .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
         })
     })
 }
@@ -12376,6 +12448,15 @@ module test
 action choose(flag: bool, x: u64) -> u64 {
     let y = if flag { x + 1 } else { x + 2 }
     return y
+}
+"#;
+
+    const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
+module test
+
+action choose_zero(flag: bool, target: Address) -> bool {
+    let selected = if flag { Address::zero() } else { Address::zero() }
+    return target == selected
 }
 "#;
 
@@ -14903,7 +14984,7 @@ module test
 
 action pack(bytes: [u8; 3]) -> u64 {
     let mut data = Vec::new()
-    data.push(1)
+    data.push(bytes[0])
     data.extend_from_slice(bytes)
     return data.len()
 }
@@ -15386,6 +15467,49 @@ action is_zero(target: Address) -> bool {
 }
 "#;
 
+    const LOCAL_ZERO_PROGRAM: &str = r#"
+module test
+
+action is_zero(target: Address) -> bool {
+    let zero = Address::zero()
+    return target == zero
+}
+"#;
+
+    const U128_EQ_PROGRAM: &str = r#"
+module test
+
+action eq128(left: u128, right: u128) -> bool {
+    return left == right
+}
+"#;
+
+    const U128_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared Ledger has store {
+    balance: u128,
+    owner: Address,
+}
+
+action credit(ledger: &mut Ledger, delta: u64) {
+    ledger.balance = ledger.balance + delta
+}
+"#;
+
+    const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared BigState has store {
+    balance: u64,
+    pad: [u8; 600],
+}
+
+action update(state: &mut BigState, delta: u64) {
+    state.balance = state.balance + delta
+}
+"#;
+
     const SUMMARY_PROGRAM: &str = r#"
 module test
 
@@ -15648,6 +15772,19 @@ action make() -> Ticket {
 }
 "#;
 
+    const LIFECYCLE_MISSING_STATE_FIELD_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    id: u64,
+}
+
+action noop() -> u64 {
+    return 0
+}
+"#;
+
     const LIFECYCLE_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
@@ -15741,10 +15878,69 @@ receipt Ticket has store {
 }
 
 action activate(ticket: Ticket) -> Ticket {
-    let active: u8 = 1
     consume ticket
     return create Ticket {
-        state: active,
+        state: Active,
+        id: ticket.id,
+    }
+}
+"#;
+
+    const LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+action make() -> Ticket {
+    return create Ticket {
+        state: Created,
+        id: 1,
+    }
+}
+"#;
+
+    const LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+action activate(ticket: Ticket) -> Ticket {
+    assert_invariant(ticket.state < Ticket::Active, "already active")
+    consume ticket
+    return create Ticket {
+        state: Ticket::Active,
+        id: ticket.id,
+    }
+}
+"#;
+
+    const LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+#[lifecycle(Draft -> Live)]
+receipt OtherTicket has store {
+    state: u8,
+    id: u64,
+}
+
+action activate(ticket: Ticket) -> Ticket {
+    consume ticket
+    return create Ticket {
+        state: OtherTicket::Live,
         id: ticket.id,
     }
 }
@@ -15804,6 +16000,18 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains("beqz t0, .Lchoose_block_2"), "missing conditional branch for if expression:\n{}", asm);
         assert!(asm.contains(".Lchoose_block_3:"), "missing join block for if expression:\n{}", asm);
         assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_if_expression_fixed_byte_const_join_move() {
+        let result = compile(IF_EXPR_FIXED_BYTE_CONST_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("la t0, __cellscript_const_data_"),
+            "fixed-byte constant moves must materialize a rodata pointer instead of a null pointer:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -17611,9 +17819,15 @@ action grant(config: read_ref Config, token: Token) -> Grant {
         );
         assert!(asm.contains("# length"), "len() did not stay on builtin length path:\n{}", asm);
         assert!(
-            asm.contains("# cellscript abi: collection push is not needed for verifier execution")
-                || asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
-            "collection push/extend fail-closed comment not found:\n{}",
+            asm.contains("# cellscript abi: stack collection push element_size=1")
+                && asm.contains("# cellscript abi: stack collection extend bytes=3 elements=3 element_size=1"),
+            "collection push/extend did not use stack-backed Vec<u8> paths:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: collection push is not needed for verifier execution")
+                && !asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
+            "collection push/extend should not hit old fail-closed comments:\n{}",
             asm
         );
         assert!(!asm.contains("# call push"), "push() leaked through generic call path:\n{}", asm);
@@ -17624,6 +17838,68 @@ action grant(config: read_ref Config, token: Token) -> Grant {
     #[test]
     fn compile_rejects_unsupported_vec_helper_type_combinations() {
         let cases = [
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let value = 7
+    return value.len()
+}
+"#,
+                "len is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> bool {
+    let value = 7
+    return value.is_empty()
+}
+"#,
+                "is_empty is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let value = 7
+    value.extend_from_slice([1, 2])
+    return value
+}
+"#,
+                "extend_from_slice is only supported on Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64 {
+    let mut values: Vec<u64> = []
+    values.extend_from_slice([true])
+    return values.len()
+}
+"#,
+                "Vec.extend_from_slice type mismatch",
+            ),
+            (
+                r#"
+module test
+
+struct Point {
+    x: u64,
+}
+
+action bad(point: Point) -> u64 {
+    let mut points = Vec::new()
+    points.extend_from_slice([&point])
+    return 0
+}
+"#,
+                "Vec.extend_from_slice cannot store reference type &Point",
+            ),
             (
                 r#"
 module test
@@ -19003,6 +19279,79 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
     }
 
     #[test]
+    fn compile_materializes_local_fixed_byte_constants_into_rodata() {
+        let result = compile(LOCAL_ZERO_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("__const_data"), "legacy undefined const label leaked into assembly:\n{}", asm);
+        assert!(asm.contains("__cellscript_const_data_0:"), "local fixed-byte constant should have a concrete rodata label:\n{}", asm);
+
+        compile(LOCAL_ZERO_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+    }
+
+    #[test]
+    fn compile_lowers_u128_equality_as_fixed_byte_comparison() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=16"),
+            "u128 equality should compare all 16 bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 equality should not fall through to the generic fail-closed path:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_lowers_u128_mutate_delta_with_carry_arithmetic() {
+        let result = compile(U128_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: u128 Add with u64 delta"),
+            "u128 mutate expression should lower through the 128-bit carry path:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 mutate expression should not fail through generic u128 handling:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_entry_witness_rejects_payloads_larger_than_buffer() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript entry abi: reject witnesses larger than the local entry buffer"),
+            "entry witness wrapper should reject sizes above its local buffer:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t1, 1025"), "entry witness wrapper should enforce ENTRY_WITNESS_BUFFER_SIZE=1024:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_fails_closed_when_preserved_fields_exceed_runtime_buffer() {
+        let result = compile(LARGE_PRESERVED_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fail closed because not all preserved fields are verifier-addressable"),
+            "large preserved fields should not silently fall back to a partial check:\n{}",
+            asm
+        );
+        let action = result.metadata.actions.iter().find(|action| action.name == "update").expect("update metadata");
+        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "BigState").expect("BigState mutation");
+        assert_eq!(mutation.field_equality_status, "runtime-required");
+    }
+
+    #[test]
     fn compile_result_writes_artifact_to_disk() {
         let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         let dir = tempdir().unwrap();
@@ -19024,6 +19373,99 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
         assert!(!result.artifact_bytes.is_empty());
         // CKB profile does not embed VM ABI trailer
         assert!(!result.metadata.runtime.vm_abi.embedded_in_artifact);
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_full_width_u64_literals() {
+        let program = r#"
+module vm::u64_literals
+
+action high_bit() -> u64 {
+    return 9223372036854775808
+}
+
+action max_value() -> u64 {
+    return 18446744073709551615
+}
+"#;
+
+        let result =
+            compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+
+        assert_eq!(result.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_large_stack_offsets() {
+        let mut program = String::from("module vm::large_stack\n\naction main() -> u64 {\n");
+        for index in 0..260 {
+            program.push_str(&format!("    let x{} = {}\n", index, index));
+        }
+        program.push_str("    return x259\n}\n");
+
+        let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(asm.artifact_bytes).unwrap();
+        assert!(!asm.contains("2048(sp)") && !asm.contains("2072(sp)"), "large stack offsets should be expanded:\n{}", asm);
+
+        let elf = compile(&program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(elf.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_large_schema_field_offsets() {
+        let scalar_program = r#"
+module vm::large_schema_scalar
+
+struct Big {
+    pad: [u8; 2048],
+    amount: u64,
+}
+
+action inspect(snapshot: Big) -> u64 {
+    return snapshot.amount
+}
+"#;
+
+        let scalar_asm =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let scalar_asm = String::from_utf8(scalar_asm.artifact_bytes).unwrap();
+        assert!(
+            !scalar_asm.contains("lbu t2, 2048(t4)"),
+            "large schema scalar field offset should be expanded before assembly:\n{}",
+            scalar_asm
+        );
+        let scalar_elf =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(scalar_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(scalar_elf.artifact_bytes.starts_with(b"\x7fELF"));
+
+        let bytes_program = r#"
+module vm::large_schema_bytes
+
+struct Big {
+    pad: [u8; 2048],
+    marker: [u8; 1],
+}
+
+action get_marker(snapshot: Big) -> [u8; 1] {
+    return snapshot.marker
+}
+"#;
+
+        let bytes_asm =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let bytes_asm = String::from_utf8(bytes_asm.artifact_bytes).unwrap();
+        assert!(
+            !bytes_asm.contains("addi t0, t4, 2048"),
+            "large schema fixed-byte field pointer offset should be expanded before assembly:\n{}",
+            bytes_asm
+        );
+        let bytes_elf =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(bytes_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(bytes_elf.artifact_bytes.starts_with(b"\x7fELF"));
     }
 
     #[test]
@@ -20306,6 +20748,13 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
+    fn compile_rejects_lifecycle_receipt_without_state_field() {
+        let err = compile(LIFECYCLE_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("lifecycle receipt 'Ticket' must declare a state field"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn compile_rejects_bad_lifecycle_state_field_type_on_main_path() {
         let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
@@ -20355,6 +20804,43 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
 
         assert!(
             err.message.contains("lifecycle update of 'Ticket' cannot reset to initial state index 0"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_accepts_lifecycle_state_name_initializers() {
+        let result = compile(LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: verify output field Ticket.state offset=0 size=1"),
+            "state-name initializer should still verify the explicit state field:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_accepts_qualified_lifecycle_state_names() {
+        let result = compile(LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
+
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "lifecycle-transition"
+                && obligation.feature == "Ticket.state"
+                && obligation.status == "checked-runtime"
+        }));
+        assert!(asm.contains("state_count=2"), "qualified lifecycle state names should preserve verifier metadata:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_wrong_qualified_lifecycle_state_field_initializer() {
+        let err = compile(LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(
+            err.message.contains("lifecycle state field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
             "unexpected error: {}",
             err.message
         );
@@ -21686,6 +22172,11 @@ action spend(amount: u64) -> u64 {
             "entry wrapper did not lower u64 witness payload into the action ABI register:\n{}",
             asm
         );
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes"),
+            "entry wrapper should reject non-canonical trailing witness bytes:\n{}",
+            asm
+        );
         assert!(asm.contains("call spend"), "entry wrapper did not call the original action label:\n{}", asm);
         assert!(
             asm.contains("# cellscript entry abi: spend requires-explicit-parameter-abi"),
@@ -21773,11 +22264,12 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: scalar param required stored to caller stack +0"),
-            "entry wrapper did not store the stack scalar argument before calling the action:\n{}",
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
+                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, 0(sp)"), "entry wrapper did not emit the stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];
@@ -21812,6 +22304,12 @@ action raw(data: Vec<u8>) -> u64 {
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes") && asm.contains("sub t2, t5, t6"),
+            "dynamic entry wrapper should reject non-canonical trailing witness bytes after consuming dynamic payload:\n{}",
+            asm
+        );
         let action = result.metadata.actions.iter().find(|action| action.name == "bad").unwrap();
         let schema_bytes = vec![1u8, 2, 3, 4];
         let mut expected = ENTRY_WITNESS_ABI_MAGIC.to_vec();

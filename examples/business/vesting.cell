@@ -13,7 +13,7 @@ shared VestingConfig has store {
 
 #[lifecycle(Granted -> Claimable -> FullyClaimed)]
 receipt VestingGrant has store {
-    state: u8                  // 0=Granted, 1=Claimable, 2=FullyClaimed
+    state: u8
     beneficiary: Address
     total_amount: u64
     claimed_amount: u64
@@ -54,7 +54,7 @@ action grant_vesting(
     consume tokens
     
     create VestingGrant {
-        state: 0,  // Granted
+        state: Granted,
         beneficiary,
         total_amount: tokens.amount,
         claimed_amount: 0,
@@ -69,7 +69,7 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
     let now = env::current_timepoint()
     
     assert_invariant(now >= grant.cliff_timepoint, "cliff not reached")
-    assert_invariant(grant.state < 2, "already fully claimed")
+    assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
     
     let vested_total = if now >= grant.end_timepoint {
         grant.total_amount
@@ -84,7 +84,7 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
     
     consume grant
     
-    let new_state: u8 = if vested_total == grant.total_amount { 2 } else { 1 }
+    let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
     
     let tokens = create Token {
         amount: claimable,
@@ -115,7 +115,7 @@ action revoke_grant(
 ) -> (Token, Token) {
     assert_invariant(config.revocable, "not revocable")
     assert_invariant(is_vesting_admin(config, claimed_admin), "not admin")
-    assert_invariant(grant.state < 2, "already fully claimed")
+    assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
     
     let now = env::current_timepoint()
     

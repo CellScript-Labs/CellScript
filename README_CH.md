@@ -228,6 +228,32 @@ action burn(token: Token) {
 | `examples/amm_pool.cell` | Shared pool state、swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
+非生产语言示例位于 `examples/language/`。这些文件用于验证编译器和工具面，
+不属于七个文件的 CKB production acceptance matrix。`registry.cell` 覆盖
+bounded local `Vec<Address>` / `Vec<Hash>` helper；顶层
+`examples/registry.cell` 是这个语言示例的兼容镜像。`order_book.cell` 是
+local stack-backed order vector 草图，不宣称持久化 order-book 语义。
+
+## 对比
+
+CellScript 为什么围绕 typed Cells、线性资源、显式交易 effect 和 ckb-vm
+artifact 设计——而不是围绕账户存储或单链专用 VM：
+
+| 维度 | CellScript | Solidity | Move | Sway |
+|---|---|---|---|---|
+| 执行目标 | ckb-vm 上 RISC-V ELF/asm | EVM bytecode | Move bytecode | FuelVM bytecode |
+| 状态模型 | 类型化 Cells，显式 inputs/deps/outputs | 账户存储槽 | 全局存储中的 resources | UTXO + 原生资产 |
+| 资产模型 | 原生 `resource`、生命周期、receipt、shared Cells | 手写 token contracts | 原生 resources | 原生资产 |
+| 线性所有权 | 编译器强制 | 无 | 通过 abilities | 无通用用户定义 |
+| 共享状态 | 显式 `shared` Cells | 隐式 contract storage | 部分 Move 链的 shared objects | 无 shared Cell 对应物 |
+| 重入 | 无 callback 风格重入 | 常见风险面 | 设计上较低 | predicate 风险较低 |
+| 调度 metadata | CKB 原生支持 | 无 | 非 GhostDAG 导向 | predicate 级 |
+| CKB 兼容性 | 面向 bundled Cell suite 的 production-gated CKB ckb-vm artifact profile | 需要不同 VM | 需要不同 VM | 需要 FuelVM |
+
+与手写 CKB 脚本相比，CellScript 保留同一个 runtime substrate，
+但用类型化 Cell 操作、线性检查、schema metadata 和可被策略验证的产物取代
+原始 byte/syscall 编程。
+
 ---
 
 ## 编辑器支持
@@ -257,90 +283,8 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [Collections matrix 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
 - [Mutate append 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
-- [0.13 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_13_ROADMAP.md)
-- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
-
-## Target Profiles
-
-CellScript 现在只支持 CKB 这一个 target profile：
-
-| Profile | 何时使用 | 你得到什么 |
-|---|---|---|
-| `ckb` | CKB mainnet 产物 | BLAKE2b/Molecule 约定、CKB syscall profile |
-
-> `ckb` profile 已按 bundled CellScript suite 进入 production-gated 状态。
-> 它输出原生 CKB ckb-vm artifact，使用 CKB syscall
-> 与 Molecule/BLAKE2b 约定，并通过正常 target-profile policy 拒绝未支持形状。
-
-```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
-cellc check --target-profile ckb
-```
-
-## 核心模型
-
-CellScript 程序围绕 Cell 生命周期操作书写：
-
-| 概念 | 编译到什么 |
-|---|---|
-| `resource T { ... }` | 线性的 Cell-backed 资产（`CellOutput` + `outputs_data[i]`） |
-| `shared T { ... }` | 共享状态 Cell，通过 `CellDep` 读取，或通过 consume + create 更新 |
-| `receipt T { ... }` | 一次性证明 Cell（deposit、vesting、vote、liquidity） |
-| `consume value` | 花费一个 transaction input |
-| `create T { ... }` | 创建新的 output Cell 和类型化数据 |
-| `read_ref T` | 加载只读 CellDep-backed 值 |
-| `action` | Type-script 状态转换逻辑 → 编译为 RISC-V |
-| `lock` | Lock-script 授权逻辑 → 编译为 RISC-V |
-| 本地 `let` 值 | 交易局部计算；不会成为持久存储 |
-
-> **关键规则：** 只有 `create` 会物化持久状态。普通本地值不会变成 Cell，
-> 除非被显式创建为 `resource`、`shared` 或 `receipt`。
-
-## 语言特性
-
-- **Cell 原生资源** — `resource` 值是线性的，不能复制、静默丢弃或藏进
-  普通值。每个 resource 都必须被 consume、transfer、return、claim、
-  settle 或 destroy。
-- **显式共享状态** — `shared` 标记池、注册表、配置 Cell 等争用敏感协议
-  状态。读写保持对 metadata 和工具可见。
-- **Receipt 作为有状态证明** — `receipt` 是一次性 Cell，证明某个操作已经
-  发生，并可在之后被 claim 或 settle。
-- **Capability 守门** — `has store, transfer, destroy` 让资产权限显式化。
-- **生命周期规则** — `#[lifecycle(...)]` 让 Cell-backed 值描述状态机，
-  例如 `Granted -> Claimable -> FullyClaimed`。
-- **Effect 推断** — `action` 会根据 Cell 操作被分类为 `Pure`、`ReadOnly`、
-  `Mutating`、`Creating` 或 `Destroying`。
-- **调度感知 metadata** — CKB target 可以暴露 access summary 和 shared
-  touch domain，让区块构建器判断哪些工作可以独立处理。
-- **类型化 schema metadata** — Cell data layout、type identity、source hash、
-  runtime access 和 verifier obligation 都会作为机器可读 metadata 输出。
-- **RISC-V 输出** — 可执行目标是 ckb-vm 兼容 RISC-V assembly 或 ELF。
-  CellScript 不引入独立 VM。
-- **包感知编译** — 支持 `Cell.toml`、本地模块、source roots 和本地 path
-  dependencies。
-- **策略门禁** — build、check、metadata 和 artifact verification 命令可以按
-  目标 profile 或部署策略拒绝不合规产物。
-
-## 对比
-
-CellScript 为什么围绕 typed Cells、线性资源、显式交易 effect 和 ckb-vm
-artifact 设计——而不是围绕账户存储或单链专用 VM：
-
-| 维度 | CellScript | Solidity | Move | Sway |
-|---|---|---|---|---|
-| 执行目标 | ckb-vm 上 RISC-V ELF/asm | EVM bytecode | Move bytecode | FuelVM bytecode |
-| 状态模型 | 类型化 Cells，显式 inputs/deps/outputs | 账户存储槽 | 全局存储中的 resources | UTXO + 原生资产 |
-| 资产模型 | 原生 `resource`、生命周期、receipt、shared Cells | 手写 token contracts | 原生 resources | 原生资产 |
-| 线性所有权 | 编译器强制 | 无 | 通过 abilities | 无通用用户定义 |
-| 共享状态 | 显式 `shared` Cells | 隐式 contract storage | 部分 Move 链的 shared objects | 无 shared Cell 对应物 |
-| 重入 | 无 callback 风格重入 | 常见风险面 | 设计上较低 | predicate 风险较低 |
-| 调度 metadata | CKB 原生支持 | 无 | 非 GhostDAG 导向 | predicate 级 |
-| CKB 兼容性 | 面向 bundled Cell suite 的 production-gated CKB ckb-vm artifact profile | 需要不同 VM | 需要不同 VM | 需要 FuelVM |
-
-与手写 CKB 脚本相比，CellScript 保留同一个 runtime substrate，
-但用类型化 Cell 操作、线性检查、schema metadata 和可被策略验证的产物取代
-原始 byte/syscall 编程。
+- [路线图 overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 
 ---
 
@@ -421,7 +365,7 @@ stack-spill 布局、witness byte bounds、CKB cycle/capacity 估算。
 | 模块 | 作用 |
 |---|---|
 | **Stdlib**（`stdlib/`） | 降低到 ckb-vm syscall 和小型运行时 helper 的内置函数：`syscall_load_tx_hash`、`syscall_load_script_hash`、`syscall_load_cell`、`syscall_load_header`、cycle/time helper 和 math helper。模块注入，不单独链接。 |
-| **Collections**（`stdlib/collections.rs`） | 类 vector 操作（push、length、get），降低到 Cell output data 区域写入/读取并带边界检查。 |
+| **Collections**（`stdlib/collections.rs`） | bounded stack-backed `Vec<T: FixedWidth>` helpers，用于 verifier-local value：`new`、`with_capacity`、`capacity`、`push`、`extend_from_slice`、`len`、`is_empty`、indexing、`first`、`last`、`contains`、`set`、`remove`、`pop`、`insert`、`reverse`、`truncate`、`swap`、`clear`。Cell-backed collection ownership 仍不支持。 |
 
 ### 工具面
 
@@ -511,7 +455,7 @@ IR 模块输出审计报告；其他入口返回
 ```toml
 [package]
 name = "token"
-version = "0.12.0"
+version = "0.13.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

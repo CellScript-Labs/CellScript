@@ -81,7 +81,9 @@ from the beginning:
 
 - prefer fixed-size persistent schema fields;
 - keep action entry parameters explicit;
-- use `env::current_timepoint()` for time-aware checks;
+- use `env::current_timepoint()` only when epoch-number semantics are intended
+  under the CKB profile; it maps to HeaderDep#0 epoch number, not a Unix
+  timestamp;
 - record CKB `hash_type`, CellDeps, and DepGroups in `Cell.toml`;
 - inspect `cellc constraints --target-profile ckb --json` before deployment;
 - inspect witness layout with `cellc abi` or `cellc entry-witness`;

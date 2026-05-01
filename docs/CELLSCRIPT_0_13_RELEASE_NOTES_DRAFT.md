@@ -1,9 +1,8 @@
 # CellScript 0.13 Release Notes Draft
 
-**Status**: Release-gate draft for the 0.13 implementation now merged to
-`main`.
+**Status**: Release notes for the 0.13 implementation on `nightly-0.13`.
 
-**Updated**: 2026-04-27.
+**Updated**: 2026-05-01.
 
 ## Collections Scope
 
@@ -32,10 +31,15 @@ New in 0.13:
   `swap`, and `clear`.
 - Negative type-check coverage for unsupported helper/type combinations.
 - Stable fail-closed metadata names for unsupported collection paths.
-- `examples/registry.cell` documents supported local `Vec<Address>` /
-  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support. It is
-  a compiler/tooling language example, not part of the seven-example CKB
+- `examples/language/registry.cell` documents supported local `Vec<Address>` /
+  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support. The
+  top-level `examples/registry.cell` remains a compatibility mirror. It is a
+  compiler/tooling language example, not part of the seven-example CKB
   production action acceptance matrix.
+- `examples/language/order_book.cell` is a non-production language example for
+  local stack-backed order vectors. It compiles through the bounded `Vec<T>`
+  helper surface, but it does not persist orders as Cells, prove map membership,
+  settle assets, or enforce exchange-level authorization.
 - The canonical business examples are now mirrored under `examples/business/`,
   while production/profile metadata lives under `examples/acceptance/`. The CKB
   acceptance script compiles the profiled copies when present, keeping
@@ -112,6 +116,122 @@ cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
 ```
 
+CKB-facing repository gates:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh
+./scripts/cellscript_ckb_release_gate.sh production
+./scripts/ckb_cellscript_acceptance.sh --production
+```
+
+The default `cellscript_ckb_release_gate.sh` mode is the quick gate. It includes
+compile-only production acceptance and is useful before push. The `production`
+mode runs the full local CKB acceptance script and is the release-facing gate.
+
+## Backend And ELF Emission
+
+New in 0.13:
+
+- The internal ELF assembler covers the emitted instruction surface used by the
+  current compiler and stdlib tests.
+- The assembler support surface is now guarded by an explicit supported
+  mnemonic allowlist plus an intentionally unsupported mnemonic list. Bundled
+  example codegen output, generated stdlib assembly, and generated collection
+  assembly must stay inside the declared supported surface, so public generated
+  assembly cannot quietly drift into GNU assembler mnemonics that the internal
+  assembler does not encode.
+- Register conditional branches `beq`, `bne`, `blt`, `bge`, `bltu`, and `bgeu`
+  are accepted and encoded.
+- Zero-compare branches `beqz` and `bnez` remain supported.
+- Conditional branch relaxation is covered for both zero-compare and register
+  branch forms, so generated local `Vec<T>` helpers such as `insert` and
+  `contains` can compile to ELF without relying on an external assembler.
+- Large immediates emitted by CellScript lowering are normalized before internal
+  ELF assembly. This covers full-width `u64` `li` literals, large stack-frame
+  offsets, and fixed schema field offsets beyond the RISC-V 12-bit load/store
+  or `addi` immediate range, including non-`sp` base registers used for
+  schema/data pointers.
+- Stack-frame load/store emission is centralized behind stack helpers instead
+  of scattered handwritten `offset(sp)` formatting. This makes large stack
+  offset handling a codegen invariant, with a regression test guarding against
+  direct stack pointer memory/access emission outside the helpers.
+- Large `addi` lowering now chooses a scratch register that does not overwrite
+  the source/base register, preventing large fixed-byte collection copy paths
+  from losing a live pointer when it is held in `t6`.
+- Large `sp + offset` address materialization now clobbers only the requested
+  destination register instead of using `t6` as a hidden scratch register.
+- RV64 `li` materialization avoids the `lui` sign-extension cliff near the
+  positive 32-bit boundary. Values such as `0x7ffff800` and `0x7fffffff` now
+  use the long materialization path instead of silently producing sign-extended
+  wrong-code.
+- Pool token-pair TypeHash admission is no longer emitted from a `seed_pool`
+  function-name hook in codegen. AMM examples express the rule as a normal DSL
+  `token_a.type_hash() != token_b.type_hash()` invariant, which lowers through
+  the generic runtime `type_hash()` and fixed-byte comparison paths.
+- Internal function calls and parameterized entry wrappers now stage ABI
+  arguments beyond `a7` on the outgoing call stack, so callees that require
+  schema pointer/length plus TypeHash ABI pairs do not silently turn into
+  fail-closed "arg beyond register" paths.
+- Entry-witness wrappers stage those outgoing stack arguments below the local
+  witness frame before adjusting `sp` for the call, preventing stack-spill ABI
+  slots from overwriting decoded witness payload bytes such as fixed-byte
+  `Address` parameters.
+- `env::current_timepoint()` is documented as the CKB HeaderDep#0 epoch number
+  under the CKB profile, not as a Unix timestamp.
+- Large-offset unaligned scalar loads now materialize the load address with an
+  explicit live-register avoid set, so accumulator registers such as `t6` are
+  not clobbered by the fallback address scratch.
+- Large fixed schema field regression coverage now includes both scalar loads
+  and fixed-byte field pointer paths, so valid DSL such as a schema with a
+  2048-byte prefix field compiles through `riscv64-elf`.
+- Fixed-byte constants now materialize through concrete `.rodata` labels rather
+  than the legacy undefined `__const_data` placeholder, so local
+  `Address::zero()`, `Hash::zero()`, array, and `u128` constants can round-trip
+  through internal ELF emission.
+- IR join moves now use the same operand materialization path as normal loads,
+  so fixed-byte constants selected by `if`/join control flow keep their rodata
+  pointers instead of degrading to a null pointer.
+- Generic `u128` comparison and supported `u128 +/- u64` lowering now use
+  explicit 16-byte storage/comparison and carry/borrow arithmetic instead of
+  falling through the old 8-byte register model.
+- Parameterized entry wrappers now reject witness payloads larger than their
+  local witness buffer before decoding dynamic payload lengths, and reject
+  trailing payload bytes after all static or dynamic witness arguments are
+  consumed.
+- Lifecycle receipts now fail compilation unless they declare a scalar unsigned
+  `state` field, matching the runtime verifier's lifecycle state contract.
+- Lifecycle state storage remains explicit cell data: the compiler does not
+  inject hidden state fields or mutate Molecule layout. `create` initializers
+  may now use declared lifecycle state names such as `state: Created`, while
+  guards and computed expressions can use qualified names such as
+  `Ticket::Active` instead of numeric state indexes. The LSP now completes
+  those qualified lifecycle states after `Type::`.
+- Mutate preserved-field verification now fails closed when not every preserved
+  field is verifier-addressable; metadata no longer classifies oversized
+  data-except fallback paths as checked-runtime.
+- `read_ref` runtime fallback no longer reuses the output counter as a CellDep
+  index. If a CellDep index was not allocated, the generated verifier fails
+  closed.
+- `read_ref` runtime fallback also records the loaded CellDep buffer and size
+  offsets consistently, so later schema and type-hash operations see the same
+  cell-backed state as preplanned read refs.
+- External RISC-V toolchain fallback now cleans its temporary directory on both
+  success and error paths.
+- External RISC-V toolchain overrides must now be absolute paths to existing
+  executable files. Relative command names and directories are rejected before
+  the backend launches a process.
+
+Important boundary:
+
+- This is not a claim of full arbitrary RISC-V assembly support. The internal
+  assembler is kept aligned to the CellScript-emitted surface and guarded by an
+  emitted-instruction-surface regression test.
+- Common GNU/RISC-V conveniences such as `lui`, `addiw`, `nop`, `andi`, `ori`,
+  register-register `xor`, raw `jal`/`jalr`, signed sub-word loads, CSR
+  operations, atomics, floating-point, compressed instructions, `fence`, and
+  broad pseudo-instruction support remain outside the 0.13 backend contract
+  unless future codegen starts emitting them.
+
 ## CLI Ergonomics
 
 New in 0.13:
@@ -163,10 +283,10 @@ Snapshot from `bundled_examples_backend_shape_report_serializes`:
 
 | Example | Assembly lines | Text bytes | Machine blocks | CFG edges | Call edges |
 |---|---:|---:|---:|---:|---:|
-| `amm_pool.cell` | 8778 | 33912 | 1393 | 2400 | 326 |
-| `launch.cell` | 5677 | 21320 | 763 | 1309 | 216 |
-| `multisig.cell` | 19836 | 76048 | 3414 | 5421 | 266 |
-| `nft.cell` | 12655 | 47388 | 2375 | 3933 | 305 |
-| `timelock.cell` | 10109 | 38284 | 1797 | 2976 | 243 |
-| `token.cell` | 2628 | 9748 | 478 | 787 | 85 |
-| `vesting.cell` | 3853 | 14372 | 566 | 989 | 189 |
+| `amm_pool.cell` | 8836 | 34496 | 1370 | 2354 | 329 |
+| `launch.cell` | 5742 | 21912 | 740 | 1263 | 219 |
+| `multisig.cell` | 20502 | 78672 | 3531 | 5602 | 273 |
+| `nft.cell` | 12849 | 48288 | 2421 | 4003 | 307 |
+| `timelock.cell` | 10585 | 40176 | 1876 | 3098 | 248 |
+| `token.cell` | 2673 | 10112 | 481 | 793 | 85 |
+| `vesting.cell` | 4007 | 15088 | 587 | 1017 | 191 |

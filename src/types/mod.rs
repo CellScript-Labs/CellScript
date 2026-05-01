@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
+use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use std::collections::{HashMap, HashSet};
 
@@ -269,7 +270,7 @@ pub struct TypeChecker<'a> {
     cell_type_kinds: HashMap<String, CellTypeKind>,
     type_capabilities: HashMap<String, HashSet<Capability>>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
-    lifecycle_receipts: HashSet<String>,
+    lifecycle_states: HashMap<String, Vec<String>>,
     resolver: Option<&'a ModuleResolver>,
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
@@ -362,7 +363,7 @@ impl<'a> TypeChecker<'a> {
             cell_type_kinds: HashMap::new(),
             type_capabilities: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
-            lifecycle_receipts: HashSet::new(),
+            lifecycle_states: HashMap::new(),
             resolver: None,
             current_module: None,
             current_callable: None,
@@ -420,8 +421,8 @@ impl<'a> TypeChecker<'a> {
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
-                    if receipt.lifecycle.is_some() {
-                        self.lifecycle_receipts.insert(receipt.name.clone());
+                    if let Some(lifecycle) = &receipt.lifecycle {
+                        self.lifecycle_states.insert(receipt.name.clone(), lifecycle.states.clone());
                     }
                     self.type_fields.insert(
                         receipt.name.clone(),
@@ -1261,6 +1262,8 @@ impl<'a> TypeChecker<'a> {
                     Ok(constant.ty)
                 } else if let Some(ty) = self.enum_variant_expr_type(name, expr_span(expr))? {
                     Ok(ty)
+                } else if let Some(ty) = self.lifecycle_state_expr_type(name, expr_span(expr))? {
+                    Ok(ty)
                 } else if let Some((prefix, _)) = name.split_once("::") {
                     Ok(Type::Named(prefix.to_string()))
                 } else {
@@ -1637,7 +1640,12 @@ impl<'a> TypeChecker<'a> {
             let Some(expected_ty) = expected_fields.get(field_name) else {
                 return Err(CompileError::new(format!("unknown field '{}' in {} for '{}'", field_name, context, type_name), span));
             };
-            let actual_ty = self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?;
+            let actual_ty =
+                if let Some(lifecycle_ty) = self.lifecycle_state_initializer_type(type_name, field_name, value, expected_ty)? {
+                    lifecycle_ty
+                } else {
+                    self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
+                };
             if !self.initializer_types_equal(&actual_ty, expected_ty) {
                 return Err(CompileError::new(
                     format!(
@@ -1652,7 +1660,9 @@ impl<'a> TypeChecker<'a> {
         let missing = expected_fields
             .keys()
             .filter(|field_name| !seen.contains(*field_name))
-            .filter(|field_name| !(self.lifecycle_receipts.contains(type_name) && field_name.as_str() == "state"))
+            .filter(|field_name| {
+                !(self.resolve_lifecycle_states(type_name).is_some() && field_name.as_str() == LIFECYCLE_STATE_FIELD_NAME)
+            })
             .cloned()
             .collect::<Vec<_>>();
         if !missing.is_empty() {
@@ -1663,6 +1673,68 @@ impl<'a> TypeChecker<'a> {
         }
 
         Ok(())
+    }
+
+    fn lifecycle_state_initializer_type(
+        &self,
+        type_name: &str,
+        field_name: &str,
+        value: &Expr,
+        expected_ty: &Type,
+    ) -> Result<Option<Type>> {
+        if field_name != LIFECYCLE_STATE_FIELD_NAME || !matches!(expected_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+            return Ok(None);
+        }
+        let Expr::Identifier(state_name) = value else {
+            return Ok(None);
+        };
+        let Some((qualified_type, qualified_state)) = state_name.rsplit_once("::") else {
+            return Ok(self.lifecycle_state_index(type_name, state_name).map(|_| expected_ty.clone()));
+        };
+        if qualified_type == type_name {
+            if self.lifecycle_state_index(type_name, state_name).is_some() {
+                return Ok(Some(expected_ty.clone()));
+            }
+            return Err(CompileError::new(
+                format!("unknown lifecycle state '{}::{}'", qualified_type, qualified_state),
+                expr_span(value),
+            ));
+        }
+        if self.resolve_lifecycle_states(qualified_type).is_some() {
+            return Err(CompileError::new(
+                format!(
+                    "lifecycle state field '{}.{}' cannot be initialized with '{}::{}'",
+                    type_name, field_name, qualified_type, qualified_state
+                ),
+                expr_span(value),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn lifecycle_state_expr_type(&self, name: &str, span: Span) -> Result<Option<Type>> {
+        let Some((type_name, state_name)) = name.rsplit_once("::") else {
+            return Ok(None);
+        };
+        let Some(states) = self.resolve_lifecycle_states(type_name) else {
+            return Ok(None);
+        };
+        if states.iter().any(|state| state == state_name) {
+            return Ok(Some(Type::U64));
+        }
+        Err(CompileError::new(format!("unknown lifecycle state '{}::{}'", type_name, state_name), span))
+    }
+
+    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.resolve_lifecycle_states(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
     }
 
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {
@@ -2221,6 +2293,23 @@ impl<'a> TypeChecker<'a> {
         None
     }
 
+    fn supports_collection_len(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(_, _) => true,
+            Type::Ref(inner) | Type::MutRef(inner) => self.supports_collection_len(inner),
+            Type::Named(name) => name == "Vec" || self.parse_named_collection_item_type(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn slice_item_type(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(inner, _) => Some((**inner).clone()),
+            Type::Ref(inner) | Type::MutRef(inner) => Self::slice_item_type(inner),
+            _ => None,
+        }
+    }
+
     fn parse_named_type_repr(&self, repr: &str) -> Type {
         match repr.trim() {
             "u8" => Type::U8,
@@ -2275,6 +2364,18 @@ impl<'a> TypeChecker<'a> {
             .zip(self.current_module.as_deref())
             .and_then(|(resolver, module)| resolver.type_fields(module, base_name))
             .map(|fields| fields.into_iter().collect())
+    }
+
+    fn resolve_lifecycle_states(&self, type_name: &str) -> Option<Vec<String>> {
+        let base_name = type_name.split('<').next().unwrap_or(type_name);
+        if let Some(states) = self.lifecycle_states.get(base_name) {
+            return Some(states.clone());
+        }
+        let (resolver, module) = (self.resolver?, self.current_module.as_deref()?);
+        match resolver.resolve_type(module, base_name)? {
+            TypeDef::Receipt(receipt) => receipt.lifecycle.map(|lifecycle| lifecycle.states),
+            _ => None,
+        }
     }
 
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
@@ -2351,11 +2452,19 @@ impl<'a> TypeChecker<'a> {
                     }
                     "len" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::U64)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::U64)
+                        } else {
+                            Err(CompileError::new("len is only supported on array or Vec values", call.span))
+                        }
                     }
                     "is_empty" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::Bool)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::Bool)
+                        } else {
+                            Err(CompileError::new("is_empty is only supported on array or Vec values", call.span))
+                        }
                     }
                     "capacity" => {
                         self.validate_builtin_arity("Vec.capacity", 0, arg_types, call.span)?;
@@ -2593,7 +2702,42 @@ impl<'a> TypeChecker<'a> {
                     }
                     "extend_from_slice" => {
                         self.validate_builtin_arity("Vec.extend_from_slice", 1, arg_types, call.span)?;
-                        Ok(Type::Unit)
+                        let Some(slice_item_ty) = Self::slice_item_type(&arg_types[0]) else {
+                            return Err(CompileError::new("Vec.extend_from_slice expects an array or byte-slice source", call.span));
+                        };
+                        if self.type_contains_reference(&slice_item_ty) {
+                            return Err(CompileError::new(
+                                format!(
+                                    "Vec.extend_from_slice cannot store reference type {}; Vec<T> values must use owned non-reference items",
+                                    type_repr(&slice_item_ty)
+                                ),
+                                call.span,
+                            ));
+                        }
+                        match &receiver_ty {
+                            Type::Named(name) if name == "Vec" => {
+                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            Type::Named(name) => {
+                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
+                                    return Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span));
+                                };
+                                if !self.types_equal(&item_ty, &slice_item_ty) {
+                                    return Err(CompileError::new(
+                                        format!(
+                                            "Vec.extend_from_slice type mismatch: expected {:?}, found {:?}",
+                                            item_ty, slice_item_ty
+                                        ),
+                                        call.span,
+                                    ));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            _ => Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span)),
+                        }
                     }
                     _ => self.lookup_field_type(&receiver_ty, &field.field, field.span),
                 }

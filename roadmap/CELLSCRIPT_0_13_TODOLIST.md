@@ -9,7 +9,7 @@
 This file records the implemented 0.13 scope and the explicit deferred work.
 For the broader planning context, see
 [CellScript Roadmap](CELLSCRIPT_ROADMAP.md) and
-[CellScript 0.13 Roadmap](CELLSCRIPT_0_13_ROADMAP.md).
+[CellScript 0.13 Release Scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md).
 
 ---
 
@@ -129,7 +129,7 @@ Notes:
   `Address`/`Hash`-width values => 8.
 - [x] Add release notes that distinguish 0.12 schema/ABI vector support from
   0.13 executable stack-backed vector helper support:
-  [CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md](CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md).
+  [CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md).
 - [x] Check generated assembly/code-size impact after the helper set expansion;
   current bundled-example backend-shape budget test passes and the release
   notes draft records the branch baseline snapshot.
