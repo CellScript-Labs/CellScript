@@ -134,6 +134,11 @@ New in 0.13:
 
 - The internal ELF assembler covers the emitted instruction surface used by the
   current compiler and stdlib tests.
+- The assembler support surface is now guarded by an explicit supported
+  mnemonic allowlist plus an intentionally unsupported mnemonic list. Generated
+  stdlib and collection assembly must stay inside the declared supported
+  surface, so public generated assembly cannot quietly drift into GNU assembler
+  mnemonics that the internal assembler does not encode.
 - Register conditional branches `beq`, `bne`, `blt`, `bge`, `bltu`, and `bgeu`
   are accepted and encoded.
 - Zero-compare branches `beqz` and `bnez` remain supported.
@@ -185,6 +190,11 @@ Important boundary:
 - This is not a claim of full arbitrary RISC-V assembly support. The internal
   assembler is kept aligned to the CellScript-emitted surface and guarded by an
   emitted-instruction-surface regression test.
+- Common GNU/RISC-V conveniences such as `lui`, `addiw`, `nop`, `andi`, `ori`,
+  register-register `xor`, raw `jal`/`jalr`, signed sub-word loads, CSR
+  operations, atomics, floating-point, compressed instructions, `fence`, and
+  broad pseudo-instruction support remain outside the 0.13 backend contract
+  unless future codegen starts emitting them.
 
 ## CLI Ergonomics
 
