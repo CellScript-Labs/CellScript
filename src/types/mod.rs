@@ -26,6 +26,11 @@ struct StateMachineSpec {
     transitions: Vec<StateTransition>,
 }
 
+#[derive(Debug, Clone)]
+struct ActionOutputBinding {
+    type_name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellTypeKind {
     Resource,
@@ -325,6 +330,7 @@ fn type_repr(ty: &Type) -> String {
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
         ParamSource::Default => "default",
+        ParamSource::Output => "output",
         ParamSource::Protected => "protected",
         ParamSource::Witness => "witness",
         ParamSource::LockArgs => "lock_args",
@@ -638,6 +644,14 @@ impl<'a> TypeChecker<'a> {
                             && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
                     })
                 });
+                let has_explicit_output_binding = action.state_moves.iter().any(|state_move| {
+                    state_move.path.as_ref().zip(state_move.to_path.as_ref()).is_some_and(|(from_path, to_path)| {
+                        from_path.field == spec.field_name
+                            && to_path.field == spec.field_name
+                            && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
+                            && action_param_output_named_type(action, &to_path.base).is_some_and(|ty| ty == spec.type_name)
+                    })
+                });
                 if !has_explicit_binding {
                     let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
                     if consumed.len() != 1 {
@@ -650,7 +664,9 @@ impl<'a> TypeChecker<'a> {
                         ));
                     }
                 }
-                self.validate_action_creates_single_state_output(action, &spec.type_name, transition.span)?;
+                if !has_explicit_output_binding {
+                    self.validate_action_creates_single_state_output(action, &spec.type_name, transition.span)?;
+                }
             }
         }
 
@@ -851,8 +867,9 @@ impl<'a> TypeChecker<'a> {
         let previous_return_type = self.current_return_type.replace(action.return_type.clone());
         let result = (|| {
             let mut env = self.env.child();
+            let core_evidence_bindings = action_core_evidence_binding_names(action);
 
-            self.bind_callable_params(&mut env, &action.params, "action", &action.name)?;
+            self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings)?;
             self.validate_action_state_moves(action, &env)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
@@ -880,6 +897,7 @@ impl<'a> TypeChecker<'a> {
     fn validate_action_state_moves(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
         let consumed_bindings = action_consumed_bindings(action);
         let created_type_counts = action_created_type_counts(action);
+        let output_bindings = action_output_binding_names(action);
 
         for state_move in &action.state_moves {
             let (type_name, field_name, field_enum_type) = if let Some(path) = &state_move.path {
@@ -901,42 +919,101 @@ impl<'a> TypeChecker<'a> {
                         path.span,
                     ));
                 }
-                if !consumed_bindings.contains(&path.base) {
-                    return Err(CompileError::new(
-                        format!("state move binding '{}' must be consumed by action '{}'", path.base, action.name),
-                        path.span,
-                    ));
-                }
                 let type_name = Self::base_type_name(ty)
                     .ok_or_else(|| {
                         CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span)
                     })?
                     .to_string();
-                let spec = self
-                    .state_machines
-                    .get(&type_name)
-                    .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
-                if spec.field_name != path.field {
-                    return Err(CompileError::new(
-                        format!(
-                            "state move field '{}.{}' does not match declared state machine field '{}.{}'",
-                            path.base, path.field, type_name, spec.field_name
-                        ),
-                        path.span,
-                    ));
+                if let Some(to_path) = &state_move.to_path {
+                    let Some(output_binding) = output_bindings.get(&to_path.base) else {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move output binding '{}' must be an explicit output parameter or the target of this moves clause",
+                                to_path.base
+                            ),
+                            to_path.span,
+                        ));
+                    };
+                    if output_binding.type_name != type_name {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
+                                path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
+                            ),
+                            state_move.span,
+                        ));
+                    }
+                    let spec = self
+                        .state_machines
+                        .get(&type_name)
+                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
+                    if spec.field_name != path.field {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move field '{}.{}' does not match declared state machine field '{}.{}'",
+                                path.base, path.field, type_name, spec.field_name
+                            ),
+                            path.span,
+                        ));
+                    }
+                    if spec.field_name != to_path.field {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move output field '{}.{}' does not match declared state machine field '{}.{}'",
+                                to_path.base, to_path.field, type_name, spec.field_name
+                            ),
+                            to_path.span,
+                        ));
+                    }
+                    (type_name, path.field.clone(), spec.field_enum_type.clone())
+                } else {
+                    if output_bindings.values().any(|binding| binding.type_name == type_name) {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move for '{}.{}' has an output parameter candidate; write moves {}.{} {} -> output.field {} to avoid guessing",
+                                type_name, path.field, path.base, path.field, state_move.from, state_move.to
+                            ),
+                            state_move.span,
+                        ));
+                    }
+                    if !consumed_bindings.contains(&path.base) {
+                        return Err(CompileError::new(
+                            format!("state move binding '{}' must be consumed by action '{}'", path.base, action.name),
+                            path.span,
+                        ));
+                    }
+                    let create_count = created_type_counts.get(&type_name).copied().unwrap_or(0);
+                    if create_count != 1 {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
+                                type_name, path.field, type_name, create_count
+                            ),
+                            state_move.span,
+                        ));
+                    }
+                    let spec = self
+                        .state_machines
+                        .get(&type_name)
+                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
+                    if spec.field_name != path.field {
+                        return Err(CompileError::new(
+                            format!(
+                                "state move field '{}.{}' does not match declared state machine field '{}.{}'",
+                                path.base, path.field, type_name, spec.field_name
+                            ),
+                            path.span,
+                        ));
+                    }
+                    (type_name, path.field.clone(), spec.field_enum_type.clone())
                 }
-                let create_count = created_type_counts.get(&type_name).copied().unwrap_or(0);
-                if create_count != 1 {
+            } else {
+                if !output_bindings.is_empty() {
                     return Err(CompileError::new(
-                        format!(
-                            "state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
-                            type_name, path.field, type_name, create_count
-                        ),
+                        "shorthand state move is ambiguous with output parameters; write moves input.state From -> output.state To",
                         state_move.span,
                     ));
                 }
-                (type_name, path.field.clone(), spec.field_enum_type.clone())
-            } else {
                 let mut matches = self
                     .state_machines
                     .values()
@@ -1216,6 +1293,17 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn bind_callable_params(&self, env: &mut TypeEnv, params: &[Param], callable_kind: &str, callable_name: &str) -> Result<()> {
+        self.bind_callable_params_with_non_linear(env, params, callable_kind, callable_name, &HashSet::new())
+    }
+
+    fn bind_callable_params_with_non_linear(
+        &self,
+        env: &mut TypeEnv,
+        params: &[Param],
+        callable_kind: &str,
+        callable_name: &str,
+        non_linear_params: &HashSet<String>,
+    ) -> Result<()> {
         let mut seen = HashSet::new();
         for param in params {
             if param.name == "_" {
@@ -1238,7 +1326,9 @@ impl<'a> TypeChecker<'a> {
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
             self.validate_callable_param_mutability(param)?;
-            let is_linear = self.is_linear_type(&param.ty);
+            let is_linear = self.is_linear_type(&param.ty)
+                && param.source != ParamSource::Output
+                && !non_linear_params.contains(param.name.as_str());
             env.bind_new(param.name.clone(), param.ty.clone(), is_linear, param.is_mut, param.span)?;
         }
         Ok(())
@@ -1246,6 +1336,40 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_callable_param_source(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
         if param.source == ParamSource::Default {
+            return Ok(());
+        }
+        if param.source == ParamSource::Output {
+            if callable_kind != "action" {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot use output source classification; output parameters are action verifier bindings",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
+            if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
+                return Err(CompileError::new(
+                    format!("output action parameter '{}' must use 'name: output T' without mut/ref/read_ref modifiers", param.name),
+                    param.span,
+                ));
+            }
+            let Some(name) = Self::base_type_name(&param.ty) else {
+                return Err(CompileError::new(
+                    format!("output action parameter '{}' must name a Cell-backed resource, shared cell, or receipt type", param.name),
+                    param.span,
+                ));
+            };
+            if self.resolve_cell_type_kind(name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "output action parameter '{}' references non-Cell type {}; output only marks a proposed transaction output Cell",
+                        param.name,
+                        type_repr(&param.ty)
+                    ),
+                    param.span,
+                ));
+            }
             return Ok(());
         }
         if callable_kind != "lock" {
@@ -1318,7 +1442,7 @@ impl<'a> TypeChecker<'a> {
                     param.span,
                 ));
             }
-            ParamSource::Default => {}
+            ParamSource::Default | ParamSource::Output => {}
         }
         Ok(())
     }
@@ -2214,9 +2338,9 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_expr_allowed_in_current_callable(&self, expr: &Expr) -> Result<()> {
-        if matches!(expr, Expr::Require(_)) && self.current_callable != Some(CallableKind::Lock) {
+        if matches!(expr, Expr::Require(_)) && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock)) {
             return Err(CompileError::new(
-                "require is lock-boundary syntax; use assert_invariant inside actions and ordinary boolean expressions inside pure functions",
+                "require is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside pure functions",
                 expr_span(expr),
             ));
         }
@@ -3641,6 +3765,55 @@ fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Optio
         }
         _ => None,
     })
+}
+
+fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
+    action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
+        Type::Named(type_name)
+            if matches!(param.source, ParamSource::Default | ParamSource::Output)
+                && !param.is_read_ref
+                && !param.is_ref
+                && !param.is_mut =>
+        {
+            Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
+        }
+        _ => None,
+    })
+}
+
+fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutputBinding> {
+    let mut bindings = HashMap::new();
+    for param in &action.params {
+        if param.source == ParamSource::Output {
+            if let Type::Named(type_name) = &param.ty {
+                bindings.insert(
+                    param.name.clone(),
+                    ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
+                );
+            }
+        }
+    }
+    for state_move in &action.state_moves {
+        let Some(to_path) = &state_move.to_path else {
+            continue;
+        };
+        if let Some(type_name) = action_param_output_named_type(action, &to_path.base) {
+            bindings.entry(to_path.base.clone()).or_insert_with(|| ActionOutputBinding { type_name: type_name.to_string() });
+        }
+    }
+    bindings
+}
+
+fn action_core_evidence_binding_names(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
+    for state_move in &action.state_moves {
+        if state_move.to_path.is_some() {
+            if let Some(path) = &state_move.path {
+                bindings.insert(path.base.clone());
+            }
+        }
+    }
+    bindings
 }
 
 fn action_consumed_bindings_for_type(action: &ActionDef, type_name: &str) -> Vec<String> {

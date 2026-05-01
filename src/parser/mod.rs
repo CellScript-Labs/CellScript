@@ -966,10 +966,20 @@ impl<'a> Parser<'a> {
                     (None, first)
                 };
                 self.expect(TokenKind::Arrow)?;
-                let to = self.parse_name_path()?;
+                let to_start_span = self.current().span;
+                let to_first = self.parse_name_path()?;
+                let (to_path, to) = if self.check(&TokenKind::Dot) {
+                    self.advance();
+                    let field = self.parse_name()?;
+                    let path_span = Span::new(to_start_span.start, self.current().span.end, to_start_span.line, to_start_span.column);
+                    (Some(StateFieldPath { base: to_first, field, span: path_span }), self.parse_name_path()?)
+                } else {
+                    (None, to_first)
+                };
                 let end_span = self.current().span;
                 moves.push(ActionStateMove {
                     path,
+                    to_path,
                     from,
                     to,
                     span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
@@ -1120,6 +1130,7 @@ impl<'a> Parser<'a> {
     fn parse_param_source_marker(&mut self) -> ParamSource {
         let source = match &self.current().kind {
             TokenKind::Identifier(name) if name == "protected" => ParamSource::Protected,
+            TokenKind::Identifier(name) if name == "output" => ParamSource::Output,
             TokenKind::Identifier(name) if name == "witness" => ParamSource::Witness,
             TokenKind::Identifier(name) if name == "lock_args" => ParamSource::LockArgs,
             _ => ParamSource::Default,

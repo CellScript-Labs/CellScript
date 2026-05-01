@@ -52,6 +52,7 @@ pub struct IrLifecycleRule {
 #[derive(Debug, Clone)]
 pub struct IrLifecycleMove {
     pub input_binding: Option<String>,
+    pub output_binding: Option<String>,
     pub type_name: String,
     pub field_name: String,
     pub from: String,
@@ -555,6 +556,7 @@ impl IrGenerator {
                 };
                 self.state_machine_action_moves.entry(action.clone()).or_default().push(IrLifecycleMove {
                     input_binding: None,
+                    output_binding: None,
                     type_name: type_name.clone(),
                     field_name: field_name.clone(),
                     from,
@@ -714,7 +716,13 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) = self.lower_signature_and_body(&function.params, &function.body, function.return_type.is_some());
+        let (params, body) = self.lower_signature_and_body(
+            &function.params,
+            &function.body,
+            function.return_type.is_some(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
 
         IrPureFn { name: function.name.clone(), params, return_type: function.return_type.as_ref().map(Self::convert_type), body }
     }
@@ -780,7 +788,15 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) = self.lower_signature_and_body(&action.params, &action.body, action.return_type.is_some());
+        let output_bindings = action_output_binding_names(action);
+        let core_input_bindings = action_core_input_binding_names(action);
+        let (params, body) = self.lower_signature_and_body(
+            &action.params,
+            &action.body,
+            action.return_type.is_some(),
+            &output_bindings,
+            &core_input_bindings,
+        );
 
         let mut effect_class = self.analyze_effect_class(action);
         if params.iter().any(|param| param.is_read_ref) && effect_class == EffectClass::Pure {
@@ -833,6 +849,7 @@ impl IrGenerator {
                 };
                 if let Some(mut lowered) = self.lifecycle_move_for(type_name, &path.field, &state_move.from, &state_move.to) {
                     lowered.input_binding = Some(path.base.clone());
+                    lowered.output_binding = state_move.to_path.as_ref().map(|to_path| to_path.base.clone());
                     moves.push(lowered);
                 }
             } else {
@@ -852,6 +869,7 @@ impl IrGenerator {
                 existing.type_name == state_move.type_name
                     && existing.field_name == state_move.field_name
                     && existing.input_binding == state_move.input_binding
+                    && existing.output_binding == state_move.output_binding
                     && existing.from_index == state_move.from_index
                     && existing.to_index == state_move.to_index
             }) {
@@ -872,6 +890,7 @@ impl IrGenerator {
         let to_index = states.iter().position(|state| state == &to)?;
         Some(IrLifecycleMove {
             input_binding: None,
+            output_binding: None,
             type_name: type_name.to_string(),
             field_name: field_name.to_string(),
             from,
@@ -893,7 +912,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
-        let (params, body) = self.lower_signature_and_body(&lock.params, &lock.body, true);
+        let (params, body) = self.lower_signature_and_body(&lock.params, &lock.body, true, &HashSet::new(), &HashSet::new());
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
@@ -1118,20 +1137,28 @@ impl IrGenerator {
         }
     }
 
-    fn lower_signature_and_body(&mut self, params: &[Param], stmts: &[Stmt], tail_expr_returns: bool) -> (Vec<IrParam>, IrBody) {
+    fn lower_signature_and_body(
+        &mut self,
+        params: &[Param],
+        stmts: &[Stmt],
+        tail_expr_returns: bool,
+        output_bindings: &HashSet<String>,
+        core_input_bindings: &HashSet<String>,
+    ) -> (Vec<IrParam>, IrBody) {
         let mut vars = HashMap::new();
         let ir_params = params
             .iter()
             .map(|param| {
                 let binding = self.new_var(param.name.clone(), Self::convert_type(&param.ty));
                 vars.insert(param.name.clone(), binding.clone());
+                let source = if output_bindings.contains(param.name.as_str()) { ParamSource::Output } else { param.source };
                 IrParam {
                     name: param.name.clone(),
                     ty: Self::convert_type(&param.ty),
                     is_mut: param.is_mut,
                     is_ref: param.is_ref,
                     is_read_ref: param.is_read_ref,
-                    source: param.source,
+                    source,
                     binding,
                 }
             })
@@ -1140,10 +1167,10 @@ impl IrGenerator {
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
         let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_expr_returns);
-        let consume_set = self.collect_consume_patterns(&blocks);
+        let consume_set = self.collect_consume_patterns(&blocks, &ir_params, core_input_bindings);
         let mut read_refs = self.collect_read_ref_param_patterns(&ir_params);
         read_refs.extend(self.collect_read_ref_patterns(&blocks));
-        let create_set = self.collect_create_patterns(&blocks);
+        let create_set = self.collect_create_patterns(&blocks, &ir_params);
         let mutate_set = self.collect_mutate_param_patterns(&ir_params, consume_set.len(), create_set.len());
         let write_intents = Self::collect_write_intents(&create_set, &mutate_set);
         self.transition_param_ids.clear();
@@ -1173,8 +1200,17 @@ impl IrGenerator {
         create_intents.chain(mutate_intents).collect()
     }
 
-    fn collect_consume_patterns(&self, blocks: &[IrBlock]) -> Vec<CellPattern> {
-        let mut patterns = Vec::new();
+    fn collect_consume_patterns(
+        &self,
+        blocks: &[IrBlock],
+        params: &[IrParam],
+        core_input_bindings: &HashSet<String>,
+    ) -> Vec<CellPattern> {
+        let mut patterns = params
+            .iter()
+            .filter(|param| core_input_bindings.contains(param.name.as_str()))
+            .filter_map(|param| self.cell_pattern_from_var(&param.binding, "input"))
+            .collect::<Vec<_>>();
         for block in blocks {
             for instruction in &block.instructions {
                 if let IrInstruction::Consume { operand } = instruction {
@@ -1235,8 +1271,12 @@ impl IrGenerator {
             .collect()
     }
 
-    fn collect_create_patterns(&self, blocks: &[IrBlock]) -> Vec<CreatePattern> {
-        let mut patterns = Vec::new();
+    fn collect_create_patterns(&self, blocks: &[IrBlock], params: &[IrParam]) -> Vec<CreatePattern> {
+        let mut patterns = params
+            .iter()
+            .filter(|param| param.source == ParamSource::Output)
+            .filter_map(|param| self.create_pattern_from_var(&param.binding, "output"))
+            .collect::<Vec<_>>();
         for block in blocks {
             for instruction in &block.instructions {
                 if let IrInstruction::Create { pattern, .. } = instruction {
@@ -1316,6 +1356,10 @@ impl IrGenerator {
         let IrOperand::Var(var) = operand else {
             return None;
         };
+        self.cell_pattern_from_var(var, operation)
+    }
+
+    fn cell_pattern_from_var(&self, var: &IrVar, operation: &str) -> Option<CellPattern> {
         let type_name = match &var.ty {
             IrType::Named(name) => Some(name.as_str()),
             IrType::Ref(inner) | IrType::MutRef(inner) => match inner.as_ref() {
@@ -4451,6 +4495,30 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir_type(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir_type(inner))),
     }
+}
+
+fn action_output_binding_names(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = action
+        .params
+        .iter()
+        .filter(|param| param.source == ParamSource::Output)
+        .map(|param| param.name.clone())
+        .collect::<HashSet<_>>();
+    for state_move in &action.state_moves {
+        if let Some(to_path) = &state_move.to_path {
+            bindings.insert(to_path.base.clone());
+        }
+    }
+    bindings
+}
+
+fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
+    action
+        .state_moves
+        .iter()
+        .filter(|state_move| state_move.to_path.is_some())
+        .filter_map(|state_move| state_move.path.as_ref().map(|path| path.base.clone()))
+        .collect()
 }
 
 fn const_usize_operand(operand: &IrOperand) -> Option<usize> {

@@ -609,7 +609,7 @@ impl LspServer {
             ("action", "action ${1:name}($2) {\n    $0\n}"),
             ("state_machine", "state_machine ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("state", "state ${1:Type}.${2:state} {\n    ${3:Created} -> ${4:Live};\n}"),
-            ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:Live}"),
+            ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
             (
                 "lock",
                 "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:arg}: witness ${5:Address}) -> bool {\n    require $0\n}",

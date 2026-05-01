@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::error::{CompileError, Result};
 use crate::ir::*;
 use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
@@ -557,6 +557,8 @@ pub struct CodeGenerator {
     read_ref_param_input_indices: HashMap<usize, usize>,
     /// CKB CellDep index for read_ref schema parameters keyed by IR variable id.
     read_ref_param_dep_indices: HashMap<usize, usize>,
+    /// Proposed transaction Output parameter variable ids keyed by source binding name.
+    output_param_ids: HashMap<String, usize>,
     /// Whether the current entry function should bind read-only schema params from Inputs.
     bind_readonly_schema_params: bool,
     /// Whether the current function is a CKB lock predicate entry.
@@ -680,6 +682,7 @@ impl CodeGenerator {
             read_ref_param_ids: HashMap::new(),
             read_ref_param_input_indices: HashMap::new(),
             read_ref_param_dep_indices: HashMap::new(),
+            output_param_ids: HashMap::new(),
             bind_readonly_schema_params: false,
             current_lock_entry: false,
             mutate_param_ids: HashMap::new(),
@@ -1417,6 +1420,7 @@ impl CodeGenerator {
         self.prelude_fixed_byte_constants.clear();
         self.operation_output_indices.clear();
         self.verified_operation_outputs.clear();
+        self.output_param_ids.clear();
         self.verified_collection_push_values.clear();
         self.stack_collection_vars.clear();
         self.constructed_byte_vectors.clear();
@@ -1467,6 +1471,7 @@ impl CodeGenerator {
         self.prelude_fixed_byte_constants.clear();
         self.operation_output_indices.clear();
         self.verified_operation_outputs.clear();
+        self.output_param_ids.clear();
         self.verified_collection_push_values.clear();
         self.stack_collection_vars.clear();
         self.constructed_byte_vectors.clear();
@@ -1524,6 +1529,7 @@ impl CodeGenerator {
         self.prelude_fixed_byte_constants.clear();
         self.operation_output_indices.clear();
         self.verified_operation_outputs.clear();
+        self.output_param_ids.clear();
         self.verified_collection_push_values.clear();
         self.stack_collection_vars.clear();
         self.constructed_byte_vectors.clear();
@@ -2196,7 +2202,9 @@ impl CodeGenerator {
 
     fn generate_consume(&mut self, pattern: &CellPattern, index: usize) -> Result<()> {
         self.emit(format!("# {} input {}", pattern.operation, pattern.binding));
-        if let Some(var_id) = self.consume_order.get(index).copied() {
+        if let Some(var_id) =
+            self.consume_binding_ids.get(&pattern.binding).copied().or_else(|| self.consume_order.get(index).copied())
+        {
             if let (Some(size_offset), Some(buffer_offset)) =
                 (self.cell_buffer_size_offsets.get(&var_id).copied(), self.cell_buffer_offsets.get(&var_id).copied())
             {
@@ -2271,6 +2279,34 @@ impl CodeGenerator {
         // The verifier cannot create cells inside CKB-VM; it can only verify the
         // transaction output selected by the lowering metadata.
         self.emit(format!("# {} output {}", pattern.operation, pattern.ty));
+        if pattern.operation == "output" {
+            if let Some(var_id) = self.output_param_ids.get(&pattern.binding).copied() {
+                let Some(size_offset) = self.cell_buffer_size_offsets.get(&var_id).copied() else {
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                };
+                let Some(buffer_offset) = self.cell_buffer_offsets.get(&var_id).copied() else {
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                };
+                self.emit_load_cell_data_syscall_to_offsets(
+                    "output_param",
+                    CKB_SOURCE_OUTPUT,
+                    index,
+                    size_offset,
+                    buffer_offset,
+                    RUNTIME_CELL_BUFFER_SIZE,
+                );
+                self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+                self.emit_sp_addi("t0", buffer_offset);
+                self.emit_stack_store("t0", var_id * 8);
+                self.emit_lifecycle_transition_check(pattern, size_offset, buffer_offset);
+                self.next_virtual_output = self.next_virtual_output.max(index + 1);
+                return Ok(());
+            }
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            return Ok(());
+        }
         self.emit_load_cell_data_syscall(&pattern.operation, CKB_SOURCE_OUTPUT, index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
 
@@ -2693,6 +2729,7 @@ impl CodeGenerator {
         self.read_ref_param_ids.clear();
         self.read_ref_param_input_indices.clear();
         self.read_ref_param_dep_indices.clear();
+        self.output_param_ids.clear();
         self.mutate_param_ids.clear();
         self.schema_pointer_size_offsets.clear();
         self.fixed_byte_param_size_offsets.clear();
@@ -2730,6 +2767,14 @@ impl CodeGenerator {
             next_cell_slot += 8;
         }
         for param in params {
+            if param.source == ParamSource::Output {
+                self.output_param_ids.insert(param.name.clone(), param.binding.id);
+                self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
+                self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
+                self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
+                next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                continue;
+            }
             if named_type_name(&param.ty).is_some() {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
                 next_cell_slot += 8;
@@ -2748,22 +2793,19 @@ impl CodeGenerator {
         }
 
         if self.bind_readonly_schema_params {
-            let consumed_param_ids = body
-                .blocks
-                .iter()
-                .flat_map(|block| block.instructions.iter())
-                .filter_map(consumed_operand_var)
-                .map(|var| var.id)
-                .collect::<BTreeSet<_>>();
+            let consumed_param_names = body.consume_set.iter().map(|pattern| pattern.binding.as_str()).collect::<BTreeSet<_>>();
             let mutate_param_names = body.mutate_set.iter().map(|pattern| pattern.binding.as_str()).collect::<BTreeSet<_>>();
             let read_ref_indices_by_binding =
                 body.read_refs.iter().enumerate().map(|(index, pattern)| (pattern.binding.as_str(), index)).collect::<HashMap<_, _>>();
             let mut read_ref_param_index = 0usize;
             for param in params {
+                if param.source == ParamSource::Output {
+                    continue;
+                }
                 if !self.param_is_runtime_bound(param) {
                     continue;
                 }
-                if mutate_param_names.contains(param.name.as_str()) || consumed_param_ids.contains(&param.binding.id) {
+                if mutate_param_names.contains(param.name.as_str()) || consumed_param_names.contains(param.name.as_str()) {
                     continue;
                 }
                 self.read_ref_param_ids.insert(param.name.clone(), param.binding.id);
@@ -2795,10 +2837,31 @@ impl CodeGenerator {
             next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
         }
 
-        let mut consume_index = 0usize;
+        let consume_pattern_indices =
+            body.consume_set.iter().enumerate().map(|(index, pattern)| (pattern.binding.as_str(), index)).collect::<HashMap<_, _>>();
+        for pattern in &body.consume_set {
+            let Some(param) = params.iter().find(|param| param.name == pattern.binding) else {
+                continue;
+            };
+            if self.consume_binding_ids.contains_key(&pattern.binding) {
+                continue;
+            }
+            if let Some(type_name) = named_type_name(&param.ty) {
+                self.consume_type_names.insert(param.binding.id, type_name.to_string());
+            }
+            self.consume_binding_ids.insert(pattern.binding.clone(), param.binding.id);
+            self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
+            self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
+            self.consume_order.push(param.binding.id);
+            self.consume_indices.insert(param.binding.id, consume_pattern_indices.get(pattern.binding.as_str()).copied().unwrap_or(0));
+            next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+        }
         for block in &body.blocks {
             for instruction in &block.instructions {
                 if let Some(var) = consumed_operand_var(instruction) {
+                    if self.consume_binding_ids.contains_key(&var.name) {
+                        continue;
+                    }
                     if let Some(type_name) = named_type_name(&var.ty) {
                         self.consume_type_names.insert(var.id, type_name.to_string());
                     }
@@ -2806,9 +2869,11 @@ impl CodeGenerator {
                     self.cell_buffer_size_offsets.insert(var.id, next_cell_slot);
                     self.cell_buffer_offsets.insert(var.id, next_cell_slot + 8);
                     self.consume_order.push(var.id);
-                    self.consume_indices.insert(var.id, consume_index);
+                    self.consume_indices.insert(
+                        var.id,
+                        consume_pattern_indices.get(var.name.as_str()).copied().unwrap_or(self.consume_order.len() - 1),
+                    );
                     next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
-                    consume_index += 1;
                 }
             }
         }
@@ -5795,7 +5860,14 @@ impl CodeGenerator {
     }
 
     fn lifecycle_transition_moves_for_pattern(&self, pattern: &CreatePattern) -> Vec<IrLifecycleMove> {
-        self.current_lifecycle_moves.iter().filter(|state_move| state_move.type_name == pattern.ty).cloned().collect()
+        self.current_lifecycle_moves
+            .iter()
+            .filter(|state_move| {
+                state_move.type_name == pattern.ty
+                    && state_move.output_binding.as_ref().is_none_or(|binding| binding == &pattern.binding)
+            })
+            .cloned()
+            .collect()
     }
 
     fn lifecycle_transition_rules_for_pattern(
@@ -10856,6 +10928,7 @@ mod tests {
 
         let state_move = IrLifecycleMove {
             input_binding: Some("right".to_string()),
+            output_binding: None,
             type_name: "Offer".to_string(),
             field_name: "state".to_string(),
             from: "Live".to_string(),

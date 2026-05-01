@@ -75,23 +75,17 @@ state_machine GrantFlow for VestingGrant.state {
 }
 ```
 
-Bind each action to the transition it is allowed to prove:
+Bind each action to the transition it is allowed to prove. The semantic core is
+an `action(input: T, output: T)` verifier form: `input` and `output` are
+proposed transaction cells, and `moves` names both state fields explicitly.
 
 ```cellscript
-action unlock_grant(input: VestingGrant)
-    moves input.state Granted -> Claimable
+action unlock_grant(input: VestingGrant, output: VestingGrant)
+    moves input.state Granted -> output.state Claimable
 {
-    let beneficiary = input.beneficiary
-    let total_amount = input.total_amount
-    let claimed_amount = input.claimed_amount
-
-    consume input
-    create VestingGrant {
-        state: GrantState::Claimable,
-        beneficiary,
-        total_amount,
-        claimed_amount,
-    }
+    require input.beneficiary == output.beneficiary
+    require input.total_amount == output.total_amount
+    require input.claimed_amount == output.claimed_amount
 }
 ```
 
@@ -100,9 +94,21 @@ need a separate name. The compiler keeps the state field explicit in Molecule
 layout, lowers enum states to their ordinal values, verifies old/new state at
 runtime, and rejects action moves that are not declared in the state graph.
 
+Output binding is deterministic. Output parameters are bound to transaction
+outputs in action parameter order among output parameters, starting at
+`Output#0`. A `moves input.state A -> output.state B` target marks `output` as
+an output binding; otherwise use `name: output T`. If a legacy
+`moves input.state A -> B` action has output parameters, the compiler rejects it
+instead of guessing which output is the replacement. Existing
+`consume input` plus `create T { ... }` remains accepted as front-end sugar for
+the same verifier shape.
+
 ## Creating Output Cells
 
-`create` constructs typed output data and a corresponding Cell output:
+`create` constructs typed output data and a corresponding Cell output. In the
+verifier model this is sugar for selecting and checking a proposed transaction
+output; the script still validates an existing transaction, it does not allocate
+Cells inside CKB-VM.
 
 ```cellscript
 create Token {

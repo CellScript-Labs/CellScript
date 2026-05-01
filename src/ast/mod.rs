@@ -150,6 +150,7 @@ pub struct ActionDef {
 #[derive(Debug, Clone)]
 pub struct ActionStateMove {
     pub path: Option<StateFieldPath>,
+    pub to_path: Option<StateFieldPath>,
     pub from: String,
     pub to: String,
     pub span: Span,
@@ -201,6 +202,7 @@ pub struct Param {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamSource {
     Default,
+    Output,
     Protected,
     Witness,
     LockArgs,

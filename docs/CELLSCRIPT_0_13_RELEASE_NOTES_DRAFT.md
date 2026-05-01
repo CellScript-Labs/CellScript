@@ -210,14 +210,22 @@ New in 0.13:
 - Declarative state machines can now be expressed without hidden layout changes:
   `state_machine Name for Type.field { A -> B by action; }` and compact
   `state Type.field { A -> B; }` declare the graph, while action signatures can
-  bind the edge they prove with `moves input.field A -> B`. The type checker,
-  state static checks, IR metadata, runtime verifier, formatter, docs
-  generator, and LSP all carry the explicit state field name.
+  bind the edge they prove with explicit field-to-field moves such as
+  `moves input.state Live -> output.state Filled`. The type checker, state
+  static checks, IR metadata, runtime verifier, formatter, docs generator, and
+  LSP all carry the explicit state field name.
+- The semantic core for state transitions is now proposed-cell verification:
+  `action(input: T, output: T)` treats `input` as a transaction input and
+  `output` as a transaction output. `consume` plus `create` remains accepted as
+  front-end sugar, but output parameters bind deterministically to `Output#N`
+  in output-parameter order. The compiler rejects legacy moves with output
+  parameters unless the target output field is named explicitly.
 - State-machine checking no longer treats enum or declaration order as a hidden
   linear state sequence: initial creates may use any declared state, and declared
-  edges may return to the first state. `moves` and `by action` edges now fail at
-  compile time unless the action consumes the corresponding owned input and
-  creates exactly one replacement output.
+  edges may return to the first state. Legacy `moves` and `by action` edges now
+  fail at compile time unless the action consumes the corresponding owned input
+  and creates exactly one replacement output; explicit field-to-field `moves`
+  validate the named input and output parameter bindings instead.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.

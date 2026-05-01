@@ -211,7 +211,14 @@ impl Formatter {
         }
         for state_move in &action.state_moves {
             let edge = if let Some(path) = &state_move.path {
-                format!("moves {}.{} {} -> {}", path.base, path.field, state_move.from, state_move.to)
+                if let Some(to_path) = &state_move.to_path {
+                    format!(
+                        "moves {}.{} {} -> {}.{} {}",
+                        path.base, path.field, state_move.from, to_path.base, to_path.field, state_move.to
+                    )
+                } else {
+                    format!("moves {}.{} {} -> {}", path.base, path.field, state_move.from, state_move.to)
+                }
             } else {
                 format!("moves {} -> {}", state_move.from, state_move.to)
             };
@@ -470,6 +477,10 @@ fn format_param(param: &Param) -> String {
     rendered.push_str(&param.name);
     rendered.push_str(": ");
     match param.source {
+        ParamSource::Output => {
+            rendered.push_str("output ");
+            rendered.push_str(&format_type(&param.ty));
+        }
         ParamSource::Protected => {
             rendered.push_str("protected ");
             let ty = match &param.ty {

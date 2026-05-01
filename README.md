@@ -171,7 +171,9 @@ CellScript programs are written in terms of Cell lifecycle operations:
 - **Declarative state machines** — state remains explicit schema data, while
   `state_machine Name for Type.field { A -> B by action; }` or compact
   `state Type.field { A -> B; }` declares allowed edges, and
-  `action ... moves input.field A -> B` binds an action to the edge it proves.
+  `action(input: T, output: T) moves input.field A -> output.field B` binds
+  proposed transaction cells to the edge it proves. Legacy `consume`/`create`
+  actions are front-end sugar over the same verifier constraints.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -483,7 +485,7 @@ treated as deployable.
 ```mermaid
 flowchart TB
     Source[".cell source + Cell.toml\n--target-profile ckb"] --> Frontend["Lexer + parser\nstable source spans"]
-    Frontend --> Semantics["Type + state checks\nlinear resources, lock-only require,\nprotected/witness/lock_args classification"]
+    Frontend --> Semantics["Type + state checks\nlinear resources, verifier require,\ninput/output/protected/witness classification"]
     Semantics --> Policy["CKB policy gate\nfail closed on unsupported runtime or state shapes"]
 
     subgraph Rules["CKB profile rules"]

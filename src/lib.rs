@@ -8998,7 +8998,13 @@ fn body_lifecycle_transition_checks(
     params: &[ir::IrParam],
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<LifecycleTransitionCheck> {
-    let consumed_types = body_consumed_named_types(body);
+    let mut consumed_types = body_consumed_named_types(body);
+    for pattern in &body.consume_set {
+        if let Some(type_name) = params.iter().find(|param| param.name == pattern.binding).and_then(|param| named_type_name(&param.ty))
+        {
+            consumed_types.insert(type_name.to_string());
+        }
+    }
     let param_schema_vars = schema_pointer_var_ids(body, params);
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
     let mut checks = Vec::new();
@@ -9052,6 +9058,9 @@ fn metadata_can_verify_lifecycle_transition(
     };
     if metadata_layout_fixed_scalar_width(state_layout).is_none() {
         return false;
+    }
+    if pattern.operation == "output" {
+        return true;
     }
     metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
@@ -10937,7 +10946,17 @@ fn scheduler_access_is_cell_state_access(access: &CkbRuntimeAccessMetadata) -> b
     matches!(access.source.as_str(), "Input" | "CellDep" | "Output")
         && matches!(
             access.operation.as_str(),
-            "consume" | "transfer" | "destroy" | "claim" | "settle" | "read_ref" | "create" | "mutate-input" | "mutate-output"
+            "input"
+                | "consume"
+                | "transfer"
+                | "destroy"
+                | "claim"
+                | "settle"
+                | "read_ref"
+                | "output"
+                | "create"
+                | "mutate-input"
+                | "mutate-output"
         )
 }
 
@@ -11878,6 +11897,7 @@ fn param_metadata(
 fn param_source_metadata(source: ast::ParamSource) -> &'static str {
     match source {
         ast::ParamSource::Default => "default",
+        ast::ParamSource::Output => "output",
         ast::ParamSource::Protected => "protected",
         ast::ParamSource::Witness => "witness",
         ast::ParamSource::LockArgs => "lock_args",
@@ -16564,16 +16584,11 @@ action activate(ticket: Ticket) -> Ticket {
             lock_args_err.message
         );
 
-        let action_require_err = compile(ACTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            action_require_err.message.contains("require is lock-boundary syntax"),
-            "unexpected error: {}",
-            action_require_err.message
-        );
+        compile(ACTION_REQUIRE_PROGRAM, CompileOptions::default()).expect("actions may use require for verifier guards");
 
         let function_require_err = compile(FUNCTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            function_require_err.message.contains("require is lock-boundary syntax"),
+            function_require_err.message.contains("require is verifier-boundary syntax"),
             "unexpected error: {}",
             function_require_err.message
         );
@@ -21038,6 +21053,163 @@ action accept(input: Offer) moves input.state Live -> Filled {
         );
         assert!(asm.contains("li t3, 1"), "action move should check source state Live=1:\n{}", asm);
         assert!(asm.contains("li t3, 2"), "action move should check target state Filled=2:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_accepts_core_input_output_state_transition_moves() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Filled;
+    Live -> Cancelled;
+}
+
+action accept(input: Offer, output: Offer) moves input.state Live -> output.state Filled {
+    require input.amount == output.amount
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "input"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
+        assert!(action.params.iter().any(|param| param.name == "output" && param.source == "output"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0"),
+            "core input parameter should bind deterministically to Input#0:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+            "core output parameter should bind deterministically to Output#0:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t3, 0"), "core move should check source state Live=0:\n{}", asm);
+        assert!(asm.contains("li t3, 1"), "core move should check target state Filled=1:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_core_state_transition_edge_not_in_graph() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Filled;
+}
+
+action cancel(input: Offer, output: Offer) moves input.state Live -> output.state Cancelled {
+    require input.amount == output.amount
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_output_binding_ambiguity_without_target_path() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Filled;
+}
+
+action accept(input: Offer, left: output Offer, right: output Offer) moves input.state Live -> Filled {
+    consume input
+    require left.amount == right.amount
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("avoid guessing") || err.message.contains("ambiguous"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_reports_equivalent_state_transition_obligation_for_sugar_and_core_forms() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Live -> Filled;
+}
+
+action accept_sugar(input: Offer) moves input.state Live -> Filled {
+    let amount = input.amount
+    consume input
+    create Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+}
+
+action accept_core(input: Offer, output: Offer) moves input.state Live -> output.state Filled {
+    require input.amount == output.amount
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let sugar = result.metadata.actions.iter().find(|action| action.name == "accept_sugar").expect("sugar metadata");
+        let core = result.metadata.actions.iter().find(|action| action.name == "accept_core").expect("core metadata");
+        let sugar_obligations = sugar
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.category == "state-transition" && obligation.feature == "Offer.state")
+            .count();
+        let core_obligations = core
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.category == "state-transition" && obligation.feature == "Offer.state")
+            .count();
+
+        assert_eq!(sugar_obligations, 1);
+        assert_eq!(core_obligations, sugar_obligations);
+        assert!(sugar.create_set.iter().any(|pattern| pattern.operation == "create" && pattern.ty == "Offer"));
+        assert!(core.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
     }
 
     #[test]
