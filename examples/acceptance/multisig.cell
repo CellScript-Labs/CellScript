@@ -131,7 +131,7 @@ action propose_transfer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: 0,
+        state: Created,
     };
     
     
@@ -260,7 +260,7 @@ action propose_add_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: 0,
+        state: Created,
     };
     
     proposal
@@ -298,7 +298,7 @@ action propose_remove_signer(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: 0,
+        state: Created,
     };
     
     proposal
@@ -337,7 +337,7 @@ action propose_change_threshold(
         signatures: [],
         created_at: current_time,
         expires_at: current_time + DEFAULT_TIMEOUT,
-        state: 0,
+        state: Created,
     };
     
     proposal

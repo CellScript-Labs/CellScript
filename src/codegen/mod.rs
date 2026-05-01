@@ -1,6 +1,7 @@
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::error::{CompileError, Result};
 use crate::ir::*;
+use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::runtime_errors::CellScriptRuntimeError;
 use crate::{ArtifactFormat, TargetProfile, ENTRY_WITNESS_ABI_MAGIC};
 use serde::Serialize;
@@ -5702,7 +5703,8 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get("state")).cloned() else {
+        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(LIFECYCLE_STATE_FIELD_NAME)).cloned()
+        else {
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
@@ -5712,10 +5714,21 @@ impl CodeGenerator {
             return;
         };
 
-        self.emit(format!("# cellscript abi: lifecycle transition {}.state old+1 state_count={}", pattern.ty, state_count));
+        self.emit(format!(
+            "# cellscript abi: lifecycle transition {}.{} old+1 state_count={}",
+            pattern.ty, LIFECYCLE_STATE_FIELD_NAME, state_count
+        ));
         self.emit_loaded_schema_exact_size_check(input_size_offset, expected_size, &format!("{} input", pattern.ty));
-        self.emit_loaded_schema_bounds_check(input_size_offset, state_layout.offset + width, &format!("{} input.state", pattern.ty));
-        self.emit_loaded_schema_bounds_check(output_size_offset, state_layout.offset + width, &format!("{} output.state", pattern.ty));
+        self.emit_loaded_schema_bounds_check(
+            input_size_offset,
+            state_layout.offset + width,
+            &format!("{} input.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+        );
+        self.emit_loaded_schema_bounds_check(
+            output_size_offset,
+            state_layout.offset + width,
+            &format!("{} output.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+        );
         self.emit_sp_addi("t4", input_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", state_layout.offset, width);
         let old_range_ok_label = self.fresh_label("lifecycle_old_state_range_ok");
@@ -5759,7 +5772,8 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get("state")).cloned() else {
+        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(LIFECYCLE_STATE_FIELD_NAME)).cloned()
+        else {
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
@@ -5770,14 +5784,23 @@ impl CodeGenerator {
         };
 
         self.emit(format!(
-            "# cellscript abi: settle final-state {}.state final_state={} state_count={}",
+            "# cellscript abi: settle final-state {}.{} final_state={} state_count={}",
             pattern.ty,
+            LIFECYCLE_STATE_FIELD_NAME,
             final_state,
             states.len()
         ));
         self.emit_loaded_schema_exact_size_check(input_size_offset, expected_size, &format!("{} input", pattern.ty));
-        self.emit_loaded_schema_bounds_check(input_size_offset, state_layout.offset + width, &format!("{} input.state", pattern.ty));
-        self.emit_loaded_schema_bounds_check(output_size_offset, state_layout.offset + width, &format!("{} output.state", pattern.ty));
+        self.emit_loaded_schema_bounds_check(
+            input_size_offset,
+            state_layout.offset + width,
+            &format!("{} input.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+        );
+        self.emit_loaded_schema_bounds_check(
+            output_size_offset,
+            state_layout.offset + width,
+            &format!("{} output.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+        );
 
         self.emit_sp_addi("t4", input_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", state_layout.offset, width);

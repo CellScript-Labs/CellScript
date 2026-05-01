@@ -200,6 +200,10 @@ New in 0.13:
   consumed.
 - Lifecycle receipts now fail compilation unless they declare a scalar unsigned
   `state` field, matching the runtime verifier's lifecycle state contract.
+- Lifecycle state storage remains explicit cell data: the compiler does not
+  inject hidden state fields or mutate Molecule layout. `create` initializers
+  may now use declared lifecycle state names such as `state: Created` instead
+  of numeric state indexes.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.

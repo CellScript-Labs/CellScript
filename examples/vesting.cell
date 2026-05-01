@@ -13,7 +13,7 @@ shared VestingConfig has store {
 
 #[lifecycle(Granted -> Claimable -> FullyClaimed)]
 receipt VestingGrant has store {
-    state: u8                  // 0=Granted, 1=Claimable, 2=FullyClaimed
+    state: u8
     beneficiary: Address
     total_amount: u64
     claimed_amount: u64
@@ -54,7 +54,7 @@ action grant_vesting(
     consume tokens
     
     create VestingGrant {
-        state: 0,  // Granted
+        state: Granted,
         beneficiary,
         total_amount: tokens.amount,
         claimed_amount: 0,

@@ -4654,7 +4654,7 @@ fn body_verifier_obligations(
             &mut seen,
             &scope,
             "lifecycle-transition",
-            &format!("{}.state", check.feature),
+            &format!("{}.{}", check.feature, lifecycle::LIFECYCLE_STATE_FIELD_NAME),
             &check.status,
             &check.detail,
         );
@@ -6491,9 +6491,9 @@ fn metadata_can_verify_settle_final_state(
     lifecycle_states: &HashMap<String, Vec<String>>,
 ) -> bool {
     lifecycle_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
-        && type_layouts
-            .get(&pattern.ty)
-            .is_some_and(|layouts| layouts.get("state").and_then(metadata_layout_fixed_scalar_width).is_some())
+        && type_layouts.get(&pattern.ty).is_some_and(|layouts| {
+            layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME).and_then(metadata_layout_fixed_scalar_width).is_some()
+        })
         && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
 
@@ -9004,7 +9004,7 @@ fn metadata_can_verify_lifecycle_transition(
     if metadata_type_encoded_size_from_layouts(layouts).is_none() {
         return false;
     }
-    let Some(state_layout) = layouts.get("state") else {
+    let Some(state_layout) = layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME) else {
         return false;
     };
     if metadata_layout_fixed_scalar_width(state_layout).is_none() {
@@ -15878,11 +15878,27 @@ receipt Ticket has store {
 }
 
 action activate(ticket: Ticket) -> Ticket {
-    let active: u8 = 1
     consume ticket
     return create Ticket {
-        state: active,
+        state: Active,
         id: ticket.id,
+    }
+}
+"#;
+
+    const LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+action make() -> Ticket {
+    return create Ticket {
+        state: Created,
+        id: 1,
     }
 }
 "#;
@@ -20747,6 +20763,18 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
             err.message.contains("lifecycle update of 'Ticket' cannot reset to initial state index 0"),
             "unexpected error: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn compile_accepts_lifecycle_state_name_initializers() {
+        let result = compile(LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: verify output field Ticket.state offset=0 size=1"),
+            "state-name initializer should still verify the explicit state field:\n{}",
+            asm
         );
     }
 

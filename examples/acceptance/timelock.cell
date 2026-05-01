@@ -133,7 +133,7 @@ action request_release(
         lock_hash: hash_lock(time_lock),
         requester,
         requested_at: current_height,
-        state: 0,
+        state: Created,
     };
     
     request
@@ -193,7 +193,7 @@ action request_emergency_release(
         reason,
         requested_at: current_height,
         approvers: [],
-        state: 0,
+        state: Created,
     };
     
     emergency

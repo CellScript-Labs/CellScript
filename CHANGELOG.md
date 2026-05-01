@@ -111,6 +111,9 @@
   code.
 - Removed empty module doc comments and simplified duplicated verifier branches
   reported by clippy.
+- Kept lifecycle state storage explicit in cell data while allowing lifecycle
+  state names in `create` initializers, avoiding hidden layout changes and
+  numeric initial-state boilerplate.
 - Clarified README CLI docs that `cellc test` is a compiler/policy harness, not
   trusted runtime execution.
 - Removed the old CKB acceptance policy exception path so the CKB target

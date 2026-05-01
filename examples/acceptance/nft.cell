@@ -102,7 +102,7 @@ action create_listing(
         seller: nft.owner,
         price,
         created_at: current_time,
-        state: 0,
+        state: Created,
     };
     
     listing
@@ -164,7 +164,7 @@ action create_offer(
         buyer,
         price,
         expires_at,
-        state: 0,
+        state: Created,
     };
     
     offer
