@@ -31,7 +31,6 @@ resource Collection has store {
     base_uri: String,
 }
 
-#[lifecycle(Created, Active, Filled, Cancelled)]
 receipt Listing has destroy {
     token_id: u64,
     seller: Address,
@@ -40,13 +39,24 @@ receipt Listing has destroy {
     state: u8,
 }
 
-#[lifecycle(Created, Active, Accepted, Expired)]
+state Listing.state {
+    Created -> Active;
+    Active -> Filled;
+    Filled -> Cancelled;
+}
+
 receipt Offer has destroy {
     token_id: u64,
     buyer: Address,
     price: u64,
     expires_at: u64,
     state: u8,
+}
+
+state Offer.state {
+    Created -> Active;
+    Active -> Accepted;
+    Accepted -> Expired;
 }
 
 receipt RoyaltyPayment {

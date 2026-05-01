@@ -322,6 +322,8 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
+            ("state_machine", "state_machine ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
+            ("state", "state ${1:Type}.${2:state} {\n    ${3:Created} -> ${4:Live};\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
             (
                 "lock",
@@ -392,7 +394,74 @@ impl LspServer {
                 _ => {}
             }
         }
+        items.extend(Self::state_machine_state_completions(module, type_name));
         items
+    }
+
+    fn state_machine_state_completions(module: &Module, type_name: &str) -> Vec<CompletionItem> {
+        module
+            .items
+            .iter()
+            .filter_map(|item| {
+                let Item::StateMachine(machine) = item else {
+                    return None;
+                };
+                (machine.target.base == type_name).then_some(machine)
+            })
+            .flat_map(|machine| {
+                let states = Self::state_machine_enum_states(module, type_name, &machine.target.field)
+                    .unwrap_or_else(|| Self::transition_states(machine));
+                let field_name = machine.target.field.clone();
+                states.into_iter().enumerate().map(move |(index, state)| CompletionItem {
+                    label: state.clone(),
+                    kind: CompletionItemKind::EnumMember,
+                    detail: Some(format!("state machine state {}::{}", type_name, state)),
+                    documentation: Some(format!("State index {} for state machine field `{}.{}`.", index, type_name, field_name)),
+                    insert_text: Some(state),
+                })
+            })
+            .collect()
+    }
+
+    fn state_machine_enum_states(module: &Module, type_name: &str, field_name: &str) -> Option<Vec<String>> {
+        let enum_name = module.items.iter().find_map(|item| {
+            let fields = match item {
+                Item::Resource(def) if def.name == type_name => Some(&def.fields),
+                Item::Shared(def) if def.name == type_name => Some(&def.fields),
+                Item::Receipt(def) if def.name == type_name => Some(&def.fields),
+                Item::Struct(def) if def.name == type_name => Some(&def.fields),
+                _ => None,
+            }?;
+            fields.iter().find_map(|field| {
+                if field.name == field_name {
+                    if let Type::Named(name) = &field.ty {
+                        return Some(name.clone());
+                    }
+                }
+                None
+            })
+        })?;
+
+        module.items.iter().find_map(|item| {
+            let Item::Enum(enum_def) = item else {
+                return None;
+            };
+            (enum_def.name == enum_name && enum_def.variants.iter().all(|variant| variant.fields.is_empty()))
+                .then(|| enum_def.variants.iter().map(|variant| variant.name.clone()).collect())
+        })
+    }
+
+    fn transition_states(machine: &StateMachineDef) -> Vec<String> {
+        let mut states = Vec::new();
+        for transition in &machine.transitions {
+            for raw in [&transition.from, &transition.to] {
+                let state = raw.rsplit_once("::").map_or(raw.as_str(), |(_, state)| state);
+                if !states.iter().any(|existing| existing == state) {
+                    states.push(state.to_string());
+                }
+            }
+        }
+        states
     }
 
     /// Member completions for a given type name (after `.`).
@@ -549,6 +618,9 @@ impl LspServer {
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
+            ("state_machine", "state_machine ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
+            ("state", "state ${1:Type}.${2:state} {\n    ${3:Created} -> ${4:Live};\n}"),
+            ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:Live}"),
             (
                 "lock",
                 "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:arg}: witness ${5:Address}) -> bool {\n    require $0\n}",
@@ -1648,6 +1720,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Shared(s) => Some(&s.name),
         Item::Receipt(r) => Some(&r.name),
         Item::Struct(s) => Some(&s.name),
+        Item::StateMachine(machine) => machine.name.as_deref(),
         Item::Const(c) => Some(&c.name),
         Item::Enum(e) => Some(&e.name),
         Item::Action(a) => Some(&a.name),
@@ -1663,6 +1736,7 @@ fn item_span(item: &Item) -> Span {
         Item::Shared(s) => s.span,
         Item::Receipt(r) => r.span,
         Item::Struct(s) => s.span,
+        Item::StateMachine(machine) => machine.span,
         Item::Const(c) => c.span,
         Item::Enum(e) => e.span,
         Item::Action(a) => a.span,
@@ -2056,6 +2130,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "module"));
         assert!(keywords.iter().any(|k| k.label == "resource"));
         assert!(keywords.iter().any(|k| k.label == "action"));
+        assert!(keywords.iter().any(|k| k.label == "state_machine"));
+        assert!(keywords.iter().any(|k| k.label == "moves"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
@@ -2137,6 +2213,56 @@ action activate(ticket: Ticket) -> Ticket {
             item.label == "Active"
                 && item.kind == CompletionItemKind::EnumMember
                 && item.detail.as_deref() == Some("lifecycle state Ticket::Active")
+        }));
+    }
+
+    #[test]
+    fn test_state_machine_namespace_completions() {
+        let mut server = LspServer::new();
+        let uri = "file:///state_machine_completion.cell".to_string();
+        let source = r#"
+module state_machine_completion
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState,
+    amount: u64,
+}
+
+state_machine OfferFlow for Offer.state {
+    Created -> Live;
+    Live -> Filled by accept;
+}
+
+action accept(input: Offer) moves input.state Live -> Filled {
+    consume input
+    create Offer {
+        state: Offer::Filled,
+        amount: input.amount,
+    }
+}
+"#
+        .to_string();
+
+        server.open_document(uri.clone(), source.clone());
+        assert!(server.get_diagnostics(&uri).is_empty());
+
+        let offset = source.find("Offer::Filled").expect("qualified state") + "Offer::".len();
+        let completions = server.completion(&uri, offset_to_position(&source, offset));
+        let labels = completions.iter().map(|item| item.label.as_str()).collect::<std::collections::BTreeSet<_>>();
+
+        assert!(labels.contains("Created"));
+        assert!(labels.contains("Live"));
+        assert!(labels.contains("Filled"));
+        assert!(completions.iter().any(|item| {
+            item.label == "Filled"
+                && item.kind == CompletionItemKind::EnumMember
+                && item.detail.as_deref() == Some("state machine state Offer::Filled")
         }));
     }
 

@@ -315,15 +315,16 @@ graph LR
 **2. 语法解析**（`parser/`）
 从 token 流构建 AST。AST 建模完整 CellScript 表面语法：`resource`、
 `shared`、`receipt`、`struct`、`enum`、`action`、`lock`、`function`、
-`use`、`const`、capability gates、lifecycle 注解，以及所有语句/表达式形式。
+`use`、`const`、capability gates、声明式 state machine、action `moves`
+子句，以及所有语句/表达式形式。
 
 **3. 语义分析**（`types/` + `lifecycle/`）
 - *类型检查* — 强制线性资源语义：每个 `resource`/`receipt` 值在 action
   体退出前必须被 consume、transfer、destroy、claim 或 settle。同时验证
   shared-state 可变性规则、capability gates、effect 分类（`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`）和调用签名。
-- *生命周期检查* — 验证 receipt 上的 `#[lifecycle(...)]` 状态机：合法
-  状态转换、整数 state-field 类型和静态 create-site 检查。
+- *生命周期检查* — 验证显式 state 字段、`state_machine` 转换图、action
+  `moves` 子句、合法状态转换和静态 create-site 检查。
 
 **4. IR 降低**（`ir/` + `optimize/` + `resolve/`）
 - *`resolve/`* — 构建每模块符号表，解析跨包 `use` 导入。

@@ -11,7 +11,6 @@ shared VestingConfig has store {
     revocable: bool
 }
 
-#[lifecycle(Granted -> Claimable -> FullyClaimed)]
 receipt VestingGrant has store {
     state: u8
     beneficiary: Address
@@ -21,6 +20,11 @@ receipt VestingGrant has store {
     cliff_timepoint: u64
     end_timepoint: u64
     token_symbol: [u8; 8]
+}
+
+state VestingGrant.state {
+    Granted -> Claimable;
+    Claimable -> FullyClaimed;
 }
 
 action create_vesting_config(

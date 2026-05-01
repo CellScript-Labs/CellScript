@@ -79,6 +79,7 @@ impl Formatter {
                 self.format_receipt_def(receipt)
             }
             Item::Struct(struct_def) => self.format_type_def("struct", &struct_def.name, &struct_def.fields, None),
+            Item::StateMachine(machine) => self.format_state_machine(machine),
             Item::Const(constant) => {
                 self.push_line(&format!(
                     "const {}: {} = {};",
@@ -136,6 +137,27 @@ impl Formatter {
         }
     }
 
+    fn format_state_machine(&mut self, machine: &StateMachineDef) -> Result<()> {
+        let header = if let Some(name) = &machine.name {
+            format!("state_machine {} for {}.{} {{", name, machine.target.base, machine.target.field)
+        } else {
+            format!("state {}.{} {{", machine.target.base, machine.target.field)
+        };
+        self.push_line(&header);
+        self.indent_level += 1;
+        for transition in &machine.transitions {
+            let mut line = format!("{} -> {}", transition.from, transition.to);
+            if let Some(action) = &transition.action {
+                line.push_str(&format!(" by {}", action));
+            }
+            line.push(';');
+            self.push_line(&line);
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
+        Ok(())
+    }
+
     fn format_type_def(&mut self, keyword: &str, name: &str, fields: &[Field], capabilities: Option<&[Capability]>) -> Result<()> {
         let mut header = format!("{} {}", keyword, name);
         if let Some(capabilities) = capabilities {
@@ -191,6 +213,15 @@ impl Formatter {
         let mut signature = format!("{} {}({})", keyword, action.name, params);
         if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
+        }
+        for state_move in &action.state_moves {
+            let edge = if let Some(path) = &state_move.path {
+                format!("moves {}.{} {} -> {}", path.base, path.field, state_move.from, state_move.to)
+            } else {
+                format!("moves {} -> {}", state_move.from, state_move.to)
+            };
+            signature.push(' ');
+            signature.push_str(&edge);
         }
         self.push_line(&format!("{} {{", signature));
         self.indent_level += 1;

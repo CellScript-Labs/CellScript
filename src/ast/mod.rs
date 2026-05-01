@@ -13,6 +13,7 @@ pub enum Item {
     Shared(SharedDef),
     Receipt(ReceiptDef),
     Struct(StructDef),
+    StateMachine(StateMachineDef),
     Const(ConstDef),
     Enum(EnumDef),
     Action(ActionDef),
@@ -102,6 +103,29 @@ pub struct Lifecycle {
     pub span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct StateFieldPath {
+    pub base: String,
+    pub field: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateTransition {
+    pub from: String,
+    pub to: String,
+    pub action: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateMachineDef {
+    pub name: Option<String>,
+    pub target: StateFieldPath,
+    pub transitions: Vec<StateTransition>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     Store,
@@ -121,11 +145,20 @@ pub struct ActionDef {
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub state_moves: Vec<ActionStateMove>,
     pub body: Vec<Stmt>,
     pub effect: EffectClass,
     pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     pub doc_comment: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionStateMove {
+    pub path: Option<StateFieldPath>,
+    pub from: String,
+    pub to: String,
     pub span: Span,
 }
 

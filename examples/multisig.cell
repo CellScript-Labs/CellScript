@@ -31,7 +31,6 @@ resource MultisigWallet has store {
     created_at: u64,
 }
 
-#[lifecycle(Created, Pending, Executed, Cancelled)]
 receipt Proposal has destroy {
     wallet_hash: Hash,
     proposal_id: u64,
@@ -45,6 +44,12 @@ receipt Proposal has destroy {
     created_at: u64,
     expires_at: u64,
     state: u8,
+}
+
+state Proposal.state {
+    Created -> Pending;
+    Pending -> Executed;
+    Executed -> Cancelled;
 }
 
 struct Signature {

@@ -788,6 +788,31 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             signature: format!("struct {}", struct_def.name),
             summary: format!("Fields: {}", format_fields(&struct_def.fields)),
         }),
+        Item::StateMachine(machine) => Some(ItemDoc {
+            kind: "state_machine".to_string(),
+            name: machine.name.clone().unwrap_or_else(|| format!("{}.{}", machine.target.base, machine.target.field)),
+            signature: format!(
+                "state_machine{} for {}.{}",
+                machine.name.as_ref().map(|name| format!(" {}", name)).unwrap_or_default(),
+                machine.target.base,
+                machine.target.field
+            ),
+            summary: format!(
+                "Transitions: {}",
+                machine
+                    .transitions
+                    .iter()
+                    .map(|transition| {
+                        let mut edge = format!("{} -> {}", transition.from, transition.to);
+                        if let Some(action) = &transition.action {
+                            edge.push_str(&format!(" by {}", action));
+                        }
+                        edge
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }),
         Item::Const(constant) => Some(ItemDoc {
             kind: "const".to_string(),
             name: constant.name.clone(),
@@ -964,6 +989,9 @@ fn item_name_for_xref(item: &Item) -> Option<String> {
         Item::Shared(s) => Some(s.name.clone()),
         Item::Receipt(r) => Some(r.name.clone()),
         Item::Struct(s) => Some(s.name.clone()),
+        Item::StateMachine(machine) => {
+            machine.name.clone().or_else(|| Some(format!("{}.{}", machine.target.base, machine.target.field)))
+        }
         Item::Enum(e) => Some(e.name.clone()),
         Item::Action(a) => Some(a.name.clone()),
         Item::Function(f) => Some(f.name.clone()),

@@ -7,6 +7,7 @@ pub const LIFECYCLE_STATE_FIELD_NAME: &str = "state";
 #[derive(Debug, Clone)]
 struct LifecycleSpec {
     states: Vec<String>,
+    state_field_name: String,
     state_field_span: Option<Span>,
 }
 
@@ -44,7 +45,36 @@ pub fn check(module: &Module) -> Result<()> {
             ));
         }
 
-        specs.insert(receipt.name.clone(), LifecycleSpec { states: lifecycle.states.clone(), state_field_span: Some(field.span) });
+        specs.insert(
+            receipt.name.clone(),
+            LifecycleSpec {
+                states: lifecycle.states.clone(),
+                state_field_name: LIFECYCLE_STATE_FIELD_NAME.to_string(),
+                state_field_span: Some(field.span),
+            },
+        );
+    }
+
+    for item in &module.items {
+        let Item::StateMachine(machine) = item else {
+            continue;
+        };
+        let mut states = Vec::new();
+        for transition in &machine.transitions {
+            for raw in [&transition.from, &transition.to] {
+                let state = raw.rsplit_once("::").map_or(raw.as_str(), |(_, state)| state).to_string();
+                if !states.iter().any(|existing| existing == &state) {
+                    states.push(state);
+                }
+            }
+        }
+        if states.len() < 2 {
+            return Err(CompileError::new("state machine must mention at least two states", machine.span));
+        }
+        specs.insert(
+            machine.target.base.clone(),
+            LifecycleSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
+        );
     }
 
     for item in &module.items {
@@ -634,7 +664,7 @@ fn validate_lifecycle_create(
         return Ok(());
     }
 
-    let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == LIFECYCLE_STATE_FIELD_NAME) else {
+    let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == &spec.state_field_name) else {
         return Err(CompileError::new(format!("create of lifecycle receipt '{}' must set its state field", create.ty), create.span));
     };
 
@@ -687,13 +717,11 @@ fn static_integer_value(expr: &Expr, context: &ActionLifecycleContext) -> Option
     }
 }
 
-fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, type_name: &str, states: &[String]) -> Option<u64> {
+fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, _type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
         Expr::Identifier(name) => {
             let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
-                if qualified_type != type_name {
-                    return None;
-                }
+                let _ = qualified_type;
                 state_name
             } else {
                 name.as_str()

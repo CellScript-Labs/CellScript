@@ -31,12 +31,17 @@ enum AssetType {
     NFT(Hash, u64),
 }
 
-#[lifecycle(Created, Processing, Released, Cancelled)]
 receipt ReleaseRequest has destroy {
     lock_hash: Hash,
     requester: Address,
     requested_at: u64,
     state: u8,
+}
+
+state ReleaseRequest.state {
+    Created -> Processing;
+    Processing -> Released;
+    Released -> Cancelled;
 }
 
 receipt ReleaseRecord {
@@ -45,7 +50,6 @@ receipt ReleaseRecord {
     released_by: Address,
 }
 
-#[lifecycle(Created, Pending, Approved, Rejected)]
 receipt EmergencyRelease has destroy {
     lock_hash: Hash,
     requester: Address,
@@ -53,6 +57,12 @@ receipt EmergencyRelease has destroy {
     requested_at: u64,
     approvers: Vec<Address>,
     state: u8,
+}
+
+state EmergencyRelease.state {
+    Created -> Pending;
+    Pending -> Approved;
+    Approved -> Rejected;
 }
 
 

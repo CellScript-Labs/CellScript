@@ -1934,6 +1934,8 @@ pub struct TypeMetadata {
     pub capabilities: Vec<String>,
     pub claim_output: Option<String>,
     pub lifecycle_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_state_field: Option<String>,
     pub lifecycle_transitions: Vec<LifecycleTransitionMetadata>,
     pub encoded_size: Option<usize>,
     pub fields: Vec<FieldMetadata>,
@@ -3242,13 +3244,20 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let type_layouts = metadata_type_layouts(ir);
     let type_defs = metadata_type_defs_by_name(ir);
     let lifecycle_states = metadata_lifecycle_states(ir);
+    let lifecycle_state_fields = metadata_lifecycle_state_fields(ir);
     let cell_type_kinds = metadata_cell_type_kinds(ir);
     let pure_const_returns = metadata_pure_const_returns(ir);
     let fail_closed_runtime_features = module_fail_closed_runtime_features(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
     let ckb_runtime_features = module_ckb_runtime_features(ir, &cell_type_kinds, &type_layouts);
     let ckb_runtime_accesses = module_ckb_runtime_accesses(ir, &cell_type_kinds, &type_layouts);
-    let verifier_obligations =
-        module_verifier_obligations(ir, &type_layouts, &lifecycle_states, &cell_type_kinds, &pure_const_returns);
+    let verifier_obligations = module_verifier_obligations(
+        ir,
+        &type_layouts,
+        &lifecycle_states,
+        &lifecycle_state_fields,
+        &cell_type_kinds,
+        &pure_const_returns,
+    );
     let collection_instantiations = module_collection_instantiation_metadata(ir, &type_layouts, &pure_const_returns);
     let transaction_runtime_input_requirements = transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
     let pool_primitives = module_pool_primitive_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
@@ -3344,6 +3353,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &type_layouts,
                         &action.params,
                         &lifecycle_states,
+                        &lifecycle_state_fields,
                         &cell_type_kinds,
                         action.return_type.as_ref(),
                         &pure_const_returns,
@@ -3432,6 +3442,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &type_layouts,
                         &function.params,
                         &lifecycle_states,
+                        &lifecycle_state_fields,
                         &cell_type_kinds,
                         function.return_type.as_ref(),
                         &pure_const_returns,
@@ -3492,6 +3503,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &type_layouts,
                         &lock.params,
                         &lifecycle_states,
+                        &lifecycle_state_fields,
                         &cell_type_kinds,
                         None,
                         &pure_const_returns,
@@ -3989,6 +4001,7 @@ fn module_verifier_obligations(
     ir: &ir::IrModule,
     type_layouts: &MetadataTypeLayouts,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<VerifierObligationMetadata> {
@@ -4018,6 +4031,7 @@ fn module_verifier_obligations(
                     type_layouts,
                     &action.params,
                     lifecycle_states,
+                    lifecycle_state_fields,
                     cell_type_kinds,
                     action.return_type.as_ref(),
                     pure_const_returns,
@@ -4046,6 +4060,7 @@ fn module_verifier_obligations(
                     type_layouts,
                     &function.params,
                     lifecycle_states,
+                    lifecycle_state_fields,
                     cell_type_kinds,
                     function.return_type.as_ref(),
                     pure_const_returns,
@@ -4074,6 +4089,7 @@ fn module_verifier_obligations(
                     type_layouts,
                     &lock.params,
                     lifecycle_states,
+                    lifecycle_state_fields,
                     cell_type_kinds,
                     None,
                     pure_const_returns,
@@ -4572,6 +4588,7 @@ fn body_verifier_obligations(
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     return_type: Option<&ir::IrType>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
@@ -4616,9 +4633,16 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in
-        body_transaction_resource_obligations(name, body, type_layouts, params, lifecycle_states, cell_type_kinds, pure_const_returns)
-    {
+    for check in body_transaction_resource_obligations(
+        name,
+        body,
+        type_layouts,
+        params,
+        lifecycle_states,
+        lifecycle_state_fields,
+        cell_type_kinds,
+        pure_const_returns,
+    ) {
         push_verifier_obligation(&mut obligations, &mut seen, &scope, check.category, &check.feature, check.status, &check.detail);
     }
 
@@ -4648,13 +4672,15 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in body_lifecycle_transition_checks(body, lifecycle_states, type_layouts, params, pure_const_returns) {
+    for check in
+        body_lifecycle_transition_checks(body, lifecycle_states, lifecycle_state_fields, type_layouts, params, pure_const_returns)
+    {
         push_verifier_obligation(
             &mut obligations,
             &mut seen,
             &scope,
             "lifecycle-transition",
-            &format!("{}.{}", check.feature, lifecycle::LIFECYCLE_STATE_FIELD_NAME),
+            &format!("{}.{}", check.feature, check.field),
             &check.status,
             &check.detail,
         );
@@ -4737,6 +4763,7 @@ fn body_transaction_resource_obligations(
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<TransactionResourceObligation> {
@@ -4867,6 +4894,7 @@ fn body_transaction_resource_obligations(
                             type_layouts,
                             &availability,
                             lifecycle_states,
+                            lifecycle_state_fields,
                             output_index,
                             &type_name,
                         );
@@ -4879,6 +4907,7 @@ fn body_transaction_resource_obligations(
                                 type_layouts,
                                 &availability,
                                 lifecycle_states,
+                                lifecycle_state_fields,
                                 "settle",
                                 operand,
                                 &type_name,
@@ -6201,6 +6230,7 @@ fn transaction_condition_detail(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     operation: &str,
     operand: &ir::IrOperand,
     type_name: &str,
@@ -6212,13 +6242,13 @@ fn transaction_condition_detail(
         ("settle", true) => format!(
             "Compiler-emitted runtime verifier proves '{}' lifecycle final-state invariants and admits the settle-created output{}; settle-output-admission=checked-runtime; runtime inputs: {}",
             type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, type_name),
+            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name),
             input_summary
         ),
         ("settle", false) => format!(
             "Runtime verifier must prove '{}' finalization invariants and reject invalid pending-to-final state transitions{}; runtime inputs: {}",
             type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, type_name),
+            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name),
             input_summary
         ),
         _ => format!("Runtime verifier must prove '{}' transaction conditions; runtime inputs: {}", type_name, input_summary),
@@ -6325,9 +6355,10 @@ fn settle_final_state_detail(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     type_name: &str,
 ) -> String {
-    if settle_final_state_is_checked(body, type_layouts, availability, lifecycle_states, type_name) {
+    if settle_final_state_is_checked(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name) {
         "; settle-final-state=checked-runtime; settle-state-policy=lifecycle-final-state".to_string()
     } else {
         String::new()
@@ -6460,12 +6491,13 @@ fn settle_final_state_is_checked(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     type_name: &str,
 ) -> bool {
     body.create_set.iter().any(|pattern| {
         pattern.operation == "settle"
             && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states)
+            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states, lifecycle_state_fields)
     })
 }
 
@@ -6474,13 +6506,14 @@ fn settle_finalization_is_checked(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     output_index: usize,
     type_name: &str,
 ) -> bool {
     body.create_set.get(output_index).is_some_and(|pattern| {
         pattern.operation == "settle"
             && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states)
+            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states, lifecycle_state_fields)
     })
 }
 
@@ -6489,10 +6522,12 @@ fn metadata_can_verify_settle_final_state(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
 ) -> bool {
     lifecycle_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
         && type_layouts.get(&pattern.ty).is_some_and(|layouts| {
-            layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME).and_then(metadata_layout_fixed_scalar_width).is_some()
+            let state_field = lifecycle_state_fields.get(&pattern.ty).map_or(lifecycle::LIFECYCLE_STATE_FIELD_NAME, String::as_str);
+            layouts.get(state_field).and_then(metadata_layout_fixed_scalar_width).is_some()
         })
         && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
@@ -8950,6 +8985,7 @@ fn push_verifier_obligation(
 
 struct LifecycleTransitionCheck {
     feature: String,
+    field: String,
     status: String,
     detail: String,
 }
@@ -8957,6 +8993,7 @@ struct LifecycleTransitionCheck {
 fn body_lifecycle_transition_checks(
     body: &ir::IrBody,
     lifecycle_states: &HashMap<String, Vec<String>>,
+    lifecycle_state_fields: &HashMap<String, String>,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     pure_const_returns: &HashMap<String, ir::IrConst>,
@@ -8973,18 +9010,22 @@ fn body_lifecycle_transition_checks(
         if !lifecycle_states.contains_key(&pattern.ty) || !consumed_types.contains(&pattern.ty) {
             continue;
         }
+        let state_field =
+            lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| lifecycle::LIFECYCLE_STATE_FIELD_NAME.to_string());
         if !seen.insert(pattern.ty.clone()) {
             continue;
         }
-        if metadata_can_verify_lifecycle_transition(pattern, type_layouts, &availability) {
+        if metadata_can_verify_lifecycle_transition(pattern, type_layouts, lifecycle_state_fields, &availability) {
             checks.push(LifecycleTransitionCheck {
                 feature: pattern.ty.clone(),
+                field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime old_state + 1 and old/new state range checks, and the lifecycle output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and old/new state range checks, and the lifecycle output is already fully covered by the fixed-field verifier".to_string(),
             });
         } else {
             checks.push(LifecycleTransitionCheck {
                 feature: pattern.ty.clone(),
+                field: state_field,
                 status: "checked-partial".to_string(),
                 detail: "Compiler emits declaration/static checks, but this transition still lacks a complete fixed-field runtime verifier path".to_string(),
             });
@@ -8996,6 +9037,7 @@ fn body_lifecycle_transition_checks(
 fn metadata_can_verify_lifecycle_transition(
     pattern: &ir::CreatePattern,
     type_layouts: &MetadataTypeLayouts,
+    lifecycle_state_fields: &HashMap<String, String>,
     availability: &MetadataPreludeAvailability,
 ) -> bool {
     let Some(layouts) = type_layouts.get(&pattern.ty) else {
@@ -9004,7 +9046,8 @@ fn metadata_can_verify_lifecycle_transition(
     if metadata_type_encoded_size_from_layouts(layouts).is_none() {
         return false;
     }
-    let Some(state_layout) = layouts.get(lifecycle::LIFECYCLE_STATE_FIELD_NAME) else {
+    let state_field = lifecycle_state_fields.get(&pattern.ty).map_or(lifecycle::LIFECYCLE_STATE_FIELD_NAME, String::as_str);
+    let Some(state_layout) = layouts.get(state_field) else {
         return false;
     };
     if metadata_layout_fixed_scalar_width(state_layout).is_none() {
@@ -10958,6 +11001,24 @@ fn metadata_lifecycle_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> 
     states
 }
 
+fn metadata_lifecycle_state_fields(ir: &ir::IrModule) -> HashMap<String, String> {
+    let mut fields = HashMap::new();
+    for type_def in &ir.external_type_defs {
+        if let Some(state_field) = &type_def.lifecycle_state_field {
+            fields.insert(type_def.name.clone(), state_field.clone());
+        }
+    }
+    for item in &ir.items {
+        let ir::IrItem::TypeDef(type_def) = item else {
+            continue;
+        };
+        if let Some(state_field) = &type_def.lifecycle_state_field {
+            fields.insert(type_def.name.clone(), state_field.clone());
+        }
+    }
+    fields
+}
+
 fn metadata_cell_type_kinds(ir: &ir::IrModule) -> HashMap<String, ir::IrTypeKind> {
     let mut kinds = HashMap::new();
     for type_def in &ir.external_type_defs {
@@ -11013,6 +11074,7 @@ fn type_metadata(
         kind: format!("{:?}", type_def.kind),
         capabilities: type_def.capabilities.iter().map(metadata_capability_name).collect(),
         claim_output: type_def.claim_output.as_ref().map(ir_type_to_string),
+        lifecycle_state_field: type_def.lifecycle_state_field.clone(),
         lifecycle_transitions: if type_def.lifecycle_rules.is_empty() {
             lifecycle_transition_metadata(&lifecycle_states)
         } else {
@@ -20872,7 +20934,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
                 && obligation.status == "checked-runtime"
         }));
         assert!(
-            asm.contains("# cellscript abi: lifecycle transition Ticket.state old+1"),
+            asm.contains("# cellscript abi: lifecycle transition Ticket.state state_count=2"),
             "missing lifecycle runtime transition verifier:\n{}",
             asm
         );
@@ -20881,6 +20943,163 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         assert!(asm.contains("li a0, 9"), "missing lifecycle old-state range failure code:\n{}", asm);
         assert!(asm.contains("li t3, 2"), "missing lifecycle output state range check:\n{}", asm);
         assert!(asm.contains("li a0, 8"), "missing lifecycle output state range failure code:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_accepts_explicit_state_machine_action_moves() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state_machine OfferFlow for Offer.state {
+    Created -> Live;
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(input: Offer) moves input.state Live -> Filled {
+    let amount = input.amount
+    consume input
+    create Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert_eq!(offer.lifecycle_states, vec!["Created", "Live", "Filled", "Cancelled"]);
+        assert_eq!(offer.lifecycle_state_field.as_deref(), Some("state"));
+        assert!(offer.lifecycle_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "lifecycle-transition"
+                && obligation.feature == "Offer.state"
+                && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: lifecycle transition Offer.state state_count=4"),
+            "missing explicit state machine runtime transition marker:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t3, 1"), "action move should check source state Live=1:\n{}", asm);
+        assert!(asm.contains("li t3, 2"), "action move should check target state Filled=2:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_accepts_state_machine_on_custom_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    status: OfferState
+    amount: u64
+}
+
+state_machine OfferFlow for Offer.status {
+    Created -> Live;
+    Live -> Filled by accept;
+}
+
+action accept(input: Offer) moves input.status Live -> Filled {
+    let amount = input.amount
+    consume input
+    create Offer {
+        status: OfferState::Filled,
+        amount,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert_eq!(offer.lifecycle_state_field.as_deref(), Some("status"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "lifecycle-transition"
+                && obligation.feature == "Offer.status"
+                && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: lifecycle transition Offer.status state_count=3"),
+            "custom state field should be used by runtime verifier:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_rejects_undeclared_action_state_move() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Created -> Live;
+}
+
+action accept(input: Offer) moves input.state Live -> Filled {
+    consume input
+    create Offer {
+        state: OfferState::Filled,
+        amount: 1,
+    }
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_state_machine_payload_enum_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live(u64),
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+state Offer.state {
+    Created -> Live;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must not have payload variants"), "unexpected error: {}", err.message);
     }
 
     #[test]

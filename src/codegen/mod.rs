@@ -472,8 +472,14 @@ pub struct CodeGenerator {
     receipt_type_names: BTreeSet<String>,
     /// Named types that are transaction cell-backed values.
     cell_type_names: BTreeSet<String>,
-    /// Lifecycle state names for receipt schemas that declared #[lifecycle(...)].
+    /// Lifecycle state names for schemas that declared lifecycle/state-machine policy.
     lifecycle_states: HashMap<String, Vec<String>>,
+    /// Lifecycle state field name keyed by schema type.
+    lifecycle_state_fields: HashMap<String, String>,
+    /// Declared lifecycle/state-machine transition graph keyed by schema type.
+    lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
+    /// Action-specific state moves for the function currently being emitted.
+    current_lifecycle_moves: Vec<IrLifecycleMove>,
     /// ABI summaries for locally emitted actions/functions/locks.
     callable_abis: HashMap<String, CallableAbi>,
     /// Function parameters whose slot contains a pointer to encoded schema bytes.
@@ -539,6 +545,8 @@ pub struct CodeGenerator {
     consume_indices: HashMap<usize, usize>,
     /// Consumed named schema type keyed by IR operand variable id.
     consume_type_names: HashMap<usize, String>,
+    /// Consumed IR operand variable id keyed by source binding name.
+    consume_binding_ids: HashMap<String, usize>,
     /// Read-ref IR destination variable ids in source lowering order.
     read_ref_order: Vec<usize>,
     /// Read-ref CellDep index keyed by IR destination variable id.
@@ -630,6 +638,9 @@ impl CodeGenerator {
             receipt_type_names: BTreeSet::new(),
             cell_type_names: BTreeSet::new(),
             lifecycle_states: HashMap::new(),
+            lifecycle_state_fields: HashMap::new(),
+            lifecycle_rules: HashMap::new(),
+            current_lifecycle_moves: Vec::new(),
             callable_abis: HashMap::new(),
             schema_pointer_vars: BTreeSet::new(),
             param_vars: BTreeSet::new(),
@@ -663,6 +674,7 @@ impl CodeGenerator {
             consume_order: Vec::new(),
             consume_indices: HashMap::new(),
             consume_type_names: HashMap::new(),
+            consume_binding_ids: HashMap::new(),
             read_ref_order: Vec::new(),
             read_ref_indices: HashMap::new(),
             read_ref_param_ids: HashMap::new(),
@@ -1243,6 +1255,12 @@ impl CodeGenerator {
         if let Some(states) = &type_def.lifecycle_states {
             self.lifecycle_states.insert(type_def.name.clone(), states.clone());
         }
+        if let Some(field) = &type_def.lifecycle_state_field {
+            self.lifecycle_state_fields.insert(type_def.name.clone(), field.clone());
+        }
+        if !type_def.lifecycle_rules.is_empty() {
+            self.lifecycle_rules.insert(type_def.name.clone(), type_def.lifecycle_rules.clone());
+        }
         if matches!(type_def.kind, IrTypeKind::Resource | IrTypeKind::Shared | IrTypeKind::Receipt) {
             self.cell_type_names.insert(type_def.name.clone());
             if type_def.kind == IrTypeKind::Receipt {
@@ -1353,6 +1371,7 @@ impl CodeGenerator {
 
     fn generate_action(&mut self, action: &IrAction) -> Result<()> {
         self.current_function = Some(action.name.clone());
+        self.current_lifecycle_moves = action.lifecycle_moves.clone();
         self.bind_readonly_schema_params = true;
         self.fail_handler_codes.clear();
         self.prepare_function_layout(&action.body, &action.params);
@@ -1379,6 +1398,7 @@ impl CodeGenerator {
         self.emit_shared_epilogue();
 
         self.current_function = None;
+        self.current_lifecycle_moves.clear();
         self.bind_readonly_schema_params = false;
         self.schema_pointer_vars.clear();
         self.schema_pointer_size_offsets.clear();
@@ -2667,6 +2687,7 @@ impl CodeGenerator {
         self.consume_order.clear();
         self.consume_indices.clear();
         self.consume_type_names.clear();
+        self.consume_binding_ids.clear();
         self.read_ref_order.clear();
         self.read_ref_indices.clear();
         self.read_ref_param_ids.clear();
@@ -2766,6 +2787,7 @@ impl CodeGenerator {
             };
             self.mutate_param_ids.insert(pattern.binding.clone(), param.binding.id);
             self.consume_type_names.insert(param.binding.id, pattern.ty.clone());
+            self.consume_binding_ids.insert(pattern.binding.clone(), param.binding.id);
             self.consume_indices.insert(param.binding.id, pattern.input_index);
             self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
@@ -2780,6 +2802,7 @@ impl CodeGenerator {
                     if let Some(type_name) = named_type_name(&var.ty) {
                         self.consume_type_names.insert(var.id, type_name.to_string());
                     }
+                    self.consume_binding_ids.insert(var.name.clone(), var.id);
                     self.cell_buffer_size_offsets.insert(var.id, next_cell_slot);
                     self.cell_buffer_offsets.insert(var.id, next_cell_slot + 8);
                     self.consume_order.push(var.id);
@@ -5694,7 +5717,11 @@ impl CodeGenerator {
             return;
         };
         let state_count = states.len();
-        let Some(consumed_var_id) = self.consumed_var_for_type(&pattern.ty) else {
+        let action_moves = self.lifecycle_transition_moves_for_pattern(pattern);
+        let Some(consumed_var_id) = self.consumed_var_for_lifecycle_transition(&pattern.ty, &action_moves) else {
+            if !action_moves.is_empty() {
+                self.emit_fail(CellScriptRuntimeError::LifecycleTransitionMismatch);
+            }
             return;
         };
         let Some(input_size_offset) = self.cell_buffer_size_offsets.get(&consumed_var_id).copied() else {
@@ -5703,8 +5730,9 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(LIFECYCLE_STATE_FIELD_NAME)).cloned()
-        else {
+        let state_field =
+            self.lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| LIFECYCLE_STATE_FIELD_NAME.to_string());
+        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
@@ -5714,20 +5742,17 @@ impl CodeGenerator {
             return;
         };
 
-        self.emit(format!(
-            "# cellscript abi: lifecycle transition {}.{} old+1 state_count={}",
-            pattern.ty, LIFECYCLE_STATE_FIELD_NAME, state_count
-        ));
+        self.emit(format!("# cellscript abi: lifecycle transition {}.{} state_count={}", pattern.ty, state_field, state_count));
         self.emit_loaded_schema_exact_size_check(input_size_offset, expected_size, &format!("{} input", pattern.ty));
         self.emit_loaded_schema_bounds_check(
             input_size_offset,
             state_layout.offset + width,
-            &format!("{} input.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+            &format!("{} input.{}", pattern.ty, state_field),
         );
         self.emit_loaded_schema_bounds_check(
             output_size_offset,
             state_layout.offset + width,
-            &format!("{} output.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+            &format!("{} output.{}", pattern.ty, state_field),
         );
         self.emit_sp_addi("t4", input_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", state_layout.offset, width);
@@ -5740,10 +5765,24 @@ impl CodeGenerator {
 
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", state_layout.offset, width);
-        self.emit("addi t0, t0, 1");
-        self.emit("sub t2, t1, t0");
         let ok_label = self.fresh_label("lifecycle_transition_ok");
-        self.emit(format!("beqz t2, {}", ok_label));
+        let rules = self.lifecycle_transition_rules_for_pattern(pattern, &action_moves);
+        if rules.is_empty() {
+            self.emit("addi t0, t0, 1");
+            self.emit("sub t2, t1, t0");
+            self.emit(format!("beqz t2, {}", ok_label));
+        } else {
+            for rule in rules {
+                let next_rule_label = self.fresh_label("lifecycle_transition_next_rule");
+                self.emit(format!("li t3, {}", rule.from_index));
+                self.emit("sub t2, t0, t3");
+                self.emit(format!("bnez t2, {}", next_rule_label));
+                self.emit(format!("li t3, {}", rule.to_index));
+                self.emit("sub t2, t1, t3");
+                self.emit(format!("beqz t2, {}", ok_label));
+                self.emit_label(&next_rule_label);
+            }
+        }
         self.emit_fail(CellScriptRuntimeError::LifecycleTransitionMismatch);
         self.emit_label(&ok_label);
 
@@ -5753,6 +5792,40 @@ impl CodeGenerator {
         self.emit(format!("bnez t2, {}", range_ok_label));
         self.emit_fail(CellScriptRuntimeError::LifecycleNewStateInvalid);
         self.emit_label(&range_ok_label);
+    }
+
+    fn lifecycle_transition_moves_for_pattern(&self, pattern: &CreatePattern) -> Vec<IrLifecycleMove> {
+        self.current_lifecycle_moves.iter().filter(|state_move| state_move.type_name == pattern.ty).cloned().collect()
+    }
+
+    fn lifecycle_transition_rules_for_pattern(
+        &self,
+        pattern: &CreatePattern,
+        action_moves: &[IrLifecycleMove],
+    ) -> Vec<IrLifecycleRule> {
+        if !action_moves.is_empty() {
+            return action_moves
+                .iter()
+                .map(|state_move| IrLifecycleRule {
+                    from: state_move.from.clone(),
+                    to: state_move.to.clone(),
+                    from_index: state_move.from_index,
+                    to_index: state_move.to_index,
+                })
+                .collect();
+        }
+        self.lifecycle_rules.get(&pattern.ty).cloned().unwrap_or_default()
+    }
+
+    fn consumed_var_for_lifecycle_transition(&self, type_name: &str, action_moves: &[IrLifecycleMove]) -> Option<usize> {
+        if let Some(binding) = action_moves.iter().filter_map(|state_move| state_move.input_binding.as_ref()).next() {
+            let var_id = self.consume_binding_ids.get(binding).copied()?;
+            if self.consume_type_names.get(&var_id).is_some_and(|consumed_type| consumed_type == type_name) {
+                return Some(var_id);
+            }
+            return None;
+        }
+        self.consumed_var_for_type(type_name)
     }
 
     fn emit_settle_final_state_check(&mut self, pattern: &CreatePattern, output_size_offset: usize, output_buffer_offset: usize) {
@@ -5772,8 +5845,9 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(LIFECYCLE_STATE_FIELD_NAME)).cloned()
-        else {
+        let state_field =
+            self.lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| LIFECYCLE_STATE_FIELD_NAME.to_string());
+        let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
@@ -5786,7 +5860,7 @@ impl CodeGenerator {
         self.emit(format!(
             "# cellscript abi: settle final-state {}.{} final_state={} state_count={}",
             pattern.ty,
-            LIFECYCLE_STATE_FIELD_NAME,
+            state_field,
             final_state,
             states.len()
         ));
@@ -5794,12 +5868,12 @@ impl CodeGenerator {
         self.emit_loaded_schema_bounds_check(
             input_size_offset,
             state_layout.offset + width,
-            &format!("{} input.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+            &format!("{} input.{}", pattern.ty, state_field),
         );
         self.emit_loaded_schema_bounds_check(
             output_size_offset,
             state_layout.offset + width,
-            &format!("{} output.{}", pattern.ty, LIFECYCLE_STATE_FIELD_NAME),
+            &format!("{} output.{}", pattern.ty, state_field),
         );
 
         self.emit_sp_addi("t4", input_buffer_offset);
@@ -10772,6 +10846,28 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_moves_use_explicit_consumed_binding() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.consume_order = vec![1, 2];
+        generator.consume_type_names.insert(1, "Offer".to_string());
+        generator.consume_type_names.insert(2, "Offer".to_string());
+        generator.consume_binding_ids.insert("left".to_string(), 1);
+        generator.consume_binding_ids.insert("right".to_string(), 2);
+
+        let state_move = IrLifecycleMove {
+            input_binding: Some("right".to_string()),
+            type_name: "Offer".to_string(),
+            field_name: "state".to_string(),
+            from: "Live".to_string(),
+            to: "Filled".to_string(),
+            from_index: 1,
+            to_index: 2,
+        };
+
+        assert_eq!(generator.consumed_var_for_lifecycle_transition("Offer", &[state_move]), Some(2));
+    }
+
+    #[test]
     fn unaligned_scalar_load_large_offsets_preserve_live_accumulator() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.emit_unaligned_scalar_load("t4", "t6", "t2", 2048, 2);
@@ -11125,6 +11221,7 @@ mod tests {
                 name: "shape".to_string(),
                 params: vec![],
                 return_type: Some(IrType::U64),
+                lifecycle_moves: vec![],
                 effect_class: EffectClass::Pure,
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {

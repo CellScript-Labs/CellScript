@@ -66,7 +66,13 @@ impl Optimizer {
                 Item::Lock(lock) => {
                     lock.body = self.with_child_scope(|this| this.optimize_stmts(&lock.body))?;
                 }
-                Item::Resource(_) | Item::Shared(_) | Item::Receipt(_) | Item::Struct(_) | Item::Enum(_) | Item::Use(_) => {}
+                Item::Resource(_)
+                | Item::Shared(_)
+                | Item::Receipt(_)
+                | Item::Struct(_)
+                | Item::StateMachine(_)
+                | Item::Enum(_)
+                | Item::Use(_) => {}
             }
         }
 
@@ -912,6 +918,7 @@ mod tests {
                 name: "run".to_string(),
                 params: Vec::new(),
                 return_type: None,
+                state_moves: Vec::new(),
                 body: vec![Stmt::If(IfStmt {
                     condition: Expr::Bool(false),
                     then_branch: vec![Stmt::Expr(Expr::Destroy(DestroyExpr {
@@ -978,6 +985,7 @@ mod tests {
                     name: "run".to_string(),
                     params: Vec::new(),
                     return_type: Some(Type::U64),
+                    state_moves: Vec::new(),
                     body: vec![
                         Stmt::Let(LetStmt {
                             pattern: BindingPattern::Name("unused_local".to_string()),

@@ -206,6 +206,12 @@ New in 0.13:
   guards and computed expressions can use qualified names such as
   `Ticket::Active` instead of numeric state indexes. The LSP now completes
   those qualified lifecycle states after `Type::`.
+- Declarative state machines can now be expressed without hidden layout changes:
+  `state_machine Name for Type.field { A -> B by action; }` and compact
+  `state Type.field { A -> B; }` declare the graph, while action signatures can
+  bind the edge they prove with `moves input.field A -> B`. The type checker,
+  lifecycle static checks, IR metadata, runtime verifier, formatter, docs
+  generator, and LSP all carry the explicit state field name.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.

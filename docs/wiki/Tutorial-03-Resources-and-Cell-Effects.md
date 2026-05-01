@@ -45,49 +45,60 @@ The `Token` cannot simply disappear. It must be consumed, returned, transferred,
 claimed, settled, or destroyed. Silent loss is rejected because silent loss would
 make the Cell lifecycle unclear.
 
-## Lifecycle State Is Explicit Data
+## State Machines Use Explicit State Fields
 
-`#[lifecycle(...)]` declares the allowed state order for a Cell-backed receipt,
-but it does not hide storage or change Molecule layout behind the user's back.
-Declare the state field in the schema:
+State is ordinary schema data. Declare the state field yourself, usually as a
+no-payload enum so SDKs, indexers, and explorers can decode the layout without
+knowing compiler magic:
 
 ```cellscript
-#[lifecycle(Granted -> Claimable -> FullyClaimed)]
+enum GrantState {
+    Granted,
+    Claimable,
+    FullyClaimed,
+}
+
 receipt VestingGrant has store {
-    state: u8,
+    state: GrantState,
     beneficiary: Address,
     total_amount: u64,
     claimed_amount: u64
 }
 ```
 
-When creating an initial output, use the state name instead of a numeric index:
+Then declare the allowed transition graph separately:
 
 ```cellscript
-create VestingGrant {
-    state: Granted,
-    beneficiary,
-    total_amount,
-    claimed_amount: 0
+state_machine GrantFlow for VestingGrant.state {
+    Granted -> Claimable by unlock_grant;
+    Claimable -> FullyClaimed by claim_all;
 }
 ```
 
-In guards and computed expressions, prefer the qualified form so the state
-machine is clear at the use site:
+Bind each action to the transition it is allowed to prove:
 
 ```cellscript
-assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
+action unlock_grant(input: VestingGrant)
+    moves input.state Granted -> Claimable
+{
+    let beneficiary = input.beneficiary
+    let total_amount = input.total_amount
+    let claimed_amount = input.claimed_amount
 
-let next_state: u8 = if claimed == grant.total_amount {
-    VestingGrant::FullyClaimed
-} else {
-    VestingGrant::Claimable
+    consume input
+    create VestingGrant {
+        state: GrantState::Claimable,
+        beneficiary,
+        total_amount,
+        claimed_amount,
+    }
 }
 ```
 
-The compiler lowers lifecycle states to their declared ordinal values, verifies
-the explicit `state` field at runtime, and rejects a state from another
-lifecycle, such as assigning `OtherGrant::Live` to `VestingGrant.state`.
+`state Type.field { ... }` is the compact form when the state machine does not
+need a separate name. The compiler keeps the state field explicit in Molecule
+layout, lowers enum states to their ordinal values, verifies old/new state at
+runtime, and rejects action moves that are not declared in the state graph.
 
 ## Creating Output Cells
 

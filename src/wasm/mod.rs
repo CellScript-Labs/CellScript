@@ -398,6 +398,7 @@ mod tests {
                 name: "main".to_string(),
                 params: Vec::new(),
                 return_type: Some(crate::ir::IrType::U64),
+                lifecycle_moves: Vec::new(),
                 body: empty_body(),
                 effect_class: crate::ir::EffectClass::Pure,
                 scheduler_hints: crate::ir::SchedulerHints::default(),

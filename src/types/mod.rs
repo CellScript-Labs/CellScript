@@ -18,6 +18,15 @@ struct FunctionSignature {
     kind: CallableKind,
 }
 
+#[derive(Debug, Clone)]
+struct StateMachineSpec {
+    type_name: String,
+    field_name: String,
+    field_enum_type: Option<String>,
+    states: Vec<String>,
+    transitions: Vec<StateTransition>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellTypeKind {
     Resource,
@@ -271,6 +280,8 @@ pub struct TypeChecker<'a> {
     type_capabilities: HashMap<String, HashSet<Capability>>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
     lifecycle_states: HashMap<String, Vec<String>>,
+    lifecycle_state_fields: HashMap<String, String>,
+    state_machines: HashMap<String, StateMachineSpec>,
     resolver: Option<&'a ModuleResolver>,
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
@@ -364,6 +375,8 @@ impl<'a> TypeChecker<'a> {
             type_capabilities: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
             lifecycle_states: HashMap::new(),
+            lifecycle_state_fields: HashMap::new(),
+            state_machines: HashMap::new(),
             resolver: None,
             current_module: None,
             current_callable: None,
@@ -423,6 +436,7 @@ impl<'a> TypeChecker<'a> {
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
                     if let Some(lifecycle) = &receipt.lifecycle {
                         self.lifecycle_states.insert(receipt.name.clone(), lifecycle.states.clone());
+                        self.lifecycle_state_fields.insert(receipt.name.clone(), LIFECYCLE_STATE_FIELD_NAME.to_string());
                     }
                     self.type_fields.insert(
                         receipt.name.clone(),
@@ -479,11 +493,13 @@ impl<'a> TypeChecker<'a> {
                         },
                     );
                 }
+                Item::StateMachine(_) => {}
                 Item::Use(_) => {}
             }
         }
 
         self.register_imported_type_ids(&mut seen_type_ids)?;
+        self.register_state_machines(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
@@ -509,12 +525,180 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn register_state_machines(&mut self, module: &Module) -> Result<()> {
+        let mut seen_targets = HashSet::new();
+        for item in &module.items {
+            let Item::StateMachine(machine) = item else {
+                continue;
+            };
+            if machine.transitions.is_empty() {
+                return Err(CompileError::new("state machine must declare at least one transition", machine.span));
+            }
+            let type_name = machine.target.base.clone();
+            let field_name = machine.target.field.clone();
+            let target_key = format!("{}.{}", type_name, field_name);
+            if !seen_targets.insert(target_key.clone()) {
+                return Err(CompileError::new(format!("duplicate state machine for '{}'", target_key), machine.target.span));
+            }
+            if self.lifecycle_states.contains_key(&type_name) {
+                return Err(CompileError::new(
+                    format!("type '{}' already has lifecycle states; use either #[lifecycle] or state_machine, not both", type_name),
+                    machine.target.span,
+                ));
+            }
+
+            let fields = self.resolve_named_type_fields(&type_name).ok_or_else(|| {
+                CompileError::new(format!("state machine target type '{}' is not defined", type_name), machine.target.span)
+            })?;
+            let field_ty = fields.get(&field_name).ok_or_else(|| {
+                CompileError::new(
+                    format!("state machine target field '{}.{}' is not defined", type_name, field_name),
+                    machine.target.span,
+                )
+            })?;
+
+            let (states, field_enum_type) = self.state_machine_states(machine, field_ty)?;
+            let mut seen_transitions = HashSet::new();
+            let mut normalized_transitions = Vec::new();
+            for transition in &machine.transitions {
+                let from = self.canonical_state_name_for_machine(
+                    &type_name,
+                    field_enum_type.as_deref(),
+                    &states,
+                    &transition.from,
+                    transition.span,
+                )?;
+                let to = self.canonical_state_name_for_machine(
+                    &type_name,
+                    field_enum_type.as_deref(),
+                    &states,
+                    &transition.to,
+                    transition.span,
+                )?;
+                if from == to {
+                    return Err(CompileError::new(format!("state transition '{} -> {}' is a no-op", from, to), transition.span));
+                }
+                if !seen_transitions.insert((from.clone(), to.clone())) {
+                    return Err(CompileError::new(format!("duplicate state transition '{} -> {}'", from, to), transition.span));
+                }
+                if let Some(action) = &transition.action {
+                    match self.functions.get(action) {
+                        Some(signature) if signature.kind == CallableKind::Action => {}
+                        Some(_) => {
+                            return Err(CompileError::new(
+                                format!("state transition action '{}' is not an action", action),
+                                transition.span,
+                            ))
+                        }
+                        None => {
+                            return Err(CompileError::new(
+                                format!("state transition action '{}' is not defined", action),
+                                transition.span,
+                            ))
+                        }
+                    }
+                }
+                normalized_transitions.push(StateTransition { from, to, action: transition.action.clone(), span: transition.span });
+            }
+
+            self.lifecycle_states.insert(type_name.clone(), states.clone());
+            self.lifecycle_state_fields.insert(type_name.clone(), field_name.clone());
+            self.state_machines.insert(
+                type_name.clone(),
+                StateMachineSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn state_machine_states(&self, machine: &StateMachineDef, field_ty: &Type) -> Result<(Vec<String>, Option<String>)> {
+        if let Type::Named(enum_name) = field_ty {
+            if let Some(variants) = self.resolve_enum_variants(enum_name) {
+                if variants.iter().any(|variant| self.enum_variant_has_payload(enum_name, variant)) {
+                    return Err(CompileError::new(
+                        format!(
+                            "state machine field '{}.{}' enum '{}' must not have payload variants",
+                            machine.target.base, machine.target.field, enum_name
+                        ),
+                        machine.target.span,
+                    ));
+                }
+                for transition in &machine.transitions {
+                    self.canonical_state_name_for_machine(
+                        &machine.target.base,
+                        Some(enum_name),
+                        &variants,
+                        &transition.from,
+                        transition.span,
+                    )?;
+                    self.canonical_state_name_for_machine(
+                        &machine.target.base,
+                        Some(enum_name),
+                        &variants,
+                        &transition.to,
+                        transition.span,
+                    )?;
+                }
+                return Ok((variants, Some(enum_name.clone())));
+            }
+        }
+
+        if !is_state_storage_type(field_ty) {
+            return Err(CompileError::new(
+                format!(
+                    "state machine field '{}.{}' must be an unsigned integer or no-payload enum",
+                    machine.target.base, machine.target.field
+                ),
+                machine.target.span,
+            ));
+        }
+
+        let mut states = Vec::new();
+        for transition in &machine.transitions {
+            for raw in [&transition.from, &transition.to] {
+                let state = raw.rsplit_once("::").map_or(raw.as_str(), |(_, state)| state).to_string();
+                if !states.iter().any(|existing| existing == &state) {
+                    states.push(state);
+                }
+            }
+        }
+        if states.len() < 2 {
+            return Err(CompileError::new("state machine must mention at least two states", machine.span));
+        }
+        Ok((states, None))
+    }
+
+    fn canonical_state_name_for_machine(
+        &self,
+        type_name: &str,
+        enum_name: Option<&str>,
+        states: &[String],
+        raw: &str,
+        span: Span,
+    ) -> Result<String> {
+        let state = if let Some((qualifier, state)) = raw.rsplit_once("::") {
+            if qualifier != type_name && Some(qualifier) != enum_name {
+                return Err(CompileError::new(format!("state '{}' does not belong to '{}'", raw, type_name), span));
+            }
+            state
+        } else {
+            raw
+        };
+        if states.iter().any(|candidate| candidate == state) {
+            Ok(state.to_string())
+        } else {
+            Err(CompileError::new(format!("unknown state '{}::{}'", type_name, state), span))
+        }
+    }
+
     fn check_item(&mut self, item: &Item) -> Result<()> {
         match item {
             Item::Resource(r) => self.check_resource(r),
             Item::Shared(s) => self.check_shared(s),
             Item::Receipt(r) => self.check_receipt(r),
             Item::Struct(s) => self.check_struct(s),
+            Item::StateMachine(_) => Ok(()),
             Item::Const(c) => self.check_const(c),
             Item::Enum(e) => self.check_enum(e),
             Item::Action(a) => self.check_action(a),
@@ -610,6 +794,7 @@ impl<'a> TypeChecker<'a> {
             let mut env = self.env.child();
 
             self.bind_callable_params(&mut env, &action.params, "action", &action.name)?;
+            self.validate_action_state_moves(action, &env)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -631,6 +816,109 @@ impl<'a> TypeChecker<'a> {
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
         result
+    }
+
+    fn validate_action_state_moves(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
+        for state_move in &action.state_moves {
+            let (type_name, field_name, field_enum_type) = if let Some(path) = &state_move.path {
+                let ty = env
+                    .lookup(&path.base)
+                    .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
+                let type_name = Self::base_type_name(ty)
+                    .ok_or_else(|| {
+                        CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span)
+                    })?
+                    .to_string();
+                let spec = self
+                    .state_machines
+                    .get(&type_name)
+                    .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
+                if spec.field_name != path.field {
+                    return Err(CompileError::new(
+                        format!(
+                            "state move field '{}.{}' does not match declared state machine field '{}.{}'",
+                            path.base, path.field, type_name, spec.field_name
+                        ),
+                        path.span,
+                    ));
+                }
+                (type_name, path.field.clone(), spec.field_enum_type.clone())
+            } else {
+                let mut matches = self
+                    .state_machines
+                    .values()
+                    .filter(|spec| {
+                        spec.transitions.iter().any(|transition| {
+                            transition.action.as_deref() == Some(action.name.as_str())
+                                && self
+                                    .canonical_state_name_for_machine(
+                                        &spec.type_name,
+                                        spec.field_enum_type.as_deref(),
+                                        &spec.states,
+                                        &state_move.from,
+                                        state_move.span,
+                                    )
+                                    .ok()
+                                    .is_some_and(|from| {
+                                        self.canonical_state_name_for_machine(
+                                            &spec.type_name,
+                                            spec.field_enum_type.as_deref(),
+                                            &spec.states,
+                                            &state_move.to,
+                                            state_move.span,
+                                        )
+                                        .ok()
+                                        .is_some_and(|to| transition.from == from && transition.to == to)
+                                    })
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if matches.len() != 1 {
+                    return Err(CompileError::new(
+                        "shorthand state move is ambiguous; write moves input.state From -> To or bind the edge with 'by action_name'",
+                        state_move.span,
+                    ));
+                }
+                let spec = matches.pop().expect("exactly one state machine");
+                (spec.type_name.clone(), spec.field_name.clone(), spec.field_enum_type.clone())
+            };
+
+            let states = self
+                .lifecycle_states
+                .get(&type_name)
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), state_move.span))?;
+            let from = self.canonical_state_name_for_machine(
+                &type_name,
+                field_enum_type.as_deref(),
+                states,
+                &state_move.from,
+                state_move.span,
+            )?;
+            let to = self.canonical_state_name_for_machine(
+                &type_name,
+                field_enum_type.as_deref(),
+                states,
+                &state_move.to,
+                state_move.span,
+            )?;
+            let Some(spec) = self.state_machines.get(&type_name) else {
+                return Err(CompileError::new(format!("type '{}' has no declared state machine", type_name), state_move.span));
+            };
+            if spec.field_name != field_name {
+                return Err(CompileError::new(
+                    format!("state machine for '{}' is bound to field '{}'", type_name, spec.field_name),
+                    state_move.span,
+                ));
+            }
+            if !spec.transitions.iter().any(|transition| transition.from == from && transition.to == to) {
+                return Err(CompileError::new(
+                    format!("state transition '{}.{} {} -> {}' is not declared", type_name, field_name, from, to),
+                    state_move.span,
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn check_function(&mut self, function: &FnDef) -> Result<()> {
@@ -1661,7 +1949,9 @@ impl<'a> TypeChecker<'a> {
             .keys()
             .filter(|field_name| !seen.contains(*field_name))
             .filter(|field_name| {
-                !(self.resolve_lifecycle_states(type_name).is_some() && field_name.as_str() == LIFECYCLE_STATE_FIELD_NAME)
+                !(self.resolve_lifecycle_states(type_name).is_some()
+                    && !self.state_machines.contains_key(type_name)
+                    && self.lifecycle_state_fields.get(type_name).is_some_and(|state_field| state_field == field_name.as_str()))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1682,12 +1972,25 @@ impl<'a> TypeChecker<'a> {
         value: &Expr,
         expected_ty: &Type,
     ) -> Result<Option<Type>> {
-        if field_name != LIFECYCLE_STATE_FIELD_NAME || !matches!(expected_ty, Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+        if self.lifecycle_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return Ok(None);
         }
         let Expr::Identifier(state_name) = value else {
             return Ok(None);
         };
+        if let Type::Named(enum_name) = expected_ty {
+            if self.enum_variant_expr_type(state_name, expr_span(value))?.is_some_and(|ty| self.types_equal(&ty, expected_ty)) {
+                return Ok(Some(expected_ty.clone()));
+            }
+            let Some(states) = self.resolve_lifecycle_states(type_name) else {
+                return Ok(None);
+            };
+            if self.canonical_state_name_for_machine(type_name, Some(enum_name), &states, state_name, expr_span(value)).is_ok() {
+                return Ok(Some(expected_ty.clone()));
+            }
+        } else if !is_state_storage_type(expected_ty) {
+            return Ok(None);
+        }
         let Some((qualified_type, qualified_state)) = state_name.rsplit_once("::") else {
             return Ok(self.lifecycle_state_index(type_name, state_name).map(|_| expected_ty.clone()));
         };
@@ -1720,6 +2023,9 @@ impl<'a> TypeChecker<'a> {
             return Ok(None);
         };
         if states.iter().any(|state| state == state_name) {
+            if let Some(spec) = self.state_machines.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
+                return Ok(Some(Type::Named(spec.clone())));
+            }
             return Ok(Some(Type::U64));
         }
         Err(CompileError::new(format!("unknown lifecycle state '{}::{}'", type_name, state_name), span))
@@ -3200,6 +3506,7 @@ fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
         Item::Shared(def) => Some((&def.name, def.span)),
         Item::Receipt(def) => Some((&def.name, def.span)),
         Item::Struct(def) => Some((&def.name, def.span)),
+        Item::StateMachine(def) => def.name.as_deref().map(|name| (name, def.span)),
         Item::Enum(def) => Some((&def.name, def.span)),
         Item::Const(def) => Some((&def.name, def.span)),
         Item::Action(def) => Some((&def.name, def.span)),
@@ -3272,6 +3579,10 @@ fn capability_name(capability: Capability) -> &'static str {
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
     }
+}
+
+fn is_state_storage_type(ty: &Type) -> bool {
+    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64)
 }
 
 pub fn check(module: &Module) -> Result<()> {

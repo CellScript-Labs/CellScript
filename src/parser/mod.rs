@@ -360,6 +360,14 @@ impl<'a> Parser<'a> {
             TokenKind::Shared => Ok(Item::Shared(self.parse_shared(attrs.type_id, attrs.capabilities)?)),
             TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id, attrs.lifecycle, attrs.capabilities)?)),
             TokenKind::Struct => Ok(Item::Struct(self.parse_struct(attrs.type_id)?)),
+            TokenKind::Identifier(name) if name == "state_machine" => {
+                self.reject_type_id_attr(&attrs)?;
+                Ok(Item::StateMachine(self.parse_state_machine(false)?))
+            }
+            TokenKind::Identifier(name) if name == "state" => {
+                self.reject_type_id_attr(&attrs)?;
+                Ok(Item::StateMachine(self.parse_state_machine(true)?))
+            }
             TokenKind::Const => {
                 self.reject_type_id_attr(&attrs)?;
                 Ok(Item::Const(self.parse_const()?))
@@ -609,6 +617,79 @@ impl<'a> Parser<'a> {
             fields,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
+    }
+
+    fn parse_state_machine(&mut self, shorthand: bool) -> Result<StateMachineDef> {
+        let start_span = self.current().span;
+        let keyword = self.parse_name()?;
+        debug_assert!((shorthand && keyword == "state") || (!shorthand && keyword == "state_machine"));
+
+        let name = if shorthand
+            || self.check(&TokenKind::For)
+            || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "for")
+        {
+            None
+        } else {
+            Some(self.parse_name_path()?)
+        };
+
+        if !shorthand {
+            match &self.current().kind {
+                TokenKind::For => self.advance(),
+                TokenKind::Identifier(name) if name == "for" => self.advance(),
+                _ => return Err(CompileError::new("expected 'for' in state_machine declaration", self.current().span)),
+            };
+        }
+
+        let target = self.parse_state_field_path()?;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut transitions = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let transition_start = self.current().span;
+            let from = self.parse_name_path()?;
+            self.expect(TokenKind::Arrow)?;
+            let to = self.parse_name_path()?;
+            let action = if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "by") {
+                self.advance();
+                Some(self.parse_name_path()?)
+            } else {
+                None
+            };
+            let transition_end = self.current().span;
+            transitions.push(StateTransition {
+                from,
+                to,
+                action,
+                span: Span::new(transition_start.start, transition_end.end, transition_start.line, transition_start.column),
+            });
+
+            if self.check(&TokenKind::Comma) || self.check(&TokenKind::Semi) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+
+        self.expect(TokenKind::RBrace)?;
+        self.consume_optional_semi();
+
+        let end_span = self.current().span;
+        Ok(StateMachineDef {
+            name,
+            target,
+            transitions,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_state_field_path(&mut self) -> Result<StateFieldPath> {
+        let start_span = self.current().span;
+        let base = self.parse_name_path()?;
+        self.expect(TokenKind::Dot)?;
+        let field = self.parse_name()?;
+        let end_span = self.current().span;
+        Ok(StateFieldPath { base, field, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
     fn parse_default_hash_type_decl(&mut self) -> Result<Option<HashTypeDecl>> {
@@ -887,6 +968,7 @@ impl<'a> Parser<'a> {
             None
         };
 
+        let state_moves = self.parse_action_state_moves()?;
         let body = self.parse_block()?;
 
         let end_span = self.current().span;
@@ -896,6 +978,7 @@ impl<'a> Parser<'a> {
             name,
             params,
             return_type,
+            state_moves,
             body,
             effect: effect.unwrap_or(EffectClass::Pure),
             effect_declared,
@@ -903,6 +986,47 @@ impl<'a> Parser<'a> {
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
+    }
+
+    fn parse_action_state_moves(&mut self) -> Result<Vec<ActionStateMove>> {
+        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "moves") {
+            return Ok(Vec::new());
+        }
+
+        let mut moves = Vec::new();
+        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "moves") {
+            self.advance();
+            loop {
+                let start_span = self.current().span;
+                let first = self.parse_name_path()?;
+                let (path, from) = if self.check(&TokenKind::Dot) {
+                    self.advance();
+                    let field = self.parse_name()?;
+                    let path_span = Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column);
+                    (Some(StateFieldPath { base: first, field, span: path_span }), self.parse_name_path()?)
+                } else {
+                    (None, first)
+                };
+                self.expect(TokenKind::Arrow)?;
+                let to = self.parse_name_path()?;
+                let end_span = self.current().span;
+                moves.push(ActionStateMove {
+                    path,
+                    from,
+                    to,
+                    span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+                });
+
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    continue;
+                }
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        Ok(moves)
     }
 
     fn parse_fn(&mut self) -> Result<FnDef> {
@@ -1976,6 +2100,32 @@ action mint(amount: u64) -> Token {
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_state_machine_and_action_moves() {
+        let input = r#"
+module test
+
+state_machine OfferFlow for Offer.state {
+    Created -> Live by publish;
+    Live -> Filled by accept;
+}
+
+action accept(input: Offer, output: Offer) moves input.state Live -> Filled {
+    consume input
+    create Offer { state: Filled }
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        assert!(matches!(&module.items[0], Item::StateMachine(machine) if machine.name.as_deref() == Some("OfferFlow")));
+        let Item::Action(action) = &module.items[1] else {
+            panic!("expected action");
+        };
+        assert_eq!(action.state_moves.len(), 1);
+        assert_eq!(action.state_moves[0].from, "Live");
+        assert_eq!(action.state_moves[0].to, "Filled");
     }
 
     #[test]

@@ -168,11 +168,9 @@ CellScript programs are written in terms of Cell lifecycle operations:
   an operation happened and can later be claimed or settled.
 - **Capability gates** — `has store, transfer, destroy` makes asset permissions
   explicit instead of implicit.
-- **Lifecycle rules** — `#[lifecycle(...)]` lets a Cell-backed value describe a
-  state machine, e.g. `Granted -> Claimable -> FullyClaimed`. Lifecycle state
-  is still explicit data: declare a scalar `state` field, initialize it with a
-  declared state name such as `state: Granted`, and use qualified names such as
-  `VestingGrant::FullyClaimed` in guards and computed expressions.
+- **Declarative state machines** — state remains explicit schema data, while
+  `state_machine Type.field { A -> B by action; }` declares allowed edges and
+  `action ... moves input.field A -> B` binds an action to the edge it proves.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -395,8 +393,8 @@ line/column span for diagnostics.
 **2. Parsing** (`parser/`)
 Builds an AST from the token stream. The AST models the full surface:
 `resource`, `shared`, `receipt`, `struct`, `enum`, `action`, `lock`,
-`function`, `use`, `const`, capability gates, lifecycle annotations, and all
-statement/expression forms.
+`function`, `use`, `const`, capability gates, declarative state machines,
+action `moves` clauses, and all statement/expression forms.
 
 **3. Semantic analysis** (`types/` + `lifecycle/`)
 - *Type checking* — enforces linear resource semantics: every
@@ -404,8 +402,8 @@ statement/expression forms.
   or settled before the action body exits. Also validates shared-state
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
-- *Lifecycle checking* — validates `#[lifecycle(...)]` state machines on
-  receipts: legal state transitions, integer state-field types, and static
+- *Lifecycle checking* — validates explicit state fields, `state_machine`
+  transition graphs, action `moves` clauses, legal state transitions, and static
   create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)
