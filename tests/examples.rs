@@ -14,7 +14,7 @@ const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.j
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 40 * 1024),
     ("launch.cell", 28 * 1024),
-    ("multisig.cell", 80 * 1024),
+    ("multisig.cell", 84 * 1024),
     ("nft.cell", 54 * 1024),
     ("timelock.cell", 44 * 1024),
     ("token.cell", 16 * 1024),
@@ -57,12 +57,12 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 20_500,
+            max_lines: 21_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 20,
             max_text_bytes: 80 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_000,
+            max_cond_branch_abs_distance: 7_300,
             max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 5_800,
@@ -89,7 +89,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 10_500,
+            max_lines: 10_900,
             max_fail_handlers: 64,
             max_shared_epilogues: 22,
             max_text_bytes: 40 * 1024,
@@ -99,7 +99,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_block_bytes: 320,
             max_cfg_edges: 3_100,
             max_call_edges: 260,
-            max_unreachable_machine_blocks: 1_800,
+            max_unreachable_machine_blocks: 1_850,
         },
     ),
     (

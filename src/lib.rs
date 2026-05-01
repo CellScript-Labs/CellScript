@@ -15772,6 +15772,19 @@ action make() -> Ticket {
 }
 "#;
 
+    const LIFECYCLE_MISSING_STATE_FIELD_PROGRAM: &str = r#"
+module test
+
+#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    id: u64,
+}
+
+action noop() -> u64 {
+    return 0
+}
+"#;
+
     const LIFECYCLE_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
@@ -20676,6 +20689,13 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
+    fn compile_rejects_lifecycle_receipt_without_state_field() {
+        let err = compile(LIFECYCLE_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("lifecycle receipt 'Ticket' must declare a state field"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn compile_rejects_bad_lifecycle_state_field_type_on_main_path() {
         let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
@@ -22056,6 +22076,11 @@ action spend(amount: u64) -> u64 {
             "entry wrapper did not lower u64 witness payload into the action ABI register:\n{}",
             asm
         );
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes"),
+            "entry wrapper should reject non-canonical trailing witness bytes:\n{}",
+            asm
+        );
         assert!(asm.contains("call spend"), "entry wrapper did not call the original action label:\n{}", asm);
         assert!(
             asm.contains("# cellscript entry abi: spend requires-explicit-parameter-abi"),
@@ -22183,6 +22208,12 @@ action raw(data: Vec<u8>) -> u64 {
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes") && asm.contains("sub t2, t5, t6"),
+            "dynamic entry wrapper should reject non-canonical trailing witness bytes after consuming dynamic payload:\n{}",
+            asm
+        );
         let action = result.metadata.actions.iter().find(|action| action.name == "bad").unwrap();
         let schema_bytes = vec![1u8, 2, 3, 4];
         let mut expected = ENTRY_WITNESS_ABI_MAGIC.to_vec();

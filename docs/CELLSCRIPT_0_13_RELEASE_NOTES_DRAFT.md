@@ -158,6 +158,8 @@ New in 0.13:
 - Large `addi` lowering now chooses a scratch register that does not overwrite
   the source/base register, preventing large fixed-byte collection copy paths
   from losing a live pointer when it is held in `t6`.
+- Large `sp + offset` address materialization now clobbers only the requested
+  destination register instead of using `t6` as a hidden scratch register.
 - RV64 `li` materialization avoids the `lui` sign-extension cliff near the
   positive 32-bit boundary. Values such as `0x7ffff800` and `0x7fffffff` now
   use the long materialization path instead of silently producing sign-extended
@@ -193,7 +195,11 @@ New in 0.13:
   explicit 16-byte storage/comparison and carry/borrow arithmetic instead of
   falling through the old 8-byte register model.
 - Parameterized entry wrappers now reject witness payloads larger than their
-  local witness buffer before decoding dynamic payload lengths.
+  local witness buffer before decoding dynamic payload lengths, and reject
+  trailing payload bytes after all static or dynamic witness arguments are
+  consumed.
+- Lifecycle receipts now fail compilation unless they declare a scalar unsigned
+  `state` field, matching the runtime verifier's lifecycle state contract.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.
@@ -268,10 +274,10 @@ Snapshot from `bundled_examples_backend_shape_report_serializes`:
 
 | Example | Assembly lines | Text bytes | Machine blocks | CFG edges | Call edges |
 |---|---:|---:|---:|---:|---:|
-| `amm_pool.cell` | 8778 | 33912 | 1393 | 2400 | 326 |
-| `launch.cell` | 5677 | 21320 | 763 | 1309 | 216 |
-| `multisig.cell` | 19836 | 76048 | 3414 | 5421 | 266 |
-| `nft.cell` | 12655 | 47388 | 2375 | 3933 | 305 |
-| `timelock.cell` | 10109 | 38284 | 1797 | 2976 | 243 |
-| `token.cell` | 2628 | 9748 | 478 | 787 | 85 |
-| `vesting.cell` | 3853 | 14372 | 566 | 989 | 189 |
+| `amm_pool.cell` | 8836 | 34496 | 1370 | 2354 | 329 |
+| `launch.cell` | 5742 | 21912 | 740 | 1263 | 219 |
+| `multisig.cell` | 20502 | 78672 | 3531 | 5602 | 273 |
+| `nft.cell` | 12849 | 48288 | 2421 | 4003 | 307 |
+| `timelock.cell` | 10585 | 40176 | 1876 | 3098 | 248 |
+| `token.cell` | 2673 | 10112 | 481 | 793 | 85 |
+| `vesting.cell` | 4007 | 15088 | 587 | 1017 | 191 |

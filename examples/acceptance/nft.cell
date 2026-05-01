@@ -37,6 +37,7 @@ receipt Listing has destroy {
     seller: Address,
     price: u64,
     created_at: u64,
+    state: u8,
 }
 
 #[lifecycle(Created, Active, Accepted, Expired)]
@@ -45,6 +46,7 @@ receipt Offer has destroy {
     buyer: Address,
     price: u64,
     expires_at: u64,
+    state: u8,
 }
 
 receipt RoyaltyPayment {
@@ -100,6 +102,7 @@ action create_listing(
         seller: nft.owner,
         price,
         created_at: current_time,
+        state: 0,
     };
     
     listing
@@ -161,6 +164,7 @@ action create_offer(
         buyer,
         price,
         expires_at,
+        state: 0,
     };
     
     offer

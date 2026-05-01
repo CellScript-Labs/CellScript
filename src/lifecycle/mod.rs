@@ -32,19 +32,17 @@ pub fn check(module: &Module) -> Result<()> {
         checker.register_lifecycle(&receipt.name, lifecycle)?;
 
         let state_field = receipt.fields.iter().find(|field| field.name == "state");
-        if let Some(field) = state_field {
-            if !is_lifecycle_state_type(&field.ty) {
-                return Err(CompileError::new(
-                    format!("lifecycle receipt '{}' state field must be an unsigned integer type", receipt.name),
-                    field.span,
-                ));
-            }
+        let Some(field) = state_field else {
+            return Err(CompileError::new(format!("lifecycle receipt '{}' must declare a state field", receipt.name), lifecycle.span));
+        };
+        if !is_lifecycle_state_type(&field.ty) {
+            return Err(CompileError::new(
+                format!("lifecycle receipt '{}' state field must be an unsigned integer type", receipt.name),
+                field.span,
+            ));
         }
 
-        specs.insert(
-            receipt.name.clone(),
-            LifecycleSpec { states: lifecycle.states.clone(), state_field_span: state_field.map(|field| field.span) },
-        );
+        specs.insert(receipt.name.clone(), LifecycleSpec { states: lifecycle.states.clone(), state_field_span: Some(field.span) });
     }
 
     for item in &module.items {

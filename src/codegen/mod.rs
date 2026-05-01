@@ -894,6 +894,17 @@ impl CodeGenerator {
             self.emit(format!("bnez t2, {}", fail_label));
         }
 
+        if !has_dynamic_payload {
+            let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
+            self.emit("# cellscript entry abi: reject trailing witness payload bytes");
+            self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
+            self.emit(format!("li t1, {}", min_witness_len));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("beqz t2, {}", exact_size_label));
+            self.emit(format!("j {}", fail_label));
+            self.emit_label(&exact_size_label);
+        }
+
         if payload.iter().any(|arg| arg.unsupported) {
             self.emit("# cellscript entry abi: unsupported witness parameter shape; fail closed");
             self.emit(format!("j {}", fail_label));
@@ -1016,6 +1027,13 @@ impl CodeGenerator {
                     self.emit(format!("j {}", fail_label));
                 }
             }
+            let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
+            self.emit("# cellscript entry abi: reject trailing witness payload bytes");
+            self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
+            self.emit("sub t2, t5, t6");
+            self.emit(format!("beqz t2, {}", exact_size_label));
+            self.emit(format!("j {}", fail_label));
+            self.emit_label(&exact_size_label);
             self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
             self.emit(format!("j {}", done_label));
         } else {
@@ -2608,9 +2626,11 @@ impl CodeGenerator {
     fn emit_sp_addi(&mut self, rd: &str, offset: usize) {
         if offset <= 2047 {
             self.emit(format!("addi {}, sp, {}", rd, offset));
+        } else if rd == "sp" {
+            self.emit_large_addi("sp", "sp", offset as i64);
         } else {
-            self.emit(format!("li t6, {}", offset));
-            self.emit(format!("add {}, sp, t6", rd));
+            self.emit(format!("li {}, {}", rd, offset));
+            self.emit(format!("add {}, sp, {}", rd, rd));
         }
     }
 
@@ -9849,14 +9869,8 @@ fn encode_instruction(
         Instruction::Li { rd, imm } => encode_li_sequence(out, *rd, *imm)?,
         Instruction::La { rd, label } => encode_address_sequence(out, *rd, pc, parsed.symbol_address(label, layout)?)?,
         Instruction::Call { label } => {
-            if let Ok(target) = parsed.symbol_address(label, layout) {
-                encode_call_sequence(out, pc, target)?;
-            } else {
-                // External function call: fail closed with the fixed 8-byte size
-                // declared by op_size(Call), then return from the current entry.
-                out.extend_from_slice(&encode_i_type(0x13, 10, 0b000, 0, 23)?.to_le_bytes());
-                out.extend_from_slice(&encode_i_type(0x67, 0, 0b000, 1, 0)?.to_le_bytes());
-            }
+            let target = parsed.symbol_address(label, layout)?;
+            encode_call_sequence(out, pc, target)?;
         }
         Instruction::Jump { label } => {
             let target = parsed.symbol_address(label, layout)?;
@@ -10687,6 +10701,15 @@ mod tests {
     }
 
     #[test]
+    fn sp_addi_large_offsets_clobber_only_destination_register() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_sp_addi("t4", 4096);
+        generator.emit_sp_addi("t6", 8192);
+
+        assert_eq!(generator.assembly, vec!["    li t4, 4096", "    add t4, sp, t4", "    li t6, 8192", "    add t6, sp, t6",]);
+    }
+
+    #[test]
     fn unaligned_scalar_load_large_offsets_preserve_live_accumulator() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.emit_unaligned_scalar_load("t4", "t6", "t2", 2048, 2);
@@ -10769,6 +10792,14 @@ mod tests {
 
         let elf = assemble_elf_internal(&lines).expect("generated collection assembly should assemble internally");
         assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn internal_assembler_rejects_unresolved_call_targets() {
+        let lines = vec![".section .text".to_string(), ".global main".to_string(), "main:".to_string(), "call missing".to_string()];
+        let err = assemble_elf_internal(&lines).unwrap_err();
+
+        assert!(err.message.contains("unknown assembly label 'missing'"), "unexpected error: {}", err.message);
     }
 
     #[test]
