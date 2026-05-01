@@ -213,11 +213,13 @@ fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
     let ty = match operand {
         IrOperand::Const(IrConst::Address(_)) | IrOperand::Const(IrConst::Hash(_)) => return Some(32),
         IrOperand::Const(IrConst::Array(values)) => return Some(values.len()),
+        IrOperand::Const(IrConst::U128(_)) => return Some(16),
         IrOperand::Var(var) => &var.ty,
         _ => return None,
     };
     match ty {
         IrType::Address | IrType::Hash => Some(32),
+        IrType::U128 => Some(16),
         IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
         _ => None,
     }
@@ -284,6 +286,7 @@ fn fixed_aggregate_pointer_param_width(ty: &IrType) -> Option<usize> {
 fn fixed_byte_const_bytes(value: &IrConst) -> Option<Vec<u8>> {
     match value {
         IrConst::Address(bytes) | IrConst::Hash(bytes) => Some(bytes.to_vec()),
+        IrConst::U128(value) => Some(value.to_le_bytes().to_vec()),
         IrConst::Array(values) => values
             .iter()
             .map(|value| match value {
@@ -463,6 +466,13 @@ pub struct CodeGenerator {
     prelude_scalar_immediates: HashMap<usize, u64>,
     /// Fixed-byte constant temporaries that can be recomputed byte-by-byte in the CKB-runtime prelude.
     prelude_fixed_byte_constants: HashMap<usize, Vec<u8>>,
+    /// Function-local fixed-byte storage for wide scalar temporaries such as u128.
+    fixed_byte_local_offsets: HashMap<usize, usize>,
+    /// Named IR variable slots used only by legacy StoreVar/LoadVar instructions.
+    named_var_offsets: HashMap<String, usize>,
+    /// Deduplicated immutable byte constants emitted into .rodata.
+    const_data_labels: HashMap<Vec<u8>, String>,
+    const_data_entries: Vec<(String, Vec<u8>)>,
     /// Local pure functions proven to return one constant on every path.
     pure_const_returns: HashMap<String, IrConst>,
     /// Per-CKB-runtime cell data buffers keyed by IR variable id.
@@ -536,6 +546,30 @@ impl CodeGenerator {
         fixed_byte_width(ty, type_static_length(ty)).or_else(|| self.fixed_named_type_width(ty))
     }
 
+    fn const_data_label_for_bytes(&mut self, bytes: Vec<u8>) -> String {
+        if let Some(label) = self.const_data_labels.get(&bytes) {
+            return label.clone();
+        }
+        let label = format!("__cellscript_const_data_{}", self.const_data_entries.len());
+        self.const_data_labels.insert(bytes.clone(), label.clone());
+        self.const_data_entries.push((label.clone(), bytes));
+        label
+    }
+
+    fn emit_const_data_pool(&mut self) {
+        if self.const_data_entries.is_empty() {
+            return;
+        }
+        self.emit_section(".rodata");
+        for (label, bytes) in self.const_data_entries.clone() {
+            self.emit_label(&label);
+            for byte in bytes {
+                self.emit(format!(".byte {}", byte));
+            }
+            self.emit(".align 3");
+        }
+    }
+
     fn constructed_byte_vector_part_width(&self, operand: &IrOperand) -> Option<usize> {
         constructed_byte_vector_part_width(operand).or_else(|| match operand {
             IrOperand::Var(var) => self.fixed_named_type_width(&var.ty),
@@ -575,6 +609,10 @@ impl CodeGenerator {
             prelude_u64_value_sources: HashMap::new(),
             prelude_scalar_immediates: HashMap::new(),
             prelude_fixed_byte_constants: HashMap::new(),
+            fixed_byte_local_offsets: HashMap::new(),
+            named_var_offsets: HashMap::new(),
+            const_data_labels: HashMap::new(),
+            const_data_entries: Vec::new(),
             pure_const_returns: HashMap::new(),
             cell_buffer_offsets: HashMap::new(),
             cell_buffer_size_offsets: HashMap::new(),
@@ -661,6 +699,7 @@ impl CodeGenerator {
         }
 
         self.generate_runtime_support();
+        self.emit_const_data_pool();
 
         self.assemble(format)
     }
@@ -778,6 +817,7 @@ impl CodeGenerator {
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
         let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
         let loaded_label = self.fresh_label("entry_witness_loaded");
+        let buffer_ok_label = self.fresh_label("entry_witness_buffer_ok");
         let size_ok_label = self.fresh_label("entry_witness_size_ok");
         let fail_label = self.fresh_label("entry_witness_fail");
         let done_label = self.fresh_label("entry_witness_done");
@@ -801,6 +841,12 @@ impl CodeGenerator {
         self.emit_label(&loaded_label);
 
         self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
+        self.emit("# cellscript entry abi: reject witnesses larger than the local entry buffer");
+        self.emit(format!("li t1, {}", ENTRY_WITNESS_BUFFER_SIZE + 1));
+        self.emit("sltu t2, t0, t1");
+        self.emit(format!("bnez t2, {}", buffer_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&buffer_ok_label);
         self.emit(format!("li t1, {}", min_witness_len));
         self.emit("sltu t2, t0, t1");
         self.emit(format!("beqz t2, {}", size_ok_label));
@@ -2508,17 +2554,25 @@ impl CodeGenerator {
 
     fn prepare_function_layout(&mut self, body: &IrBody, params: &[IrParam]) {
         let mut max_var_id = None;
+        let mut fixed_byte_locals = HashMap::<usize, usize>::new();
+        let mut named_vars = BTreeSet::<String>::new();
         for param in params {
             self.record_var(&param.binding, &mut max_var_id);
         }
         for block in &body.blocks {
             for instruction in &block.instructions {
                 self.record_instruction_var(instruction, &mut max_var_id);
+                self.record_instruction_fixed_byte_local(instruction, &mut fixed_byte_locals);
+                if let IrInstruction::StoreVar { name, .. } = instruction {
+                    named_vars.insert(name.clone());
+                }
             }
             self.record_terminator_var(&block.terminator, &mut max_var_id);
         }
 
         let locals_size = max_var_id.map(|id| (id + 1) * 8).unwrap_or(0);
+        self.fixed_byte_local_offsets.clear();
+        self.named_var_offsets.clear();
         self.cell_buffer_offsets.clear();
         self.cell_buffer_size_offsets.clear();
         self.dynamic_value_size_offsets.clear();
@@ -2559,6 +2613,18 @@ impl CodeGenerator {
         }
 
         let mut next_cell_slot = locals_size;
+        let mut fixed_byte_locals = fixed_byte_locals.into_iter().collect::<Vec<_>>();
+        fixed_byte_locals.sort_unstable_by_key(|(var_id, _)| *var_id);
+        for (var_id, width) in fixed_byte_locals {
+            next_cell_slot = align_up(next_cell_slot, 8);
+            self.fixed_byte_local_offsets.insert(var_id, next_cell_slot);
+            next_cell_slot += align_up(width, 8);
+        }
+        for name in named_vars {
+            next_cell_slot = align_up(next_cell_slot, 8);
+            self.named_var_offsets.insert(name, next_cell_slot);
+            next_cell_slot += 8;
+        }
         for param in params {
             if named_type_name(&param.ty).is_some() {
                 self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
@@ -3366,6 +3432,10 @@ impl CodeGenerator {
         if pattern.transitions.len() != pattern.fields.len() {
             return None;
         }
+        let type_size = self.type_fixed_sizes.get(&pattern.ty).copied()?;
+        if type_size > RUNTIME_SCRATCH_BUFFER_SIZE {
+            return None;
+        }
         let mut ranges = Vec::new();
         for transition in &pattern.transitions {
             let layout = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&transition.field))?;
@@ -3401,6 +3471,9 @@ impl CodeGenerator {
             if self.emit_mutate_replacement_data_except_transition_checks(pattern) {
                 return;
             }
+            self.emit("# cellscript abi: fail closed because not all preserved fields are verifier-addressable");
+            self.emit_fail(CellScriptRuntimeError::FieldPreservationMismatch);
+            return;
         }
         if preserved_fields.is_empty() {
             return;
@@ -3930,6 +4003,18 @@ impl CodeGenerator {
             RUNTIME_SCRATCH_BUFFER_SIZE,
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+        if let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() {
+            self.emit_loaded_schema_exact_size_check(
+                input_size_offset,
+                expected_size,
+                &format!("{} preserved-data input", pattern.ty),
+            );
+            self.emit_loaded_schema_exact_size_check(
+                output_size_offset,
+                expected_size,
+                &format!("{} preserved-data output", pattern.ty),
+            );
+        }
         let size_ok_label = self.fresh_label("mutate_preserved_data_size_ok");
         self.emit_stack_load("t0", input_size_offset);
         self.emit_stack_load("t1", output_size_offset);
@@ -4824,6 +4909,9 @@ impl CodeGenerator {
                         return Some(ExpectedFixedByteSource::Const(bytes));
                     }
                 }
+                if self.fixed_byte_local_offsets.contains_key(&var.id) && var_width == expected_width {
+                    return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
+                }
                 if expected_width <= 8
                     && (fixed_scalar_width(&var.ty, type_static_length(&var.ty)).is_some()
                         || (var_width == expected_width && fixed_byte_width(&var.ty, type_static_length(&var.ty)).is_some()))
@@ -4955,6 +5043,15 @@ impl CodeGenerator {
                     }
                 }
             }
+            IrOperand::Const(IrConst::U128(value)) => {
+                self.emit(format!("# cellscript abi: store u128 const size={}", width));
+                self.emit(format!("li t0, {}", width));
+                self.emit_stack_store("t0", size_offset);
+                for (i, byte) in value.to_le_bytes().iter().enumerate() {
+                    self.emit(format!("li t0, {}", byte));
+                    self.emit_stack_store_byte("t0", buffer_offset + i);
+                }
+            }
             IrOperand::Const(IrConst::Array(values)) => {
                 self.emit(format!("# cellscript abi: store fixed-byte array const size={}", width));
                 self.emit(format!("li t0, {}", width));
@@ -4976,6 +5073,78 @@ impl CodeGenerator {
                 self.emit("# cellscript abi: cannot store unknown const type to scratch".to_string());
             }
         }
+    }
+
+    fn emit_fixed_byte_source_scalar_to(
+        &mut self,
+        dest_reg: &str,
+        scratch_reg: &str,
+        base_reg: &str,
+        source: &ExpectedFixedByteSource,
+        start: usize,
+        width: usize,
+    ) {
+        self.emit(format!("li {}, 0", dest_reg));
+        for byte_index in 0..width {
+            self.emit_fixed_byte_source_byte_to(scratch_reg, base_reg, source, start + byte_index);
+            if byte_index != 0 {
+                self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+            }
+            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+        }
+    }
+
+    fn operand_is_u128(&self, operand: &IrOperand) -> bool {
+        match operand {
+            IrOperand::Const(IrConst::U128(_)) => true,
+            IrOperand::Var(var) => var.ty == IrType::U128,
+            _ => false,
+        }
+    }
+
+    fn emit_u128_add_sub_with_u64(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
+        if dest.ty != IrType::U128 || !matches!(op, BinaryOp::Add | BinaryOp::Sub) {
+            return false;
+        }
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+
+        let (wide_operand, delta_operand) = match op {
+            BinaryOp::Add if self.operand_is_u128(left) => (left, right),
+            BinaryOp::Add if self.operand_is_u128(right) => (right, left),
+            BinaryOp::Sub if self.operand_is_u128(left) => (left, right),
+            _ => return false,
+        };
+        let Some(source) = self.expected_fixed_byte_source(wide_operand, 16) else {
+            return false;
+        };
+        let Some(delta) = self.prelude_u64_operand_source(delta_operand) else {
+            return false;
+        };
+
+        self.emit(format!("# cellscript abi: u128 {:?} with u64 delta", op));
+        self.emit_fixed_byte_source_scalar_to("t0", "t2", "t4", &source, 0, 8);
+        self.emit_fixed_byte_source_scalar_to("t3", "t2", "t4", &source, 8, 8);
+        self.emit_prelude_u64_operand_source_to_t1(&delta);
+        match op {
+            BinaryOp::Add => {
+                self.emit("add t5, t0, t1");
+                self.emit("sltu t2, t5, t0");
+                self.emit("add t6, t3, t2");
+            }
+            BinaryOp::Sub => {
+                self.emit("sub t5, t0, t1");
+                self.emit("sltu t2, t0, t1");
+                self.emit("sub t6, t3, t2");
+            }
+            _ => unreachable!("guarded u128 binary op"),
+        }
+        self.emit_stack_store("t5", dest_offset);
+        self.emit_stack_store("t6", dest_offset + 8);
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        true
     }
 
     fn emit_expected_operand_to_t1(&mut self, operand: &IrOperand) {
@@ -5828,6 +5997,53 @@ impl CodeGenerator {
         }
     }
 
+    fn record_instruction_fixed_byte_local(&self, instruction: &IrInstruction, offsets: &mut HashMap<usize, usize>) {
+        let mut record = |var: &IrVar| {
+            if var.ty == IrType::U128 {
+                offsets.insert(var.id, 16);
+            }
+        };
+
+        match instruction {
+            IrInstruction::LoadConst { dest, .. }
+            | IrInstruction::LoadVar { dest, .. }
+            | IrInstruction::Unary { dest, .. }
+            | IrInstruction::FieldAccess { dest, .. }
+            | IrInstruction::Index { dest, .. }
+            | IrInstruction::Length { dest, .. }
+            | IrInstruction::TypeHash { dest, .. }
+            | IrInstruction::Create { dest, .. }
+            | IrInstruction::Claim { dest, .. }
+            | IrInstruction::ReadRef { dest, .. }
+            | IrInstruction::CollectionCapacity { dest, .. }
+            | IrInstruction::CollectionContains { dest, .. }
+            | IrInstruction::CollectionRemove { dest, .. }
+            | IrInstruction::CollectionPop { dest, .. }
+            | IrInstruction::CollectionNew { dest, .. }
+            | IrInstruction::Move { dest, .. }
+            | IrInstruction::Tuple { dest, .. }
+            | IrInstruction::Binary { dest, .. }
+            | IrInstruction::Settle { dest, .. }
+            | IrInstruction::Transfer { dest, .. } => record(dest),
+            IrInstruction::Call { dest, .. } => {
+                if let Some(dest) = dest {
+                    record(dest);
+                }
+            }
+            IrInstruction::StoreVar { .. }
+            | IrInstruction::Consume { .. }
+            | IrInstruction::Destroy { .. }
+            | IrInstruction::CollectionPush { .. }
+            | IrInstruction::CollectionExtend { .. }
+            | IrInstruction::CollectionClear { .. }
+            | IrInstruction::CollectionReverse { .. }
+            | IrInstruction::CollectionTruncate { .. }
+            | IrInstruction::CollectionSwap { .. }
+            | IrInstruction::CollectionInsert { .. }
+            | IrInstruction::CollectionSet { .. } => {}
+        }
+    }
+
     fn record_terminator_var(&self, terminator: &IrTerminator, max_var_id: &mut Option<usize>) {
         match terminator {
             IrTerminator::Return(Some(operand)) | IrTerminator::Branch { cond: operand, .. } => {
@@ -5847,6 +6063,13 @@ impl CodeGenerator {
         *max_var_id = Some(max_var_id.map(|current| current.max(var.id)).unwrap_or(var.id));
     }
 
+    fn emit_store_const_bytes_to_stack(&mut self, bytes: &[u8], offset: usize) {
+        for (index, byte) in bytes.iter().enumerate() {
+            self.emit(format!("li t0, {}", byte));
+            self.emit_stack_store_byte("t0", offset + index);
+        }
+    }
+
     fn emit_load_const(&mut self, dest: &IrVar, value: &IrConst) -> Result<()> {
         match value {
             IrConst::Unit => self.emit("li t0, 0"),
@@ -5854,16 +6077,27 @@ impl CodeGenerator {
             IrConst::U16(n) => self.emit(format!("li t0, {}", n)),
             IrConst::U32(n) => self.emit(format!("li t0, {}", n)),
             IrConst::U64(n) => self.emit(format!("li t0, {}", n)),
-            IrConst::U128(_) => {
-                self.emit("li t0, 0");
-                self.emit("li t1, 0");
+            IrConst::U128(value) => {
+                if let Some(offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() {
+                    self.emit_store_const_bytes_to_stack(&value.to_le_bytes(), offset);
+                    self.emit_sp_addi("t0", offset);
+                    self.emit_stack_store("t0", dest.id * 8);
+                    return Ok(());
+                }
+                let label = self.const_data_label_for_bytes(value.to_le_bytes().to_vec());
+                self.emit(format!("la t0, {}", label));
             }
             IrConst::Bool(b) => self.emit(format!("li t0, {}", if *b { 1 } else { 0 })),
-            IrConst::Address(_) | IrConst::Hash(_) => {
-                self.emit("la t0, __const_data");
-            }
-            IrConst::Array(_) => {
-                self.emit("la t0, __const_data");
+            IrConst::Address(_) | IrConst::Hash(_) | IrConst::Array(_) => {
+                let Some(bytes) = fixed_byte_const_bytes(value) else {
+                    self.emit("# cellscript abi: fail closed because fixed-byte constant bytes are not materializable");
+                    self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                    self.emit("li t0, 0");
+                    self.emit_stack_store("t0", dest.id * 8);
+                    return Ok(());
+                };
+                let label = self.const_data_label_for_bytes(bytes);
+                self.emit(format!("la t0, {}", label));
             }
         }
         self.emit_stack_store("t0", dest.id * 8);
@@ -5872,21 +6106,25 @@ impl CodeGenerator {
 
     fn emit_load_var(&mut self, dest: &IrVar, name: &str) -> Result<()> {
         self.emit(format!("# load var {}", name));
-        self.emit_stack_load("t0", dest.id * 8);
+        let Some(offset) = self.named_var_offsets.get(name).copied() else {
+            self.emit("# cellscript abi: fail closed because named variable slot was not allocated");
+            self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
+            return Ok(());
+        };
+        self.emit_stack_load("t0", offset);
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
     fn emit_store_var(&mut self, name: &str, src: &IrOperand) -> Result<()> {
         self.emit(format!("# store var {}", name));
-        match src {
-            IrOperand::Const(c) => match c {
-                IrConst::U64(n) => self.emit(format!("li t0, {}", n)),
-                _ => self.emit("li t0, 0"),
-            },
-            IrOperand::Var(v) => {
-                self.emit_stack_load("t0", v.id * 8);
-            }
-        }
+        let Some(offset) = self.named_var_offsets.get(name).copied() else {
+            self.emit("# cellscript abi: fail closed because named variable slot was not allocated");
+            self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
+            return Ok(());
+        };
+        self.emit_operand_to_register("t0", src);
+        self.emit_stack_store("t0", offset);
         Ok(())
     }
 
@@ -5904,6 +6142,16 @@ impl CodeGenerator {
             self.emit(format!("# binary {:?} over fixed-byte operands (unresolved)", op));
             self.emit("# cellscript abi: fail closed because fixed-byte operand sources are not available");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        }
+
+        if self.emit_u128_add_sub_with_u64(dest, op, left, right) {
+            return Ok(());
+        }
+        if dest.ty == IrType::U128 || self.operand_is_u128(left) || self.operand_is_u128(right) {
+            self.emit(format!("# binary {:?} over unsupported u128 operand shape", op));
+            self.emit("# cellscript abi: fail closed because generic u128 arithmetic/comparison shape is not lowered");
+            self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
             return Ok(());
         }
 
@@ -7745,7 +7993,11 @@ impl CodeGenerator {
 
         // Runtime fallback: emit LOAD_CELL_DATA syscall to load the cell dep data
         // into the scratch buffer and store the pointer.
-        let dep_index = self.read_ref_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
+        let Some(dep_index) = self.read_ref_indices.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: fail closed because read_ref CellDep index was not allocated");
+            self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
+            return Ok(());
+        };
         let size_offset = self.runtime_scratch_size_offset();
         let buffer_offset = self.runtime_scratch_buffer_offset();
 
@@ -7766,7 +8018,6 @@ impl CodeGenerator {
         // Also store the size so that subsequent schema operations can use it
         self.schema_pointer_size_offsets.insert(dest.id, size_offset);
 
-        self.next_virtual_output += 1;
         Ok(())
     }
 
@@ -7794,8 +8045,15 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("li {}, {}", register, if *b { 1 } else { 0 })),
+            IrOperand::Const(value) => {
+                if let Some(bytes) = fixed_byte_const_bytes(value) {
+                    let label = self.const_data_label_for_bytes(bytes);
+                    self.emit(format!("la {}, {}", register, label));
+                } else {
+                    self.emit(format!("li {}, 0", register));
+                }
+            }
             IrOperand::Var(v) => self.emit_stack_load(register, v.id * 8),
-            _ => self.emit(format!("li {}, 0", register)),
         }
     }
 
@@ -8517,6 +8775,7 @@ fn try_external_elf_toolchain(lines: &[String]) -> Result<Option<Vec<u8>>> {
     })?;
 
     let temp_dir = make_external_toolchain_temp_dir()?;
+    let _temp_dir_cleanup = TempDirCleanup(temp_dir.clone());
     let asm_path = temp_dir.join("module.s");
     let elf_path = temp_dir.join("module.elf");
     let obj_path = temp_dir.join("module.o");
@@ -8584,8 +8843,15 @@ fn try_external_elf_toolchain(lines: &[String]) -> Result<Option<Vec<u8>>> {
         }
     })?;
 
-    let _ = fs::remove_dir_all(&temp_dir);
     Ok(Some(elf))
+}
+
+struct TempDirCleanup(PathBuf);
+
+impl Drop for TempDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 fn render_external_assembly(lines: &[String], entry_label: &str) -> String {

@@ -1565,7 +1565,7 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
-                let dest = self.new_var("tmp", self.binary_result_type(binary.op));
+                let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left.operand, &right.operand));
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Binary {
                     dest: dest.clone(),
@@ -1702,12 +1702,19 @@ impl IrGenerator {
         }
     }
 
-    fn binary_result_type(&self, op: BinaryOp) -> IrType {
+    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::And | BinaryOp::Or => {
-                IrType::U64
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty == IrType::U128 || right_ty == IrType::U128 {
+                    IrType::U128
+                } else {
+                    IrType::U64
+                }
             }
+            BinaryOp::And | BinaryOp::Or => IrType::Bool,
         }
     }
 

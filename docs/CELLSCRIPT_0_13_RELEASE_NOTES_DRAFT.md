@@ -162,6 +162,23 @@ New in 0.13:
 - Large fixed schema field regression coverage now includes both scalar loads
   and fixed-byte field pointer paths, so valid DSL such as a schema with a
   2048-byte prefix field compiles through `riscv64-elf`.
+- Fixed-byte constants now materialize through concrete `.rodata` labels rather
+  than the legacy undefined `__const_data` placeholder, so local
+  `Address::zero()`, `Hash::zero()`, array, and `u128` constants can round-trip
+  through internal ELF emission.
+- Generic `u128` comparison and supported `u128 +/- u64` lowering now use
+  explicit 16-byte storage/comparison and carry/borrow arithmetic instead of
+  falling through the old 8-byte register model.
+- Parameterized entry wrappers now reject witness payloads larger than their
+  local witness buffer before decoding dynamic payload lengths.
+- Mutate preserved-field verification now fails closed when not every preserved
+  field is verifier-addressable; metadata no longer classifies oversized
+  data-except fallback paths as checked-runtime.
+- `read_ref` runtime fallback no longer reuses the output counter as a CellDep
+  index. If a CellDep index was not allocated, the generated verifier fails
+  closed.
+- External RISC-V toolchain fallback now cleans its temporary directory on both
+  success and error paths.
 
 Important boundary:
 

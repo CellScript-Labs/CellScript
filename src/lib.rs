@@ -11869,16 +11869,17 @@ fn mutate_preserved_data_except_transition_is_verifier_coverable(
     let Some(fields) = type_layouts.get(&pattern.ty) else {
         return false;
     };
-    let dynamic_table = metadata_type_encoded_size_from_layouts(fields).is_none();
+    let Some(type_size) = metadata_type_encoded_size_from_layouts(fields) else {
+        return false;
+    };
+    if type_size > METADATA_MUTATE_CELL_BUFFER_SIZE {
+        return false;
+    }
     pattern.transitions.iter().all(|transition| {
         fields.get(&transition.field).is_some_and(|layout| {
-            if dynamic_table {
-                metadata_layout_fixed_byte_width(layout).is_some()
-            } else {
-                metadata_layout_fixed_byte_width(layout)
-                    .map(|width| layout.offset + width)
-                    .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
-            }
+            metadata_layout_fixed_byte_width(layout)
+                .map(|width| layout.offset + width)
+                .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
         })
     })
 }
@@ -15383,6 +15384,49 @@ module test
 
 action is_zero(target: Address) -> bool {
     return target == Address::zero()
+}
+"#;
+
+    const LOCAL_ZERO_PROGRAM: &str = r#"
+module test
+
+action is_zero(target: Address) -> bool {
+    let zero = Address::zero()
+    return target == zero
+}
+"#;
+
+    const U128_EQ_PROGRAM: &str = r#"
+module test
+
+action eq128(left: u128, right: u128) -> bool {
+    return left == right
+}
+"#;
+
+    const U128_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared Ledger has store {
+    balance: u128,
+    owner: Address,
+}
+
+action credit(ledger: &mut Ledger, delta: u64) {
+    ledger.balance = ledger.balance + delta
+}
+"#;
+
+    const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared BigState has store {
+    balance: u64,
+    pad: [u8; 600],
+}
+
+action update(state: &mut BigState, delta: u64) {
+    state.balance = state.balance + delta
 }
 "#;
 
@@ -19068,6 +19112,79 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
             "Address::zero() comparison should not use the fail-closed lowering path:\n{}",
             asm
         );
+    }
+
+    #[test]
+    fn compile_materializes_local_fixed_byte_constants_into_rodata() {
+        let result = compile(LOCAL_ZERO_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("__const_data"), "legacy undefined const label leaked into assembly:\n{}", asm);
+        assert!(asm.contains("__cellscript_const_data_0:"), "local fixed-byte constant should have a concrete rodata label:\n{}", asm);
+
+        compile(LOCAL_ZERO_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+    }
+
+    #[test]
+    fn compile_lowers_u128_equality_as_fixed_byte_comparison() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=16"),
+            "u128 equality should compare all 16 bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 equality should not fall through to the generic fail-closed path:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_lowers_u128_mutate_delta_with_carry_arithmetic() {
+        let result = compile(U128_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: u128 Add with u64 delta"),
+            "u128 mutate expression should lower through the 128-bit carry path:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 mutate expression should not fail through generic u128 handling:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_entry_witness_rejects_payloads_larger_than_buffer() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript entry abi: reject witnesses larger than the local entry buffer"),
+            "entry witness wrapper should reject sizes above its local buffer:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t1, 1025"), "entry witness wrapper should enforce ENTRY_WITNESS_BUFFER_SIZE=1024:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_fails_closed_when_preserved_fields_exceed_runtime_buffer() {
+        let result = compile(LARGE_PRESERVED_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fail closed because not all preserved fields are verifier-addressable"),
+            "large preserved fields should not silently fall back to a partial check:\n{}",
+            asm
+        );
+        let action = result.metadata.actions.iter().find(|action| action.name == "update").expect("update metadata");
+        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "BigState").expect("BigState mutation");
+        assert_eq!(mutation.field_equality_status, "runtime-required");
     }
 
     #[test]
