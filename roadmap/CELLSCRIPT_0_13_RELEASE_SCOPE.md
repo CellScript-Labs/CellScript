@@ -125,7 +125,7 @@ Important boundary:
 
 - `witness Address` is not a signer;
 - `Address` is not an authorization proof by name;
-- `lock_args` is reserved but not active;
+- `lock_args` binds fixed-width lock parameters to the executing script's args;
 - hidden sighash defaults are rejected.
 
 Deferred authorization roadmap:

@@ -94,8 +94,9 @@ Completed in 0.13:
 
 Important boundaries:
 
-- `lock_args` is reserved and fail-closed until typed CKB script-args binding is
-  implemented.
+- `lock_args` is implemented for fixed-width lock parameters by decoding the
+  executing lock Script.args bytes. Sighash/signature verification remains
+  explicit future work.
 - 0.13 does not introduce first-class signer values, implicit `Address` signer
   semantics, or hidden sighash defaults.
 - `witness Address` means decoded witness data only; it is not a cryptographic
@@ -211,16 +212,21 @@ New in 0.13:
   `flow Name for Type.field { A -> B by action; }` and compact
   `flow Type.field { A -> B; }` declare the graph, while action signatures can
   bind the edge they prove with explicit field-to-field moves such as
-  `moves input.state Live -> output.state Filled`. The type checker, state
+  `moves input.state Live -> output.state Filled`. Cross-cell moves require an
+  explicit `replaces input with output` relationship. The type checker, state
   static checks, IR metadata, runtime verifier, formatter, docs generator, and
   LSP all carry the explicit state field name. A state field may have only one
   flow declaration; CellScript does not merge partial flow declarations.
 - The semantic core for state transitions is now proposed-cell verification:
-  `action(input: T, output: T)` treats `input` as a transaction input and
-  `output` as a transaction output. `consume` plus `create` remains accepted as
-  front-end sugar, but output parameters bind deterministically to `Output#N`
-  in output-parameter order. The compiler rejects legacy moves with output
-  parameters unless the target output field is named explicitly.
+  `action(before: T, after: output T) replaces before with after` treats
+  `before` as a transaction input and `after` as a transaction output.
+  `consume` plus `create` remains accepted as front-end sugar, but output
+  parameters bind deterministically to `Output#N` in output-parameter order.
+  The compiler rejects moves with output parameters unless the target output
+  field and replacement relation are named explicitly.
+- Public `&mut` Cell parameter syntax has been removed before release. Cell
+  replacement is now expressed with explicit input/output parameters and a
+  `replaces` clause, keeping the CKB transaction shape visible in source.
 - State-machine checking no longer treats enum or declaration order as a hidden
   linear state sequence: initial creates may use any declared state, and declared
   edges may return to the first state. Legacy `moves` and `by action` edges now
@@ -282,9 +288,9 @@ New in 0.13:
 - `require` is available as the canonical lock predicate form. A false
   condition fails the current script validation; it does not create
   authorization by itself.
-- `lock_args` is reserved as the spelling for typed script-args data. The parser
-  recognizes it, but type checking rejects it until explicit CKB script-args
-  binding is implemented.
+- `lock_args T` binds fixed-width lock parameters to typed bytes decoded from
+  the executing lock Script.args. The entry wrapper rejects trailing args bytes
+  after the declared typed parameters.
 - The bundled production locks now have builder-backed local CKB valid-spend and
   invalid-spend matrix coverage in the production acceptance report.
 

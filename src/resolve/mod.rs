@@ -457,6 +457,7 @@ mod tests {
                         name: "Token".to_string(),
                         params: Vec::new(),
                         return_type: Some(Type::U64),
+                        replacements: Vec::new(),
                         state_moves: Vec::new(),
                         body: vec![Stmt::Return(Some(Expr::Integer(0)))],
                         effect: EffectClass::Pure,

@@ -124,7 +124,7 @@ Future work:
 
 - declarative capacity requirements where the compiler can check them;
 - declarative since/header/timepoint assumptions for timelock-like protocols;
-- explicit continuity policy for `&mut` Cell replacement, including type id,
+- explicit continuity policy for `replaces before with after` Cell replacement, including type id,
   lock, data schema, and capacity continuity;
 - clearer builder obligations in action builder plans.
 

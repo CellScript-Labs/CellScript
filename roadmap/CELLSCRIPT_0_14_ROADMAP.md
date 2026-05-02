@@ -12,7 +12,7 @@
 
 CellScript's evolution follows a deliberate maturity curve:
 
-- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, mutate replacement outputs, low-level time helpers, dep cell reads).
+- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, replacement output checks, low-level time helpers, dep cell reads).
 - **v0.13** — Performance and expressiveness: bounded value-vector helpers, zero-cost abstractions (deserialization specialization, inlining, DCE, const propagation), CLI ergonomics.
 - **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and WASM simulation backend.
 
@@ -87,7 +87,7 @@ Full protocol composability remains a v0.15+ ProofPlan / scoped-invariant concer
 ```cellscript
 action verify_with_delegate(proof: Proof) {
     let result = spawn("secp256k1_verifier", args: [proof.pubkey, proof.signature])
-    assert_invariant(result == 0, "delegate verification failed")
+    assert(result == 0, "delegate verification failed")
 }
 ```
 
@@ -98,7 +98,7 @@ action multi_step_verify(data: VerifyData) {
     spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
     let hash_result = wait()
-    assert_invariant(hash_result == 0, "hash check failed")
+    assert(hash_result == 0, "hash check failed")
 }
 ```
 
@@ -142,9 +142,11 @@ lock standard_lock(pubkey_hash: Hash160) -> bool {
     return secp256k1_verify(pubkey_hash, sig, sighash)
 }
 
-action prove_type_transition(state: &mut State) {
+action prove_type_transition(state_before: State, state_after: output State)
+    replaces state_before with state_after
+{
     let proof = witness::input_type<TransitionProof>(source: source::group_input(0))
-    assert_invariant(verify_transition(proof, state), "bad transition proof")
+    assert(verify_transition(proof, state_before, state_after), "bad transition proof")
 }
 ```
 
@@ -257,7 +259,7 @@ resource Token has store, transfer, destroy {
 ```cellscript
 action transfer_with_fee(token: Token, fee: u64) {
     let freed_cap = consume token
-    assert_invariant(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
+    assert(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
     create Token { amount: token.amount } with_lock(recipient)
     // remaining capacity implicitly becomes miner fee
 }
@@ -388,6 +390,20 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 **Problem**: Complex scripts depend on multiple dep cells (shared libraries, data cells, verifier scripts). Current dep cell handling is manual and flat.
 
 **Implementation Items**:
+
+#### 12. Surface Ergonomics Backlog 🟢
+
+**Problem**: v0.13 intentionally prioritizes verifier correctness and explicit CKB semantics over syntax sugar. Several useful ergonomic features are good candidates for v0.14 design, but they are not v0.13 correctness blockers.
+
+**Deferred from the 0.13 syntax audit**:
+- `transfer token { ... } with_lock(to)` sugar for consume+create replacement/transfer cases where most fields are preserved.
+- `create_each` or bounded batch-create sugar that compiles to statically auditable repeated `create` operations.
+- Named tuple returns such as `-> (royalty: Payment, seller: Payment)` for readability without changing ABI layout.
+- Multi-field `moves` sugar for compactly declaring several field transitions while preserving explicit guards.
+- `Option<T>` / `Result<T, E>` as an explicit optional/error model, including type checking, lowering, ABI representation, and match-pattern support.
+- Attribute-form hash type declarations such as `#[default_hash_type(Data1)]` as a possible spelling alongside or instead of `with_default_hash_type(Data1)`.
+
+**Boundary**: These items must not hide Cell layout, invent recoverable verifier errors casually, or weaken fail-closed semantics. Each item needs parser, type checker, lowering, codegen, formatter, LSP, docs, and regression coverage before promotion.
 - DepGroup dynamic composition: declare a group of related dep cells
 - Multi-module CellDep dependency graph: compiler resolves transitive deps
 - Shared code cell version locking: pin dep cell `out_point` in manifest
@@ -458,6 +474,7 @@ done
 | Formal verification | Future milestone (v0.16+). v0.14 focuses on bounded verifier composition, not proof. |
 | `T: CellBacked` / `T: Linear` generic constraints | Deferred to v0.15+ per the phased generics plan from v0.13. |
 | Full generic `HashMap<K, V>` | Remains fail-closed per v0.13 boundary. |
+| Recoverable verifier error model by default | CellScript remains a verifier DSL: failed validation rejects the transaction. Optional/error types require an explicit design before source-level use. |
 
 ---
 
@@ -597,7 +614,7 @@ cargo run -p cellscript -- explain-profile ckb
 
 | Example | Pattern | Features Exercised |
 |---------|---------|-------------------|
-| `delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, `assert_invariant` |
+| `delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, `assert` |
 | `multi_step_pipeline.cell` | Pipe-connected verification chain | `spawn`, `pipe`, `pipe_write`, `wait` |
 | `witness_args_lock.cell` | CKB-style lock reads `WitnessArgs.lock` | `witness::lock<T>`, `source::group_input(0)`, signature verification |
 | `script_group_type_transition.cell` | Type script reads group input/output views | ScriptGroup metadata, `source::group_input`, `source::group_output` |

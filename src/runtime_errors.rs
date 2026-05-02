@@ -82,7 +82,7 @@ impl CellScriptRuntimeError {
             Self::TypeHashPreservationMismatch => "A replacement output did not preserve the consumed input type hash.",
             Self::LockHashPreservationMismatch => "A replacement output did not preserve the consumed input lock hash.",
             Self::FieldPreservationMismatch => "An output field required to be preserved differs from its input field.",
-            Self::MutateTransitionMismatch => "A mutable replacement output failed its declared field transition check.",
+            Self::MutateTransitionMismatch => "A replacement output failed its declared field transition check.",
             Self::DataPreservationMismatch => "Replacement output data outside transition ranges differs from the input data.",
             Self::DynamicFieldBoundsInvalid => "A Molecule dynamic field offset or length failed bounds validation.",
             Self::TypeHashMismatch => "A loaded cell type hash did not match the expected CellScript type identity.",

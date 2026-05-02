@@ -909,6 +909,9 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         let register_slots = (slot_start..slot_start + abi_slots).filter(|slot| *slot < 8).count();
         let stack_spill_slots = abi_slots.saturating_sub(register_slots);
         let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_start + abi_slots > 8;
+        if param.source == "lock_args" || param.cell_bound_abi || param.ty.starts_with('&') {
+            witness_bytes = 0;
+        }
         witness_payload_bytes += witness_bytes;
         param_constraints.push(ParamAbiConstraintsMetadata {
             name: param.name.clone(),
@@ -931,6 +934,7 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
 
     let register_slots_used = abi_index.min(8);
     let stack_spill_slots = abi_index.saturating_sub(8);
+    let min_witness_bytes = if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes };
     EntryAbiConstraintsMetadata {
         entry_kind: entry_kind.to_string(),
         entry_name: entry_name.to_string(),
@@ -940,7 +944,7 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         stack_spill_slots,
         stack_spill_bytes: stack_spill_slots * 8,
         witness_payload_bytes,
-        min_witness_bytes: ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes,
+        min_witness_bytes,
         unsupported: !unsupported_reasons.is_empty(),
         unsupported_reasons,
         params: param_constraints,
@@ -2140,6 +2144,15 @@ pub fn encode_entry_witness_args_for_params_with_runtime_bound(
     args: &[EntryWitnessArg],
     runtime_bound_param_names: &BTreeSet<String>,
 ) -> Result<Vec<u8>> {
+    if !params.iter().any(|param| param_consumes_entry_witness_payload(param, runtime_bound_param_names)) {
+        if args.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(CompileError::without_span(format!(
+            "entry witness received {} payload args but this entry ABI consumes none",
+            args.len()
+        )));
+    }
     let payload_len = entry_witness_metadata_payload_len_with_runtime_bound(params, runtime_bound_param_names)?;
     let mut witness = Vec::with_capacity(ENTRY_WITNESS_ABI_MAGIC.len() + payload_len);
     witness.extend_from_slice(ENTRY_WITNESS_ABI_MAGIC);
@@ -2295,7 +2308,10 @@ fn runtime_bound_param_names(
 }
 
 fn param_consumes_entry_witness_payload(param: &ParamMetadata, runtime_bound_param_names: &BTreeSet<String>) -> bool {
-    !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound_param_names.contains(&param.name)
+    param.source != "lock_args"
+        && !param.cell_bound_abi
+        && !param.ty.starts_with('&')
+        && !runtime_bound_param_names.contains(&param.name)
 }
 
 fn entry_witness_scalar_param_width(ty: &str) -> Option<usize> {
@@ -9179,10 +9195,16 @@ fn body_fail_closed_runtime_features(
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
     let prelude_availability = metadata_prelude_availability(body, param_schema_vars, type_layouts, params, pure_const_returns);
-    if body.create_set.iter().any(|pattern| !metadata_can_verify_create_output_fields(pattern, type_layouts, &prelude_availability)) {
+    if body.create_set.iter().any(|pattern| {
+        pattern.operation != "output" && !metadata_can_verify_create_output_fields(pattern, type_layouts, &prelude_availability)
+    }) {
         features.insert("output-verification-incomplete".to_string());
     }
-    if body.create_set.iter().any(|pattern| !metadata_can_verify_output_lock(pattern, &prelude_availability)) {
+    if body
+        .create_set
+        .iter()
+        .any(|pattern| pattern.operation != "output" && !metadata_can_verify_output_lock(pattern, &prelude_availability))
+    {
         features.insert("output-lock-verification-incomplete".to_string());
     }
     let mut output_index = 0usize;
@@ -13312,6 +13334,22 @@ action bad(x: u64) -> bool {
 }
 "#;
 
+    const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
+module test
+
+action checked(x: u64) -> bool {
+    require x > 0, "x must be positive"
+}
+"#;
+
+    const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
+module test
+
+action bad(x: u64, msg: String) -> bool {
+    require x > 0, msg
+}
+"#;
+
     const FUNCTION_REQUIRE_PROGRAM: &str = r#"
 module test
 
@@ -15573,8 +15611,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 }
 "#;
 
@@ -15586,8 +15627,11 @@ shared BigState has store {
     pad: [u8; 600],
 }
 
-action update(state: &mut BigState, delta: u64) {
-    state.balance = state.balance + delta
+action update(state_before: BigState, state_after: output BigState, delta: u64)
+    replaces state_before with state_after
+{
+    require state_after.balance == state_before.balance + delta
+    require state_after.pad == state_before.pad
 }
 "#;
 
@@ -16263,48 +16307,28 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(err.message.contains("parameter 'cfg' is a read-only reference"), "unexpected error: {}", err.message);
 
         let err = compile(REDUNDANT_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("parameter 'pool' is already an '&mut' reference"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
 
         let err = compile(FUNCTION_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("function 'bad' parameter 'pool' cannot use mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
 
         let err = compile(LOCK_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("lock 'bad' parameter 'pool' cannot use mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_local_mutable_reference_aliases() {
         let err = compile(MUT_REF_LOCAL_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("local binding cannot store mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
 
         let err = compile(MUT_REF_TUPLE_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("local binding cannot store mutable reference type (&mut Pool, u64)"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
 
         let err = compile(MUT_REF_IF_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("local binding cannot store mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
 
         let err = compile(MUT_REF_ASSIGN_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("assignment cannot store mutable reference type &mut Pool"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -16412,9 +16436,10 @@ action activate(ticket: Ticket) -> Ticket {
 
         let err = compile(CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains(
-                "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
-            ),
+            err.message.contains("`&mut` Cell parameters have been removed")
+                || err.message.contains(
+                    "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
+                ),
             "unexpected error: {}",
             err.message
         );
@@ -16574,16 +16599,8 @@ action activate(ticket: Ticket) -> Ticket {
             action_err.message
         );
 
-        let lock_args_err = compile(LOCK_ARGS_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            lock_args_err
-                .message
-                .contains("lock_args parameter 'owner' is reserved until explicit CKB script-args binding is implemented"),
-            "unexpected error: {}",
-            lock_args_err.message
-        );
-
         compile(ACTION_REQUIRE_PROGRAM, CompileOptions::default()).expect("actions may use require for verifier guards");
+        compile(ACTION_REQUIRE_MESSAGE_PROGRAM, CompileOptions::default()).expect("require may carry a static review message");
 
         let function_require_err = compile(FUNCTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -16591,6 +16608,39 @@ action activate(ticket: Ticket) -> Ticket {
             "unexpected error: {}",
             function_require_err.message
         );
+    }
+
+    #[test]
+    fn compile_rejects_dynamic_require_messages() {
+        let err = compile(REQUIRE_DYNAMIC_MESSAGE_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("require message must be a string literal"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_lock_args_script_args_binding() {
+        let result = compile(LOCK_ARGS_PARAM_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: LOAD_SCRIPT reason=entry_lock_args"),
+            "lock_args entry wrapper must load the executing Script.args:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)"),
+            "lock_args Address should consume exactly 32 script arg bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args"),
+            "lock_args-only wrapper should not require a witness payload:\n{}",
+            asm
+        );
+
+        let lock = result.metadata.locks.iter().find(|lock| lock.name == "bad").expect("lock metadata");
+        let owner = lock.params.iter().find(|param| param.name == "owner").expect("owner param");
+        assert_eq!(owner.source, "lock_args");
+        assert!(owner.lock_args_data_source);
+        assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
     }
 
     #[test]
@@ -19338,15 +19388,18 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection: &mut Collection, recipients: Vec<Address>) {
-    collection.total_supply += recipients.len() as u64
+action batch(collection_before: Collection, collection_after: output Collection, recipients: Vec<Address>)
+    replaces collection_before with collection_after
+{
+    require collection_after.name == collection_before.name
+    require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "batch").expect("batch metadata");
-        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "Collection").expect("Collection mutation");
 
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "collection_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "collection_after"));
         assert!(
             !action
                 .transaction_runtime_input_requirements
@@ -19469,18 +19522,18 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
     }
 
     #[test]
-    fn compile_fails_closed_when_preserved_fields_exceed_runtime_buffer() {
+    fn compile_verifies_large_replacement_field_requirements_without_partial_fallback() {
         let result = compile(LARGE_PRESERVED_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("# cellscript abi: fail closed because not all preserved fields are verifier-addressable"),
-            "large preserved fields should not silently fall back to a partial check:\n{}",
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=600"),
+            "large explicit replacement field requirements should use the fixed-byte verifier path:\n{}",
             asm
         );
         let action = result.metadata.actions.iter().find(|action| action.name == "update").expect("update metadata");
-        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "BigState").expect("BigState mutation");
-        assert_eq!(mutation.field_equality_status, "runtime-required");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "state_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "state_after"));
     }
 
     #[test]
@@ -21075,7 +21128,10 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer, output: Offer) moves input.state Live -> output.state Filled {
+action accept(input: Offer, output: output Offer)
+    replaces input with output
+    moves input.state Live -> output.state Filled
+{
     require input.amount == output.amount
 }
 "#;
@@ -21123,7 +21179,10 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer, output: Offer) moves input.state Live -> output.state Cancelled {
+action cancel(input: Offer, output: output Offer)
+    replaces input with output
+    moves input.state Live -> output.state Cancelled
+{
     require input.amount == output.amount
 }
 "#;
@@ -21215,7 +21274,10 @@ action accept_sugar(input: Offer) moves input.state Live -> Filled {
     }
 }
 
-action accept_core(input: Offer, output: Offer) moves input.state Live -> output.state Filled {
+action accept_core(input: Offer, output: output Offer)
+    replaces input with output
+    moves input.state Live -> output.state Filled
+{
     require input.amount == output.amount
 }
 "#;
@@ -21984,37 +22046,22 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 }
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "credit").expect("credit metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Ledger" && mutation.binding == "ledger")
-            .expect("credit should expose Ledger mutate_set metadata");
 
         assert_eq!(action.effect_class, "Mutating");
         assert!(!action.parallelizable, "generic shared mutation must not default to parallel execution");
         assert!(!action.touches_shared.is_empty(), "generic shared mutation must expose scheduler-visible shared type hash");
-        assert_eq!(mutation.fields, vec!["balance".to_string()]);
-        assert_eq!(mutation.preserved_fields, vec!["owner".to_string()]);
-        assert_eq!(mutation.input_source, "Input");
-        assert_eq!(mutation.input_index, 0);
-        assert_eq!(mutation.output_source, "Output");
-        assert_eq!(mutation.output_index, 0);
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "shared-state"
-                && obligation.feature == "shared-mutation:Ledger"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "ledger_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "ledger_after"));
         assert!(
             action.pool_primitives.is_empty(),
             "generic shared mutation must not emit Pool pattern metadata: {:?}",
@@ -22042,28 +22089,19 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 }
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "credit").expect("credit metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Ledger" && mutation.binding == "ledger")
-            .expect("credit should expose Ledger mutate_set metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "shared-state"
-                && obligation.feature == "shared-mutation:Ledger"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "ledger_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "ledger_after"));
         assert!(!action.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "shared-mutation:Ledger" && requirement.component == "mutate-field-transition"
         }));
@@ -22082,31 +22120,32 @@ resource NFT has store, destroy {
     royalty_bps: u16
 }
 
-action transfer(nft: &mut NFT, to: Address) {
-    assert_invariant(nft.owner != to, "cannot transfer to self")
-    nft.owner = to
+action transfer(nft_before: NFT, nft_after: output NFT, to: Address)
+    replaces nft_before with nft_after
+{
+    assert(nft_before.owner != to, "cannot transfer to self")
+    require nft_after.token_id == nft_before.token_id
+    require nft_after.owner == to
+    require nft_after.metadata_hash == nft_before.metadata_hash
+    require nft_after.royalty_recipient == nft_before.royalty_recipient
+    require nft_after.royalty_bps == nft_before.royalty_bps
 }
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "transfer").expect("transfer metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "NFT" && mutation.binding == "nft")
-            .expect("transfer should expose NFT mutate_set metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "nft_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "nft_after"));
         assert!(
-            asm.contains("# cellscript abi: verify mutate set transition field NFT.owner Output#0 offset=8 size=32"),
-            "fixed-byte set transition should be checked against the replacement output:\n{}",
+            asm.contains("# cellscript abi: schema field NFT.owner offset=8 size=32"),
+            "fixed-byte output owner requirement should read the replacement output field:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: verify output bytes field NFT set.owner offset=8 size=32 against pointer var"),
-            "fixed-byte set transition should compare the output field to the Address pointer source:\n{}",
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=32"),
+            "fixed-byte replacement requirements should compare address/hash fields:\n{}",
             asm
         );
         assert!(
@@ -22114,13 +22153,6 @@ action transfer(nft: &mut NFT, to: Address) {
             "void action success path must clear a0 before returning to ckb-vm:\n{}",
             asm
         );
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "cell-state"
-                && obligation.feature == "mutable-cell:NFT"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
         assert!(!action
             .transaction_runtime_input_requirements
             .iter()
@@ -22554,9 +22586,13 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection: &mut Collection) {
-    assert!(collection.total_supply < collection.max_supply, "max supply reached");
-    collection.total_supply = collection.total_supply + 1;
+action mint(collection_before: Collection, collection_after: output Collection)
+    replaces collection_before with collection_after
+{
+    assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
+    require collection_after.name == collection_before.name
+    require collection_after.max_supply == collection_before.max_supply
+    require collection_after.total_supply == collection_before.total_supply + 1
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -22566,10 +22602,9 @@ action mint(collection: &mut Collection) {
         assert_eq!(schema.dynamic_fields, vec!["name".to_string()]);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
-        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "Collection").expect("mutation metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "collection_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "collection_after"));
         assert!(!action.fail_closed_runtime_features.contains(&"field-access".to_string()));
         assert!(
             !action.transaction_runtime_input_requirements.iter().any(|requirement| {

@@ -215,7 +215,7 @@ Legacy ownership-style actions remain valid as front-end sugar:
 
 ```cellscript
 action transfer_token(token: Token, to: Address) -> Token {
-    assert_invariant(token.amount > 0, "empty token")
+    assert(token.amount > 0, "empty token")
     consume token
 
     create Token {
@@ -266,11 +266,11 @@ of hiding it behind account-style authorization language.
 |---|---|---|
 | `protected T` | Typed view of the Cell state guarded by this lock invocation. | One selected input Cell in the current script group, not an output Cell and not a transaction-wide scan. |
 | `witness T` | Typed value decoded from transaction witness data. | User-supplied witness bytes decoded by the entry ABI. It is not a signer proof. |
-| `require expr` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. |
-| `lock_args T` | Reserved spelling for typed script args. | Future typed decoding of the executing lock script's args; currently fail-closed until binding is implemented. |
+| `require expr` / `require expr, "message"` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. The optional string message is kept for source readability and tooling. |
+| `lock_args T` | Typed script args for lock parameters. | Fixed-width bytes decoded from the executing lock script's `Script.args`. |
 
 Use `require` for verifier guards inside actions and locks. Use
-`assert_invariant` for ordinary internal sanity checks where the condition is not
+`assert` for ordinary internal sanity checks where the condition is not
 part of the protocol boundary you want metadata and reviews to read as a guard.
 
 This lock checks equality between protected Cell state and witness data:
@@ -310,12 +310,17 @@ Until those primitives are available, treat `Address` and `witness Address` as
 data only. They are useful for expressing and testing lock predicates, but they
 are not cryptographic authorization by themselves.
 
+`lock_args Address` is already bound to the executing lock script's typed
+`Script.args` bytes. That makes it a stable script-argument value, but it still
+does not verify a transaction signature unless the lock also calls an explicit
+signature verification primitive.
+
 ## Assertions
 
 Use assertions for action-side verifier conditions:
 
 ```cellscript
-assert_invariant(amount > 0, "amount must be positive")
+assert(amount > 0, "amount must be positive")
 ```
 
 Assertions make state-transition rules visible in source and metadata. They are

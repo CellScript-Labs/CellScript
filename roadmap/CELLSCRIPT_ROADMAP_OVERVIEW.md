@@ -120,7 +120,7 @@ reports are future/evidence-gated release material.
 // Delegate verification: Lock Script spawns a child verifier
 action verify_with_delegate(proof: Proof) {
     let result = spawn("secp256k1_verifier", args: [proof.pubkey, proof.signature])
-    assert_invariant(result == 0, "verification failed")
+    assert(result == 0, "verification failed")
 }
 
 // Pipe-based multi-step verification chain
@@ -129,7 +129,7 @@ action multi_step_verify(data: VerifyData) {
     spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
     let result = wait()
-    assert_invariant(result == 0, "hash check failed")
+    assert(result == 0, "hash check failed")
 }
 ```
 
@@ -146,7 +146,7 @@ lock standard_lock {
     let proof = witness::input_type<ProofData>(source: source::group_input(0))
 
     let pubkey_hash = env::lock_args()
-    assert_invariant(
+    assert(
         secp256k1_verify(pubkey_hash, sig, env::tx_hash()),
         "signature verification failed"
     )
@@ -183,7 +183,7 @@ resource Token has store, transfer, destroy {
 
 action transfer_with_fee(token: Token, fee: u64) {
     let freed = consume token
-    assert_invariant(freed >= occupied_capacity(Token) + fee, "insufficient")
+    assert(freed >= occupied_capacity(Token) + fee, "insufficient")
     create Token { amount: token.amount } with_lock(recipient)
 }
 ```

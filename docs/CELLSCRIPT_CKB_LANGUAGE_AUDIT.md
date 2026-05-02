@@ -21,7 +21,7 @@ concepts:
 | `lock` | Spend predicate entrypoint compiled to ckb-vm RISC-V. |
 | `protected` | Marks a typed input Cell view guarded by the current lock invocation. |
 | `witness` | Marks typed transaction witness data; it is not signer authority by itself. |
-| `lock_args` | Reserved typed script-args source; currently fail-closed until binding is implemented. |
+| `lock_args` | Typed fixed-width script-args source decoded from the executing lock script. |
 | `require` | Fail the current script validation when a lock condition is false. |
 
 The strongest design point is that persistent state is explicit. Ordinary local
@@ -34,9 +34,9 @@ evidence.
 The 2026-04-26 surface pass keeps this alignment intact. Its completed changes
 are presentation-level or classification-level: cleaner example modules,
 DSL-native capability declarations, field shorthand, typed empty `Vec<T>`
-literals, and explicit `protected` / `witness` / `require` lock syntax. It does
-not add implicit signer authority, hidden sighash defaults, or active
-`lock_args` binding.
+literals, explicit `protected` / `witness` / `require` lock syntax, and
+fixed-width `lock_args` binding. It does not add implicit signer authority,
+hidden sighash defaults, or automatic signature verification.
 
 The 0.13 compiler also exposes CKB-specific evidence instead of hiding it behind
 a generic artifact:
@@ -66,7 +66,7 @@ split across compiler metadata, builders, and production evidence.
 |---|---|---|
 | Signer authorization | `witness Address` parameters can prove equality only inside explicit lock predicates such as `vesting_admin`; they still do not prove witness-sighash ownership by themselves. | Add explicit script-args binding, script-hash policy, sighash verification, and later first-class verified signer binding. |
 | Lock behavior | All 16 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
-| `&mut` Cell updates | Metadata exposes mutate input/output access, but syntax can look like in-place account storage. | Add explicit continuity policy for type id, lock, data schema, and capacity. |
+| Explicit Cell replacements | Metadata exposes input/output access through `replaces before with after`; source no longer looks like in-place account storage. | Keep continuity policy explicit for type id, lock, data schema, and capacity. |
 | Capacity policy | Capacity evidence is builder/runtime-required and validated by reports. | Promote common capacity requirements into declarative DSL policy where practical. |
 | Timelock policy | since/header/runtime features are visible in metadata. | Make since/header assumptions more directly declarative and statically auditable. |
 | Collection examples | `examples/language/registry.cell`, its top-level compatibility mirror `examples/registry.cell`, and `examples/language/order_book.cell` cover bounded local Vec language behavior. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |
@@ -79,13 +79,13 @@ lock predicates and the bundled lock predicates are exercised with positive and
 negative on-chain spend cases. That still does not make a witness `Address`
 parameter a cryptographic signer proof by itself. In CKB terms, the current
 syntax should be read as a typed view over one guarded input Cell plus decoded
-witness data. It is not an implicit lock-args binding, not a hidden
-`WitnessArgs.lock` convention, and not automatic sighash verification.
+witness data. `lock_args` is script-bound data, but it is not a hidden
+`WitnessArgs.lock` convention and not automatic sighash verification.
 
 For 0.13 follow-up, the recommended order is:
 
-1. Add explicit `lock_args` and sighash verification primitives before adding a
-   higher-level verified signer abstraction.
+1. Add explicit sighash verification primitives before adding a higher-level
+   verified signer abstraction.
 2. Make mutable Cell transitions declare continuity requirements explicitly.
 3. Turn common capacity and timelock assumptions from report-only evidence into
    DSL-level policy where the compiler can check them.

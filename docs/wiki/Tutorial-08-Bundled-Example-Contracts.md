@@ -91,24 +91,28 @@ resource MintAuthority has store {
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
 minted.
 
-`mint` mutates authority state and validates a proposed new token output:
+`mint` replaces authority state and validates a proposed new token output:
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
+    replaces auth_before with auth_after
+{
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    auth.minted = auth.minted + amount
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
     create Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
 }
 ```
 
-Read `auth: &mut MintAuthority` as replacement-output sugar. The source is
-pleasant to read, but CKB still needs an input state Cell and a replacement
-state Cell in the proposed transaction.
+Read `auth_before` as the existing authority Cell and `auth_after` as the
+proposed replacement output. The `replaces` clause is the relationship; the
+`require` guards are the field-level proof.
 
 `transfer_token` consumes an input token and validates a replacement output
 under a new lock:
@@ -128,7 +132,7 @@ action transfer_token(token: Token, to: Address) -> Token {
 
 ```cellscript
 action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+    assert(token.amount > 0, "cannot burn zero")
     destroy token
 }
 ```

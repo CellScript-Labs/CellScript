@@ -36,7 +36,7 @@ pub enum TokenKind {
     Claim,      // claim
     Settle,     // settle
     Launch,     // launch
-    Assert,     // assert_invariant
+    Assert,     // assert / assert_invariant
     Require,    // require
     True,       // true
     False,      // false
@@ -136,7 +136,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Claim => write!(f, "'claim'"),
             TokenKind::Settle => write!(f, "'settle'"),
             TokenKind::Launch => write!(f, "'launch'"),
-            TokenKind::Assert => write!(f, "'assert_invariant'"),
+            TokenKind::Assert => write!(f, "'assert'"),
             TokenKind::Require => write!(f, "'require'"),
             TokenKind::True => write!(f, "'true'"),
             TokenKind::False => write!(f, "'false'"),

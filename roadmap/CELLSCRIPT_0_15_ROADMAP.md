@@ -459,7 +459,9 @@ lock owner_lock(owner: LockHash) -> bool {
 }
 
 #[entry(type)]
-action verify_transition(state: &mut State) {
+action verify_transition(state_before: State, state_after: output State)
+    replaces state_before with state_after
+{
     ...
 }
 ```
@@ -636,15 +638,18 @@ claim_proof(
 
 ---
 
-### 14. Make Mutation Cardinality Explicit
+### 14. Make Replacement Cardinality Explicit
 
 **Problem**
 
-Mutable params currently map to replacement input/output positions by ordering: consumed count plus mutation index, created count plus mutation index. This hides cardinality and pairing policy.
+One-to-one replacement is explicit in 0.13 through `replaces before with after`,
+but split, merge, and rebalance transactions still need a first-class way to
+declare cardinality and pairing policy. Those shapes should not fall back to
+compiler guessing or scattered consume/create reconstruction.
 
 **Change**
 
-Add explicit transition forms:
+Add explicit multi-cell replacement forms:
 
 ```text
 replace_one(input, output)
@@ -655,14 +660,14 @@ rebalance(inputs, outputs, invariant)
 
 **Code Areas**
 
-- mutate analysis
-- IR `MutatePattern`
+- replacement analysis
+- replacement pattern metadata
 - codegen source selection
 - metadata obligations
 
 **Acceptance**
 
-- one-to-one mutation keeps current behavior
+- one-to-one replacement keeps current `replaces before with after` behavior
 - split/merge requires explicit invariant
 - compiler diagnostics name the exact missing pairing or cardinality rule
 

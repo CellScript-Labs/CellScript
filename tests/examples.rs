@@ -82,7 +82,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 256,
             max_cfg_edges: 4_100,
-            max_call_edges: 330,
+            max_call_edges: 370,
             max_unreachable_machine_blocks: 2_100,
         },
     ),
@@ -313,127 +313,6 @@ fn assert_with_regression_margin(example: &str, field: &str, actual: u64, baseli
     );
 }
 
-struct SchedulerAccessWitness {
-    operation: u8,
-    source: u8,
-    index: u32,
-    binding_hash: [u8; 32],
-}
-
-struct SchedulerWitness {
-    magic: u16,
-    version: u8,
-    effect_class: u8,
-    parallelizable: bool,
-    touches_shared_count: u32,
-    touches_shared: Vec<[u8; 32]>,
-    estimated_cycles: u64,
-    access_count: u32,
-    accesses: Vec<SchedulerAccessWitness>,
-}
-
-fn decode_hex_bytes(hex: &str) -> Vec<u8> {
-    assert_eq!(hex.len() % 2, 0, "hex string must contain full bytes");
-    (0..hex.len()).step_by(2).map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("valid hex byte")).collect()
-}
-
-fn scheduler_witness_operation_ids(hex: &str) -> Vec<u8> {
-    let bytes = decode_hex_bytes(hex);
-    let witness = decode_molecule_scheduler_witness(&bytes);
-    assert_eq!(witness.magic, 0xCE11);
-    assert_eq!(witness.version, 1);
-    assert!(witness.effect_class <= 4);
-    assert_eq!(witness.touches_shared_count as usize, witness.touches_shared.len());
-    assert_eq!(witness.access_count as usize, witness.accesses.len());
-    for access in &witness.accesses {
-        assert!(access.source <= 3, "unexpected scheduler access source {}", access.source);
-        assert!(access.index < u32::MAX, "scheduler access index should decode as a concrete u32");
-        assert_ne!(access.binding_hash, [0; 32], "scheduler access binding hash should be populated");
-    }
-    let _ = (witness.parallelizable, witness.estimated_cycles);
-    witness.accesses.into_iter().map(|access| access.operation).collect()
-}
-
-fn decode_molecule_scheduler_witness(bytes: &[u8]) -> SchedulerWitness {
-    let fields = decode_molecule_table(bytes, 9);
-    SchedulerWitness {
-        magic: read_u16(fields[0], "magic"),
-        version: read_u8(fields[1], "version"),
-        effect_class: read_u8(fields[2], "effect_class"),
-        parallelizable: read_bool(fields[3], "parallelizable"),
-        touches_shared_count: read_u32(fields[4], "touches_shared_count"),
-        touches_shared: read_fixvec_byte32(fields[5]),
-        estimated_cycles: read_u64(fields[6], "estimated_cycles"),
-        access_count: read_u32(fields[7], "access_count"),
-        accesses: read_scheduler_accesses(fields[8]),
-    }
-}
-
-fn decode_molecule_table(bytes: &[u8], expected_fields: usize) -> Vec<&[u8]> {
-    assert!(bytes.len() >= 8, "molecule table header is too short: {}", bytes.len());
-    let total_size = read_u32(&bytes[..4], "total_size") as usize;
-    assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
-    let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
-    assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
-    let field_count = first_offset / 4 - 1;
-    assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
-    let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();
-    offsets.push(total_size);
-    for pair in offsets.windows(2) {
-        assert!(pair[0] <= pair[1], "molecule offsets must be monotonic: {:?}", offsets);
-        assert!(pair[0] >= first_offset && pair[1] <= total_size, "molecule offsets must stay in payload: {:?}", offsets);
-    }
-    offsets.windows(2).map(|pair| &bytes[pair[0]..pair[1]]).collect()
-}
-
-fn read_scheduler_accesses(bytes: &[u8]) -> Vec<SchedulerAccessWitness> {
-    let count = read_u32(&bytes[..4], "access_count") as usize;
-    assert_eq!(bytes.len(), 4 + count * 38, "access fixvec byte length mismatch");
-    bytes[4..]
-        .chunks_exact(38)
-        .map(|chunk| SchedulerAccessWitness {
-            operation: chunk[0],
-            source: chunk[1],
-            index: read_u32(&chunk[2..6], "access.index"),
-            binding_hash: chunk[6..38].try_into().expect("binding hash width"),
-        })
-        .collect()
-}
-
-fn read_fixvec_byte32(bytes: &[u8]) -> Vec<[u8; 32]> {
-    let count = read_u32(&bytes[..4], "byte32_count") as usize;
-    assert_eq!(bytes.len(), 4 + count * 32, "byte32 fixvec byte length mismatch");
-    bytes[4..].chunks_exact(32).map(|chunk| chunk.try_into().expect("byte32 width")).collect()
-}
-
-fn read_u8(bytes: &[u8], field: &str) -> u8 {
-    assert_eq!(bytes.len(), 1, "{field} should be a molecule byte");
-    bytes[0]
-}
-
-fn read_bool(bytes: &[u8], field: &str) -> bool {
-    match read_u8(bytes, field) {
-        0 => false,
-        1 => true,
-        value => panic!("{field} should be a molecule bool, got {value}"),
-    }
-}
-
-fn read_u16(bytes: &[u8], field: &str) -> u16 {
-    assert_eq!(bytes.len(), 2, "{field} should be a molecule u16");
-    u16::from_le_bytes(bytes.try_into().expect("u16 width"))
-}
-
-fn read_u32(bytes: &[u8], field: &str) -> u32 {
-    assert_eq!(bytes.len(), 4, "{field} should be a molecule u32");
-    u32::from_le_bytes(bytes.try_into().expect("u32 width"))
-}
-
-fn read_u64(bytes: &[u8], field: &str) -> u64 {
-    assert_eq!(bytes.len(), 8, "{field} should be a molecule u64");
-    u64::from_le_bytes(bytes.try_into().expect("u64 width"))
-}
-
 fn assert_pool_component(primitive: &PoolPrimitiveMetadata, component: &str, context: &str) {
     assert!(
         primitive.checked_components.iter().any(|candidate| candidate == component),
@@ -640,17 +519,20 @@ fn assert_destroy(action: &cellscript::ActionMetadata, binding: &str, context: &
     );
 }
 
-fn assert_mutate_field(action: &cellscript::ActionMetadata, ty: &str, binding: &str, field: &str, context: &str) {
+fn assert_replacement(action: &cellscript::ActionMetadata, ty: &str, input_binding: &str, output_binding: &str, context: &str) {
     assert!(
-        action.mutate_set.iter().any(|mutation| mutation.ty == ty
-            && mutation.binding == binding
-            && mutation.fields.iter().any(|candidate| candidate == field)),
-        "{} should expose {}.{} mutation for '{}': {:?}",
+        action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == input_binding),
+        "{} should expose replacement input '{}': {:?}",
         context,
-        ty,
-        field,
-        binding,
-        action.mutate_set
+        input_binding,
+        action.consume_set
+    );
+    assert!(
+        action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "output" && pattern.binding == output_binding),
+        "{} should expose replacement output '{}': {:?}",
+        context,
+        output_binding,
+        action.create_set
     );
 }
 
@@ -1149,93 +1031,31 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
 }
 
 #[test]
-fn token_mint_authority_mutation_is_explicit() {
+fn token_mint_authority_replacement_is_explicit() {
     let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("token asm should be utf8");
     let mint = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
-    let mutation = mint
-        .mutate_set
-        .iter()
-        .find(|mutation| mutation.operation == "mutate" && mutation.ty == "MintAuthority" && mutation.binding == "auth")
-        .expect("mint should expose MintAuthority mutate_set metadata");
 
-    assert_eq!(mutation.fields, vec!["minted".to_string()]);
-    assert_eq!(mutation.preserved_fields, vec!["max_supply".to_string(), "token_symbol".to_string()]);
-    assert_eq!(mutation.input_source, "Input");
-    assert_eq!(mutation.input_index, 0);
-    assert_eq!(mutation.output_source, "Output");
-    assert_eq!(mutation.output_index, 1);
-    assert!(mutation.preserve_type_hash);
-    assert!(mutation.preserve_lock_hash);
-    assert_eq!(mutation.type_hash_preservation_status, "checked-runtime");
-    assert_eq!(mutation.lock_hash_preservation_status, "checked-runtime");
-    assert_eq!(mutation.field_equality_status, "checked-runtime");
-    assert_eq!(mutation.field_transition_status, "checked-runtime");
-
-    assert!(
-        mint.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "cell-state"
-                && obligation.feature == "mutable-cell:MintAuthority"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("Input#0 -> Output#1")
-                && obligation.detail.contains("type_hash preservation=checked-runtime")
-                && obligation.detail.contains("lock_hash preservation=checked-runtime")
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-                && obligation.detail.contains("transition fields: minted")
-                && obligation.detail.contains("preserved fields: max_supply, token_symbol")
-        }),
-        "mint authority updates should remain explicit until the replacement authority cell is proved: {:?}",
-        mint.verifier_obligations
-    );
-    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
-        access.operation == "mutate-input" && access.source == "Input" && access.index == 0 && access.binding == "auth"
-    }));
-    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
-        access.operation == "mutate-output" && access.source == "Output" && access.index == 1 && access.binding == "auth"
-    }));
-    let scheduler_ops = scheduler_witness_operation_ids(&mint.scheduler_witness_hex);
-    assert!(scheduler_ops.contains(&8), "mint scheduler witness should encode mutate-input access");
-    assert!(scheduler_ops.contains(&9), "mint scheduler witness should encode mutate-output access");
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_type_hash source=Input index=0 field=5")
-            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_type_hash source=Output index=1 field=5")
-            && asm.contains("# cellscript abi: verify mutate replacement MintAuthority type_hash Input#0 == Output#1 size=32"),
-        "mint should emit executable TypeHash preservation checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_lock_hash source=Input index=0 field=3")
-            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_lock_hash source=Output index=1 field=3")
-            && asm.contains("# cellscript abi: verify mutate replacement MintAuthority lock_hash Input#0 == Output#1 size=32"),
-        "mint should emit executable LockHash preservation checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_input_data source=Input index=0")
-            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_output_data source=Output index=1")
-            && asm.contains(
-                "# cellscript abi: verify mutate preserved field MintAuthority.max_supply Input#0 == Output#1 offset=8 size=8"
-            )
-            && asm.contains(
-                "# cellscript abi: verify mutate preserved field MintAuthority.token_symbol Input#0 == Output#1 offset=0 size=8"
-            ),
-        "mint should emit executable preserved-field equality checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_input_transition source=Input index=0")
-            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_output_transition source=Output index=1")
-            && asm.contains(
-                "# cellscript abi: verify mutate transition field MintAuthority.minted Add Input#0 -> Output#1 offset=16 size=8"
-            ),
-        "mint should emit executable transition checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
+    assert_eq!(mint.effect_class, "Mutating");
+    assert_replacement(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
+    assert_create(mint, "Token", "token mint");
     assert!(
         mint.fail_closed_runtime_features.is_empty(),
-        "mint authority mutation should be a verifier obligation, not a fail-closed lowering path: {:?}",
+        "mint authority replacement should be verifier-coverable, not a fail-closed lowering path: {:?}",
         mint.fail_closed_runtime_features
+    );
+    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "input" && access.source == "Input" && access.index == 0 && access.binding == "auth_before"
+    }));
+    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "output" && access.source == "Output" && access.index == 0 && access.binding == "auth_after"
+    }));
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0")
+            && asm.contains("# cellscript abi: schema field MintAuthority.minted offset=16 size=8"),
+        "mint should bind authority input/output and verify minted through explicit require checks:\n{}",
+        asm
     );
 }
 
@@ -1245,29 +1065,28 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
 
     let mint = action(&result.metadata, "mint");
-    assert_eq!(mint.effect_class, "Creating");
+    assert_eq!(mint.effect_class, "Mutating");
     assert!(mint.parallelizable);
     assert!(mint.fail_closed_runtime_features.is_empty(), "nft mint should not carry fail-closed debt");
+    assert_replacement(mint, "Collection", "collection_before", "collection_after", "nft mint");
     assert_create(mint, "NFT", "nft mint");
-    assert_mutate_field(mint, "Collection", "collection", "total_supply", "nft mint");
     assert_runtime_requirement(mint, "create-output:NFT:create_NFT", "checked-runtime", "create-output-fields", "nft mint");
-    assert_no_runtime_requirement(mint, "mutable-cell:Collection", "mutate-field-equality", "nft mint");
-    assert_no_runtime_requirement(mint, "mutable-cell:Collection", "mutate-field-transition", "nft mint");
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved Molecule table fields Collection Input#0 == Output#1"),
-        "nft mint should verify dynamic Collection preserved Molecule table fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "nft mint should bind Collection input/output deterministically:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table transition fields Collection Input#0 -> Output#1"),
-        "nft mint should verify dynamic Collection total_supply transition through Molecule table offsets:\n{}",
+        asm.contains("# cellscript abi: schema field Collection.total_supply"),
+        "nft mint should verify Collection total_supply through explicit replacement requirements:\n{}",
         asm
     );
 
     let transfer = action(&result.metadata, "transfer");
     assert_eq!(transfer.effect_class, "Mutating");
     assert!(transfer.fail_closed_runtime_features.is_empty(), "nft transfer should not carry fail-closed debt");
-    assert_mutate_field(transfer, "NFT", "nft", "owner", "nft transfer");
+    assert_replacement(transfer, "NFT", "nft_before", "nft_after", "nft transfer");
     assert!(
         !transfer
             .transaction_runtime_input_requirements
@@ -1367,13 +1186,10 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
 
     let extend_lock = action(&result.metadata, "extend_lock");
     assert!(extend_lock.fail_closed_runtime_features.is_empty(), "extend_lock should not carry fail-closed debt");
-    assert_mutate_field(extend_lock, "TimeLock", "time_lock", "unlock_height", "timelock extend_lock");
-    assert_no_runtime_requirement(extend_lock, "mutable-cell:TimeLock", "mutate-field-equality", "timelock extend_lock");
+    assert_replacement(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved fields TimeLock Input#0 == Output#0")
-            && asm.contains("# cellscript abi: verify mutate preserved field TimeLock.lock_type Input#0 == Output#0 offset=32 size=1")
-            && asm.contains("# cellscript abi: verify output field TimeLock set.unlock_height offset=33 size=8"),
-        "timelock extend_lock should verify fieldless enum preservation and unlock_height transition:\n{}",
+        asm.contains("# cellscript abi: schema field TimeLock.unlock_height"),
+        "timelock extend_lock should verify unlock_height through explicit replacement requirements:\n{}",
         asm
     );
     assert!(
@@ -1414,9 +1230,9 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
 
     let propose_transfer = action(&result.metadata, "propose_transfer");
-    assert_eq!(propose_transfer.effect_class, "Creating");
+    assert_eq!(propose_transfer.effect_class, "Mutating");
+    assert_replacement(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
     assert_create(propose_transfer, "Proposal", "multisig propose_transfer");
-    assert_mutate_field(propose_transfer, "MultisigWallet", "wallet", "nonce", "multisig propose_transfer");
     assert_runtime_requirement(
         propose_transfer,
         "create-output:Proposal:create_Proposal",
@@ -1424,32 +1240,15 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
         "create-output-fields",
         "multisig propose_transfer",
     );
-    assert_no_runtime_requirement(
-        propose_transfer,
-        "mutable-cell:MultisigWallet",
-        "mutate-field-equality",
-        "multisig propose_transfer",
-    );
-    assert_no_runtime_requirement(
-        propose_transfer,
-        "mutable-cell:MultisigWallet",
-        "mutate-field-transition",
-        "multisig propose_transfer",
-    );
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved Molecule table fields MultisigWallet Input#0 == Output#1"),
-        "multisig propose_transfer should verify dynamic wallet preserved Molecule table fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "multisig propose_transfer should bind wallet input/output deterministically:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table transition fields MultisigWallet Input#0 -> Output#1"),
-        "multisig propose_transfer should verify dynamic wallet nonce transition through Molecule table offsets:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: preserve mutate table input scalar before transition expression")
-            && asm.contains("# cellscript abi: preserve mutate table expected scalar across output field load"),
-        "multisig propose_transfer should preserve transition scalars across dynamic Molecule table expression and output decoding:\n{}",
+        asm.contains("# cellscript abi: schema field MultisigWallet.nonce"),
+        "multisig propose_transfer should verify wallet nonce through explicit replacement requirements:\n{}",
         asm
     );
     assert!(
@@ -1477,25 +1276,18 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-equality", "multisig add_signature");
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-transition", "multisig add_signature");
+    assert_replacement(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table append fields Proposal Input#0 -> Output#1")
-            && asm.contains("# cellscript abi: verify mutate Molecule vector append Proposal.signatures element_size=96")
-            && asm.contains("# cellscript abi: collection push is covered by mutate append verifier"),
-        "multisig add_signature should verify Proposal.signatures append and skip runtime collection push:\n{}",
-        asm
-    );
-    let append_marker = "# cellscript abi: verify mutate Molecule vector append Proposal.signatures element_size=96";
-    let append_start = asm.find(append_marker).expect("multisig add_signature should emit a Proposal.signatures append verifier");
-    let append_end = (append_start + 4096).min(asm.len());
-    let append_block = &asm[append_start..append_end];
-    assert!(
-        append_block.contains("addi a0, a0, 4") && append_block.contains("addi a1, a1, 4") && append_block.contains("addi a2, a2, -4"),
-        "Molecule fixvec append prefix comparison must skip the 4-byte count header:\n{}",
-        append_block
+        add_signature.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "proposal_before")
+            && add_signature.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "proposal_after"),
+        "multisig add_signature should expose Proposal replacement input/output bindings: {:?} {:?}",
+        add_signature.consume_set,
+        add_signature.create_set
     );
 
     let propose_add_signer = action(&result.metadata, "propose_add_signer");
-    assert_eq!(propose_add_signer.effect_class, "Creating");
+    assert_eq!(propose_add_signer.effect_class, "Mutating");
+    assert_replacement(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
     assert_create(propose_add_signer, "Proposal", "multisig propose_add_signer");
     assert_runtime_requirement(
         propose_add_signer,
@@ -1517,7 +1309,14 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
 
     let propose_change_threshold = action(&result.metadata, "propose_change_threshold");
-    assert_eq!(propose_change_threshold.effect_class, "Creating");
+    assert_eq!(propose_change_threshold.effect_class, "Mutating");
+    assert_replacement(
+        propose_change_threshold,
+        "MultisigWallet",
+        "wallet_before",
+        "wallet_after",
+        "multisig propose_change_threshold",
+    );
     assert_create(propose_change_threshold, "Proposal", "multisig propose_change_threshold");
     assert_runtime_requirement(
         propose_change_threshold,
@@ -1577,529 +1376,56 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
 }
 
 #[test]
-fn amm_pool_mutable_shared_params_are_scheduler_visible() {
-    let result = compile_file(example_path("amm_pool.cell"), CompileOptions::default()).expect("amm pool example should compile");
-    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("amm pool asm should be utf8");
+fn amm_pool_replacement_params_are_scheduler_visible() {
+    let result = compile_file(example_path("amm_pool.cell"), CompileOptions::default()).expect("amm_pool example should compile");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("amm_pool asm should be utf8");
 
-    let seed_pool = result.metadata.actions.iter().find(|action| action.name == "seed_pool").expect("seed_pool metadata");
-    assert!(!seed_pool.touches_shared.is_empty(), "created Pool should be scheduler-visible");
-    assert!(!seed_pool.parallelizable, "new shared Pool creation should not be marked parallelizable");
-    assert!(
-        seed_pool.fail_closed_runtime_features.is_empty(),
-        "seed_pool should not carry generic fail-closed debt; unresolved AMM production policy is reported through pool-pattern obligations: {:?}",
-        seed_pool.fail_closed_runtime_features
-    );
-    assert!(
-        seed_pool.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "pool-pattern"
-                && obligation.feature == "pool-create:Pool"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("ordinary shared Cell creation")
-                && obligation.detail.contains("pool_primitives[].invariant_families")
-        }),
-        "seed_pool should keep pool-pattern creation/admission semantics explicit: {:?}",
-        seed_pool.verifier_obligations
-    );
-    let seed_pool_primitive = seed_pool
-        .pool_primitives
-        .iter()
-        .find(|primitive| primitive.feature == "pool-create:Pool")
-        .expect("seed_pool should expose structured Pool creation metadata");
-    assert_eq!(seed_pool_primitive.operation, "create");
-    assert_eq!(seed_pool_primitive.status, "checked-runtime");
-    assert_eq!(seed_pool_primitive.binding.as_deref(), Some("create_Pool"));
-    assert_eq!(seed_pool_primitive.output_source.as_deref(), Some("Output"));
-    assert_eq!(seed_pool_primitive.output_index, Some(0));
-    assert_eq!(seed_pool_primitive.source_invariant_count, 4);
-    assert_pool_component(seed_pool_primitive, "ordinary-shared-create-summary", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=4", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-distinct=checked-runtime", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:positive-reserves=checked-runtime", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:fee-bps-bound=checked-runtime", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-identity-distinct=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "token-pair-distinct", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "positive-reserves", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "fee-bps-bound", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "token-pair-identity-distinct",
-        "checked-runtime",
-        "assert-invariant-cfg",
-        "seed_pool",
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-symbol-admission=checked-runtime", "seed_pool");
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=0 field=5")
-            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=runtime_type_hash source=Input index=1 field=5")
-            && asm.contains("# cellscript abi: fixed-byte Ne comparison size=32"),
-        "seed_pool should express token-pair TypeHash identity through source type_hash() inequality, not a function-name codegen hook:\n{}",
-        asm
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-identity-admission=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "token-pair-identity-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+input-type-id-abi",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission"),
-        "seed_pool token-pair identity admission should be closed by executable Input TypeHash inequality checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "token-pair-symbol-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-symbol-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-symbol-admission"),
-        "seed_pool token-pair symbol admission should be closed by source guard plus Pool symbol field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:positive-reserve-admission=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "positive-reserve-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "positive-reserve-admission"),
-        "seed_pool positive reserve admission should be closed by executable source guard plus create-field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:fee-policy=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "fee-policy",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "fee-policy"),
-        "seed_pool fee policy should be closed by executable fee bound plus create-field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:lp-supply-invariant=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "lp-supply-invariant",
-        "checked-runtime",
-        "create-output-field-coupling",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
-        "seed_pool LP supply should be closed when Pool.total_lp and LPReceipt.lp_amount share a verifier-covered source: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert!(
-        !seed_pool_primitive
-            .runtime_input_requirements
-            .iter()
-            .any(|requirement| requirement.component == "token-pair-identity-admission"),
-        "checked token-pair identity admission should not remain in Pool runtime input requirements: {:?}",
-        seed_pool_primitive.runtime_input_requirements
-    );
-    assert!(!seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-admission"));
-    assert!(
-        result
-            .metadata
-            .runtime
-            .pool_primitives
-            .iter()
-            .any(|primitive| primitive.scope == "action:seed_pool" && primitive.feature == "pool-create:Pool"),
-        "runtime metadata should aggregate structured Pool primitive obligations"
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=0 field=5"),
-        "created Pool type_hash should be loaded from the Output TypeHash field:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
-        "LPReceipt.pool_id should be checked against the created Pool output type hash:\n{}",
-        asm
-    );
-
-    for (
-        action_name,
-        expected_fields,
-        expected_preserved,
-        expected_checked_transitions,
-        expected_input_index,
-        expected_output_index,
-        expected_invariant_count,
-        expected_source_invariants,
-        expected_runtime_family,
-        _expected_runtime_source,
-    ) in [
-        (
-            "swap_a_for_b",
-            &["reserve_a", "reserve_b"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol", "total_lp"][..],
-            &["reserve_a", "reserve_b"][..],
-            1,
-            1,
-            3,
-            &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
-            "constant-product-pricing",
-            "swap-constant-product-abi",
-        ),
-        (
-            "add_liquidity",
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol"][..],
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            2,
-            1,
-            2,
-            &["deposit-token-a-match", "deposit-token-b-match"][..],
-            "proportional-liquidity-accounting",
-            "add-liquidity-proportional-abi",
-        ),
-        (
-            "remove_liquidity",
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol"][..],
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            1,
-            2,
-            1,
-            &["lp-receipt-pool-id-match"][..],
-            "proportional-withdrawal-accounting",
-            "remove-liquidity-proportional-withdrawal-abi",
-        ),
+    for (action_name, input_binding, output_binding, extra_created_ty) in [
+        ("swap_a_for_b", "pool_before", "pool_after", "Token"),
+        ("add_liquidity", "pool_before", "pool_after", "LPReceipt"),
+        ("remove_liquidity", "pool_before", "pool_after", "Token"),
     ] {
         let action = result.metadata.actions.iter().find(|action| action.name == action_name).expect("amm action metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Pool" && mutation.binding == "pool")
-            .expect("amm action should expose Pool mutate_set metadata");
-        let mutation_fields = mutation.fields.iter().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(
-            mutation_fields.as_slice(),
-            expected_fields,
-            "{} should expose the mutated Pool fields in mutate_set metadata",
-            action_name
-        );
-        assert_eq!(
-            mutation.preserved_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
-            expected_preserved,
-            "{} should expose Pool fields that must be preserved by the replacement output",
-            action_name
-        );
-        assert_eq!(mutation.input_source, "Input");
-        assert_eq!(mutation.input_index, expected_input_index, "{} should pin the mutable Pool input ABI index", action_name);
-        assert_eq!(mutation.output_source, "Output");
-        assert_eq!(
-            mutation.output_index, expected_output_index,
-            "{} should pin the mutable Pool replacement output ABI index",
-            action_name
-        );
-        assert!(mutation.preserve_type_hash, "{} should require Pool TypeHash preservation", action_name);
-        assert!(mutation.preserve_lock_hash, "{} should require Pool LockHash preservation", action_name);
-        assert_eq!(mutation.type_hash_preservation_status, "checked-runtime");
-        assert_eq!(mutation.lock_hash_preservation_status, "checked-runtime");
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.ckb_runtime_accesses.iter().any(|access| {
-            access.operation == "mutate-input"
-                && access.source == "Input"
-                && access.index == expected_input_index
-                && access.binding == "pool"
-        }));
-        assert!(action.ckb_runtime_accesses.iter().any(|access| {
-            access.operation == "mutate-output"
-                && access.source == "Output"
-                && access.index == expected_output_index
-                && access.binding == "pool"
-        }));
-        let scheduler_ops = scheduler_witness_operation_ids(&action.scheduler_witness_hex);
-        assert!(scheduler_ops.contains(&8), "{} scheduler witness should encode mutate-input access", action_name);
-        assert!(scheduler_ops.contains(&9), "{} scheduler witness should encode mutate-output access", action_name);
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_type_hash source=Input index={} field=5",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_type_hash source=Output index={} field=5",
-                expected_output_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: verify mutate replacement Pool type_hash Input#{} == Output#{} size=32",
-                expected_input_index, expected_output_index
-            )),
-            "{} should emit executable TypeHash preservation checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_lock_hash source=Input index={} field=3",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_lock_hash source=Output index={} field=3",
-                expected_output_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: verify mutate replacement Pool lock_hash Input#{} == Output#{} size=32",
-                expected_input_index, expected_output_index
-            )),
-            "{} should emit executable LockHash preservation checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_input_data source=Input index={}",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_output_data source=Output index={}",
-                expected_output_index
-            )) && expected_preserved.iter().all(|field| {
-                asm.contains(&format!(
-                    "# cellscript abi: verify mutate preserved field Pool.{} Input#{} == Output#{}",
-                    field, expected_input_index, expected_output_index
-                ))
-            }),
-            "{} should emit executable preserved-field equality checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_input_transition source=Input index={}",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_output_transition source=Output index={}",
-                expected_output_index
-            )) && expected_checked_transitions
-                .iter()
-                .all(|field| { asm.contains(&format!("# cellscript abi: verify mutate transition field Pool.{}", field)) }),
-            "{} should emit executable transition checks for verifier-coverable Pool delta fields {:?}:\n{}",
-            action_name,
-            expected_checked_transitions,
-            asm
-        );
+        assert_replacement(action, "Pool", input_binding, output_binding, action_name);
+        assert_create(action, extra_created_ty, action_name);
         assert!(
             !action.touches_shared.is_empty(),
-            "{} mutates &mut Pool and must expose the shared Pool type hash to the scheduler",
+            "{} replaces shared Pool state and must expose the Pool type hash to the scheduler",
             action_name
         );
-        assert!(!action.parallelizable, "{} mutates shared Pool state and should not default to parallel execution", action_name);
+        assert!(!action.parallelizable, "{} replaces shared Pool state and should not default to parallel execution", action_name);
         assert_eq!(action.effect_class, "Mutating", "{} should be classified as mutating shared state", action_name);
         assert!(
-            action.verifier_obligations.iter().any(|obligation| {
-                obligation.category == "shared-state"
-                    && obligation.feature == "shared-mutation:Pool"
-                    && obligation.status == "checked-runtime"
-                    && obligation.detail.contains("type_hash preservation=checked-runtime")
-                    && obligation.detail.contains("lock_hash preservation=checked-runtime")
-                    && obligation.detail.contains("field equality=checked-runtime")
-                    && obligation.detail.contains("field transition=checked-runtime")
-                    && obligation.detail.contains("transition fields:")
-                    && obligation.detail.contains("preserved fields:")
-            }),
-            "{} should report fully verifier-covered &mut Pool state transitions for the source-level formulas: {:?}",
+            action.fail_closed_runtime_features.is_empty(),
+            "{} should keep explicit replacement requirements verifier-coverable: {:?}",
+            action_name,
+            action.fail_closed_runtime_features
+        );
+        assert!(
+            action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("resource-conservation:Token")
+                || obligation.feature.starts_with("pool-create:Pool")),
+            "{} should retain AMM-specific runtime obligations separately from replacement binding: {:?}",
             action_name,
             action.verifier_obligations
         );
-        let expected_pool_status = "checked-runtime";
-        assert!(
-            action.verifier_obligations.iter().any(|obligation| {
-                obligation.category == "pool-pattern"
-                    && obligation.feature == "pool-mutation-invariants:Pool"
-                    && obligation.status == expected_pool_status
-                    && obligation.detail.contains("Generic shared mutation checks")
-            }),
-            "{} should keep pool-pattern invariant/admission semantics explicit: {:?}",
-            action_name,
-            action.verifier_obligations
-        );
-        let pool_primitive = action
-            .pool_primitives
-            .iter()
-            .find(|primitive| primitive.feature == "pool-mutation-invariants:Pool")
-            .expect("AMM action should expose structured Pool mutation primitive metadata");
-        assert_eq!(pool_primitive.operation, "mutation-invariants");
-        assert_eq!(pool_primitive.status, expected_pool_status);
-        assert_eq!(pool_primitive.binding.as_deref(), Some("pool"));
-        assert_eq!(pool_primitive.input_source.as_deref(), Some("Input"));
-        assert_eq!(pool_primitive.input_index, Some(expected_input_index));
-        assert_eq!(pool_primitive.output_source.as_deref(), Some("Output"));
-        assert_eq!(pool_primitive.output_index, Some(expected_output_index));
-        assert_eq!(pool_primitive.transition_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(), expected_fields);
-        assert_eq!(pool_primitive.preserved_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(), expected_preserved);
-        assert_eq!(pool_primitive.source_invariant_count, expected_invariant_count);
-        assert_pool_component(pool_primitive, "field-transition=checked-runtime", action_name);
-        for source_invariant in expected_source_invariants {
-            assert_pool_component(pool_primitive, &format!("source-invariant:{}=checked-runtime", source_invariant), action_name);
-            assert_pool_invariant_family(pool_primitive, source_invariant, "checked-runtime", "assert-invariant-cfg", action_name);
-        }
-        if matches!(action_name, "swap_a_for_b" | "add_liquidity" | "remove_liquidity") {
-            let checked_component = match action_name {
-                "swap_a_for_b" => "pool-protocol:constant-product-pricing=checked-runtime",
-                "add_liquidity" => "pool-protocol:proportional-liquidity-accounting=checked-runtime",
-                "remove_liquidity" => "pool-protocol:proportional-withdrawal-accounting=checked-runtime",
-                _ => unreachable!("unexpected AMM action"),
-            };
-            assert_pool_component(pool_primitive, checked_component, action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                expected_runtime_family,
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != expected_runtime_family),
-                "{} should discharge AMM accounting through verifier-computed Pool transitions and output fields: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-        }
-        assert_pool_invariant_family(pool_primitive, "reserve-conservation", "checked-runtime", "transition-formula", action_name);
-        assert!(
-            !pool_primitive.runtime_required_components.iter().any(|component| component == "reserve-conservation"),
-            "{} should discharge reserve conservation through checked field transition formula: {:?}",
-            action_name,
-            pool_primitive.runtime_required_components
-        );
-        if matches!(action_name, "swap_a_for_b" | "add_liquidity" | "remove_liquidity") {
-            assert_pool_component(pool_primitive, "pool-protocol:pool-specific-admission=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "pool-specific-admission",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != "pool-specific-admission"),
-                "{} should discharge token/pool/receipt admission through source guards, preserved Pool symbols, and checked output fields: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-        }
-        if action_name == "swap_a_for_b" {
-            assert_pool_component(pool_primitive, "pool-protocol:lp-supply-consistency=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "lp-supply-consistency",
-                "checked-runtime",
-                "mutate-preserved-field-equality",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != "lp-supply-consistency"),
-                "{} should discharge LP supply consistency through preserved Pool.total_lp equality: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| requirement.component != "lp-supply-consistency"),
-                "{} checked LP supply consistency should not retain total_lp runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert_pool_component(pool_primitive, "pool-protocol:reserve-conservation=checked-runtime", action_name);
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| requirement.component != "reserve-conservation"),
-                "{} checked reserve conservation should not retain runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert_pool_component(pool_primitive, "pool-protocol:fee-accounting=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "fee-accounting",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert_pool_invariant_family(
-                pool_primitive,
-                "constant-product-pricing",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_input_requirements.is_empty(),
-                "{} checked swap metadata should not retain pool runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert!(
-                action.verifier_obligations.iter().any(|obligation| {
-                    obligation.category == "transaction-invariant"
-                        && obligation.feature == "resource-conservation:Token"
-                        && obligation.status == "checked-runtime"
-                }),
-                "{} AMM swap resource conservation should be checked by protocol formulas: {:?}",
-                action_name,
-                action.verifier_obligations
-            );
-            assert!(
-                action.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
-                "{} checked swap action should not retain runtime-required verifier obligations: {:?}",
-                action_name,
-                action.verifier_obligations
-            );
-            assert!(
-                action.transaction_runtime_input_requirements.iter().all(|requirement| requirement.status != "runtime-required"),
-                "{} checked swap action should not retain runtime-required transaction inputs: {:?}",
-                action_name,
-                action.transaction_runtime_input_requirements
-            );
-        }
-        if matches!(action_name, "add_liquidity" | "remove_liquidity") {
-            assert_pool_component(pool_primitive, "pool-protocol:lp-supply-consistency=checked-runtime", action_name);
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| {
-                    requirement.component != "pool-specific-admission"
-                        && requirement.component != "proportional-liquidity-accounting"
-                        && requirement.component != "lp-supply-consistency"
-                }),
-                "{} checked AMM liquidity metadata should not retain admission/accounting/LP runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-        }
     }
 
-    let add_liquidity = result.metadata.actions.iter().find(|action| action.name == "add_liquidity").expect("add_liquidity metadata");
-    let pool_param = add_liquidity.params.iter().find(|param| param.name == "pool").expect("add_liquidity pool param");
-    assert!(pool_param.schema_pointer_abi, "&mut Pool should still use the schema pointer ABI");
-    assert!(pool_param.type_hash_pointer_abi, "&mut Pool type_hash should require a trusted TypeHash pointer ABI");
-    assert!(pool_param.type_hash_length_abi, "&mut Pool type_hash should require a trusted TypeHash length ABI");
-    assert_eq!(pool_param.type_hash_len, Some(32), "&mut Pool TypeHash ABI must be exactly 32 bytes");
     assert!(
-        add_liquidity.fail_closed_runtime_features.is_empty(),
-        "add_liquidity should verify &mut Pool type_hash through the parameter ABI without fail-closed debt: {:?}",
-        add_liquidity.fail_closed_runtime_features
-    );
-    let remove_liquidity =
-        result.metadata.actions.iter().find(|action| action.name == "remove_liquidity").expect("remove_liquidity metadata");
-    assert!(
-        remove_liquidity.fail_closed_runtime_features.is_empty(),
-        "remove_liquidity should compare receipt.pool_id against the trusted Pool TypeHash bytes without fail-closed debt: {:?}",
-        remove_liquidity.fail_closed_runtime_features
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "AMM replacements should bind Pool input/output parameters through transaction cells:\n{}",
+        asm
     );
     assert!(
-        asm.contains("# cellscript abi: schema param pool type_hash pointer=a2 length=a3 size=32"),
-        "&mut Pool type_hash ABI should be explicit in the verifier assembly:\n{}",
+        asm.contains("# cellscript abi: schema field Pool.reserve_a")
+            && asm.contains("# cellscript abi: schema field Pool.reserve_b")
+            && asm.contains("# cellscript abi: schema field Pool.total_lp"),
+        "AMM replacements should verify Pool reserve and LP fields through explicit require checks:\n{}",
         asm
     );
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
-        "LPReceipt.pool_id should be checked against loaded TypeHash bytes:\n{}",
+        "LPReceipt.pool_id should be checked against loaded Pool TypeHash bytes:\n{}",
         asm
     );
 }

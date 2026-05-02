@@ -59,11 +59,11 @@ action create_absolute_lock(
     unlock_height: u64,
     current_height: u64,
 ) -> TimeLock {
-    assert!(
+    assert(
         unlock_height > current_height + MIN_LOCK_PERIOD,
         "Unlock height too close"
     );
-    assert!(
+    assert(
         unlock_height <= current_height + MAX_LOCK_PERIOD,
         "Unlock height too far"
     );
@@ -83,8 +83,8 @@ action create_relative_lock(
     lock_period: u64,
     current_height: u64,
 ) -> TimeLock {
-    assert!(lock_period >= MIN_LOCK_PERIOD, "Lock period too short");
-    assert!(lock_period <= MAX_LOCK_PERIOD, "Lock period too long");
+    assert(lock_period >= MIN_LOCK_PERIOD, "Lock period too short");
+    assert(lock_period <= MAX_LOCK_PERIOD, "Lock period too long");
     
     let lock = create TimeLock {
         owner,
@@ -101,7 +101,7 @@ action lock_asset(
     asset_type: AssetType,
     amount: u64,
 ) -> LockedAsset {
-    assert!(amount > 0, "Amount must be positive");
+    assert(amount > 0, "Amount must be positive");
     
     let locked = create LockedAsset {
         asset_type,
@@ -117,7 +117,7 @@ action request_release(
     requester: Address,
     current_height: u64,
 ) -> ReleaseRequest {
-    assert!(can_unlock(time_lock, current_height), "Cannot unlock yet");
+    assert(can_unlock(time_lock, current_height), "Cannot unlock yet");
     
     let request = create ReleaseRequest {
         lock_hash: hash_lock(time_lock),
@@ -136,16 +136,16 @@ action execute_release(
     executor: Address,
     current_height: u64,
 ) -> ReleaseRecord {
-    assert!(time_lock.owner == executor, "Not the owner");
+    assert(time_lock.owner == executor, "Not the owner");
     
-    assert!(can_unlock(&time_lock, current_height), "Cannot unlock yet");
+    assert(can_unlock(&time_lock, current_height), "Cannot unlock yet");
     
-    assert!(
+    assert(
         locked_asset.lock_hash == hash_lock(&time_lock),
         "Asset does not match lock"
     );
     
-    assert!(
+    assert(
         request.lock_hash == hash_lock(&time_lock),
         "Request does not match lock"
     );
@@ -169,9 +169,9 @@ action request_emergency_release(
     reason: String,
     current_height: u64,
 ) -> EmergencyRelease {
-    assert!(time_lock.owner == requester, "Not the owner");
+    assert(time_lock.owner == requester, "Not the owner");
     
-    assert!(!can_unlock(time_lock, current_height), "Already unlockable");
+    assert(!can_unlock(time_lock, current_height), "Already unlockable");
     
     let emergency = create EmergencyRelease {
         lock_hash: hash_lock(time_lock),
@@ -186,15 +186,22 @@ action request_emergency_release(
 }
 
 action approve_emergency_release(
-    emergency: &mut EmergencyRelease,
+    emergency_before: EmergencyRelease,
+    emergency_after: output EmergencyRelease,
     approver: Address,
     required_approvals: u8,
-) {
-    for existing in &emergency.approvers {
-        assert!(*existing != approver, "Already approved");
+)
+    replaces emergency_before with emergency_after
+{
+    for existing in &emergency_before.approvers {
+        assert(*existing != approver, "Already approved");
     }
-    
-    emergency.approvers.push(approver);
+    require emergency_after.lock_hash == emergency_before.lock_hash
+    require emergency_after.requester == emergency_before.requester
+    require emergency_after.reason == emergency_before.reason
+    require emergency_after.requested_at == emergency_before.requested_at
+    require emergency_after.approvers.len() == emergency_before.approvers.len() + 1
+    require emergency_after.state == emergency_before.state
     
 }
 
@@ -206,18 +213,18 @@ action execute_emergency_release(
     required_approvals: u8,
     current_height: u64,
 ) -> ReleaseRecord {
-    assert!(time_lock.owner == executor, "Not the owner");
+    assert(time_lock.owner == executor, "Not the owner");
     
-    assert!(
+    assert(
         emergency.approvers.len() >= required_approvals as usize,
         "Not enough approvals"
     );
     
-    assert!(
+    assert(
         emergency.lock_hash == hash_lock(&time_lock),
         "Emergency request does not match"
     );
-    assert!(
+    assert(
         locked_asset.lock_hash == hash_lock(&time_lock),
         "Asset does not match"
     );
@@ -236,22 +243,27 @@ action execute_emergency_release(
 }
 
 action extend_lock(
-    time_lock: &mut TimeLock,
+    time_lock_before: TimeLock,
+    time_lock_after: output TimeLock,
     additional_period: u64,
     owner: Address,
     current_height: u64,
-) {
-    assert!(time_lock.owner == owner, "Not the owner");
+)
+    replaces time_lock_before with time_lock_after
+{
+    assert(time_lock_before.owner == owner, "Not the owner");
     
-    assert!(!can_unlock(time_lock, current_height), "Already unlocked");
+    assert(!can_unlock(&time_lock_before, current_height), "Already unlocked");
     
-    let new_unlock_height = time_lock.unlock_height + additional_period;
-    assert!(
+    let new_unlock_height = time_lock_before.unlock_height + additional_period;
+    assert(
         new_unlock_height <= current_height + MAX_LOCK_PERIOD,
         "New unlock height too far"
     );
-    
-    time_lock.unlock_height = new_unlock_height;
+    require time_lock_after.owner == time_lock_before.owner
+    require time_lock_after.lock_type == time_lock_before.lock_type
+    require time_lock_after.unlock_height == new_unlock_height
+    require time_lock_after.created_at == time_lock_before.created_at
 }
 
 action batch_create_locks(
@@ -259,14 +271,14 @@ action batch_create_locks(
     unlock_heights: [u64; 4],
     current_height: u64,
 ) -> (TimeLock, TimeLock, TimeLock, TimeLock) {
-    assert!(unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
-    assert!(unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
-    assert!(unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
-    assert!(unlock_heights[3] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
-    assert!(unlock_heights[0] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
-    assert!(unlock_heights[1] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
-    assert!(unlock_heights[2] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
-    assert!(unlock_heights[3] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
+    assert(unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
+    assert(unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
+    assert(unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
+    assert(unlock_heights[3] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
+    assert(unlock_heights[0] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
+    assert(unlock_heights[1] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
+    assert(unlock_heights[2] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
+    assert(unlock_heights[3] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far");
 
     let lock0 = create TimeLock {
         owner: owners[0],

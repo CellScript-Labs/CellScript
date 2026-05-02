@@ -36,13 +36,17 @@ must consume, return, transfer, claim, settle, or destroy it.
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
-    auth.minted = auth.minted + amount
+action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
+    replaces auth_before with auth_after
+{
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
     create Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
 }
 ```
@@ -52,17 +56,20 @@ the lock on the created output Cell.
 
 ## Recipe: Replace State Instead Of Updating In Place
 
-Use `&mut` when the source should read like mutation, but remember the CKB model:
-the transaction still needs an input Cell and a replacement output Cell.
+Use an explicit input/output pair when the transaction replaces state. The input
+and output names are ordinary parameters; `replaces` is the Cell relationship.
 
 ```cellscript
-action bump_nonce(wallet: &mut Wallet) {
-    wallet.nonce = wallet.nonce + 1
+action bump_nonce(wallet_before: Wallet, wallet_after: output Wallet)
+    replaces wallet_before with wallet_after
+{
+    require wallet_after.owner == wallet_before.owner
+    require wallet_after.nonce == wallet_before.nonce + 1
 }
 ```
 
-When reviewing this pattern, inspect metadata and builder evidence for the
-replacement-output obligations. Do not treat it as account storage.
+When reviewing this pattern, inspect metadata and builder evidence for the input
+and output binding. Do not treat it as account storage.
 
 ## Recipe: Write An Honest Lock Predicate
 
@@ -111,8 +118,9 @@ lock signed_owner(
 }
 ```
 
-This is a teaching shape for the future. `lock_args` is reserved and fail-closed
-until typed CKB script-args binding is implemented.
+`lock_args Address` is decoded from the executing lock script's `Script.args`.
+It is script-bound data, not a signature proof by itself; keep signature
+verification explicit when that primitive is available.
 
 ## Recipe: Use Empty Vec Literals Safely
 

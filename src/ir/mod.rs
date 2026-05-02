@@ -938,6 +938,9 @@ impl IrGenerator {
     }
 
     fn analyze_effect_class(&self, action: &ActionDef) -> EffectClass {
+        if !action.replacements.is_empty() {
+            return EffectClass::Mutating;
+        }
         self.analyze_body_effect_class(&action.body)
     }
 
@@ -1046,6 +1049,9 @@ impl IrGenerator {
             }
             Expr::Require(require_expr) => {
                 self.check_expr_effects(&require_expr.condition, footprint);
+                if let Some(message) = &require_expr.message {
+                    self.check_expr_effects(message, footprint);
+                }
             }
             Expr::Assign(assign) => {
                 self.check_expr_effects(&assign.target, footprint);
@@ -4122,6 +4128,9 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
         }
         Expr::Require(require_expr) => {
             collect_call_names_from_expr(&require_expr.condition, names);
+            if let Some(message) = &require_expr.message {
+                collect_call_names_from_expr(message, names);
+            }
         }
         Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
         Expr::Tuple(items) | Expr::Array(items) => {
@@ -4196,6 +4205,9 @@ fn ast_type_to_ir(ty: &Type) -> IrType {
 }
 
 fn infer_action_effect_without_call_graph(action: &ActionDef) -> EffectClass {
+    if !action.replacements.is_empty() {
+        return EffectClass::Mutating;
+    }
     let mut footprint = EffectFootprint::default();
     for stmt in &action.body {
         collect_ast_stmt_effects(stmt, &mut footprint);
@@ -4284,6 +4296,9 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
         }
         Expr::Require(require_expr) => {
             collect_ast_expr_effects(&require_expr.condition, footprint);
+            if let Some(message) = &require_expr.message {
+                collect_ast_expr_effects(message, footprint);
+            }
         }
         Expr::Assign(assign) => {
             collect_ast_expr_effects(&assign.target, footprint);
@@ -4498,27 +4513,11 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
 }
 
 fn action_output_binding_names(action: &ActionDef) -> HashSet<String> {
-    let mut bindings = action
-        .params
-        .iter()
-        .filter(|param| param.source == ParamSource::Output)
-        .map(|param| param.name.clone())
-        .collect::<HashSet<_>>();
-    for state_move in &action.state_moves {
-        if let Some(to_path) = &state_move.to_path {
-            bindings.insert(to_path.base.clone());
-        }
-    }
-    bindings
+    action.params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()).collect::<HashSet<_>>()
 }
 
 fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
-    action
-        .state_moves
-        .iter()
-        .filter(|state_move| state_move.to_path.is_some())
-        .filter_map(|state_move| state_move.path.as_ref().map(|path| path.base.clone()))
-        .collect()
+    action.replacements.iter().map(|replacement| replacement.input.clone()).collect()
 }
 
 fn const_usize_operand(operand: &IrOperand) -> Option<usize> {

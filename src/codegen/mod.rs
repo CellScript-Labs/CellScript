@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = 2082;
 const CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER: u64 = 2083;
 const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = 2074;
+const CKB_LOAD_SCRIPT_SYSCALL_NUMBER: u64 = 2052;
 const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = 2081;
 const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
 const CLAIM_SECP256K1_VERIFY_SYSCALL_NUMBER: u64 = 3002;
@@ -47,7 +48,13 @@ const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
 const ENTRY_WITNESS_HEADER_SIZE: usize = 8;
 const ENTRY_WITNESS_BUFFER_SIZE: usize = 1024;
-const ENTRY_WITNESS_FRAME_SIZE: usize = 1280;
+const ENTRY_SCRIPT_SIZE_OFFSET: usize = ENTRY_WITNESS_BUFFER_OFFSET + ENTRY_WITNESS_BUFFER_SIZE;
+const ENTRY_SCRIPT_ARGS_START_OFFSET: usize = ENTRY_SCRIPT_SIZE_OFFSET + 8;
+const ENTRY_SCRIPT_ARGS_LEN_OFFSET: usize = ENTRY_SCRIPT_ARGS_START_OFFSET + 8;
+const ENTRY_SCRIPT_ARGS_CURSOR_OFFSET: usize = ENTRY_SCRIPT_ARGS_LEN_OFFSET + 8;
+const ENTRY_SCRIPT_BUFFER_OFFSET: usize = ENTRY_SCRIPT_ARGS_CURSOR_OFFSET + 8;
+const ENTRY_SCRIPT_BUFFER_SIZE: usize = 1024;
+const ENTRY_WITNESS_FRAME_SIZE: usize = 2304;
 const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
 const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
 const ENTRY_WITNESS_RA_OFFSET: usize = ENTRY_WITNESS_FRAME_SIZE - 8;
@@ -60,6 +67,7 @@ struct RuntimeSyscallAbi {
     load_header_by_field: u64,
     load_input_by_field: u64,
     load_witness: u64,
+    load_script: u64,
     load_cell_by_field: u64,
     load_cell_data: u64,
     secp256k1_verify: u64,
@@ -72,6 +80,7 @@ const CKB_RUNTIME_SYSCALL_ABI: RuntimeSyscallAbi = RuntimeSyscallAbi {
     load_header_by_field: CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER,
     load_input_by_field: CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER,
     load_witness: CKB_LOAD_WITNESS_SYSCALL_NUMBER,
+    load_script: CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
     load_cell_by_field: CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER,
     load_cell_data: CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
     // Claim helper syscalls are rejected by CKB profile policy before codegen.
@@ -864,6 +873,8 @@ impl CodeGenerator {
         let outgoing_stack_arg_bytes = entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8;
         let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
+        let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
+        let has_lock_args = params.iter().any(|param| param.source == ParamSource::LockArgs);
         let has_dynamic_payload = payload.iter().any(|arg| arg.schema_dynamic);
         let min_witness_len = ENTRY_WITNESS_HEADER_SIZE + payload_len;
         let loaded_label = self.fresh_label("entry_witness_loaded");
@@ -878,47 +889,52 @@ impl CodeGenerator {
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
-        self.emit_load_witness_syscall_to_offsets(
-            "entry_args",
-            self.runtime_abi().source_group_input,
-            0,
-            ENTRY_WITNESS_SIZE_OFFSET,
-            ENTRY_WITNESS_BUFFER_OFFSET,
-            ENTRY_WITNESS_BUFFER_SIZE,
-        );
-        self.emit(format!("beqz a0, {}", loaded_label));
-        self.emit(format!("j {}", fail_label));
-        self.emit_label(&loaded_label);
-
-        self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
-        self.emit("# cellscript entry abi: reject witnesses larger than the local entry buffer");
-        self.emit(format!("li t1, {}", ENTRY_WITNESS_BUFFER_SIZE + 1));
-        self.emit("sltu t2, t0, t1");
-        self.emit(format!("bnez t2, {}", buffer_ok_label));
-        self.emit(format!("j {}", fail_label));
-        self.emit_label(&buffer_ok_label);
-        self.emit(format!("li t1, {}", min_witness_len));
-        self.emit("sltu t2, t0, t1");
-        self.emit(format!("beqz t2, {}", size_ok_label));
-        self.emit(format!("j {}", fail_label));
-        self.emit_label(&size_ok_label);
-
-        for (index, byte) in ENTRY_WITNESS_MAGIC.iter().enumerate() {
-            self.emit_stack_load_byte("t0", ENTRY_WITNESS_BUFFER_OFFSET + index);
-            self.emit(format!("li t1, {}", byte));
-            self.emit("sub t2, t0, t1");
-            self.emit(format!("bnez t2, {}", fail_label));
+        if has_lock_args {
+            self.emit_entry_load_script_args(&fail_label);
         }
-
-        if !has_dynamic_payload {
-            let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
-            self.emit("# cellscript entry abi: reject trailing witness payload bytes");
-            self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
-            self.emit(format!("li t1, {}", min_witness_len));
-            self.emit("sub t2, t0, t1");
-            self.emit(format!("beqz t2, {}", exact_size_label));
+        if has_witness_payload {
+            self.emit_load_witness_syscall_to_offsets(
+                "entry_args",
+                self.runtime_abi().source_group_input,
+                0,
+                ENTRY_WITNESS_SIZE_OFFSET,
+                ENTRY_WITNESS_BUFFER_OFFSET,
+                ENTRY_WITNESS_BUFFER_SIZE,
+            );
+            self.emit(format!("beqz a0, {}", loaded_label));
             self.emit(format!("j {}", fail_label));
-            self.emit_label(&exact_size_label);
+            self.emit_label(&loaded_label);
+
+            self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
+            self.emit("# cellscript entry abi: reject witnesses larger than the local entry buffer");
+            self.emit(format!("li t1, {}", ENTRY_WITNESS_BUFFER_SIZE + 1));
+            self.emit("sltu t2, t0, t1");
+            self.emit(format!("bnez t2, {}", buffer_ok_label));
+            self.emit(format!("j {}", fail_label));
+            self.emit_label(&buffer_ok_label);
+            self.emit(format!("li t1, {}", min_witness_len));
+            self.emit("sltu t2, t0, t1");
+            self.emit(format!("beqz t2, {}", size_ok_label));
+            self.emit(format!("j {}", fail_label));
+            self.emit_label(&size_ok_label);
+
+            for (index, byte) in ENTRY_WITNESS_MAGIC.iter().enumerate() {
+                self.emit_stack_load_byte("t0", ENTRY_WITNESS_BUFFER_OFFSET + index);
+                self.emit(format!("li t1, {}", byte));
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("bnez t2, {}", fail_label));
+            }
+
+            if !has_dynamic_payload {
+                let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
+                self.emit("# cellscript entry abi: reject trailing witness payload bytes");
+                self.emit_stack_load("t0", ENTRY_WITNESS_SIZE_OFFSET);
+                self.emit(format!("li t1, {}", min_witness_len));
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("beqz t2, {}", exact_size_label));
+                self.emit(format!("j {}", fail_label));
+                self.emit_label(&exact_size_label);
+            }
         }
 
         if payload.iter().any(|arg| arg.unsupported) {
@@ -930,7 +946,11 @@ impl CodeGenerator {
             self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
             self.emit(format!("li t6, {}", ENTRY_WITNESS_HEADER_SIZE));
             for (param_index, param) in params.iter().enumerate() {
-                if runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
+                let param_is_runtime_bound =
+                    runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
+                if param.source == ParamSource::LockArgs {
+                    self.emit_entry_lock_args_param(&mut abi_index, param, outgoing_stack_arg_bytes, &fail_label);
+                } else if param_is_runtime_bound {
                     self.emit(format!("# cellscript entry abi: runtime-bound param {} is loaded from transaction cells", param.name));
                     self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
                     self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
@@ -1050,13 +1070,20 @@ impl CodeGenerator {
             self.emit(format!("beqz t2, {}", exact_size_label));
             self.emit(format!("j {}", fail_label));
             self.emit_label(&exact_size_label);
+            if has_lock_args {
+                self.emit_entry_lock_args_exact_size_check(&fail_label);
+            }
             self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
             self.emit(format!("j {}", done_label));
         } else {
             let mut abi_index = 0usize;
             let mut payload_cursor = 0usize;
             for (param_index, param) in params.iter().enumerate() {
-                if runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
+                let param_is_runtime_bound =
+                    runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
+                if param.source == ParamSource::LockArgs {
+                    self.emit_entry_lock_args_param(&mut abi_index, param, outgoing_stack_arg_bytes, &fail_label);
+                } else if param_is_runtime_bound {
                     self.emit(format!("# cellscript entry abi: runtime-bound param {} is loaded from transaction cells", param.name));
                     self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
                     self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
@@ -1127,6 +1154,9 @@ impl CodeGenerator {
                     self.emit(format!("# cellscript entry abi: unsupported param {} shape; fail closed", param.name));
                     self.emit(format!("j {}", fail_label));
                 }
+            }
+            if has_lock_args {
+                self.emit_entry_lock_args_exact_size_check(&fail_label);
             }
             self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
             self.emit(format!("j {}", done_label));
@@ -1233,6 +1263,152 @@ impl CodeGenerator {
             }
             self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
         }
+    }
+
+    fn emit_entry_load_u32_from_stack(&mut self, dest_reg: &str, stack_offset: usize) {
+        self.emit(format!("li {}, 0", dest_reg));
+        for byte_index in 0..4 {
+            self.emit_stack_load_byte("t0", stack_offset + byte_index);
+            if byte_index != 0 {
+                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+            }
+            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+        }
+    }
+
+    fn emit_entry_load_u32_from_reg(&mut self, dest_reg: &str, base_reg: &str) {
+        self.emit(format!("li {}, 0", dest_reg));
+        for byte_index in 0..4 {
+            self.emit(format!("lbu t0, {}({})", byte_index, base_reg));
+            if byte_index != 0 {
+                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+            }
+            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+        }
+    }
+
+    fn emit_entry_load_script_args(&mut self, fail_label: &str) {
+        let loaded_label = self.fresh_label("entry_script_loaded");
+        let buffer_ok_label = self.fresh_label("entry_script_buffer_ok");
+        let total_ok_label = self.fresh_label("entry_script_total_ok");
+        let table_header_ok_label = self.fresh_label("entry_script_table_header_ok");
+        let args_offset_min_ok_label = self.fresh_label("entry_script_args_offset_min_ok");
+        let args_offset_ok_label = self.fresh_label("entry_script_args_offset_ok");
+        let args_span_ok_label = self.fresh_label("entry_script_args_span_ok");
+
+        self.emit("# cellscript entry abi: lock_args parameters are decoded from the executing Script.args bytes");
+        self.emit_load_script_syscall_to_offsets(
+            "entry_lock_args",
+            ENTRY_SCRIPT_SIZE_OFFSET,
+            ENTRY_SCRIPT_BUFFER_OFFSET,
+            ENTRY_SCRIPT_BUFFER_SIZE,
+        );
+        self.emit(format!("beqz a0, {}", loaded_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&loaded_label);
+
+        self.emit_stack_load("t0", ENTRY_SCRIPT_SIZE_OFFSET);
+        self.emit(format!("li t1, {}", ENTRY_SCRIPT_BUFFER_SIZE + 1));
+        self.emit("sltu t2, t0, t1");
+        self.emit(format!("bnez t2, {}", buffer_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&buffer_ok_label);
+
+        self.emit_entry_load_u32_from_stack("t3", ENTRY_SCRIPT_BUFFER_OFFSET);
+        self.emit_stack_load("t0", ENTRY_SCRIPT_SIZE_OFFSET);
+        self.emit("sub t2, t0, t3");
+        self.emit(format!("beqz t2, {}", total_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&total_ok_label);
+
+        self.emit("li t1, 16");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("beqz t2, {}", table_header_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&table_header_ok_label);
+
+        self.emit_entry_load_u32_from_stack("t4", ENTRY_SCRIPT_BUFFER_OFFSET + 12);
+        self.emit("li t1, 16");
+        self.emit("sltu t2, t4, t1");
+        self.emit(format!("beqz t2, {}", args_offset_min_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&args_offset_min_ok_label);
+        self.emit("addi t1, t4, 4");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("beqz t2, {}", args_offset_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&args_offset_ok_label);
+
+        self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
+        self.emit("add t0, t0, t4");
+        self.emit_entry_load_u32_from_reg("t5", "t0");
+        self.emit("addi t6, t4, 4");
+        self.emit("add t1, t6, t5");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("beqz t2, {}", args_span_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&args_span_ok_label);
+        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_START_OFFSET);
+        self.emit_stack_store("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
+        self.emit("li t0, 0");
+        self.emit_stack_store("t0", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+    }
+
+    fn emit_entry_lock_args_param(
+        &mut self,
+        abi_index: &mut usize,
+        param: &IrParam,
+        outgoing_stack_arg_bytes: usize,
+        fail_label: &str,
+    ) {
+        let fixed_byte_width = fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty));
+        let scalar_width = entry_witness_register_param_width(&param.ty);
+        let Some(width) = fixed_byte_width.or(scalar_width) else {
+            self.emit(format!("# cellscript entry abi: unsupported lock_args param {} shape; fail closed", param.name));
+            self.emit(format!("j {}", fail_label));
+            return;
+        };
+        let bytes_ok_label = self.fresh_label("entry_lock_args_bytes_ok");
+        self.emit(format!("# cellscript entry abi: lock_args param {} consumes {} script arg byte(s)", param.name, width));
+        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit_stack_load("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
+        self.emit(format!("addi t1, t6, {}", width));
+        self.emit("sltu t2, t5, t1");
+        self.emit(format!("beqz t2, {}", bytes_ok_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&bytes_ok_label);
+        self.emit_stack_load("t3", ENTRY_SCRIPT_ARGS_START_OFFSET);
+        self.emit("add t3, t3, t6");
+        self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
+        self.emit("add t0, t0, t3");
+
+        if fixed_byte_width.is_some() {
+            self.emit_entry_abi_reg_arg(*abi_index, "t0", outgoing_stack_arg_bytes);
+            self.emit_entry_abi_immediate_arg(*abi_index + 1, width as u64, outgoing_stack_arg_bytes);
+            *abi_index += 2;
+        } else if *abi_index < 8 {
+            self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", *abi_index), "t0", width);
+            *abi_index += 1;
+        } else {
+            self.emit_entry_witness_scalar_load_from_reg("t4", "t0", width);
+            self.emit_entry_abi_reg_arg(*abi_index, "t4", outgoing_stack_arg_bytes);
+            *abi_index += 1;
+        }
+
+        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit(format!("addi t6, t6, {}", width));
+        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+    }
+
+    fn emit_entry_lock_args_exact_size_check(&mut self, fail_label: &str) {
+        let exact_label = self.fresh_label("entry_lock_args_exact_size_ok");
+        self.emit("# cellscript entry abi: reject trailing Script.args bytes after typed lock_args");
+        self.emit_stack_load("t0", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit_stack_load("t1", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
+        self.emit("sub t2, t1, t0");
+        self.emit(format!("beqz t2, {}", exact_label));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&exact_label);
     }
 
     fn generate_type_def(&mut self, type_def: &IrTypeDef) -> Result<()> {
@@ -3019,6 +3195,14 @@ impl CodeGenerator {
         self.emit(format!("li a3, {}", index));
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a7, {}", self.runtime_abi().load_witness));
+        self.emit("ecall");
+        self.emit("# a0 = CKB syscall return code");
+    }
+
+    fn emit_load_script_syscall_to_offsets(&mut self, reason: &str, size_offset: usize, buffer_offset: usize, max_bytes: usize) {
+        self.emit(format!("# cellscript abi: LOAD_SCRIPT reason={}", reason));
+        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
+        self.emit(format!("li a7, {}", self.runtime_abi().load_script));
         self.emit("ecall");
         self.emit("# a0 = CKB syscall return code");
     }
@@ -8683,7 +8867,7 @@ fn entry_witness_payload_layout(params: &[IrParam], runtime_bound_param_indices:
         .iter()
         .enumerate()
         .map(|(index, param)| {
-            if runtime_bound_param_indices.contains(&index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_)) {
+            if !entry_param_consumes_witness_payload(param, index, runtime_bound_param_indices) {
                 EntryWitnessPayloadArg { width: 0, schema_dynamic: false, unsupported: false }
             } else if entry_witness_dynamic_schema_param(&param.ty) {
                 EntryWitnessPayloadArg { width: 4, schema_dynamic: true, unsupported: false }
@@ -8698,6 +8882,12 @@ fn entry_witness_payload_layout(params: &[IrParam], runtime_bound_param_indices:
             }
         })
         .collect()
+}
+
+fn entry_param_consumes_witness_payload(param: &IrParam, index: usize, runtime_bound_param_indices: &BTreeSet<usize>) -> bool {
+    param.source != ParamSource::LockArgs
+        && !runtime_bound_param_indices.contains(&index)
+        && !matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_))
 }
 
 fn entry_witness_dynamic_schema_param(ty: &IrType) -> bool {

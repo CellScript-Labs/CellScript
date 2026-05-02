@@ -77,7 +77,7 @@ impl Formatter {
             Item::StateMachine(machine) => self.format_state_machine(machine),
             Item::Const(constant) => {
                 self.push_line(&format!(
-                    "const {}: {} = {};",
+                    "const {}: {} = {}",
                     constant.name,
                     format_type(&constant.ty),
                     self.format_expr(&constant.value)
@@ -208,6 +208,9 @@ impl Formatter {
         let mut signature = format!("{} {}({})", keyword, action.name, params);
         if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
+        }
+        for replacement in &action.replacements {
+            signature.push_str(&format!(" replaces {} with {}", replacement.input, replacement.output));
         }
         for state_move in &action.state_moves {
             let edge = if let Some(path) = &state_move.path {
@@ -384,9 +387,15 @@ impl Formatter {
             Expr::Claim(claim) => format!("claim {}", self.format_expr(&claim.receipt)),
             Expr::Settle(settle) => format!("settle {}", self.format_expr(&settle.expr)),
             Expr::Assert(assert_expr) => {
-                format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
+                format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
-            Expr::Require(require_expr) => format!("require {}", self.format_expr(&require_expr.condition)),
+            Expr::Require(require_expr) => {
+                if let Some(message) = &require_expr.message {
+                    format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                } else {
+                    format!("require {}", self.format_expr(&require_expr.condition))
+                }
+            }
             Expr::Block(stmts) => {
                 let inner = stmts
                     .iter()
@@ -636,5 +645,28 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("create Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_uses_canonical_assert_and_no_const_semicolon() {
+        let source = r#"
+module demo
+
+const LIMIT: u64 = 10;
+
+action check(x: u64) -> bool {
+    assert_invariant(x < LIMIT, "too large");
+    require x > 0, "zero"
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("const LIMIT: u64 = 10\n"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("assert(x < LIMIT, \"too large\")"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("require x > 0, \"zero\""), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("assert_invariant"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("const LIMIT: u64 = 10;"), "unexpected formatted source:\n{}", formatted);
     }
 }

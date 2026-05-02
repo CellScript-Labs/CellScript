@@ -446,7 +446,7 @@ error: fixed-byte comparison unresolved
 error[E0018]: fixed-byte comparison unresolved
    --> examples/token.cell:15:5
     |
-15  |     assert_invariant(a.symbol == b.symbol, "symbol mismatch")
+15  |     assert(a.symbol == b.symbol, "symbol mismatch")
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     |
     = help: use schema-backed parameters or fixed-byte values that the verifier can address

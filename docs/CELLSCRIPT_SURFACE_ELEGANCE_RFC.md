@@ -86,8 +86,9 @@ authorization semantics:
 
 The security-sensitive boundary remains deliberately narrow:
 
-- `lock_args` is reserved and fail-closed until typed CKB script-args binding is
-  implemented.
+- `lock_args` binds fixed-width lock parameters to bytes decoded from the
+  executing lock script's `Script.args`; explicit sighash verification remains
+  separate.
 - Explicit sighash verification primitives are not part of 0.13.
 - First-class verified signer values are deferred.
 - `protects T { self ... }` sugar is deferred until protected-input selection
@@ -254,7 +255,7 @@ CKB vocabulary mapping:
 |---|---|
 | `protected T` | Typed view of one selected input Cell in the current script group whose spend is guarded by this lock invocation. |
 | `witness T` | Typed data decoded from the transaction witness surface for the entry. |
-| `lock_args T` | Typed decoding of the executing script args, reserved until binding is implemented. |
+| `lock_args T` | Typed decoding of fixed-width values from the executing script args. |
 | `require condition` | Fail the current script if `condition` is false. |
 
 The older `protects NFT { self ... }` spelling may still be considered later,
@@ -443,7 +444,7 @@ A future `examples/canonical_style.cell` should demonstrate:
 - namespace module declaration;
 - resource, shared, and receipt declarations;
 - create/consume/destroy flows;
-- `&mut` replacement semantics with a short lifecycle comment;
+- explicit `output` parameters plus `replaces before with after` for replacement semantics;
 - a lock boundary;
 - field shorthand;
 - bounded collection literals;
@@ -478,7 +479,7 @@ This list is the living implementation tracker for the RFC.
 | `protected` lock parameter classification | Done | Parses as a read-only typed input Cell view and records `source: "protected"` metadata for the current lock invocation's guarded input. |
 | `witness` parameter classification | Done | Records `source: "witness"` metadata; this is still transaction witness data, never signer authority. |
 | `require` lock assertion form | Done | Lowers false conditions to the same fail-closed script validation failure path while producing `true` on success for bool-returning locks. |
-| `lock_args` data-source binding | Reserved | Parser recognizes the spelling, but type checking rejects it until explicit CKB script-args binding is implemented. |
+| `lock_args` data-source binding | Implemented for fixed-width lock parameters | Entry wrapper decodes the executing Script.args bytes and rejects trailing bytes after declared typed parameters. |
 | Explicit sighash verification primitive | Not started | Must define digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class verified signer abstraction | Deferred | Only after explicit verification primitives are proven and documented. |
 | `protects T { self ... }` sugar | Deferred | Wait until `self` binding and lock-group aggregation semantics are exact. |

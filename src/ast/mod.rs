@@ -138,12 +138,20 @@ pub struct ActionDef {
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub replacements: Vec<ActionReplacement>,
     pub state_moves: Vec<ActionStateMove>,
     pub body: Vec<Stmt>,
     pub effect: EffectClass,
     pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     pub doc_comment: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionReplacement {
+    pub input: String,
+    pub output: String,
     pub span: Span,
 }
 
@@ -427,7 +435,7 @@ pub struct SettleExpr {
     pub span: Span,
 }
 
-/// Assert / assert_invariant expression
+/// Assert expression.
 #[derive(Debug, Clone)]
 pub struct AssertExpr {
     pub condition: Box<Expr>,
@@ -439,6 +447,7 @@ pub struct AssertExpr {
 #[derive(Debug, Clone)]
 pub struct RequireExpr {
     pub condition: Box<Expr>,
+    pub message: Option<Box<Expr>>,
     pub span: Span,
 }
 

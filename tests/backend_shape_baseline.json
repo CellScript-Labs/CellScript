@@ -44,7 +44,7 @@
     "machine_block_count": 2421,
     "max_machine_block_size": 164,
     "machine_cfg_edge_count": 4003,
-    "machine_call_edge_count": 307,
+    "machine_call_edge_count": 348,
     "unreachable_machine_block_count": 1998
   },
   {

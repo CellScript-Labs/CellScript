@@ -925,7 +925,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let state_moves = self.parse_action_state_moves()?;
+        let (replacements, state_moves) = self.parse_action_clauses()?;
         let body = self.parse_block()?;
 
         let end_span = self.current().span;
@@ -935,6 +935,7 @@ impl<'a> Parser<'a> {
             name,
             params,
             return_type,
+            replacements,
             state_moves,
             body,
             effect: effect.unwrap_or(EffectClass::Pure),
@@ -943,6 +944,62 @@ impl<'a> Parser<'a> {
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
+    }
+
+    fn parse_action_clauses(&mut self) -> Result<(Vec<ActionReplacement>, Vec<ActionStateMove>)> {
+        let mut replacements = Vec::new();
+        let mut state_moves = Vec::new();
+
+        loop {
+            self.skip_newlines();
+            match &self.current().kind {
+                TokenKind::Identifier(name) if name == "replaces" => {
+                    replacements.extend(self.parse_action_replacements()?);
+                }
+                TokenKind::Identifier(name) if name == "moves" => {
+                    state_moves.extend(self.parse_action_state_moves()?);
+                }
+                _ => break,
+            }
+        }
+
+        Ok((replacements, state_moves))
+    }
+
+    fn parse_action_replacements(&mut self) -> Result<Vec<ActionReplacement>> {
+        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replaces") {
+            return Ok(Vec::new());
+        }
+
+        let mut replacements = Vec::new();
+        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replaces") {
+            self.advance();
+            loop {
+                let start_span = self.current().span;
+                let input = self.parse_name()?;
+                let with_span = self.current().span;
+                let with = self.parse_name()?;
+                if with != "with" {
+                    return Err(CompileError::new("expected 'with' in replacement clause", with_span));
+                }
+                let output = self.parse_name()?;
+                let end_span = self.current().span;
+                replacements.push(ActionReplacement {
+                    input,
+                    output,
+                    span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+                });
+
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    continue;
+                }
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        Ok(replacements)
     }
 
     fn parse_action_state_moves(&mut self) -> Result<Vec<ActionStateMove>> {
@@ -1075,7 +1132,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' or '&mut T' in the parameter type",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `before: T, after: output T` with `replaces before with after` for replacement Cell state",
                 self.current().span,
             ));
         }
@@ -1844,9 +1901,17 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::Require)?;
         let condition = self.parse_expr()?;
+        let message = if self.check(&TokenKind::Comma) {
+            self.advance();
+            self.skip_newlines();
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
         let end_span = self.current().span;
         Ok(Expr::Require(RequireExpr {
             condition: Box::new(condition),
+            message,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -2080,9 +2145,11 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer, output: Offer) moves input.state Live -> Filled {
-    consume input
-    create Offer { state: Filled }
+action accept(input: Offer, output: output Offer)
+    replaces input with output
+    moves input.state Live -> output.state Filled
+{
+    require output.state == OfferState::Filled
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -2091,7 +2158,12 @@ action accept(input: Offer, output: Offer) moves input.state Live -> Filled {
         let Item::Action(action) = &module.items[1] else {
             panic!("expected action");
         };
+        assert_eq!(action.replacements.len(), 1);
+        assert_eq!(action.replacements[0].input, "input");
+        assert_eq!(action.replacements[0].output, "output");
         assert_eq!(action.state_moves.len(), 1);
+        assert_eq!(action.state_moves[0].path.as_ref().map(|path| path.base.as_str()), Some("input"));
+        assert_eq!(action.state_moves[0].to_path.as_ref().map(|path| path.base.as_str()), Some("output"));
         assert_eq!(action.state_moves[0].from, "Live");
         assert_eq!(action.state_moves[0].to, "Filled");
     }

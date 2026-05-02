@@ -89,8 +89,8 @@ by existing fixed-width machinery):
   under `examples/language`.
 - [x] Refreshed LSP completions and the VS Code grammar/snippets for the
   lock-boundary syntax.
-- [x] Kept `lock_args` reserved/fail-closed until typed CKB script-args binding
-  is implemented.
+- [x] Implemented fixed-width `lock_args` binding from the executing lock
+  script's `Script.args`, with explicit signature verification still deferred.
 - [x] Deferred first-class signer values, implicit `Address` signer semantics,
   hidden sighash defaults, explicit sighash verification primitives, and
   `protects T { self ... }` sugar.

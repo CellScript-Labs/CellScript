@@ -48,7 +48,7 @@ A type script checks state transition rules for Cells. CellScript `action`
 entries are closer to type-script style transition logic: they describe the
 inputs, invariants, and outputs of a state change.
 
-Use `assert_invariant` inside actions for business-state transition checks.
+Use `assert` inside actions for business-state transition checks.
 
 ## Witness
 
@@ -64,9 +64,9 @@ signature binding.
 Script args are bytes stored in the executing script. They are often used to
 bind a script to a particular owner, policy, or configuration.
 
-CellScript reserves the spelling `lock_args T` for typed script-args decoding.
-That binding is intentionally fail-closed until the compiler and CKB profile
-define it exactly.
+CellScript uses `lock_args T` on lock parameters for typed fixed-width decoding
+from the executing lock script's `Script.args`. This binds data to script args;
+it does not by itself verify a transaction signature.
 
 ## Lock Group
 

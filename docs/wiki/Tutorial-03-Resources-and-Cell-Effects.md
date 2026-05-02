@@ -11,9 +11,8 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
-- how `action(input: T, output: T)` expresses the verifier core for
+- how `action(before: T, after: output T)` plus `replaces` expresses the verifier core for
   replacement-style transitions;
-- how `&mut` source syntax still maps to replacement-output style transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
 ## The Main Effects
@@ -40,7 +39,7 @@ action must say where it goes.
 
 ```cellscript
 action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+    assert(token.amount > 0, "cannot burn zero")
     destroy token
 }
 ```
@@ -80,11 +79,14 @@ flow GrantFlow for VestingGrant.state {
 ```
 
 Bind each action to the transition it is allowed to prove. The semantic core is
-an `action(input: T, output: T)` verifier form: `input` and `output` are
-proposed transaction cells, and `moves` names both state fields explicitly.
+an `action(before: T, after: output T)` verifier form: `before` is the consumed
+input Cell view, `after` is the proposed output Cell view, and `moves` names
+both state fields explicitly. The `replaces` clause declares the deterministic
+one-to-one relationship.
 
 ```cellscript
-action unlock_grant(input: VestingGrant, output: VestingGrant)
+action unlock_grant(input: VestingGrant, output: output VestingGrant)
+    replaces input with output
     moves input.state Granted -> output.state Claimable
 {
     require input.beneficiary == output.beneficiary
@@ -102,12 +104,12 @@ that field in one named or compact flow block.
 
 Output binding is deterministic. Output parameters are bound to transaction
 outputs in action parameter order among output parameters, starting at
-`Output#0`. A `moves input.state A -> output.state B` target marks `output` as
-an output binding; otherwise use `name: output T`. If a legacy
-`moves input.state A -> B` action has output parameters, the compiler rejects it
-instead of guessing which output is the replacement. Existing
-`consume input` plus `create T { ... }` remains accepted as front-end sugar for
-the same verifier shape.
+`Output#0`. A field-to-field transition such as
+`moves input.state A -> output.state B` must have a matching
+`replaces input with output` clause. The compiler rejects ambiguous shorthand
+instead of guessing which output is the replacement. Existing `consume input`
+plus `create T { ... }` remains accepted as front-end sugar for the same
+verifier shape.
 
 ## Creating Output Cells
 
@@ -157,29 +159,30 @@ action transfer_token(token: Token, to: Address) -> Token {
 This is closer to CKB than an account-style assignment. The old Cell is spent;
 the new Cell is a proposed output that the verifier checks.
 
-## Mutating Existing State
+## Replacing Existing State
 
-CellScript also supports mutable references for readable source code:
+For one-to-one state replacement, make both cells visible:
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
-    auth.minted = auth.minted + amount
+action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
+    replaces auth_before with auth_after
+{
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
     create Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
 }
 ```
 
-The source says `auth.minted = ...`, but the CKB-facing model still needs an
-input Cell and a replacement output Cell for `MintAuthority`. Metadata records
-the runtime requirements and checked subconditions so reviewers can see that the
-mutation is not pretending CKB has account storage.
-
-When you read `&mut` in examples, translate it mentally as "this state must be
-replaced consistently."
+This is intentionally explicit: `auth_before` is the existing state Cell,
+`auth_after` is the proposed replacement output, and the `require` guards prove
+which fields may change. There is no hidden account-style mutation.
 
 ## Read-Only Dependencies
 

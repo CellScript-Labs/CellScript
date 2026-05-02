@@ -172,11 +172,11 @@ transformations:
 - **Declarative flows** — state remains explicit schema data, while
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges, and
-  `action(input: T, output: T) moves input.field A -> output.field B` binds
-  proposed transaction cells to the edge it proves. Legacy `consume`/`create`
-  actions are front-end sugar over the same verifier constraints. Each state
-  field has exactly one flow declaration; split/partial flow merging is not
-  supported.
+  `action(before: T, after: output T) replaces before with after moves before.field A -> after.field B`
+  binds proposed transaction cells to the edge it proves. Legacy
+  `consume`/`create` actions are front-end sugar over the same verifier
+  constraints. Each state field has exactly one flow declaration; split/partial
+  flow merging is not supported.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -236,7 +236,7 @@ lock owner_only(wallet: &Wallet, signer: Address) -> bool {
 
 ```cellscript
 action move_token(token: Token, to: Address) -> Token {
-    assert_invariant(token.amount > 0, "empty token")
+    assert(token.amount > 0, "empty token")
 
     consume token
 
@@ -268,14 +268,18 @@ resource MintAuthority has store {
     minted: u64
 }
 
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
+    replaces auth_before with auth_after
+{
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    auth.minted = auth.minted + amount
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
     create Token {
         amount: amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
 }
 
@@ -289,7 +293,7 @@ action transfer_token(token: Token, to: Address) -> Token {
 }
 
 action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+    assert(token.amount > 0, "cannot burn zero")
     destroy token
 }
 ```

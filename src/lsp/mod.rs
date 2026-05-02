@@ -607,6 +607,8 @@ impl LspServer {
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
+            ("output", "output ${1:CellType}"),
+            ("replaces", "replaces ${1:before} with ${2:after}"),
             ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
             (
                 "lock",
@@ -620,10 +622,11 @@ impl LspServer {
             ("create", "create ${1:Type} { $0 }"),
             ("destroy", "destroy ${1:expr};"),
             ("transfer", "transfer ${1:expr} to ${2:addr};"),
-            ("assert_invariant", "assert_invariant(${1:condition}, \"${2:message}\");"),
-            ("require", "require ${1:condition};"),
+            ("assert", "assert(${1:condition}, \"${2:message}\")"),
+            ("require", "require ${1:condition}, \"${2:message}\""),
             ("protected", "protected ${1:CellType}"),
             ("witness", "witness ${1:Address}"),
+            ("lock_args", "lock_args ${1:Address}"),
         ];
 
         keywords
@@ -641,7 +644,6 @@ impl LspServer {
     fn type_completions(&self) -> Vec<CompletionItem> {
         let types = vec![
             "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128", "bool", "String", "Address", "Hash", "Bytes", "Vec",
-            "Option", "Result", "Map",
         ];
 
         types
@@ -962,8 +964,17 @@ impl LspServer {
             // Check parameters.
             for param in params {
                 if param.name == symbol {
+                    let note = if param.is_mut {
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `before: T, after: output T` and `replaces before with after`."
+                    } else if param.source == ParamSource::Output {
+                        "\n\n`output` marks a proposed transaction output Cell. Bind it to an input Cell with `replaces before with after` when it is a replacement."
+                    } else if param.source == ParamSource::LockArgs {
+                        "\n\n`lock_args` is decoded from the executing lock Script.args bytes."
+                    } else {
+                        ""
+                    };
                     return Some(Hover {
-                        contents: format!("```cellscript\n{}: {}\n```\n\nParameter", param.name, type_to_string(&param.ty)),
+                        contents: format!("```cellscript\n{}: {}\n```\n\nParameter{}", param.name, type_to_string(&param.ty), note),
                         range: Some(span_to_range(content, param.span)),
                     });
                 }
@@ -2113,6 +2124,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "resource"));
         assert!(keywords.iter().any(|k| k.label == "action"));
         assert!(keywords.iter().any(|k| k.label == "flow"));
+        assert!(keywords.iter().any(|k| k.label == "output"));
+        assert!(keywords.iter().any(|k| k.label == "replaces"));
         assert!(keywords.iter().any(|k| k.label == "moves"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
@@ -2176,13 +2189,13 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
+action activate(ticket: Ticket, active_ticket: output Ticket)
+    replaces ticket with active_ticket
+    moves ticket.state Created -> active_ticket.state Active
+{
     assert_invariant(ticket.state < Ticket::Closed, "closed")
-    consume ticket
-    return create Ticket {
-        state: Ticket::Active,
-        id: ticket.id,
-    }
+    require active_ticket.state == Ticket::Active
+    require active_ticket.id == ticket.id
 }
 "#
         .to_string();
@@ -2228,12 +2241,12 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) moves input.state Live -> Filled {
-    consume input
-    create Offer {
-        state: Offer::Filled,
-        amount: input.amount,
-    }
+action accept(input: Offer, output: output Offer)
+    replaces input with output
+    moves input.state Live -> output.state Filled
+{
+    require output.state == Offer::Filled
+    require output.amount == input.amount
 }
 "#
         .to_string();
@@ -2345,13 +2358,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
+action activate(ticket: Ticket, active_ticket: output Ticket)
+    replaces ticket with active_ticket
+    moves ticket.state Created -> active_ticket.state Active
+{
     let active = Ticket::Active
-    consume ticket
-    return create Ticket {
-        state: active,
-        id: ticket.id,
-    }
+    require active_ticket.state == active
+    require active_ticket.id == ticket.id
 }
 "#;
         server.open_document(uri.clone(), source.to_string());

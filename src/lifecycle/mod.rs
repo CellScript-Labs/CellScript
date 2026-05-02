@@ -167,6 +167,9 @@ fn collect_state_context_from_expr(specs: &HashMap<String, StateMachineSpec>, co
         }
         Expr::Require(require_expr) => {
             collect_state_context_from_expr(specs, context, &require_expr.condition);
+            if let Some(message) = &require_expr.message {
+                collect_state_context_from_expr(specs, context, message);
+            }
         }
         Expr::Block(stmts) => collect_state_context_from_stmts(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
@@ -285,7 +288,13 @@ fn validate_state_transition_expr(specs: &HashMap<String, StateMachineSpec>, con
             validate_state_transition_expr(specs, context, &assert_expr.condition)?;
             validate_state_transition_expr(specs, context, &assert_expr.message)
         }
-        Expr::Require(require_expr) => validate_state_transition_expr(specs, context, &require_expr.condition),
+        Expr::Require(require_expr) => {
+            validate_state_transition_expr(specs, context, &require_expr.condition)?;
+            if let Some(message) = &require_expr.message {
+                validate_state_transition_expr(specs, context, message)?;
+            }
+            Ok(())
+        }
         Expr::Block(stmts) => validate_stmt_list(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {

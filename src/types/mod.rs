@@ -650,6 +650,10 @@ impl<'a> TypeChecker<'a> {
                             && to_path.field == spec.field_name
                             && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
                             && action_param_output_named_type(action, &to_path.base).is_some_and(|ty| ty == spec.type_name)
+                            && action
+                                .replacements
+                                .iter()
+                                .any(|replacement| replacement.input == from_path.base && replacement.output == to_path.base)
                     })
                 });
                 if !has_explicit_binding {
@@ -684,6 +688,91 @@ impl<'a> TypeChecker<'a> {
                 span,
             ));
         }
+        Ok(())
+    }
+
+    fn validate_action_replacements(&self, action: &ActionDef) -> Result<()> {
+        let mut inputs = HashSet::new();
+        let mut outputs = HashSet::new();
+        for replacement in &action.replacements {
+            if !inputs.insert(replacement.input.clone()) {
+                return Err(CompileError::new(
+                    format!("replacement input '{}' is used more than once", replacement.input),
+                    replacement.span,
+                ));
+            }
+            if !outputs.insert(replacement.output.clone()) {
+                return Err(CompileError::new(
+                    format!("replacement output '{}' is used more than once", replacement.output),
+                    replacement.span,
+                ));
+            }
+
+            let Some(input_param) = action.params.iter().find(|param| param.name == replacement.input) else {
+                return Err(CompileError::new(
+                    format!("replacement input '{}' is not an action parameter", replacement.input),
+                    replacement.span,
+                ));
+            };
+            if input_param.source != ParamSource::Default
+                || input_param.is_read_ref
+                || input_param.is_ref
+                || input_param.is_mut
+                || !matches!(input_param.ty, Type::Named(_))
+            {
+                return Err(CompileError::new(
+                    format!(
+                        "replacement input '{}' must be an owned Cell input parameter, written `{}: T`",
+                        replacement.input, replacement.input
+                    ),
+                    input_param.span,
+                ));
+            }
+            let Some(input_type) = action_param_owned_named_type(action, &replacement.input) else {
+                return Err(CompileError::new(
+                    format!("replacement input '{}' must name a Cell-backed type", replacement.input),
+                    input_param.span,
+                ));
+            };
+
+            let Some(output_param) = action.params.iter().find(|param| param.name == replacement.output) else {
+                return Err(CompileError::new(
+                    format!("replacement output '{}' is not an action parameter", replacement.output),
+                    replacement.span,
+                ));
+            };
+            if output_param.source != ParamSource::Output {
+                return Err(CompileError::new(
+                    format!(
+                        "replacement output '{}' must be declared as `{}: output {}`",
+                        replacement.output, replacement.output, input_type
+                    ),
+                    output_param.span,
+                ));
+            }
+            let Some(output_type) = action_param_output_named_type(action, &replacement.output) else {
+                return Err(CompileError::new(
+                    format!("replacement output '{}' must name a Cell-backed output type", replacement.output),
+                    output_param.span,
+                ));
+            };
+            if input_type != output_type {
+                return Err(CompileError::new(
+                    format!(
+                        "replacement input '{}' has type '{}', but output '{}' has type '{}'",
+                        replacement.input, input_type, replacement.output, output_type
+                    ),
+                    replacement.span,
+                ));
+            }
+            if self.resolve_cell_type_kind(input_type).is_none() {
+                return Err(CompileError::new(
+                    format!("replacement type '{}' must be a resource, shared, or receipt Cell type", input_type),
+                    replacement.span,
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -870,6 +959,7 @@ impl<'a> TypeChecker<'a> {
             let core_evidence_bindings = action_core_evidence_binding_names(action);
 
             self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings)?;
+            self.validate_action_replacements(action)?;
             self.validate_action_state_moves(action, &env)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
@@ -898,6 +988,7 @@ impl<'a> TypeChecker<'a> {
         let consumed_bindings = action_consumed_bindings(action);
         let created_type_counts = action_created_type_counts(action);
         let output_bindings = action_output_binding_names(action);
+        let replacements = action_replacement_output_by_input(action);
 
         for state_move in &action.state_moves {
             let (type_name, field_name, field_enum_type) = if let Some(path) = &state_move.path {
@@ -925,12 +1016,18 @@ impl<'a> TypeChecker<'a> {
                     })?
                     .to_string();
                 if let Some(to_path) = &state_move.to_path {
-                    let Some(output_binding) = output_bindings.get(&to_path.base) else {
+                    if replacements.get(&path.base).is_none_or(|output| output != &to_path.base) {
                         return Err(CompileError::new(
                             format!(
-                                "state move output binding '{}' must be an explicit output parameter or the target of this moves clause",
-                                to_path.base
+                                "state move from '{}.{}' to '{}.{}' requires an explicit `replaces {} with {}` relationship",
+                                path.base, path.field, to_path.base, to_path.field, path.base, to_path.base
                             ),
+                            state_move.span,
+                        ));
+                    }
+                    let Some(output_binding) = output_bindings.get(&to_path.base) else {
+                        return Err(CompileError::new(
+                            format!("state move output binding '{}' must be an explicit output parameter", to_path.base),
                             to_path.span,
                         ));
                     };
@@ -1434,13 +1531,21 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             ParamSource::LockArgs => {
-                return Err(CompileError::new(
-                    format!(
-                        "lock_args parameter '{}' is reserved until explicit CKB script-args binding is implemented; use ordinary parameters or witness classification for now",
-                        param.name
-                    ),
-                    param.span,
-                ));
+                if param.is_mut || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
+                    return Err(CompileError::new(
+                        format!("lock_args lock parameter '{}' must be plain typed script args, not a Cell reference", param.name),
+                        param.span,
+                    ));
+                }
+                if lock_args_static_type_len(&param.ty).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "lock_args parameter '{}' must have a fixed-width type that can be decoded from Script.args",
+                            param.name
+                        ),
+                        param.span,
+                    ));
+                }
             }
             ParamSource::Default | ParamSource::Output => {}
         }
@@ -1448,6 +1553,15 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_callable_param_reference_shape(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
+        if matches!(param.ty, Type::MutRef(_)) {
+            return Err(CompileError::new(
+                format!(
+                    "`&mut` Cell parameters have been removed from the public DSL; use `before: T, after: output T` with `replaces before with after` in {} '{}'",
+                    callable_kind, callable_name
+                ),
+                param.span,
+            ));
+        }
         let nested_reference = match &param.ty {
             Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_reference(inner),
             ty => self.type_contains_reference(ty),
@@ -1468,7 +1582,7 @@ impl<'a> TypeChecker<'a> {
             if self.reference_target_is_cell_backed_aggregate(inner) {
                 return Err(CompileError::new(
                     format!(
-                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' or '&mut T' Cell view instead",
+                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or explicit `before: T, after: output T` replacement Cell parameters instead",
                         param.name,
                         callable_kind,
                         callable_name,
@@ -1485,7 +1599,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "action" && matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use mutable reference type {}; only actions may receive mutable Cell state authority",
+                    "{} '{}' parameter '{}' cannot use mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1515,21 +1629,28 @@ impl<'a> TypeChecker<'a> {
         }
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
-                format!("parameter '{}' is a read-only reference; use '&mut T' for writable reference parameters", param.name),
+                format!(
+                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `before: T, after: output T` with `replaces before with after`",
+                    param.name
+                ),
                 param.span,
             ));
         }
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
-                format!("parameter '{}' is already an '&mut' reference; remove the leading 'mut' modifier", param.name),
+                format!(
+                    "parameter '{}' uses removed `&mut` Cell syntax; use `before: T, after: output T` with `replaces before with after`",
+                    param.name
+                ),
                 param.span,
             ));
         }
         if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "cell-backed parameter '{}' cannot use leading 'mut'; use '&mut {}' for mutable cell state or consume/create for ownership transitions",
+                    "cell-backed parameter '{}' cannot use leading 'mut'; use explicit replacement parameters (`before: {}, after: output {}` with `replaces before with after`) or consume/create sugar",
                     param.name,
+                    type_repr(&param.ty),
                     type_repr(&param.ty)
                 ),
                 param.span,
@@ -1945,6 +2066,11 @@ impl<'a> TypeChecker<'a> {
                 let cond_ty = self.infer_expr(env, &require_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
+                }
+                if let Some(message) = &require_expr.message {
+                    if !matches!(message.as_ref(), Expr::String(_)) {
+                        return Err(CompileError::new("require message must be a string literal", expr_span(message)));
+                    }
                 }
                 Ok(Type::Bool)
             }
@@ -2601,7 +2727,13 @@ impl<'a> TypeChecker<'a> {
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
             Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
-            Expr::Require(require_expr) => self.mark_expr_as_moved(env, &require_expr.condition),
+            Expr::Require(require_expr) => {
+                self.mark_expr_as_moved(env, &require_expr.condition)?;
+                if let Some(message) = &require_expr.message {
+                    self.mark_expr_as_moved(env, message)?;
+                }
+                Ok(())
+            }
             Expr::If(if_expr) => {
                 let mut then_env = env.child();
                 self.mark_expr_as_moved(&mut then_env, &if_expr.then_branch)?;
@@ -2704,7 +2836,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "local binding cannot store mutable reference type {}; pass the '&mut' parameter directly to a helper call or mutate its fields in place",
+                    "local binding cannot store mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
                     type_repr(ty)
                 ),
                 span,
@@ -2760,7 +2892,7 @@ impl<'a> TypeChecker<'a> {
                 if !root_is_mut_ref && self.is_linear_type(&root_ty) {
                     return Err(CompileError::new(
                         format!(
-                            "assignment target rooted at linear/resource value '{}' is not supported; use '&mut T' for mutable cell state or consume/create for ownership transitions",
+                            "assignment target rooted at linear/resource value '{}' is not supported; use explicit replacement parameters or consume/create sugar for ownership transitions",
                             root
                         ),
                         assign.span,
@@ -2796,7 +2928,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "assignment cannot store mutable reference type {}; pass the '&mut' parameter directly to a helper call or mutate its fields in place",
+                    "assignment cannot store mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
                     type_repr(ty)
                 ),
                 span,
@@ -3346,7 +3478,7 @@ impl<'a> TypeChecker<'a> {
                     if participates_in_mutable_alias || prior_participated {
                         return Err(CompileError::new(
                             format!(
-                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; pass distinct '&mut' roots or split the mutation",
+                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; mutable Cell reference parameters have been removed from the public DSL",
                                 callee_name, root
                             ),
                             span,
@@ -3733,6 +3865,21 @@ fn match_pattern_variant<'a>(enum_name: &str, pattern: &'a str) -> Option<&'a st
     }
 }
 
+fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Bool | Type::U8 => Some(1),
+        Type::U16 => Some(2),
+        Type::U32 => Some(4),
+        Type::U64 => Some(8),
+        Type::U128 => Some(16),
+        Type::Address | Type::Hash => Some(32),
+        Type::Array(inner, len) => lock_args_static_type_len(inner).map(|inner_len| inner_len * len),
+        Type::Tuple(items) => items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).map(|len| acc + len)),
+        Type::Unit => Some(0),
+        Type::Named(_) | Type::Ref(_) | Type::MutRef(_) => None,
+    }
+}
+
 fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
     match item {
         Item::Resource(def) => Some((&def.name, def.span)),
@@ -3793,27 +3940,19 @@ fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutp
             }
         }
     }
-    for state_move in &action.state_moves {
-        let Some(to_path) = &state_move.to_path else {
-            continue;
-        };
-        if let Some(type_name) = action_param_output_named_type(action, &to_path.base) {
-            bindings.entry(to_path.base.clone()).or_insert_with(|| ActionOutputBinding { type_name: type_name.to_string() });
-        }
-    }
     bindings
 }
 
 fn action_core_evidence_binding_names(action: &ActionDef) -> HashSet<String> {
     let mut bindings = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
-    for state_move in &action.state_moves {
-        if state_move.to_path.is_some() {
-            if let Some(path) = &state_move.path {
-                bindings.insert(path.base.clone());
-            }
-        }
+    for replacement in &action.replacements {
+        bindings.insert(replacement.input.clone());
     }
     bindings
+}
+
+fn action_replacement_output_by_input(action: &ActionDef) -> HashMap<String, String> {
+    action.replacements.iter().map(|replacement| (replacement.input.clone(), replacement.output.clone())).collect()
 }
 
 fn action_consumed_bindings_for_type(action: &ActionDef, type_name: &str) -> Vec<String> {
@@ -3906,7 +4045,12 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
             collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
         }
-        Expr::Require(require_expr) => collect_consumed_bindings_from_expr(&require_expr.condition, bindings),
+        Expr::Require(require_expr) => {
+            collect_consumed_bindings_from_expr(&require_expr.condition, bindings);
+            if let Some(message) = &require_expr.message {
+                collect_consumed_bindings_from_expr(message, bindings);
+            }
+        }
         Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
@@ -4012,7 +4156,12 @@ fn collect_created_type_counts_from_expr(expr: &Expr, counts: &mut HashMap<Strin
             collect_created_type_counts_from_expr(&assert_expr.condition, counts);
             collect_created_type_counts_from_expr(&assert_expr.message, counts);
         }
-        Expr::Require(require_expr) => collect_created_type_counts_from_expr(&require_expr.condition, counts),
+        Expr::Require(require_expr) => {
+            collect_created_type_counts_from_expr(&require_expr.condition, counts);
+            if let Some(message) = &require_expr.message {
+                collect_created_type_counts_from_expr(message, counts);
+            }
+        }
         Expr::Block(stmts) => collect_created_type_counts_from_stmts(stmts, counts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {

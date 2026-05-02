@@ -1,62 +1,84 @@
-# CellScript Mutate And Replacement Outputs
+# CellScript Replacement Outputs
 
 **Status**: production semantics for the current CellScript CKB profile.
 
-CellScript `&mut Shared` does not mean physical in-place mutation on CKB or
-Cells are immutable. A mutable shared parameter lowers to:
+CellScript models persistent state as Cell transformations, not in-place object
+mutation. The canonical one-to-one replacement form is:
 
-```text
-Input#N old cell  ->  Output#M replacement cell
+```cellscript
+action update(before: State, after: output State)
+    replaces before with after
+{
+    require after.owner == before.owner
+    require after.counter == before.counter + 1
+}
 ```
 
-The compiler-generated verifier proves that the replacement output is the only
-accepted state transition for the action.
+Read this as:
+
+```text
+Input#N before  ->  Output#M after
+```
+
+`before` is consumed transaction evidence. `after` is a proposed output Cell.
+`replaces before with after` declares the deterministic relationship between
+the two. Field preservation, arithmetic transitions, authorization, capacity,
+and asset-conservation rules remain explicit `require` or verifier checks.
 
 ## Required Checks
 
-For each mutable cell, generated code and metadata record:
+For each explicit replacement, generated metadata records:
 
-- input cell data load
-- output cell data load
-- type hash preservation unless the transition explicitly permits rebinding
-- lock hash preservation unless the transition explicitly permits rebinding
-- preserved field equality
-- transition field validation
-- scheduler-visible mutate input/output access
+- input cell data binding
+- output cell data binding
+- scheduler-visible input/output access for shared state
+- field reads needed by `require` and `moves`
+- declared state transition edges from `flow`/`moves`
 
-Fixed-struct layouts are checked by byte offsets and exact field sizes. Molecule
-table layouts are checked through the table-aware dynamic verifier path and the
-schema manifest.
+The compiler does not inject a hidden state field, does not mutate Molecule
+layout, and does not infer which output should replace which input. If a state
+move crosses two variables, it must have a matching replacement clause:
+
+```cellscript
+moves before.state Live -> after.state Filled
+```
+
+requires:
+
+```cellscript
+replaces before with after
+```
 
 ## Transition Shapes
 
-Current production transition classes include:
+Current production transition checks are ordinary source requirements:
 
-| Shape | Meaning |
+| Shape | Source form |
 |---|---|
-| `Set` | Output field equals an expected expression or parameter |
-| `Add` | Output field equals input field plus delta |
-| `Sub` | Output field equals input field minus delta |
-| `Append` | Output vector field equals input vector plus appended payload |
+| Preserve | `require after.owner == before.owner` |
+| Set | `require after.owner == new_owner` |
+| Add | `require after.balance == before.balance + delta` |
+| Sub | `require after.balance == before.balance - delta` |
+| State edge | `moves before.state A -> after.state B` |
 
-Unsupported transition shapes must remain fail-closed and must use a registered
+Unsupported runtime shapes must remain fail-closed and must use a registered
 runtime error code.
 
 ## AMM Pool Example
 
-`examples/amm_pool.cell` is the canonical advanced mutate example:
+`examples/amm_pool.cell` is the canonical advanced replacement example:
 
-- `swap_a_for_b` mutates reserves through add/sub transitions
-- `add_liquidity` mutates reserves and LP supply through proportional updates
-- `remove_liquidity` mutates reserves and LP supply through subtraction
+- `swap_a_for_b` replaces pool reserves through explicit add/sub requirements
+- `add_liquidity` replaces reserves and LP supply through proportional updates
+- `remove_liquidity` replaces reserves and LP supply through subtraction
 
-The generated metadata exposes the mutation in `mutate_set`, runtime
-requirements, CKB runtime accesses, and scheduler witness access operations.
+The generated metadata exposes the replacement input/output bindings, runtime
+requirements, CKB runtime accesses, and scheduler shared-state domains.
 
 ## Builder Contract
 
-The transaction builder must place the consumed shared cell and its replacement
-output at the indexes declared by metadata. Production reports must retain:
+The transaction builder must place consumed cells and proposed replacement
+outputs at the indexes declared by metadata. Production reports must retain:
 
 - action name
 - input and output indexes

@@ -1512,7 +1512,7 @@ action withdraw(token: Token, fee: u64) -> Token {
 }
 
 #[test]
-fn cellc_check_reports_mutable_state_transition_blocker_class() {
+fn cellc_check_reports_explicit_replacement_without_mutable_state_blockers() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -1536,8 +1536,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u128) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u128)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 }
 "#,
     )
@@ -1547,36 +1550,21 @@ action credit(ledger: &mut Ledger, delta: u128) {
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
-    assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_transaction_runtime_input_blockers"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_transaction_runtime_input_blocker_classes"], 1, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_transaction_runtime_input_blockers"], 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_transaction_runtime_input_blocker_classes"], 0, "unexpected stdout: {}", stdout);
 
     let runtime_inputs = target["runtime_required_transaction_runtime_input_requirement_summaries"]
         .as_array()
         .expect("runtime-required transaction runtime input summaries array");
-    assert!(
-        runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("shared-mutation:Ledger:mutate-field-transition=InputOutput:Ledger.transition-fields")
-                && summary.contains("mutate-field-transition-policy")
-                && summary.contains("(runtime-required)")
-                && summary.contains("blocker=mutable field transition formula is not fully verifier-covered")
-                && summary.contains("blocker_class=state-transition-formula-gap")
-        })),
-        "unexpected runtime-required transaction runtime input summaries: {}",
-        stdout
-    );
+    assert!(runtime_inputs.is_empty(), "unexpected runtime-required transaction runtime input summaries: {}", stdout);
 
     let output =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
-    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("shared-mutation:Ledger"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("mutate-field-transition"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("state-transition-formula-gap"), "unexpected stderr: {}", stderr);
     assert!(
-        !stderr.contains("state-field-equality-gap"),
-        "checked preserved-field equality should not be reported as runtime-required: {}",
-        stderr
+        output.status.success(),
+        "explicit replacement requirements should not report legacy mutable-state runtime blockers: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -1782,8 +1770,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 }
 "#,
     )
@@ -2001,12 +1992,16 @@ version = "0.1.0"
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
     assert!(target["checked_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_pool_invariant_families"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
+    assert!(target["runtime_required_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
+    assert!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
     let blocker_classes = target["runtime_required_pool_invariant_blocker_class_summaries"]
         .as_array()
         .expect("runtime-required Pool invariant blocker class summaries array");
-    assert!(blocker_classes.is_empty(), "Pool invariant blockers should be checked-runtime now: {}", stdout);
+    assert!(
+        blocker_classes.iter().any(|value| value.as_str().is_some_and(|summary| summary.contains("pool-create:Pool"))),
+        "AMM pool admission blockers should remain explicit: {}",
+        stdout
+    );
     assert!(
         !blocker_classes.iter().any(|value| value
             .as_str()
@@ -2024,9 +2019,9 @@ version = "0.1.0"
     let output =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
-        output.status.success(),
-        "checked AMM invariant coverage should satisfy deny-runtime-obligations: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "full AMM policy debt should still fail deny-runtime-obligations: {}",
+        String::from_utf8_lossy(&output.stdout)
     );
 }
 
@@ -3392,12 +3387,16 @@ shared Ledger has store {
     balance: u64,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
+action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.balance == ledger_before.balance + delta
 }
 
-action debit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance - delta
+action debit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
+    replaces ledger_before with ledger_after
+{
+    require ledger_after.balance == ledger_before.balance - delta
 }
 
 action read_only(value: u64) -> u64 {

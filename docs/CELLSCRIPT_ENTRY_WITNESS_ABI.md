@@ -4,14 +4,15 @@
 tooling.
 
 CellScript action and lock entrypoints are normal RISC-V functions at the machine
-level, but chain transactions provide their public arguments through the grouped
-input witness. The compiler-generated `_cellscript_entry` wrapper loads that
-witness, validates the envelope, decodes positional arguments, and then tail-calls
-the selected action or lock.
+level. Most public arguments come through the grouped input witness. Lock
+parameters declared as `lock_args T` instead come from the executing lock
+script's `Script.args` bytes. The compiler-generated `_cellscript_entry` wrapper
+loads the required source(s), validates the envelope or script-args layout,
+decodes positional arguments, and then tail-calls the selected action or lock.
 
 ## Envelope
 
-Every parameterized entry witness starts with:
+Every parameterized entry witness that has witness-backed arguments starts with:
 
 ```text
 43 53 41 52 47 76 31 00
@@ -21,6 +22,9 @@ This is the ASCII magic `CSARGv1\0`.
 
 Wrong magic, missing bytes, or unsupported parameter placement fails closed with
 runtime error `25 entry-witness-abi-invalid`.
+
+Entries whose parameters are entirely runtime-bound or `lock_args`-backed do not
+require a witness envelope.
 
 ## Parameter Order
 
@@ -32,6 +36,11 @@ Runtime-bound parameters that are supplied by cell data, type hash pointers, or
 the chain environment may reserve ABI registers without consuming direct witness
 payload bytes. The constraints report marks this through each parameter's
 `abi_kind`, `abi_slots`, `witness_bytes`, and pointer flags.
+
+`lock_args` parameters are decoded from `Script.args` in source order and do not
+consume entry witness bytes. The wrapper currently supports fixed-width scalar,
+fixed-byte, tuple, and array shapes. It rejects trailing `Script.args` bytes
+after the declared typed parameters.
 
 ## Scalar Parameters
 

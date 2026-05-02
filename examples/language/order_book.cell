@@ -61,7 +61,7 @@ action local_cancel_order(first: Order, second: Order, cancel_nonce: u64) -> boo
 }
 
 action local_match_quote(bid: Order, ask: Order) -> MatchQuote {
-    assert_invariant(bid.price >= ask.price, "book not crossed")
+    assert(bid.price >= ask.price, "book not crossed")
 
     let mut bids = Vec::new()
     let mut asks = Vec::new()
