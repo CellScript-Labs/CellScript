@@ -22,6 +22,40 @@ The first split to learn is simple:
 - actions change state;
 - locks guard spending.
 
+## Current Syntax Checklist
+
+The current public surface keeps transaction shape visible. These are the
+syntax forms you will see in the examples:
+
+| Syntax | Use it for |
+|---|---|
+| `module cellscript::name` | Stable module identity. |
+| `use cellscript::path::{A, B}` | Grouped imports from another module. |
+| `resource T has store, transfer, destroy` | Linear Cell-backed assets with explicit capabilities. |
+| `shared T has store` | Shared Cell-backed state such as pools or registries. |
+| `receipt T has store, claim` | Claimable or settlement-style proof Cells. |
+| `with_default_hash_type(Data1)` | Default CKB hash type metadata for a persistent declaration. |
+| `flow Name for T.state { A -> B by action; }` | Named state graph for one explicit state field. |
+| `flow T.state { A -> B; }` | Compact state graph when a separate flow name is unnecessary. |
+| `action(old: T) -> new: T` | Core input-to-output verifier signature. |
+| `-> (left: T, right: Receipt)` | Multiple named proposed output Cell bindings. |
+| `input x: T` / `output y: T` | Explicit source qualifiers when the default action side is not enough. |
+| `read cfg: T` | Read-only CellDep-backed action input. |
+| `protected cell: T` | Lock-guarded input Cell view. |
+| `witness arg: T` | Decoded witness data. |
+| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
+| `replace old -> new` | One-to-one logical Cell lineage. |
+| `move old.state A -> new.state B` | Explicit field-to-field state edge. |
+| `create out = T { ... }` | Constraint on a named proposed output Cell. |
+| `require condition, "message"` | Action or lock verifier guard with an optional message. |
+| `assert(condition, "message")` | Internal checked assertion. |
+| `let mut xs: Vec<Hash> = []` | Typed empty local `Vec<T>` literal. |
+
+Names such as `old`, `new`, `input`, and `output` are ordinary bindings. The
+semantics come from the action side, source qualifier, `replace`, `move`, and
+`create` clauses. Do not use `&mut` on action-boundary Cell parameters; Cell
+replacement is expressed by naming the input and proposed output Cell.
+
 ## Module Declaration
 
 Start with a stable module name:
@@ -98,7 +132,7 @@ field name and local variable name match:
 ```cellscript
 let config = Config { threshold }
 
-create Token {
+create token = Token {
     amount,
     symbol
 }
@@ -115,7 +149,7 @@ type is already known:
 let mut keys: Vec<Hash> = []
 let mut owners: Vec<Address> = [primary_owner, backup_owner]
 
-create Proposal {
+create proposal = Proposal {
     data: [],
     signatures: []
 }
@@ -192,33 +226,35 @@ settlement proofs, and claim flows.
 ## Actions
 
 Use `action` for type-script style transition logic. The semantic core is a
-verifier over proposed transaction Cells: an input parameter is evidence from an
-input Cell, an output parameter is evidence from an output Cell, and `require`
-states the guard conditions that must pass.
+verifier over proposed transaction Cells: Cell-backed parameters on the left are
+input Cell evidence, named outputs on the right are proposed output Cell
+evidence, and `require` states the guard conditions that must pass.
 
-For state-machine transitions, prefer the explicit input/output form. Given an
-`Offer.state` graph such as `Live -> Filled`, the action names both Cell views:
+For state-machine transitions, prefer the input-to-output signature form. Given
+an `Offer.state` graph such as `Live -> Filled`, the action names both Cell
+views:
 
 ```cellscript
-action fill_offer(input: Offer, output: Offer)
-    moves input.state Live -> output.state Filled
+action fill_offer(input: Offer) -> output: Offer
+    replace input -> output
+    move input.state Live -> output.state Filled
 {
     require input.price == output.price
     require input.seller == output.seller
 }
 ```
 
-The `moves` clause only proves the state edge. Authorization, preservation, and
+The `move` clause only proves the state edge. Authorization, preservation, and
 conservation checks still belong in explicit `require` statements.
 
-Legacy ownership-style actions remain valid as front-end sugar:
+Consume/create-style actions remain valid as front-end sugar:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     assert(token.amount > 0, "empty token")
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -244,7 +280,7 @@ shared Wallet has store {
     nonce: u64
 }
 
-lock owner_only(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner
 }
 ```
@@ -276,7 +312,7 @@ part of the protocol boundary you want metadata and reviews to read as a guard.
 This lock checks equality between protected Cell state and witness data:
 
 ```cellscript
-lock owner_only(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner
 }
 ```
@@ -286,7 +322,7 @@ the transaction. A misleading parameter name does not make it safer:
 
 ```cellscript
 // Unsafe as an authorization claim: `signer` is only a witness value here.
-lock misleading(wallet: protected Wallet, signer: witness Address) -> bool {
+lock misleading(protected wallet: Wallet, witness signer: Address) -> bool {
     require wallet.owner == signer
 }
 ```
@@ -297,9 +333,9 @@ deliberately explicit:
 
 ```cellscript
 lock signed_owner(
-    wallet: protected Wallet,
-    owner: lock_args Address,
-    sig: witness Signature
+    protected wallet: Wallet,
+    lock_args owner: Address,
+    witness sig: Signature
 ) -> bool {
     require verify_sighash_all(sig, owner)
     require wallet.owner == owner
@@ -317,14 +353,16 @@ signature verification primitive.
 
 ## Assertions
 
-Use assertions for action-side verifier conditions:
+Use `assert` for internal checked conditions:
 
 ```cellscript
 assert(amount > 0, "amount must be positive")
 ```
 
-Assertions make state-transition rules visible in source and metadata. They are
-not a substitute for lock authorization checks.
+Use `require` when the condition is a verifier guard on an action or lock
+boundary. Use `assert` when you want an internal sanity assertion that still
+fails closed but is not the boundary predicate readers should treat as
+authorization.
 
 ## Comments
 

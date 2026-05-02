@@ -75,22 +75,62 @@ authorization redesign. It makes the canonical examples shorter and makes CKB
 lock data sources more visible while keeping authority-sensitive features
 explicit or fail-closed.
 
-Completed in 0.13:
+Completed syntax delta from the `0.12` tag:
 
-- Bundled examples use namespace-style `module cellscript::...` declarations
-  and DSL-native `has` capability declarations.
+- Namespace-style module and import paths are the documented style:
+  `module cellscript::token` plus grouped imports such as
+  `use cellscript::asset::{Token, MintAuthority}`.
+- Persistent declarations use DSL-native capability lists:
+  `resource T has store, transfer, destroy`, `shared T has store`, and
+  `receipt T has store, claim`.
+- Persistent declarations can declare their default CKB hash type with
+  `with_default_hash_type(Data | Data1 | Data2 | Type)` after the capability
+  list and before the field block.
+- Canonical action output bindings are named in the signature:
+  `action f(input: T) -> output: T` and
+  `action f(input: T) -> (left: T, right: Receipt)`. These named outputs are
+  deterministic proposed transaction outputs.
+- Action and lock parameters support prefix source qualifiers:
+  `input name: T`, `output name: T`, `read name: T`, `protected name: T`,
+  `witness name: T`, and `lock_args name: T`. The old type-position
+  `read_ref T` style is not the public action-boundary spelling; expression
+  `read_ref<T>()` remains the explicit CellDep read effect.
+- One-to-one logical lineage is explicit with action clauses:
+  `replace before -> after`. Multiple independent replacements can be written
+  as repeated `replace` clauses or comma-separated pairs.
+- Explicit state transitions use the singular action clause
+  `move before.state Live -> after.state Filled`. Legacy `moves` is rejected
+  with a targeted diagnostic.
+- State graphs use `flow` instead of hidden lifecycle attributes:
+  `flow Name for Type.field { A -> B by action; }` or compact
+  `flow Type.field { A -> B; }`. A state field may have exactly one flow.
+- Legacy `#[lifecycle(...)]` receipt syntax has been removed. State is ordinary
+  schema data, usually an explicit enum field, and the compiler does not inject
+  hidden Molecule fields.
+- `create output = T { ... }` constrains a named proposed output binding. The
+  older unbound `create T { ... }` form remains accepted as front-end sugar, but
+  the named form is the canonical verifier surface.
 - `create` and ordinary struct literals support field shorthand; examples use
   it where the field name and source binding are identical.
+- Declared state names can be used in `create` initializers, and qualified state
+  names such as `Ticket::Active` can be used in guards and expressions instead
+  of raw numeric indexes.
+- `require condition` and `require condition, "message"` are verifier-boundary
+  guards for actions and locks. `assert(condition, "message")` is the canonical
+  internal assertion spelling; the formatter emits the non-macro form.
 - Typed empty `Vec<T>` literals such as `let mut keys: Vec<Hash> = []` and
   contextual field literals such as `data: []` lower through the existing
   `Vec::new()` path when the expected `Vec<T>` type is known.
-- Bundled locks use `protected`, `witness`, and `require` to distinguish the
-  guarded input Cell view, transaction witness data, and script failure
-  predicate.
+- Public `&mut` Cell parameter syntax has been removed before release. Cell
+  replacement is expressed with signature-direction outputs plus `replace`.
+- Bundled locks use `protected`, `witness`, `lock_args`, and `require` to
+  distinguish guarded input Cell views, typed script args, transaction witness
+  data, and script failure predicates.
 - Clean business examples are separated from profiled acceptance examples, while
   the flat `examples/*.cell` files remain compatibility mirrors.
 - LSP completions plus VS Code grammar and snippets are refreshed for the new
-  lock parameter source syntax.
+  source qualifiers, named outputs, `flow`, `replace`, `move`, and named
+  `create` syntax.
 
 Important boundaries:
 
@@ -189,7 +229,7 @@ New in 0.13:
   than the legacy undefined `__const_data` placeholder, so local
   `Address::zero()`, `Hash::zero()`, array, and `u128` constants can round-trip
   through internal ELF emission.
-- IR join moves now use the same operand materialization path as normal loads,
+- IR join value transfers now use the same operand materialization path as normal loads,
   so fixed-byte constants selected by `if`/join control flow keep their rodata
   pointers instead of degrading to a null pointer.
 - Generic `u128` comparison and supported `u128 +/- u64` lowering now use
@@ -200,8 +240,8 @@ New in 0.13:
   trailing payload bytes after all static or dynamic witness arguments are
   consumed.
 - Legacy `#[lifecycle(...)]` receipt syntax has been removed. State remains
-  explicit schema data, and transition policy is declared with `state` /
-  `flow` plus action-level `moves`.
+  explicit schema data, and transition policy is declared with `flow` plus
+  action-level `move` clauses.
 - State storage remains explicit cell data: the compiler does not
   inject hidden state fields or mutate Molecule layout. `create` initializers
   may now use declared state names such as `state: Created`, while
@@ -211,28 +251,29 @@ New in 0.13:
 - Declarative flows can now be expressed without hidden layout changes:
   `flow Name for Type.field { A -> B by action; }` and compact
   `flow Type.field { A -> B; }` declare the graph, while action signatures can
-  bind the edge they prove with explicit field-to-field moves such as
-  `moves input.state Live -> output.state Filled`. Cross-cell moves require an
-  explicit `replaces input with output` relationship. The type checker, state
-  static checks, IR metadata, runtime verifier, formatter, docs generator, and
-  LSP all carry the explicit state field name. A state field may have only one
-  flow declaration; CellScript does not merge partial flow declarations.
+  bind the edge they prove with explicit field-to-field `move` clauses such as
+  `move old.state Live -> new.state Filled`. Cross-cell state edges require an
+  explicit `replace old -> new` relationship, and `flow ... by action` now
+  validates the action's exact `from -> to` edge instead of accepting any move on
+  the same field. The type checker, state static checks, IR metadata, runtime
+  verifier, formatter, docs generator, and LSP all carry the explicit state
+  field name. A state field may have only one flow declaration; CellScript does
+  not merge partial flow declarations.
 - The semantic core for state transitions is now proposed-cell verification:
-  `action(before: input T, after: output T) replaces before with after` treats
-  `before` as a transaction input and `after` as a transaction output.
-  `consume` plus `create` remains accepted as front-end sugar, but output
-  parameters bind deterministically to `Output#N` in output-parameter order.
-  The compiler rejects moves with output parameters unless the target output
-  field and replacement relation are named explicitly.
+  `action(before: T) -> after: T replace before -> after` treats `before` as a
+  transaction input and `after` as a proposed transaction output. Explicit
+  `output after: T` parameters remain accepted as a precision layer, but named
+  action outputs are the canonical surface. `create after = T { ... }` constrains
+  a declared output binding rather than allocating runtime storage.
 - Public `&mut` Cell parameter syntax has been removed before release. Cell
-  replacement is now expressed with explicit input/output parameters and a
-  `replaces` clause, keeping the CKB transaction shape visible in source.
+  replacement is now expressed with signature-direction outputs and `replace`,
+  keeping the CKB transaction shape visible in source.
 - State-machine checking no longer treats enum or declaration order as a hidden
   linear state sequence: initial creates may use any declared state, and declared
-  edges may return to the first state. Legacy `moves` and `by action` edges now
-  fail at compile time unless the action consumes the corresponding owned input
-  and creates exactly one replacement output; explicit field-to-field `moves`
-  validate the named input and output parameter bindings instead.
+  edges may return to the first state. Legacy `moves` clauses now fail at
+  compile time; `by action` edges require the action to consume the corresponding
+  owned input and create exactly one replacement output. Explicit field-to-field
+  `move` clauses validate the named input and output parameter bindings instead.
 - Mutate preserved-field verification now fails closed when not every preserved
   field is verifier-addressable; metadata no longer classifies oversized
   data-except fallback paths as checked-runtime.

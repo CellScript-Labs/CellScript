@@ -147,8 +147,8 @@ transformations:
 | `shared T { ... }` | Shared state Cell, read via `CellDep` or updated by consume + create |
 | `receipt T { ... }` | A single-use proof Cell (deposits, vesting, votes, liquidity) |
 | `consume value` | Spend a transaction input |
-| `create T { ... }` | Create a new output Cell with typed data |
-| `read_ref T` | Load a read-only CellDep-backed value |
+| `create output = T { ... }` | Constrain a named proposed output Cell with typed data |
+| `read param: T` / `read_ref<T>()` | Load a read-only CellDep-backed value |
 | `action` | Type-script transition logic → compiled to RISC-V |
 | `lock` | Lock-script authorization logic → compiled to RISC-V |
 | Local `let` values | Transaction-local computation; never persistent storage |
@@ -171,12 +171,12 @@ transformations:
   explicit instead of implicit.
 - **Declarative flows** — state remains explicit schema data, while
   `flow Name for Type.field { A -> B by action; }` or compact
-  `flow Type.field { A -> B; }` declares allowed edges, and
-  `action(before: input T, after: output T) replaces before with after moves before.field A -> after.field B`
-  binds proposed transaction cells to the edge it proves. Legacy
-  `consume`/`create` actions are front-end sugar over the same verifier
-  constraints. Each state field has exactly one flow declaration; split/partial
-  flow merging is not supported.
+  `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
+  shape is `action(old: T) -> new: T replace old -> new move old.field A -> new.field B`.
+  Legacy explicit `output` parameters and `consume`/`create` actions remain
+  accepted, but the signature direction is the normal input-to-output surface.
+  Each state field has exactly one flow declaration; split/partial flow merging
+  is not supported.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -227,20 +227,20 @@ struct Wallet {
     owner: Address
 }
 
-lock owner_only(wallet: &Wallet, signer: Address) -> bool {
-    wallet.owner == signer
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
+    require wallet.owner == claimed_owner
 }
 ```
 
 **Effects:**
 
 ```cellscript
-action move_token(token: Token, to: Address) -> Token {
+action move_token(token: Token, to: Address) -> next_token: Token {
     assert(token.amount > 0, "empty token")
 
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -268,8 +268,8 @@ resource MintAuthority has store {
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
-    replaces auth_before with auth_after
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    replace auth_before -> auth_after
 {
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -277,16 +277,16 @@ action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Ad
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount: amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
 }
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -405,7 +405,7 @@ line/column span for diagnostics.
 Builds an AST from the token stream. The AST models the full surface:
 `resource`, `shared`, `receipt`, `struct`, `enum`, `action`, `lock`,
 `function`, `use`, `const`, capability gates, declarative flows,
-action `moves` clauses, and all statement/expression forms.
+action `move` clauses, and all statement/expression forms.
 
 **3. Semantic analysis** (`types/` + state-transition checks)
 - *Type checking* — enforces linear resource semantics: every
@@ -414,7 +414,7 @@ action `moves` clauses, and all statement/expression forms.
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
 - *State transition checking* — validates explicit state fields,
-  `flow` transition graphs, action `moves` clauses, legal state
+  `flow` transition graphs, action `move` clauses, legal state
   transitions, and static create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)

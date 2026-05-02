@@ -26,7 +26,7 @@ An output Cell is a new Cell created by a transaction. In CellScript, `create`
 materializes typed output data and attaches it to a lock:
 
 ```cellscript
-create Token {
+create token = Token {
     amount,
     symbol
 } with_lock(owner)

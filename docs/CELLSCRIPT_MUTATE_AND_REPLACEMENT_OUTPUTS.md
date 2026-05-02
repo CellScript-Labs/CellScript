@@ -6,8 +6,8 @@ CellScript models persistent state as Cell transformations, not in-place object
 mutation. The canonical one-to-one replacement form is:
 
 ```cellscript
-action update(before: State, after: output State)
-    replaces before with after
+action update(before: State) -> after: State
+    replace before -> after
 {
     require after.owner == before.owner
     require after.counter == before.counter + 1
@@ -21,7 +21,7 @@ Input#N before  ->  Output#M after
 ```
 
 `before` is consumed transaction evidence. `after` is a proposed output Cell.
-`replaces before with after` declares the deterministic relationship between
+`replace before -> after` declares the deterministic lineage relationship between
 the two. Field preservation, arithmetic transitions, authorization, capacity,
 and asset-conservation rules remain explicit `require` or verifier checks.
 
@@ -32,21 +32,21 @@ For each explicit replacement, generated metadata records:
 - input cell data binding
 - output cell data binding
 - scheduler-visible input/output access for shared state
-- field reads needed by `require` and `moves`
-- declared state transition edges from `flow`/`moves`
+- field reads needed by `require` and `move`
+- declared state transition edges from `flow`/`move`
 
 The compiler does not inject a hidden state field, does not mutate Molecule
 layout, and does not infer which output should replace which input. If a state
 move crosses two variables, it must have a matching replacement clause:
 
 ```cellscript
-moves before.state Live -> after.state Filled
+move before.state Live -> after.state Filled
 ```
 
 requires:
 
 ```cellscript
-replaces before with after
+replace before -> after
 ```
 
 ## Transition Shapes
@@ -59,7 +59,7 @@ Current production transition checks are ordinary source requirements:
 | Set | `require after.owner == new_owner` |
 | Add | `require after.balance == before.balance + delta` |
 | Sub | `require after.balance == before.balance - delta` |
-| State edge | `moves before.state A -> after.state B` |
+| State edge | `move before.state A -> after.state B` |
 
 Unsupported runtime shapes must remain fail-closed and must use a registered
 runtime error code.

@@ -58,11 +58,11 @@ receipt RoyaltyPayment {
 #[scheduler_hint(parallel, estimated_cycles = 5000)]
 action mint(
     collection_before: Collection,
-    collection_after: output Collection,
+    output collection_after: Collection,
     to: Address,
     metadata_hash: Hash,
 ) -> NFT
-    replaces collection_before with collection_after
+    replace collection_before -> collection_after
 {
     assert(collection_before.total_supply < collection_before.max_supply, "Max supply reached");
     
@@ -87,8 +87,8 @@ action mint(
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
-action transfer(nft_before: NFT, nft_after: output NFT, to: Address)
-    replaces nft_before with nft_after
+action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
+    replace nft_before -> nft_after
 {
     assert(nft_before.owner != to, "Cannot transfer to self");
     require nft_after.token_id == nft_before.token_id
@@ -129,13 +129,13 @@ action cancel_listing(listing: Listing) {
 #[scheduler_hint(sequential, estimated_cycles = 8000)]
 action buy_from_listing(
     nft_before: NFT,
-    nft_after: output NFT,
+    output nft_after: NFT,
     listing: Listing,
     buyer: Address,
     seller: Address,
     payment: u64,
 ) -> (RoyaltyPayment, RoyaltyPayment)
-    replaces nft_before with nft_after
+    replace nft_before -> nft_after
 {
     assert(payment >= listing.price, "Insufficient payment");
     
@@ -190,14 +190,14 @@ action create_offer(
 #[scheduler_hint(sequential, estimated_cycles = 8000)]
 action accept_offer(
     nft_before: NFT,
-    nft_after: output NFT,
+    output nft_after: NFT,
     offer: Offer,
     buyer: Address,
     seller: Address,
     price: u64,
     current_time: u64,
 ) -> (RoyaltyPayment, RoyaltyPayment)
-    replaces nft_before with nft_after
+    replace nft_before -> nft_after
 {
     assert(current_time < offer.expires_at, "Offer expired");
     
@@ -237,11 +237,11 @@ action burn(nft: NFT) {
 #[scheduler_hint(sequential, estimated_cycles = 30000)]
 action batch_mint(
     collection_before: Collection,
-    collection_after: output Collection,
+    output collection_after: Collection,
     recipients: [Address; 4],
     metadata_hashes: [Hash; 4],
 ) -> (NFT, NFT, NFT, NFT)
-    replaces collection_before with collection_after
+    replace collection_before -> collection_after
 {
     assert(
         collection_before.total_supply + 4 <= collection_before.max_supply,
@@ -292,22 +292,22 @@ action batch_mint(
 }
 
 
-lock nft_ownership(nft: protected NFT, claimed_owner: witness Address) -> bool {
+lock nft_ownership(protected nft: NFT, witness claimed_owner: Address) -> bool {
     require nft.owner == claimed_owner
 }
 
-lock listing_seller(listing: protected Listing, claimed_seller: witness Address) -> bool {
+lock listing_seller(protected listing: Listing, witness claimed_seller: Address) -> bool {
     require listing.seller == claimed_seller
 }
 
-lock offer_buyer(offer: protected Offer, claimed_buyer: witness Address) -> bool {
+lock offer_buyer(protected offer: Offer, witness claimed_buyer: Address) -> bool {
     require offer.buyer == claimed_buyer
 }
 
-lock valid_royalty(nft: protected NFT) -> bool {
+lock valid_royalty(protected nft: NFT) -> bool {
     require nft.royalty_bps <= 1000
 }
 
-lock collection_creator(collection: protected Collection, claimed_creator: witness Address) -> bool {
+lock collection_creator(protected collection: Collection, witness claimed_creator: Address) -> bool {
     require collection.creator == claimed_creator
 }

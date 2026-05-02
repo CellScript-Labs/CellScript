@@ -50,7 +50,7 @@ pub struct IrLifecycleRule {
 }
 
 #[derive(Debug, Clone)]
-pub struct IrStateTransitionMove {
+pub struct IrStateTransitionEdge {
     pub input_binding: Option<String>,
     pub output_binding: Option<String>,
     pub type_name: String,
@@ -101,7 +101,7 @@ pub struct IrAction {
     pub name: String,
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
-    pub state_transition_moves: Vec<IrStateTransitionMove>,
+    pub state_transition_edges: Vec<IrStateTransitionEdge>,
     pub body: IrBody,
     pub effect_class: EffectClass,
     pub scheduler_hints: SchedulerHints,
@@ -333,7 +333,7 @@ pub struct IrGenerator {
     lifecycle_states: HashMap<String, Vec<String>>,
     lifecycle_state_fields: HashMap<String, String>,
     lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
-    state_machine_action_moves: HashMap<String, Vec<IrStateTransitionMove>>,
+    state_machine_action_edges: HashMap<String, Vec<IrStateTransitionEdge>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, Expr>,
     function_effects: HashMap<String, EffectClass>,
@@ -374,7 +374,7 @@ impl IrGenerator {
             lifecycle_states: HashMap::new(),
             lifecycle_state_fields: HashMap::new(),
             lifecycle_rules: HashMap::new(),
-            state_machine_action_moves: HashMap::new(),
+            state_machine_action_edges: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -554,7 +554,7 @@ impl IrGenerator {
                 let Some(to_index) = states.iter().position(|state| state == &to) else {
                     continue;
                 };
-                self.state_machine_action_moves.entry(action.clone()).or_default().push(IrStateTransitionMove {
+                self.state_machine_action_edges.entry(action.clone()).or_default().push(IrStateTransitionEdge {
                     input_binding: None,
                     output_binding: None,
                     type_name: type_name.clone(),
@@ -718,6 +718,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let (params, body) = self.lower_signature_and_body(
             &function.params,
+            &[],
             &function.body,
             function.return_type.is_some(),
             &HashSet::new(),
@@ -792,6 +793,7 @@ impl IrGenerator {
         let core_input_bindings = action_core_input_binding_names(action);
         let (params, body) = self.lower_signature_and_body(
             &action.params,
+            &action.outputs,
             &action.body,
             action.return_type.is_some(),
             &output_bindings,
@@ -822,7 +824,7 @@ impl IrGenerator {
             name: action.name.clone(),
             params,
             return_type: action.return_type.as_ref().map(Self::convert_type),
-            state_transition_moves: self.action_state_transition_moves(action),
+            state_transition_edges: self.action_state_transition_edges(action),
             body,
             effect_class: if action.effect_declared { declared_effect_class } else { effect_class },
             scheduler_hints: action
@@ -837,49 +839,49 @@ impl IrGenerator {
         }
     }
 
-    fn action_state_transition_moves(&self, action: &ActionDef) -> Vec<IrStateTransitionMove> {
-        let mut moves = self.state_machine_action_moves.get(&action.name).cloned().unwrap_or_default();
-        for state_move in &action.state_moves {
-            if let Some(path) = &state_move.path {
+    fn action_state_transition_edges(&self, action: &ActionDef) -> Vec<IrStateTransitionEdge> {
+        let mut edges = self.state_machine_action_edges.get(&action.name).cloned().unwrap_or_default();
+        for state_edge in &action.state_edges {
+            if let Some(path) = &state_edge.path {
                 let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
                     continue;
                 };
                 let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
                     continue;
                 };
-                if let Some(mut lowered) = self.state_transition_move_for(type_name, &path.field, &state_move.from, &state_move.to) {
+                if let Some(mut lowered) = self.state_transition_edge_for(type_name, &path.field, &state_edge.from, &state_edge.to) {
                     lowered.input_binding = Some(path.base.clone());
-                    lowered.output_binding = state_move.to_path.as_ref().map(|to_path| to_path.base.clone());
-                    moves.push(lowered);
+                    lowered.output_binding = state_edge.to_path.as_ref().map(|to_path| to_path.base.clone());
+                    edges.push(lowered);
                 }
             } else {
-                for candidate in self.state_machine_action_moves.get(&action.name).into_iter().flatten() {
-                    if candidate.from == self.canonical_state_name(&candidate.type_name, &state_move.from)
-                        && candidate.to == self.canonical_state_name(&candidate.type_name, &state_move.to)
+                for candidate in self.state_machine_action_edges.get(&action.name).into_iter().flatten() {
+                    if candidate.from == self.canonical_state_name(&candidate.type_name, &state_edge.from)
+                        && candidate.to == self.canonical_state_name(&candidate.type_name, &state_edge.to)
                     {
-                        moves.push(candidate.clone());
+                        edges.push(candidate.clone());
                     }
                 }
             }
         }
 
         let mut unique = Vec::new();
-        for state_move in moves {
-            if !unique.iter().any(|existing: &IrStateTransitionMove| {
-                existing.type_name == state_move.type_name
-                    && existing.field_name == state_move.field_name
-                    && existing.input_binding == state_move.input_binding
-                    && existing.output_binding == state_move.output_binding
-                    && existing.from_index == state_move.from_index
-                    && existing.to_index == state_move.to_index
+        for state_edge in edges {
+            if !unique.iter().any(|existing: &IrStateTransitionEdge| {
+                existing.type_name == state_edge.type_name
+                    && existing.field_name == state_edge.field_name
+                    && existing.input_binding == state_edge.input_binding
+                    && existing.output_binding == state_edge.output_binding
+                    && existing.from_index == state_edge.from_index
+                    && existing.to_index == state_edge.to_index
             }) {
-                unique.push(state_move);
+                unique.push(state_edge);
             }
         }
         unique
     }
 
-    fn state_transition_move_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrStateTransitionMove> {
+    fn state_transition_edge_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrStateTransitionEdge> {
         if self.lifecycle_state_fields.get(type_name).is_some_and(|field| field != field_name) {
             return None;
         }
@@ -888,7 +890,7 @@ impl IrGenerator {
         let to = self.canonical_state_name(type_name, to);
         let from_index = states.iter().position(|state| state == &from)?;
         let to_index = states.iter().position(|state| state == &to)?;
-        Some(IrStateTransitionMove {
+        Some(IrStateTransitionEdge {
             input_binding: None,
             output_binding: None,
             type_name: type_name.to_string(),
@@ -912,7 +914,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
-        let (params, body) = self.lower_signature_and_body(&lock.params, &lock.body, true, &HashSet::new(), &HashSet::new());
+        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, true, &HashSet::new(), &HashSet::new());
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
@@ -1146,13 +1148,14 @@ impl IrGenerator {
     fn lower_signature_and_body(
         &mut self,
         params: &[Param],
+        outputs: &[crate::ast::ActionOutput],
         stmts: &[Stmt],
         tail_expr_returns: bool,
         output_bindings: &HashSet<String>,
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
         let mut vars = HashMap::new();
-        let ir_params = params
+        let mut ir_params = params
             .iter()
             .map(|param| {
                 let binding = self.new_var(param.name.clone(), Self::convert_type(&param.ty));
@@ -1169,6 +1172,19 @@ impl IrGenerator {
                 }
             })
             .collect::<Vec<_>>();
+        for output in outputs {
+            let binding = self.new_var(output.name.clone(), Self::convert_type(&output.ty));
+            vars.insert(output.name.clone(), binding.clone());
+            ir_params.push(IrParam {
+                name: output.name.clone(),
+                ty: Self::convert_type(&output.ty),
+                is_mut: false,
+                is_ref: false,
+                is_read_ref: false,
+                source: ParamSource::Output,
+                binding,
+            });
+        }
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
@@ -1278,6 +1294,8 @@ impl IrGenerator {
     }
 
     fn collect_create_patterns(&self, blocks: &[IrBlock], params: &[IrParam]) -> Vec<CreatePattern> {
+        let output_bindings =
+            params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()).collect::<HashSet<_>>();
         let mut patterns = params
             .iter()
             .filter(|param| param.source == ParamSource::Output)
@@ -1286,7 +1304,15 @@ impl IrGenerator {
         for block in blocks {
             for instruction in &block.instructions {
                 if let IrInstruction::Create { pattern, .. } = instruction {
-                    patterns.push(pattern.clone());
+                    if pattern.operation == "output" && output_bindings.contains(&pattern.binding) {
+                        if let Some(existing) = patterns.iter_mut().find(|existing| existing.binding == pattern.binding) {
+                            *existing = pattern.clone();
+                        } else {
+                            patterns.push(pattern.clone());
+                        }
+                    } else {
+                        patterns.push(pattern.clone());
+                    }
                 } else if let IrInstruction::Transfer { dest, to, .. } = instruction {
                     if let Some(pattern) = self.create_pattern_from_var_with_lock(dest, "transfer", Some(to.clone())) {
                         patterns.push(pattern);
@@ -2395,7 +2421,11 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
-        let dest = self.new_var(format!("create_{}", create.ty), IrType::Named(create.ty.clone()));
+        let dest = if let Some(target) = &create.target {
+            vars.get(target).cloned().unwrap_or_else(|| self.new_var(target.clone(), IrType::Named(create.ty.clone())))
+        } else {
+            self.new_var(format!("create_{}", create.ty), IrType::Named(create.ty.clone()))
+        };
         let mut active = current;
         let mut lowered_fields = Vec::with_capacity(create.fields.len());
         let mut field_vars = HashMap::new();
@@ -2436,7 +2466,7 @@ impl IrGenerator {
         };
 
         let pattern = CreatePattern {
-            operation: "create".to_string(),
+            operation: if create.target.is_some() { "output".to_string() } else { "create".to_string() },
             ty: create.ty.clone(),
             binding: dest.name.clone(),
             fields: lowered_fields,
@@ -4513,7 +4543,9 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
 }
 
 fn action_output_binding_names(action: &ActionDef) -> HashSet<String> {
-    action.params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()).collect::<HashSet<_>>()
+    let mut names = action.outputs.iter().map(|output| output.name.clone()).collect::<HashSet<_>>();
+    names.extend(action.params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()));
+    names
 }
 
 fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {

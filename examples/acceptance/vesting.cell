@@ -47,7 +47,7 @@ action create_vesting_config(
 }
 
 action grant_vesting(
-    config: read_ref VestingConfig,
+    read config: VestingConfig,
     tokens: Token,
     beneficiary: Address
 ) -> VestingGrant {
@@ -114,7 +114,7 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
 // is factored through `vesting_admin` so the authority predicate is visible as a
 // lock entry and is covered by the CKB valid-spend and invalid-spend matrix.
 action revoke_grant(
-    config: read_ref VestingConfig,
+    read config: VestingConfig,
     grant: VestingGrant,
     claimed_admin: Address
 ) -> (Token, Token) {
@@ -159,6 +159,6 @@ fn is_vesting_admin(config: &VestingConfig, claimed_admin: Address) -> bool {
 // The CKB acceptance matrix spends this lock with the configured admin and
 // rejects a non-admin witness. Full witness-sighash authorization still needs a
 // first-class signer/lock-args binding in the language surface.
-lock vesting_admin(config: protected VestingConfig, claimed_admin: witness Address) -> bool {
+lock vesting_admin(protected config: VestingConfig, witness claimed_admin: Address) -> bool {
     require is_vesting_admin(config, claimed_admin)
 }

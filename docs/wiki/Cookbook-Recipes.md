@@ -36,15 +36,15 @@ must consume, return, transfer, claim, settle, or destroy it.
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
-    replaces auth_before with auth_after
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    replace auth_before -> auth_after
 {
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
@@ -56,12 +56,13 @@ the lock on the created output Cell.
 
 ## Recipe: Replace State Instead Of Updating In Place
 
-Use an explicit input/output pair when the transaction replaces state. The input
-and output names are ordinary parameters; `replaces` is the Cell relationship.
+Use an input-to-output action signature when the transaction replaces state. The
+input and output names are ordinary bindings; `replace` is the Cell lineage
+relationship.
 
 ```cellscript
-action bump_nonce(wallet_before: Wallet, wallet_after: output Wallet)
-    replaces wallet_before with wallet_after
+action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet
+    replace wallet_before -> wallet_after
 {
     require wallet_after.owner == wallet_before.owner
     require wallet_after.nonce == wallet_before.nonce + 1
@@ -76,7 +77,7 @@ and output binding. Do not treat it as account storage.
 Use `protected`, `witness`, and `require` to make the CKB boundary readable.
 
 ```cellscript
-lock owner_only(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner
 }
 ```
@@ -95,7 +96,7 @@ signature verification.
 
 ```cellscript
 // Misleading: this is still only witness data.
-lock bad_owner_check(wallet: protected Wallet, signer: witness Address) -> bool {
+lock bad_owner_check(protected wallet: Wallet, witness signer: Address) -> bool {
     require wallet.owner == signer
 }
 ```
@@ -109,9 +110,9 @@ The intended shape for real signature authorization is explicit:
 
 ```cellscript
 lock signed_owner(
-    wallet: protected Wallet,
-    owner: lock_args Address,
-    sig: witness Signature
+    protected wallet: Wallet,
+    lock_args owner: Address,
+    witness sig: Signature
 ) -> bool {
     require verify_sighash_all(sig, owner)
     require wallet.owner == owner
@@ -129,7 +130,7 @@ Use `[]` only where the expected `Vec<T>` type is known.
 ```cellscript
 let mut keys: Vec<Hash> = []
 
-create Proposal {
+create proposal = Proposal {
     proposal_id,
     proposer,
     data: [],

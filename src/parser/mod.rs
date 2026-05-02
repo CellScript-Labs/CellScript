@@ -228,7 +228,7 @@ impl<'a> Parser<'a> {
                 }
                 "lifecycle" => {
                     return Err(CompileError::new(
-                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use flow plus action moves",
+                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use flow plus action move clauses",
                         self.current().span,
                     ));
                 }
@@ -528,7 +528,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::LBracket) {
             return Err(CompileError::new(
-                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use flow plus action moves",
+                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use flow plus action move clauses",
                 self.current().span,
             ));
         }
@@ -918,14 +918,14 @@ impl<'a> Parser<'a> {
 
         let params = self.parse_params()?;
 
-        let return_type = if self.check(&TokenKind::Arrow) {
+        let (return_type, outputs) = if self.check(&TokenKind::Arrow) {
             self.advance();
-            Some(self.parse_type()?)
+            self.parse_action_output_signature()?
         } else {
-            None
+            (None, Vec::new())
         };
 
-        let (replacements, state_moves) = self.parse_action_clauses()?;
+        let (replacements, state_edges) = self.parse_action_clauses()?;
         let body = self.parse_block()?;
 
         let end_span = self.current().span;
@@ -935,8 +935,9 @@ impl<'a> Parser<'a> {
             name,
             params,
             return_type,
+            outputs,
             replacements,
-            state_moves,
+            state_edges,
             body,
             effect: effect.unwrap_or(EffectClass::Pure),
             effect_declared,
@@ -946,42 +947,85 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_action_clauses(&mut self) -> Result<(Vec<ActionReplacement>, Vec<ActionStateMove>)> {
+    fn parse_action_output_signature(&mut self) -> Result<(Option<Type>, Vec<ActionOutput>)> {
+        self.skip_newlines();
+
+        if self.check(&TokenKind::LParen) && self.action_output_tuple_looks_named() {
+            self.advance();
+            self.skip_newlines();
+            let mut outputs = Vec::new();
+            while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+                outputs.push(self.parse_action_output_binding()?);
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                } else {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            return Ok((None, outputs));
+        }
+
+        if self.action_output_looks_named() {
+            return Ok((None, vec![self.parse_action_output_binding()?]));
+        }
+
+        Ok((Some(self.parse_type()?), Vec::new()))
+    }
+
+    fn action_output_tuple_looks_named(&self) -> bool {
+        matches!((&self.peek(1).kind, &self.peek(2).kind), (TokenKind::Identifier(_), TokenKind::Colon))
+    }
+
+    fn action_output_looks_named(&self) -> bool {
+        matches!((&self.current().kind, &self.peek(1).kind), (TokenKind::Identifier(_), TokenKind::Colon))
+    }
+
+    fn parse_action_output_binding(&mut self) -> Result<ActionOutput> {
+        let start_span = self.current().span;
+        let name = self.parse_name()?;
+        self.expect(TokenKind::Colon)?;
+        let ty = self.parse_type()?;
+        let end_span = self.current().span;
+        Ok(ActionOutput { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
+    }
+
+    fn parse_action_clauses(&mut self) -> Result<(Vec<ActionReplacement>, Vec<ActionStateEdge>)> {
         let mut replacements = Vec::new();
-        let mut state_moves = Vec::new();
+        let mut state_edges = Vec::new();
 
         loop {
             self.skip_newlines();
             match &self.current().kind {
-                TokenKind::Identifier(name) if name == "replaces" => {
+                TokenKind::Identifier(name) if name == "replace" => {
                     replacements.extend(self.parse_action_replacements()?);
                 }
+                TokenKind::Identifier(name) if name == "move" => {
+                    state_edges.extend(self.parse_action_state_edges()?);
+                }
                 TokenKind::Identifier(name) if name == "moves" => {
-                    state_moves.extend(self.parse_action_state_moves()?);
+                    return Err(CompileError::new("state transition clauses use `move`, not `moves`", self.current().span));
                 }
                 _ => break,
             }
         }
 
-        Ok((replacements, state_moves))
+        Ok((replacements, state_edges))
     }
 
     fn parse_action_replacements(&mut self) -> Result<Vec<ActionReplacement>> {
-        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replaces") {
+        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace") {
             return Ok(Vec::new());
         }
 
         let mut replacements = Vec::new();
-        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replaces") {
+        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace") {
             self.advance();
             loop {
                 let start_span = self.current().span;
                 let input = self.parse_name()?;
-                let with_span = self.current().span;
-                let with = self.parse_name()?;
-                if with != "with" {
-                    return Err(CompileError::new("expected 'with' in replacement clause", with_span));
-                }
+                self.expect(TokenKind::Arrow)?;
                 let output = self.parse_name()?;
                 let end_span = self.current().span;
                 replacements.push(ActionReplacement {
@@ -1002,13 +1046,13 @@ impl<'a> Parser<'a> {
         Ok(replacements)
     }
 
-    fn parse_action_state_moves(&mut self) -> Result<Vec<ActionStateMove>> {
-        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "moves") {
+    fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
+        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "move") {
             return Ok(Vec::new());
         }
 
-        let mut moves = Vec::new();
-        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "moves") {
+        let mut edges = Vec::new();
+        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "move") {
             self.advance();
             loop {
                 let start_span = self.current().span;
@@ -1033,7 +1077,7 @@ impl<'a> Parser<'a> {
                     (None, to_first)
                 };
                 let end_span = self.current().span;
-                moves.push(ActionStateMove {
+                edges.push(ActionStateEdge {
                     path,
                     to_path,
                     from,
@@ -1050,7 +1094,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
 
-        Ok(moves)
+        Ok(edges)
     }
 
     fn parse_fn(&mut self) -> Result<FnDef> {
@@ -1132,7 +1176,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `before: input T, after: output T` with `replaces before with after` for replacement Cell state",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T replace before -> after` for replacement Cell state",
                 self.current().span,
             ));
         }
@@ -1145,12 +1189,13 @@ impl<'a> Parser<'a> {
             false
         };
 
+        let (prefix_source, prefix_read_ref) = self.parse_param_source_prefix();
         let name = self.parse_name()?;
 
         self.expect(TokenKind::Colon)?;
-        let source = self.parse_param_source_marker();
-        let is_read_ref = self.check(&TokenKind::ReadRef);
-        let ty = if source == ParamSource::Protected {
+        let source = prefix_source;
+        let is_read_ref = prefix_read_ref;
+        let mut ty = if source == ParamSource::Protected {
             if is_read_ref {
                 return Err(CompileError::new(
                     "protected parameters already denote the lock's protected read-only Cell view; remove 'read_ref'",
@@ -1161,7 +1206,7 @@ impl<'a> Parser<'a> {
             match protected_ty {
                 Type::Ref(_) | Type::MutRef(_) => {
                     return Err(CompileError::new(
-                        "protected parameters use 'name: protected T', not 'name: protected &T'",
+                        "protected parameters use 'protected name: T', not 'protected name: &T'",
                         self.current().span,
                     ));
                 }
@@ -1170,6 +1215,9 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_type()?
         };
+        if prefix_read_ref && !matches!(ty, Type::Ref(_)) {
+            ty = Type::Ref(Box::new(ty));
+        }
 
         let end_span = self.current().span;
         Ok(Param {
@@ -1183,19 +1231,34 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_param_source_marker(&mut self) -> ParamSource {
-        let source = match &self.current().kind {
-            TokenKind::Identifier(name) if name == "input" => ParamSource::Input,
-            TokenKind::Identifier(name) if name == "protected" => ParamSource::Protected,
-            TokenKind::Identifier(name) if name == "output" => ParamSource::Output,
-            TokenKind::Identifier(name) if name == "witness" => ParamSource::Witness,
-            TokenKind::Identifier(name) if name == "lock_args" => ParamSource::LockArgs,
-            _ => ParamSource::Default,
-        };
-        if source != ParamSource::Default {
-            self.advance();
+    fn parse_param_source_prefix(&mut self) -> (ParamSource, bool) {
+        match (&self.current().kind, &self.peek(1).kind, &self.peek(2).kind) {
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "read" => {
+                self.advance();
+                (ParamSource::Default, true)
+            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "input" => {
+                self.advance();
+                (ParamSource::Input, false)
+            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "output" => {
+                self.advance();
+                (ParamSource::Output, false)
+            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "protected" => {
+                self.advance();
+                (ParamSource::Protected, false)
+            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "witness" => {
+                self.advance();
+                (ParamSource::Witness, false)
+            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "lock_args" => {
+                self.advance();
+                (ParamSource::LockArgs, false)
+            }
+            _ => (ParamSource::Default, false),
         }
-        source
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>> {
@@ -1737,7 +1800,13 @@ impl<'a> Parser<'a> {
     fn parse_create(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Create)?;
-        let ty = self.parse_name_path()?;
+        let first = self.parse_name_path()?;
+        let (target, ty) = if self.check(&TokenKind::Eq) {
+            self.advance();
+            (Some(first), self.parse_name_path()?)
+        } else {
+            (None, first)
+        };
 
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
@@ -1776,6 +1845,7 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(Expr::Create(CreateExpr {
+            target,
             ty,
             fields,
             lock,
@@ -2137,7 +2207,7 @@ action mint(amount: u64) -> Token {
     }
 
     #[test]
-    fn test_parse_flow_and_action_moves() {
+    fn test_parse_flow_and_action_move_clause() {
         let input = r#"
 module test
 
@@ -2146,9 +2216,9 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: input Offer, output: output Offer)
-    replaces input with output
-    moves input.state Live -> output.state Filled
+	action accept(input: Offer) -> output: Offer
+	    replace input -> output
+	    move input.state Live -> output.state Filled
 {
     require output.state == OfferState::Filled
 }
@@ -2162,13 +2232,38 @@ action accept(input: input Offer, output: output Offer)
         assert_eq!(action.replacements.len(), 1);
         assert_eq!(action.replacements[0].input, "input");
         assert_eq!(action.replacements[0].output, "output");
-        assert_eq!(action.params[0].source, ParamSource::Input);
-        assert_eq!(action.params[1].source, ParamSource::Output);
-        assert_eq!(action.state_moves.len(), 1);
-        assert_eq!(action.state_moves[0].path.as_ref().map(|path| path.base.as_str()), Some("input"));
-        assert_eq!(action.state_moves[0].to_path.as_ref().map(|path| path.base.as_str()), Some("output"));
-        assert_eq!(action.state_moves[0].from, "Live");
-        assert_eq!(action.state_moves[0].to, "Filled");
+        assert_eq!(action.params[0].source, ParamSource::Default);
+        assert_eq!(action.outputs.len(), 1);
+        assert_eq!(action.outputs[0].name, "output");
+        assert_eq!(action.state_edges.len(), 1);
+        assert_eq!(action.state_edges[0].path.as_ref().map(|path| path.base.as_str()), Some("input"));
+        assert_eq!(action.state_edges[0].to_path.as_ref().map(|path| path.base.as_str()), Some("output"));
+        assert_eq!(action.state_edges[0].from, "Live");
+        assert_eq!(action.state_edges[0].to, "Filled");
+    }
+
+    #[test]
+    fn test_parse_prefix_source_and_create_target() {
+        let input = r#"
+module test
+
+action grant(read config: Config, token: Token) -> grant: Grant {
+    consume token
+    create grant = Grant { admin: config.admin }
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+        assert!(action.params[0].is_read_ref);
+        assert_eq!(action.params[0].name, "config");
+        assert_eq!(action.outputs[0].name, "grant");
+        let Stmt::Expr(Expr::Create(create)) = &action.body[1] else {
+            panic!("expected targeted create");
+        };
+        assert_eq!(create.target.as_deref(), Some("grant"));
     }
 
     #[test]

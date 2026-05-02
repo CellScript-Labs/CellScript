@@ -221,7 +221,7 @@ impl Optimizer {
                     fields.push((name.clone(), self.optimize_expr(value)?));
                 }
                 let lock = create.lock.as_ref().map(|lock| self.optimize_expr(lock)).transpose()?.map(Box::new);
-                Ok(Expr::Create(CreateExpr { ty: create.ty.clone(), fields, lock, span: create.span }))
+                Ok(Expr::Create(CreateExpr { target: create.target.clone(), ty: create.ty.clone(), fields, lock, span: create.span }))
             }
             Expr::Consume(consume) => {
                 Ok(Expr::Consume(ConsumeExpr { expr: Box::new(self.optimize_expr(&consume.expr)?), span: consume.span }))
@@ -932,8 +932,9 @@ mod tests {
                 name: "run".to_string(),
                 params: Vec::new(),
                 return_type: None,
+                outputs: Vec::new(),
                 replacements: Vec::new(),
-                state_moves: Vec::new(),
+                state_edges: Vec::new(),
                 body: vec![Stmt::If(IfStmt {
                     condition: Expr::Bool(false),
                     then_branch: vec![Stmt::Expr(Expr::Destroy(DestroyExpr {
@@ -1000,8 +1001,9 @@ mod tests {
                     name: "run".to_string(),
                     params: Vec::new(),
                     return_type: Some(Type::U64),
+                    outputs: Vec::new(),
                     replacements: Vec::new(),
-                    state_moves: Vec::new(),
+                    state_edges: Vec::new(),
                     body: vec![
                         Stmt::Let(LetStmt {
                             pattern: BindingPattern::Name("unused_local".to_string()),

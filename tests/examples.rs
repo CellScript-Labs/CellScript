@@ -1038,7 +1038,11 @@ fn token_mint_authority_replacement_is_explicit() {
 
     assert_eq!(mint.effect_class, "Mutating");
     assert_replacement(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
-    assert_create(mint, "Token", "token mint");
+    assert!(
+        mint.create_set.iter().any(|pattern| pattern.ty == "Token" && pattern.operation == "output" && pattern.binding == "token"),
+        "token mint should expose a named Token output binding: {:?}",
+        mint.create_set
+    );
     assert!(
         mint.fail_closed_runtime_features.is_empty(),
         "mint authority replacement should be verifier-coverable, not a fail-closed lowering path: {:?}",

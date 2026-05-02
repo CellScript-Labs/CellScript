@@ -138,13 +138,21 @@ pub struct ActionDef {
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub outputs: Vec<ActionOutput>,
     pub replacements: Vec<ActionReplacement>,
-    pub state_moves: Vec<ActionStateMove>,
+    pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
     pub effect: EffectClass,
     pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     pub doc_comment: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionOutput {
+    pub name: String,
+    pub ty: Type,
     pub span: Span,
 }
 
@@ -156,7 +164,7 @@ pub struct ActionReplacement {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActionStateMove {
+pub struct ActionStateEdge {
     pub path: Option<StateFieldPath>,
     pub to_path: Option<StateFieldPath>,
     pub from: String,
@@ -393,6 +401,7 @@ pub struct IndexExpr {
 
 #[derive(Debug, Clone)]
 pub struct CreateExpr {
+    pub target: Option<String>,
     pub ty: String,
     pub fields: Vec<(String, Expr)>,
     pub lock: Option<Box<Expr>>,

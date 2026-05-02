@@ -105,13 +105,13 @@ action create_wallet(
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
 action propose_transfer(
     wallet_before: MultisigWallet,
-    wallet_after: output MultisigWallet,
+    output wallet_after: MultisigWallet,
     proposer: Address,
     target: Address,
     amount: u64,
     current_time: u64,
 ) -> Proposal
-    replaces wallet_before with wallet_after
+    replace wallet_before -> wallet_after
 {
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
@@ -147,13 +147,13 @@ action propose_transfer(
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
 action add_signature(
     proposal_before: Proposal,
-    proposal_after: output Proposal,
+    output proposal_after: Proposal,
     wallet: &MultisigWallet,
     signer: Address,
     signature: [u8; 64],
     current_time: u64,
 ) -> SignatureConfirmation
-    replaces proposal_before with proposal_after
+    replace proposal_before -> proposal_after
 {
     assert(current_time < proposal_before.expires_at, "Proposal expired");
 
@@ -244,12 +244,12 @@ action cancel_proposal(
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
 action propose_add_signer(
     wallet_before: MultisigWallet,
-    wallet_after: output MultisigWallet,
+    output wallet_after: MultisigWallet,
     proposer: Address,
     new_signer: Address,
     current_time: u64,
 ) -> Proposal
-    replaces wallet_before with wallet_after
+    replace wallet_before -> wallet_after
 {
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
@@ -291,12 +291,12 @@ action propose_add_signer(
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
 action propose_remove_signer(
     wallet_before: MultisigWallet,
-    wallet_after: output MultisigWallet,
+    output wallet_after: MultisigWallet,
     proposer: Address,
     signer_to_remove: Address,
     current_time: u64,
 ) -> Proposal
-    replaces wallet_before with wallet_after
+    replace wallet_before -> wallet_after
 {
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
@@ -335,12 +335,12 @@ action propose_remove_signer(
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
 action propose_change_threshold(
     wallet_before: MultisigWallet,
-    wallet_after: output MultisigWallet,
+    output wallet_after: MultisigWallet,
     proposer: Address,
     new_threshold: u8,
     current_time: u64,
 ) -> Proposal
-    replaces wallet_before with wallet_after
+    replace wallet_before -> wallet_after
 {
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
@@ -400,23 +400,23 @@ fn hash_wallet(wallet: &MultisigWallet) -> Hash {
 }
 
 
-lock is_signer_lock(wallet: protected MultisigWallet, addr: witness Address) -> bool {
+lock is_signer_lock(protected wallet: MultisigWallet, witness addr: Address) -> bool {
     require is_signer(wallet, addr)
 }
 
-lock can_execute(proposal: protected Proposal, current_time: witness u64) -> bool {
+lock can_execute(protected proposal: Proposal, witness current_time: u64) -> bool {
     require proposal.signatures.len() >= proposal.required_signatures as usize
         && current_time < proposal.expires_at
 }
 
-lock can_cancel(proposal: protected Proposal, caller: witness Address) -> bool {
+lock can_cancel(protected proposal: Proposal, witness caller: Address) -> bool {
     require proposal.proposer == caller
 }
 
-lock has_enough_signatures(proposal: protected Proposal) -> bool {
+lock has_enough_signatures(protected proposal: Proposal) -> bool {
     require proposal.signatures.len() >= proposal.required_signatures as usize
 }
 
-lock not_expired(proposal: protected Proposal, current_time: witness u64) -> bool {
+lock not_expired(protected proposal: Proposal, witness current_time: u64) -> bool {
     require current_time < proposal.expires_at
 }

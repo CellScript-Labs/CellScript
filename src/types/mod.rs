@@ -639,14 +639,34 @@ impl<'a> TypeChecker<'a> {
                 let Some(action) = actions.get(action_name.as_str()).copied() else {
                     continue;
                 };
-                let has_explicit_binding = action.state_moves.iter().any(|state_move| {
-                    state_move.path.as_ref().is_some_and(|path| {
+                let has_explicit_binding = action.state_edges.iter().any(|state_edge| {
+                    state_edge.path.as_ref().is_some_and(|path| {
                         path.field == spec.field_name
                             && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
+                            && self
+                                .canonical_state_name_for_machine(
+                                    &spec.type_name,
+                                    spec.field_enum_type.as_deref(),
+                                    &spec.states,
+                                    &state_edge.from,
+                                    state_edge.span,
+                                )
+                                .ok()
+                                .is_some_and(|from| from == transition.from)
+                            && self
+                                .canonical_state_name_for_machine(
+                                    &spec.type_name,
+                                    spec.field_enum_type.as_deref(),
+                                    &spec.states,
+                                    &state_edge.to,
+                                    state_edge.span,
+                                )
+                                .ok()
+                                .is_some_and(|to| to == transition.to)
                     })
                 });
-                let has_explicit_output_binding = action.state_moves.iter().any(|state_move| {
-                    state_move.path.as_ref().zip(state_move.to_path.as_ref()).is_some_and(|(from_path, to_path)| {
+                let has_explicit_output_binding = action.state_edges.iter().any(|state_edge| {
+                    state_edge.path.as_ref().zip(state_edge.to_path.as_ref()).is_some_and(|(from_path, to_path)| {
                         from_path.field == spec.field_name
                             && to_path.field == spec.field_name
                             && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
@@ -655,14 +675,50 @@ impl<'a> TypeChecker<'a> {
                                 .replacements
                                 .iter()
                                 .any(|replacement| replacement.input == from_path.base && replacement.output == to_path.base)
+                            && self
+                                .canonical_state_name_for_machine(
+                                    &spec.type_name,
+                                    spec.field_enum_type.as_deref(),
+                                    &spec.states,
+                                    &state_edge.from,
+                                    state_edge.span,
+                                )
+                                .ok()
+                                .is_some_and(|from| from == transition.from)
+                            && self
+                                .canonical_state_name_for_machine(
+                                    &spec.type_name,
+                                    spec.field_enum_type.as_deref(),
+                                    &spec.states,
+                                    &state_edge.to,
+                                    state_edge.span,
+                                )
+                                .ok()
+                                .is_some_and(|to| to == transition.to)
                     })
                 });
+                let has_mismatched_explicit_binding = !has_explicit_binding
+                    && action.state_edges.iter().any(|state_edge| {
+                        state_edge.path.as_ref().is_some_and(|path| {
+                            path.field == spec.field_name
+                                && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
+                        })
+                    });
+                if has_mismatched_explicit_binding {
+                    return Err(CompileError::new(
+                        format!(
+                            "state transition action '{}' is bound to '{}.{} {} -> {}' but its explicit move clause uses a different edge",
+                            action.name, spec.type_name, spec.field_name, transition.from, transition.to
+                        ),
+                        transition.span,
+                    ));
+                }
                 if !has_explicit_binding {
                     let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
                     if consumed.len() != 1 {
                         return Err(CompileError::new(
                             format!(
-                                "state transition action '{}' for '{}.{}' must consume exactly one '{}' input or declare an explicit moves binding",
+                                "state transition action '{}' for '{}.{}' must consume exactly one '{}' input or declare an explicit move binding",
                                 action.name, spec.type_name, spec.field_name, spec.type_name
                             ),
                             transition.span,
@@ -723,8 +779,8 @@ impl<'a> TypeChecker<'a> {
             {
                 return Err(CompileError::new(
                     format!(
-                        "replacement input '{}' must be an owned Cell input parameter, written `{}: T`",
-                        replacement.input, replacement.input
+                        "replacement input '{}' must be an owned Cell input parameter, written `{}: T` or `input {}: T`",
+                        replacement.input, replacement.input, replacement.input
                     ),
                     input_param.span,
                 ));
@@ -736,25 +792,33 @@ impl<'a> TypeChecker<'a> {
                 ));
             };
 
-            let Some(output_param) = action.params.iter().find(|param| param.name == replacement.output) else {
+            let output_span = action
+                .outputs
+                .iter()
+                .find(|output| output.name == replacement.output)
+                .map(|output| output.span)
+                .or_else(|| action.params.iter().find(|param| param.name == replacement.output).map(|param| param.span));
+            let Some(output_span) = output_span else {
                 return Err(CompileError::new(
-                    format!("replacement output '{}' is not an action parameter", replacement.output),
+                    format!("replacement output '{}' is not an action output binding", replacement.output),
                     replacement.span,
                 ));
             };
-            if output_param.source != ParamSource::Output {
+            if action.params.iter().any(|param| param.name == replacement.output && param.source != ParamSource::Output)
+                && !action.outputs.iter().any(|output| output.name == replacement.output)
+            {
                 return Err(CompileError::new(
                     format!(
-                        "replacement output '{}' must be declared as `{}: output {}`",
+                        "replacement output '{}' must be declared as a named action output or `output {}: {}`",
                         replacement.output, replacement.output, input_type
                     ),
-                    output_param.span,
+                    output_span,
                 ));
             }
             let Some(output_type) = action_param_output_named_type(action, &replacement.output) else {
                 return Err(CompileError::new(
                     format!("replacement output '{}' must name a Cell-backed output type", replacement.output),
-                    output_param.span,
+                    output_span,
                 ));
             };
             if input_type != output_type {
@@ -960,8 +1024,10 @@ impl<'a> TypeChecker<'a> {
             let core_evidence_bindings = action_core_evidence_binding_names(action);
 
             self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings)?;
+            self.bind_action_outputs(&mut env, action)?;
             self.validate_action_replacements(action)?;
-            self.validate_action_state_moves(action, &env)?;
+            self.validate_action_state_edges(action, &env)?;
+            self.validate_action_create_targets(action)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -985,14 +1051,179 @@ impl<'a> TypeChecker<'a> {
         result
     }
 
-    fn validate_action_state_moves(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
+    fn bind_action_outputs(&self, env: &mut TypeEnv, action: &ActionDef) -> Result<()> {
+        let mut seen = action.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
+        for output in &action.outputs {
+            if output.name == "_" {
+                return Err(CompileError::new(
+                    format!("action '{}' output binding must have a stable name", action.name),
+                    output.span,
+                ));
+            }
+            if !seen.insert(output.name.clone()) {
+                return Err(CompileError::new(
+                    format!("duplicate action binding '{}' in action '{}'", output.name, action.name),
+                    output.span,
+                ));
+            }
+            self.validate_type(&output.ty)?;
+            let Some(type_name) = Self::base_type_name(&output.ty) else {
+                return Err(CompileError::new(
+                    format!("action output '{}' must name a Cell-backed resource, shared cell, or receipt type", output.name),
+                    output.span,
+                ));
+            };
+            if self.resolve_cell_type_kind(type_name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "action output '{}' references non-Cell type {}; action outputs are proposed transaction output Cells",
+                        output.name,
+                        type_repr(&output.ty)
+                    ),
+                    output.span,
+                ));
+            }
+            env.bind_new(output.name.clone(), output.ty.clone(), false, false, output.span)?;
+        }
+        Ok(())
+    }
+
+    fn validate_action_create_targets(&self, action: &ActionDef) -> Result<()> {
+        let outputs = action_output_binding_names(action);
+        self.validate_create_targets_in_stmts(&action.body, &outputs)
+    }
+
+    fn validate_create_targets_in_stmts(&self, stmts: &[Stmt], outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.validate_create_targets_in_expr(expr, outputs)?,
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_create_targets_in_expr(&if_stmt.condition, outputs)?;
+                    self.validate_create_targets_in_stmts(&if_stmt.then_branch, outputs)?;
+                    if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_create_targets_in_stmts(else_branch, outputs)?;
+                    }
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_create_targets_in_expr(&for_stmt.iterable, outputs)?;
+                    self.validate_create_targets_in_stmts(&for_stmt.body, outputs)?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_create_targets_in_expr(&while_stmt.condition, outputs)?;
+                    self.validate_create_targets_in_stmts(&while_stmt.body, outputs)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_create_targets_in_expr(&self, expr: &Expr, outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
+        match expr {
+            Expr::Create(create) => {
+                if let Some(target) = &create.target {
+                    let Some(binding) = outputs.get(target) else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' must be declared as an action output binding", target),
+                            create.span,
+                        ));
+                    };
+                    if binding.type_name != create.ty {
+                        return Err(CompileError::new(
+                            format!(
+                                "create target '{}' has type '{}', but initializer constructs '{}'",
+                                target, binding.type_name, create.ty
+                            ),
+                            create.span,
+                        ));
+                    }
+                }
+                for (_, value) in &create.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_create_targets_in_expr(lock, outputs)?;
+                }
+            }
+            Expr::Assign(assign) => {
+                self.validate_create_targets_in_expr(&assign.target, outputs)?;
+                self.validate_create_targets_in_expr(&assign.value, outputs)?;
+            }
+            Expr::Binary(binary) => {
+                self.validate_create_targets_in_expr(&binary.left, outputs)?;
+                self.validate_create_targets_in_expr(&binary.right, outputs)?;
+            }
+            Expr::Unary(unary) => self.validate_create_targets_in_expr(&unary.expr, outputs)?,
+            Expr::Call(call) => {
+                self.validate_create_targets_in_expr(&call.func, outputs)?;
+                for arg in &call.args {
+                    self.validate_create_targets_in_expr(arg, outputs)?;
+                }
+            }
+            Expr::FieldAccess(field) => self.validate_create_targets_in_expr(&field.expr, outputs)?,
+            Expr::Index(index) => {
+                self.validate_create_targets_in_expr(&index.expr, outputs)?;
+                self.validate_create_targets_in_expr(&index.index, outputs)?;
+            }
+            Expr::Consume(consume) => self.validate_create_targets_in_expr(&consume.expr, outputs)?,
+            Expr::Transfer(transfer) => {
+                self.validate_create_targets_in_expr(&transfer.expr, outputs)?;
+                self.validate_create_targets_in_expr(&transfer.to, outputs)?;
+            }
+            Expr::Destroy(destroy) => self.validate_create_targets_in_expr(&destroy.expr, outputs)?,
+            Expr::Claim(claim) => self.validate_create_targets_in_expr(&claim.receipt, outputs)?,
+            Expr::Settle(settle) => self.validate_create_targets_in_expr(&settle.expr, outputs)?,
+            Expr::Assert(assert_expr) => {
+                self.validate_create_targets_in_expr(&assert_expr.condition, outputs)?;
+                self.validate_create_targets_in_expr(&assert_expr.message, outputs)?;
+            }
+            Expr::Require(require_expr) => {
+                self.validate_create_targets_in_expr(&require_expr.condition, outputs)?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_create_targets_in_expr(message, outputs)?;
+                }
+            }
+            Expr::Block(stmts) => self.validate_create_targets_in_stmts(stmts, outputs)?,
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    self.validate_create_targets_in_expr(item, outputs)?;
+                }
+            }
+            Expr::If(if_expr) => {
+                self.validate_create_targets_in_expr(&if_expr.condition, outputs)?;
+                self.validate_create_targets_in_expr(&if_expr.then_branch, outputs)?;
+                self.validate_create_targets_in_expr(&if_expr.else_branch, outputs)?;
+            }
+            Expr::Cast(cast) => self.validate_create_targets_in_expr(&cast.expr, outputs)?,
+            Expr::Range(range) => {
+                self.validate_create_targets_in_expr(&range.start, outputs)?;
+                self.validate_create_targets_in_expr(&range.end, outputs)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+            }
+            Expr::Match(match_expr) => {
+                self.validate_create_targets_in_expr(&match_expr.expr, outputs)?;
+                for arm in &match_expr.arms {
+                    self.validate_create_targets_in_expr(&arm.value, outputs)?;
+                }
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        }
+        Ok(())
+    }
+
+    fn validate_action_state_edges(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
         let consumed_bindings = action_consumed_bindings(action);
         let created_type_counts = action_created_type_counts(action);
         let output_bindings = action_output_binding_names(action);
         let replacements = action_replacement_output_by_input(action);
 
-        for state_move in &action.state_moves {
-            let (type_name, field_name, field_enum_type) = if let Some(path) = &state_move.path {
+        for state_edge in &action.state_edges {
+            let (type_name, field_name, field_enum_type) = if let Some(path) = &state_edge.path {
                 let ty = env
                     .lookup(&path.base)
                     .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
@@ -1019,14 +1250,14 @@ impl<'a> TypeChecker<'a> {
                         CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span)
                     })?
                     .to_string();
-                if let Some(to_path) = &state_move.to_path {
+                if let Some(to_path) = &state_edge.to_path {
                     if replacements.get(&path.base).is_none_or(|output| output != &to_path.base) {
                         return Err(CompileError::new(
                             format!(
-                                "state move from '{}.{}' to '{}.{}' requires an explicit `replaces {} with {}` relationship",
+                                "state move from '{}.{}' to '{}.{}' requires an explicit `replace {} -> {}` relationship",
                                 path.base, path.field, to_path.base, to_path.field, path.base, to_path.base
                             ),
-                            state_move.span,
+                            state_edge.span,
                         ));
                     }
                     let Some(output_binding) = output_bindings.get(&to_path.base) else {
@@ -1041,7 +1272,7 @@ impl<'a> TypeChecker<'a> {
                                 "state move input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
                                 path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
                             ),
-                            state_move.span,
+                            state_edge.span,
                         ));
                     }
                     let spec = self
@@ -1071,10 +1302,10 @@ impl<'a> TypeChecker<'a> {
                     if output_bindings.values().any(|binding| binding.type_name == type_name) {
                         return Err(CompileError::new(
                             format!(
-                                "state move for '{}.{}' has an output parameter candidate; write moves {}.{} {} -> output.field {} to avoid guessing",
-                                type_name, path.field, path.base, path.field, state_move.from, state_move.to
+                                "state move for '{}.{}' has an output parameter candidate; write move {}.{} {} -> output.field {} to avoid guessing",
+                                type_name, path.field, path.base, path.field, state_edge.from, state_edge.to
                             ),
-                            state_move.span,
+                            state_edge.span,
                         ));
                     }
                     if !consumed_bindings.contains(&path.base) {
@@ -1090,7 +1321,7 @@ impl<'a> TypeChecker<'a> {
                                 "state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
                                 type_name, path.field, type_name, create_count
                             ),
-                            state_move.span,
+                            state_edge.span,
                         ));
                     }
                     let spec = self
@@ -1111,8 +1342,8 @@ impl<'a> TypeChecker<'a> {
             } else {
                 if !output_bindings.is_empty() {
                     return Err(CompileError::new(
-                        "shorthand state move is ambiguous with output parameters; write moves input.state From -> output.state To",
-                        state_move.span,
+                        "shorthand state move is ambiguous with output parameters; write move input.state From -> output.state To",
+                        state_edge.span,
                     ));
                 }
                 let mut matches = self
@@ -1126,8 +1357,8 @@ impl<'a> TypeChecker<'a> {
                                         &spec.type_name,
                                         spec.field_enum_type.as_deref(),
                                         &spec.states,
-                                        &state_move.from,
-                                        state_move.span,
+                                        &state_edge.from,
+                                        state_edge.span,
                                     )
                                     .ok()
                                     .is_some_and(|from| {
@@ -1135,8 +1366,8 @@ impl<'a> TypeChecker<'a> {
                                             &spec.type_name,
                                             spec.field_enum_type.as_deref(),
                                             &spec.states,
-                                            &state_move.to,
-                                            state_move.span,
+                                            &state_edge.to,
+                                            state_edge.span,
                                         )
                                         .ok()
                                         .is_some_and(|to| transition.from == from && transition.to == to)
@@ -1146,8 +1377,8 @@ impl<'a> TypeChecker<'a> {
                     .collect::<Vec<_>>();
                 if matches.len() != 1 {
                     return Err(CompileError::new(
-                        "shorthand state move is ambiguous; write moves input.state From -> To or bind the edge with 'by action_name'",
-                        state_move.span,
+                        "shorthand state move is ambiguous; write move input.state From -> To or bind the edge with 'by action_name'",
+                        state_edge.span,
                     ));
                 }
                 let spec = matches.pop().expect("exactly one flow");
@@ -1155,10 +1386,10 @@ impl<'a> TypeChecker<'a> {
                 if consumed.len() != 1 {
                     return Err(CompileError::new(
                         format!(
-                            "shorthand state move for '{}.{}' must consume exactly one '{}' input; write moves input.state From -> To to disambiguate",
+                            "shorthand state move for '{}.{}' must consume exactly one '{}' input; write move input.state From -> To to disambiguate",
                             spec.type_name, spec.field_name, spec.type_name
                         ),
-                        state_move.span,
+                        state_edge.span,
                     ));
                 }
                 let create_count = created_type_counts.get(&spec.type_name).copied().unwrap_or(0);
@@ -1168,7 +1399,7 @@ impl<'a> TypeChecker<'a> {
                             "shorthand state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
                             spec.type_name, spec.field_name, spec.type_name, create_count
                         ),
-                        state_move.span,
+                        state_edge.span,
                     ));
                 }
                 (spec.type_name.clone(), spec.field_name.clone(), spec.field_enum_type.clone())
@@ -1177,34 +1408,34 @@ impl<'a> TypeChecker<'a> {
             let states = self
                 .lifecycle_states
                 .get(&type_name)
-                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), state_move.span))?;
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), state_edge.span))?;
             let from = self.canonical_state_name_for_machine(
                 &type_name,
                 field_enum_type.as_deref(),
                 states,
-                &state_move.from,
-                state_move.span,
+                &state_edge.from,
+                state_edge.span,
             )?;
             let to = self.canonical_state_name_for_machine(
                 &type_name,
                 field_enum_type.as_deref(),
                 states,
-                &state_move.to,
-                state_move.span,
+                &state_edge.to,
+                state_edge.span,
             )?;
             let Some(spec) = self.state_machines.get(&type_name) else {
-                return Err(CompileError::new(format!("type '{}' has no declared flow", type_name), state_move.span));
+                return Err(CompileError::new(format!("type '{}' has no declared flow", type_name), state_edge.span));
             };
             if spec.field_name != field_name {
                 return Err(CompileError::new(
                     format!("flow for '{}' is bound to field '{}'", type_name, spec.field_name),
-                    state_move.span,
+                    state_edge.span,
                 ));
             }
             if !spec.transitions.iter().any(|transition| transition.from == from && transition.to == to) {
                 return Err(CompileError::new(
                     format!("state transition '{}.{} {} -> {}' is not declared", type_name, field_name, from, to),
-                    state_move.span,
+                    state_edge.span,
                 ));
             }
         }
@@ -1451,7 +1682,7 @@ impl<'a> TypeChecker<'a> {
             }
             if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
                 return Err(CompileError::new(
-                    format!("input action parameter '{}' must use 'name: input T' without mut/ref/read_ref modifiers", param.name),
+                    format!("input action parameter '{}' must use 'input name: T' without mut/ref/read_ref modifiers", param.name),
                     param.span,
                 ));
             }
@@ -1485,7 +1716,7 @@ impl<'a> TypeChecker<'a> {
             }
             if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
                 return Err(CompileError::new(
-                    format!("output action parameter '{}' must use 'name: output T' without mut/ref/read_ref modifiers", param.name),
+                    format!("output action parameter '{}' must use 'output name: T' or a named action return without mut/ref/read_ref modifiers", param.name),
                     param.span,
                 ));
             }
@@ -1507,10 +1738,20 @@ impl<'a> TypeChecker<'a> {
             }
             return Ok(());
         }
-        if callable_kind != "lock" {
+        if param.source == ParamSource::Witness {
+            if callable_kind != "action" && callable_kind != "lock" {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot use witness source classification; witness parameters are action or lock verifier bindings",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
+        } else if callable_kind != "lock" {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use {} source classification; protected/witness/lock_args are lock parameter source syntax",
+                    "{} '{}' parameter '{}' cannot use {} source classification; protected and lock_args are lock parameter source syntax",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1525,7 +1766,7 @@ impl<'a> TypeChecker<'a> {
                 if param.is_mut || param.is_read_ref || param.is_ref {
                     return Err(CompileError::new(
                         format!(
-                            "protected lock parameter '{}' must use 'name: protected T' without mut/ref/read_ref modifiers",
+                            "protected lock parameter '{}' must use 'protected name: T' without mut/ref/read_ref modifiers",
                             param.name
                         ),
                         param.span,
@@ -1594,7 +1835,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "`&mut` Cell parameters have been removed from the public DSL; use `before: input T, after: output T` with `replaces before with after` in {} '{}'",
+                    "`&mut` Cell parameters have been removed from the public DSL; use `action(before: T) -> after: T replace before -> after` in {} '{}'",
                     callable_kind, callable_name
                 ),
                 param.span,
@@ -1620,7 +1861,7 @@ impl<'a> TypeChecker<'a> {
             if self.reference_target_is_cell_backed_aggregate(inner) {
                 return Err(CompileError::new(
                     format!(
-                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or explicit `before: input T, after: output T` replacement Cell parameters instead",
+                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or named action outputs with `replace before -> after` instead",
                         param.name,
                         callable_kind,
                         callable_name,
@@ -1668,7 +1909,7 @@ impl<'a> TypeChecker<'a> {
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `before: input T, after: output T` with `replaces before with after`",
+                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `action(before: T) -> after: T replace before -> after`",
                     param.name
                 ),
                 param.span,
@@ -1677,7 +1918,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' uses removed `&mut` Cell syntax; use `before: input T, after: output T` with `replaces before with after`",
+                    "parameter '{}' uses removed `&mut` Cell syntax; use `action(before: T) -> after: T replace before -> after`",
                     param.name
                 ),
                 param.span,
@@ -1686,7 +1927,7 @@ impl<'a> TypeChecker<'a> {
         if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "cell-backed parameter '{}' cannot use leading 'mut'; use explicit replacement parameters (`before: {}, after: output {}` with `replaces before with after`) or consume/create sugar",
+                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(before: {}) -> after: {} replace before -> after`) or consume/create sugar",
                     param.name,
                     type_repr(&param.ty),
                     type_repr(&param.ty)
@@ -2050,6 +2291,29 @@ impl<'a> TypeChecker<'a> {
             Expr::Create(create) => {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
+                if let Some(target) = &create.target {
+                    let Some(target_ty) = env.lookup(target).cloned() else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' is not declared as an action output binding", target),
+                            create.span,
+                        ));
+                    };
+                    let Type::Named(target_type_name) = target_ty else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' must be a named Cell output binding", target),
+                            create.span,
+                        ));
+                    };
+                    if target_type_name.split('<').next().unwrap_or(target_type_name.as_str()) != create.ty {
+                        return Err(CompileError::new(
+                            format!(
+                                "create target '{}' has type '{}', but initializer constructs '{}'",
+                                target, target_type_name, create.ty
+                            ),
+                            create.span,
+                        ));
+                    }
+                }
                 Ok(Type::Named(create.ty.clone()))
             }
             Expr::Consume(consume) => {
@@ -3953,13 +4217,13 @@ fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Optio
 }
 
 fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
+    if let Some(output) = action.outputs.iter().find(|output| output.name == name) {
+        if let Type::Named(type_name) = &output.ty {
+            return Some(type_name.split('<').next().unwrap_or(type_name.as_str()));
+        }
+    }
     action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
-        Type::Named(type_name)
-            if matches!(param.source, ParamSource::Default | ParamSource::Output)
-                && !param.is_read_ref
-                && !param.is_ref
-                && !param.is_mut =>
-        {
+        Type::Named(type_name) if param.source == ParamSource::Output && !param.is_read_ref && !param.is_ref && !param.is_mut => {
             Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
         }
         _ => None,
@@ -3968,6 +4232,14 @@ fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Opti
 
 fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutputBinding> {
     let mut bindings = HashMap::new();
+    for output in &action.outputs {
+        if let Type::Named(type_name) = &output.ty {
+            bindings.insert(
+                output.name.clone(),
+                ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
+            );
+        }
+    }
     for param in &action.params {
         if param.source == ParamSource::Output {
             if let Type::Named(type_name) = &param.ty {

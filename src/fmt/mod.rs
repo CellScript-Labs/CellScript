@@ -206,24 +206,26 @@ impl Formatter {
 
         let params = action.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
         let mut signature = format!("{} {}({})", keyword, action.name, params);
-        if let Some(return_type) = &action.return_type {
+        if !action.outputs.is_empty() {
+            signature.push_str(&format!(" -> {}", format_action_outputs(&action.outputs)));
+        } else if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
         for replacement in &action.replacements {
-            signature.push_str(&format!(" replaces {} with {}", replacement.input, replacement.output));
+            signature.push_str(&format!(" replace {} -> {}", replacement.input, replacement.output));
         }
-        for state_move in &action.state_moves {
-            let edge = if let Some(path) = &state_move.path {
-                if let Some(to_path) = &state_move.to_path {
+        for state_edge in &action.state_edges {
+            let edge = if let Some(path) = &state_edge.path {
+                if let Some(to_path) = &state_edge.to_path {
                     format!(
-                        "moves {}.{} {} -> {}.{} {}",
-                        path.base, path.field, state_move.from, to_path.base, to_path.field, state_move.to
+                        "move {}.{} {} -> {}.{} {}",
+                        path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to
                     )
                 } else {
-                    format!("moves {}.{} {} -> {}", path.base, path.field, state_move.from, state_move.to)
+                    format!("move {}.{} {} -> {}", path.base, path.field, state_edge.from, state_edge.to)
                 }
             } else {
-                format!("moves {} -> {}", state_move.from, state_move.to)
+                format!("move {} -> {}", state_edge.from, state_edge.to)
             };
             signature.push(' ');
             signature.push_str(&edge);
@@ -374,7 +376,11 @@ impl Formatter {
                     .map(|(name, value)| self.format_field_initializer(name, value))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let mut rendered = format!("create {} {{ {} }}", create.ty, fields);
+                let mut rendered = if let Some(target) = &create.target {
+                    format!("create {} = {} {{ {} }}", target, create.ty, fields)
+                } else {
+                    format!("create {} {{ {} }}", create.ty, fields)
+                };
                 if let Some(lock) = &create.lock {
                     rendered.push_str(&format!(" with_lock({})", self.format_expr(lock)));
                 }
@@ -483,46 +489,35 @@ fn format_param(param: &Param) -> String {
     if param.is_ref {
         rendered.push('&');
     }
+    match param.source {
+        ParamSource::Input => rendered.push_str("input "),
+        ParamSource::Output => rendered.push_str("output "),
+        ParamSource::Protected => rendered.push_str("protected "),
+        ParamSource::Witness => rendered.push_str("witness "),
+        ParamSource::LockArgs => rendered.push_str("lock_args "),
+        ParamSource::Default if param.is_read_ref => rendered.push_str("read "),
+        ParamSource::Default => {}
+    }
     rendered.push_str(&param.name);
     rendered.push_str(": ");
-    match param.source {
-        ParamSource::Input => {
-            rendered.push_str("input ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::Output => {
-            rendered.push_str("output ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::Protected => {
-            rendered.push_str("protected ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Witness => {
-            rendered.push_str("witness ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::LockArgs => {
-            rendered.push_str("lock_args ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::Default if param.is_read_ref => {
-            rendered.push_str("read_ref ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Default => {
-            rendered.push_str(&format_type(&param.ty));
-        }
-    }
+    let ty = match (&param.source, &param.ty) {
+        (ParamSource::Protected, Type::Ref(inner)) => inner.as_ref(),
+        (ParamSource::Default, Type::Ref(inner)) if param.is_read_ref => inner.as_ref(),
+        _ => &param.ty,
+    };
+    rendered.push_str(&format_type(ty));
     rendered
+}
+
+fn format_action_outputs(outputs: &[ActionOutput]) -> String {
+    if outputs.len() == 1 {
+        format!("{}: {}", outputs[0].name, format_type(&outputs[0].ty))
+    } else {
+        format!(
+            "({})",
+            outputs.iter().map(|output| format!("{}: {}", output.name, format_type(&output.ty))).collect::<Vec<_>>().join(", ")
+        )
+    }
 }
 
 fn format_binding_pattern(pattern: &BindingPattern) -> String {

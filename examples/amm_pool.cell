@@ -56,12 +56,12 @@ action seed_pool(
 
 action swap_a_for_b(
     pool_before: Pool,
-    pool_after: output Pool,
+    output pool_after: Pool,
     input: Token,
     min_output: u64,
     to: Address
 ) -> Token
-    replaces pool_before with pool_after
+    replace pool_before -> pool_after
 {
     assert(input.symbol == pool_before.token_a_symbol, "wrong input token")
 
@@ -89,12 +89,12 @@ action swap_a_for_b(
 
 action add_liquidity(
     pool_before: Pool,
-    pool_after: output Pool,
+    output pool_after: Pool,
     token_a: Token,
     token_b: Token,
     provider: Address
 ) -> LPReceipt
-    replaces pool_before with pool_after
+    replace pool_before -> pool_after
 {
     assert(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
     assert(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
@@ -121,11 +121,11 @@ action add_liquidity(
 
 action remove_liquidity(
     pool_before: Pool,
-    pool_after: output Pool,
+    output pool_after: Pool,
     receipt: LPReceipt,
     provider: Address
 ) -> (Token, Token)
-    replaces pool_before with pool_after
+    replace pool_before -> pool_after
 {
     assert(receipt.pool_id == pool_before.type_hash(), "wrong pool")
 

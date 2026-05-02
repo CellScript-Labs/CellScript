@@ -187,11 +187,11 @@ action request_emergency_release(
 
 action approve_emergency_release(
     emergency_before: EmergencyRelease,
-    emergency_after: output EmergencyRelease,
+    output emergency_after: EmergencyRelease,
     approver: Address,
     required_approvals: u8,
 )
-    replaces emergency_before with emergency_after
+    replace emergency_before -> emergency_after
 {
     for existing in &emergency_before.approvers {
         assert(*existing != approver, "Already approved");
@@ -244,12 +244,12 @@ action execute_emergency_release(
 
 action extend_lock(
     time_lock_before: TimeLock,
-    time_lock_after: output TimeLock,
+    output time_lock_after: TimeLock,
     additional_period: u64,
     owner: Address,
     current_height: u64,
 )
-    replaces time_lock_before with time_lock_after
+    replace time_lock_before -> time_lock_after
 {
     assert(time_lock_before.owner == owner, "Not the owner");
     
@@ -349,22 +349,22 @@ fn hash_lock(time_lock: &TimeLock) -> Hash {
 }
 
 
-lock can_unlock_lock(time_lock: protected TimeLock, current_height: witness u64) -> bool {
+lock can_unlock_lock(protected time_lock: TimeLock, witness current_height: u64) -> bool {
     require can_unlock(time_lock, current_height)
 }
 
-lock is_owner(time_lock: protected TimeLock, addr: witness Address) -> bool {
+lock is_owner(protected time_lock: TimeLock, witness addr: Address) -> bool {
     require time_lock.owner == addr
 }
 
-lock asset_matches(locked_asset: protected LockedAsset, time_lock: &TimeLock) -> bool {
+lock asset_matches(protected locked_asset: LockedAsset, time_lock: &TimeLock) -> bool {
     require locked_asset.lock_hash == hash_lock(time_lock)
 }
 
-lock emergency_approved(emergency: protected EmergencyRelease, required: witness u8) -> bool {
+lock emergency_approved(protected emergency: EmergencyRelease, witness required: u8) -> bool {
     require emergency.approvers.len() >= required as usize
 }
 
-lock not_expired(time_lock: protected TimeLock, current_height: witness u64) -> bool {
+lock not_expired(protected time_lock: TimeLock, witness current_height: u64) -> bool {
     require current_height < time_lock.unlock_height
 }

@@ -1536,8 +1536,8 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u128)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u128)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -1770,8 +1770,8 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -3387,14 +3387,14 @@ shared Ledger has store {
     balance: u64,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.balance == ledger_before.balance + delta
 }
 
-action debit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action debit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.balance == ledger_before.balance - delta
 }

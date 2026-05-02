@@ -94,8 +94,8 @@ minted.
 `mint` replaces authority state and validates a proposed new token output:
 
 ```cellscript
-action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
-    replaces auth_before with auth_after
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    replace auth_before -> auth_after
 {
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -103,7 +103,7 @@ action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Ad
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
@@ -111,17 +111,17 @@ action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Ad
 ```
 
 Read `auth_before` as the existing authority Cell and `auth_after` as the
-proposed replacement output. The `replaces` clause is the relationship; the
+proposed replacement output. The `replace` clause is the relationship; the
 `require` guards are the field-level proof.
 
 `transfer_token` consumes an input token and validates a replacement output
 under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -149,7 +149,7 @@ markers do not make an `Address` a signer proof.
 When you see a lock like this:
 
 ```cellscript
-lock owner_only(asset: protected NFT, claimed_owner: witness Address) -> bool {
+lock owner_only(protected asset: NFT, witness claimed_owner: Address) -> bool {
     require asset.owner == claimed_owner
 }
 ```

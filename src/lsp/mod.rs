@@ -323,10 +323,10 @@ impl LspServer {
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
-            ("action", "action ${1:name}($2) {\n    $0\n}"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\n    replace ${2:input} -> ${4:output}\n{\n    $0\n}"),
             (
                 "lock",
-                "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:arg}: witness ${5:Address}) -> bool {\n    require $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
             ),
             ("const", "const ${1:NAME}: ${2:u64} = $0;"),
             ("enum", "enum ${1:Name} {\n    $0\n}"),
@@ -605,22 +605,22 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("action", "action ${1:name}($2) {\n    $0\n}"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\n    replace ${2:input} -> ${4:output}\n{\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
-            ("input", "input ${1:CellType}"),
-            ("output", "output ${1:CellType}"),
-            ("replaces", "replaces ${1:before} with ${2:after}"),
-            ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
+            ("input", "input ${1:name}: ${2:CellType}"),
+            ("output", "output ${1:name}: ${2:CellType}"),
+            ("replace", "replace ${1:before} -> ${2:after}"),
+            ("move", "move ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
             (
                 "lock",
-                "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:arg}: witness ${5:Address}) -> bool {\n    require $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
             ),
             ("let", "let ${1:name} = $0;"),
             ("if", "if ${1:condition} {\n    $0\n}"),
             ("for", "for ${1:item} in ${2:iterable} {\n    $0\n}"),
             ("while", "while ${1:condition} {\n    $0\n}"),
             ("return", "return $0;"),
-            ("create", "create ${1:Type} { $0 }"),
+            ("create", "create ${1:output} = ${2:Type} { $0 }"),
             ("destroy", "destroy ${1:expr};"),
             ("transfer", "transfer ${1:expr} to ${2:addr};"),
             ("assert", "assert(${1:condition}, \"${2:message}\")"),
@@ -966,11 +966,11 @@ impl LspServer {
             for param in params {
                 if param.name == symbol {
                     let note = if param.is_mut {
-                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `before: input T, after: output T` and `replaces before with after`."
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `action(before: T) -> after: T replace before -> after`."
                     } else if param.source == ParamSource::Input {
                         "\n\n`input` marks a consumed transaction input Cell explicitly. Omitting it is equivalent for Cell-backed action parameters."
                     } else if param.source == ParamSource::Output {
-                        "\n\n`output` marks a proposed transaction output Cell. Bind it to an input Cell with `replaces before with after` when it is a replacement."
+                        "\n\n`output` marks a proposed transaction output Cell. Bind it to an input Cell with `replace before -> after` when it is a replacement."
                     } else if param.source == ParamSource::LockArgs {
                         "\n\n`lock_args` is decoded from the executing lock Script.args bytes."
                     } else {
@@ -980,6 +980,20 @@ impl LspServer {
                         contents: format!("```cellscript\n{}: {}\n```\n\nParameter{}", param.name, type_to_string(&param.ty), note),
                         range: Some(span_to_range(content, param.span)),
                     });
+                }
+            }
+            if let Item::Action(action) = item {
+                for output in &action.outputs {
+                    if output.name == symbol {
+                        return Some(Hover {
+                            contents: format!(
+                                "```cellscript\n{}: {}\n```\n\nAction output binding: proposed transaction output Cell.",
+                                output.name,
+                                type_to_string(&output.ty)
+                            ),
+                            range: Some(span_to_range(content, output.span)),
+                        });
+                    }
                 }
             }
 
@@ -1354,12 +1368,13 @@ impl LspServer {
                     let params: Vec<ParameterInformation> = a
                         .params
                         .iter()
-                        .map(|p| ParameterInformation {
-                            label: ParameterLabel::Simple(format!("{}: {}", p.name, type_to_string(&p.ty))),
-                            documentation: None,
-                        })
+                        .map(|p| ParameterInformation { label: ParameterLabel::Simple(param_to_string(p)), documentation: None })
                         .collect();
-                    let return_type = a.return_type.as_ref().map(type_to_string).unwrap_or_default();
+                    let return_type = if !a.outputs.is_empty() {
+                        action_outputs_to_string(&a.outputs)
+                    } else {
+                        a.return_type.as_ref().map(type_to_string).unwrap_or_default()
+                    };
                     let label = format!(
                         "action {}({}) -> {}",
                         a.name,
@@ -1379,10 +1394,7 @@ impl LspServer {
                     let params: Vec<ParameterInformation> = f
                         .params
                         .iter()
-                        .map(|p| ParameterInformation {
-                            label: ParameterLabel::Simple(format!("{}: {}", p.name, type_to_string(&p.ty))),
-                            documentation: None,
-                        })
+                        .map(|p| ParameterInformation { label: ParameterLabel::Simple(param_to_string(p)), documentation: None })
                         .collect();
                     let return_type = f.return_type.as_ref().map(type_to_string).unwrap_or_default();
                     let label = format!(
@@ -1404,10 +1416,7 @@ impl LspServer {
                     let params: Vec<ParameterInformation> = l
                         .params
                         .iter()
-                        .map(|p| ParameterInformation {
-                            label: ParameterLabel::Simple(format!("{}: {}", p.name, type_to_string(&p.ty))),
-                            documentation: None,
-                        })
+                        .map(|p| ParameterInformation { label: ParameterLabel::Simple(param_to_string(p)), documentation: None })
                         .collect();
                     let label = format!(
                         "lock {}({}) -> {}",
@@ -1777,6 +1786,45 @@ fn type_to_string(ty: &Type) -> String {
     }
 }
 
+fn param_to_string(param: &Param) -> String {
+    let mut rendered = String::new();
+    if param.is_mut {
+        rendered.push_str("mut ");
+    }
+    if param.is_ref {
+        rendered.push('&');
+    }
+    match param.source {
+        ParamSource::Input => rendered.push_str("input "),
+        ParamSource::Output => rendered.push_str("output "),
+        ParamSource::Protected => rendered.push_str("protected "),
+        ParamSource::Witness => rendered.push_str("witness "),
+        ParamSource::LockArgs => rendered.push_str("lock_args "),
+        ParamSource::Default if param.is_read_ref => rendered.push_str("read "),
+        ParamSource::Default => {}
+    }
+    rendered.push_str(&param.name);
+    rendered.push_str(": ");
+    let ty = match (&param.source, &param.ty) {
+        (ParamSource::Protected, Type::Ref(inner)) => inner.as_ref(),
+        (ParamSource::Default, Type::Ref(inner)) if param.is_read_ref => inner.as_ref(),
+        _ => &param.ty,
+    };
+    rendered.push_str(&type_to_string(ty));
+    rendered
+}
+
+fn action_outputs_to_string(outputs: &[ActionOutput]) -> String {
+    if outputs.len() == 1 {
+        format!("{}: {}", outputs[0].name, type_to_string(&outputs[0].ty))
+    } else {
+        format!(
+            "({})",
+            outputs.iter().map(|output| format!("{}: {}", output.name, type_to_string(&output.ty))).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
 fn position_in_range(pos: Position, range: Range) -> bool {
     position_le(range.start, pos) && position_le(pos, range.end)
 }
@@ -2129,8 +2177,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "flow"));
         assert!(keywords.iter().any(|k| k.label == "input"));
         assert!(keywords.iter().any(|k| k.label == "output"));
-        assert!(keywords.iter().any(|k| k.label == "replaces"));
-        assert!(keywords.iter().any(|k| k.label == "moves"));
+        assert!(keywords.iter().any(|k| k.label == "replace"));
+        assert!(keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
@@ -2193,9 +2241,9 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket, active_ticket: output Ticket)
-    replaces ticket with active_ticket
-    moves ticket.state Created -> active_ticket.state Active
+action activate(ticket: Ticket, output active_ticket: Ticket)
+    replace ticket -> active_ticket
+    move ticket.state Created -> active_ticket.state Active
 {
     assert_invariant(ticket.state < Ticket::Closed, "closed")
     require active_ticket.state == Ticket::Active
@@ -2245,9 +2293,9 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer, output: output Offer)
-    replaces input with output
-    moves input.state Live -> output.state Filled
+action accept(input: Offer, output output: Offer)
+    replace input -> output
+    move input.state Live -> output.state Filled
 {
     require output.state == Offer::Filled
     require output.amount == input.amount
@@ -2362,9 +2410,9 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket, active_ticket: output Ticket)
-    replaces ticket with active_ticket
-    moves ticket.state Created -> active_ticket.state Active
+action activate(ticket: Ticket, output active_ticket: Ticket)
+    replace ticket -> active_ticket
+    move ticket.state Created -> active_ticket.state Active
 {
     let active = Ticket::Active
     require active_ticket.state == active

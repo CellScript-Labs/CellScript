@@ -12758,7 +12758,7 @@ shared Config {
     threshold: u64,
 }
 
-action bad(mut cfg: read_ref Config) -> u64 {
+action bad(mut read cfg: Config) -> u64 {
     return cfg.threshold
 }
 "#;
@@ -13298,7 +13298,7 @@ resource Token {
     owner: Address,
 }
 
-lock owner_guard(token: protected Token, claimed_owner: witness Address) -> bool {
+lock owner_guard(protected token: Token, witness claimed_owner: Address) -> bool {
     require claimed_owner == token.owner
 }
 "#;
@@ -13310,7 +13310,7 @@ resource Token {
     owner: Address,
 }
 
-action bad(token: protected Token) -> u64 {
+action bad(protected token: Token) -> u64 {
     return 0
 }
 "#;
@@ -13322,7 +13322,7 @@ resource Token {
     owner: Address,
 }
 
-lock bad(token: protected Token, owner: lock_args Address) -> bool {
+lock bad(protected token: Token, lock_args owner: Address) -> bool {
     require owner == token.owner
 }
 "#;
@@ -15612,8 +15612,8 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -15628,8 +15628,8 @@ shared BigState has store {
     pad: [u8; 600],
 }
 
-action update(state_before: BigState, state_after: output BigState, delta: u64)
-    replaces state_before with state_after
+action update(state_before: BigState, output state_after: BigState, delta: u64)
+    replace state_before -> state_after
 {
     require state_after.balance == state_before.balance + delta
     require state_after.pad == state_before.pad
@@ -16047,7 +16047,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
+action activate(ticket: Ticket) -> Ticket move ticket.state Created -> Active {
     consume ticket
     return create Ticket {
         state: Active,
@@ -16088,7 +16088,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
+action activate(ticket: Ticket) -> Ticket move ticket.state Created -> Active {
     assert_invariant(ticket.state < Ticket::Active, "already active")
     consume ticket
     return create Ticket {
@@ -16191,7 +16191,7 @@ action activate(ticket: Ticket) -> Ticket {
 
         assert!(
             asm.contains("la t0, __cellscript_const_data_"),
-            "fixed-byte constant moves must materialize a rodata pointer instead of a null pointer:\n{}",
+            "fixed-byte constant move must materialize a rodata pointer instead of a null pointer:\n{}",
             asm
         );
     }
@@ -16595,7 +16595,7 @@ action activate(ticket: Ticket) -> Ticket {
     fn compile_rejects_lock_boundary_sources_outside_supported_scope() {
         let action_err = compile(ACTION_PROTECTED_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            action_err.message.contains("protected/witness/lock_args are lock parameter source syntax"),
+            action_err.message.contains("protected and lock_args are lock parameter source syntax"),
             "unexpected error: {}",
             action_err.message
         );
@@ -16695,7 +16695,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output field verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: field verification incomplete for this create pattern"),
             "locked create with coverable fields should not conflate lock verification with field verification:\n{}",
             asm
         );
@@ -16715,7 +16715,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output lock verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: lock verification incomplete for this create pattern"),
             "Address lock parameter should no longer fail closed as incomplete:\n{}",
             asm
         );
@@ -16785,7 +16785,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output field verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: field verification incomplete for this create pattern"),
             "fully verified create output was incorrectly marked incomplete:\n{}",
             asm
         );
@@ -16901,7 +16901,7 @@ action activate(ticket: Ticket) -> Ticket {
     }
 
     #[test]
-    fn compile_moves_linear_values_through_let_bindings() {
+    fn compile_transfers_linear_values_through_let_bindings() {
         compile(LINEAR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
 
         let copied = compile(LINEAR_LET_COPY_PROGRAM, CompileOptions::default()).unwrap_err();
@@ -17165,7 +17165,7 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(config: read_ref Config, token: Token) -> Grant {
+action grant(read config: Config, token: Token) -> Grant {
     consume token
     create Grant {
         admin: config.admin,
@@ -17902,7 +17902,7 @@ action grant(config: read_ref Config, token: Token) -> Grant {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_match_expressions() {
+    fn compile_merges_linear_transfers_inside_match_expressions() {
         compile(LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap();
 
@@ -19389,8 +19389,8 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection_before: Collection, collection_after: output Collection, recipients: Vec<Address>)
-    replaces collection_before with collection_after
+action batch(collection_before: Collection, output collection_after: Collection, recipients: Vec<Address>)
+    replace collection_before -> collection_after
 {
     require collection_after.name == collection_before.name
     require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
@@ -20777,7 +20777,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_if_expressions() {
+    fn compile_merges_linear_transfers_inside_if_expressions() {
         compile(LINEAR_IF_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap();
 
@@ -20830,7 +20830,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_block_expressions() {
+    fn compile_merges_linear_transfers_inside_block_expressions() {
         compile(LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM, CompileOptions::default()).unwrap();
@@ -20848,7 +20848,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_block_tail_if_expressions() {
+    fn compile_merges_linear_transfers_inside_block_tail_if_expressions() {
         compile(LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM, CompileOptions::default()).unwrap();
 
         let err = compile(LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
@@ -21057,7 +21057,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_accepts_explicit_state_machine_action_moves() {
+    fn compile_accepts_explicit_state_machine_action_edges() {
         let source = r#"
 module test
 
@@ -21079,7 +21079,7 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) moves input.state Live -> Filled {
+action accept(input: Offer) move input.state Live -> Filled {
     let amount = input.amount
     consume input
     create Offer {
@@ -21109,7 +21109,7 @@ action accept(input: Offer) moves input.state Live -> Filled {
     }
 
     #[test]
-    fn compile_accepts_core_input_output_state_transition_moves() {
+    fn compile_accepts_core_input_output_state_transition_edges() {
         let source = r#"
 module test
 
@@ -21129,9 +21129,9 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: input Offer, output: output Offer)
-    replaces input with output
-    moves input.state Live -> output.state Filled
+action accept(input input: Offer, output output: Offer)
+    replace input -> output
+    move input.state Live -> output.state Filled
 {
     require input.amount == output.amount
 }
@@ -21170,7 +21170,7 @@ resource Token has store {
     amount: u64
 }
 
-fn helper(token: input Token) -> u64 {
+fn helper(input token: Token) -> u64 {
     token.amount
 }
 "#;
@@ -21180,7 +21180,7 @@ fn helper(token: input Token) -> u64 {
         let scalar_source = r#"
 module test
 
-action main(amount: input u64) -> u64 {
+action main(input amount: u64) -> u64 {
     amount
 }
 "#;
@@ -21212,9 +21212,9 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer, output: output Offer)
-    replaces input with output
-    moves input.state Live -> output.state Cancelled
+action cancel(input: Offer, output output: Offer)
+    replace input -> output
+    move input.state Live -> output.state Cancelled
 {
     require input.amount == output.amount
 }
@@ -21270,7 +21270,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept(input: Offer, left: output Offer, right: output Offer) moves input.state Live -> Filled {
+action accept(input: Offer, output left: Offer, output right: Offer) move input.state Live -> Filled {
     consume input
     require left.amount == right.amount
 }
@@ -21298,7 +21298,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept_sugar(input: Offer) moves input.state Live -> Filled {
+action accept_sugar(input: Offer) move input.state Live -> Filled {
     let amount = input.amount
     consume input
     create Offer {
@@ -21307,9 +21307,9 @@ action accept_sugar(input: Offer) moves input.state Live -> Filled {
     }
 }
 
-action accept_core(input: Offer, output: output Offer)
-    replaces input with output
-    moves input.state Live -> output.state Filled
+action accept_core(input: Offer, output output: Offer)
+    replace input -> output
+    move input.state Live -> output.state Filled
 {
     require input.amount == output.amount
 }
@@ -21335,6 +21335,169 @@ action accept_core(input: Offer, output: output Offer)
     }
 
     #[test]
+    fn compile_accepts_named_action_output_replacement_and_create_binding() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled by accept;
+}
+
+action accept(old: Offer) -> new: Offer
+    replace old -> new
+    move old.state Live -> new.state Filled
+{
+    create new = Offer {
+        state: OfferState::Filled,
+        amount: old.amount,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "old"));
+        assert!(action.create_set.iter().any(|pattern| {
+            pattern.operation == "output"
+                && pattern.ty == "Offer"
+                && pattern.binding == "new"
+                && pattern.fields == vec!["state".to_string(), "amount".to_string()]
+        }));
+        assert!(action.params.iter().any(|param| param.name == "new" && param.source == "output"));
+    }
+
+    #[test]
+    fn compile_rejects_flow_by_action_when_explicit_move_uses_different_edge() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(old: Offer) -> new: Offer
+    replace old -> new
+    move old.state Live -> new.state Cancelled
+{
+    require old.amount == new.amount
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("explicit move clause uses a different edge"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_legacy_moves_state_clause() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action accept(old: Offer) -> new: Offer
+    replace old -> new
+    moves old.state Live -> new.state Filled
+{
+    require old.amount == new.amount
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("use `move`, not `moves`"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_prefix_read_params_as_cell_dep_bindings() {
+        let source = r#"
+module test
+
+shared Config has store {
+    admin: Address,
+}
+
+resource Token has store {
+    amount: u64,
+}
+
+receipt Grant has store {
+    admin: Address,
+    amount: u64,
+}
+
+action grant(read config: Config, token: Token) -> grant: Grant {
+    consume token
+    create grant = Grant {
+        admin: config.admin,
+        amount: token.amount,
+    } with_lock(config.admin)
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_dep source=CellDep index=0"),
+            "read prefix parameter did not bind to CellDep:\n{}",
+            asm
+        );
+        let action = result.metadata.actions.iter().find(|action| action.name == "grant").expect("grant metadata");
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "grant"));
+    }
+
+    #[test]
+    fn compile_accepts_action_witness_source_qualifier() {
+        let source = r#"
+module test
+
+resource Token has store {
+    amount: u64,
+}
+
+action mint(witness amount: u64) -> token: Token {
+    create token = Token {
+        amount,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
+        let amount = action.params.iter().find(|param| param.name == "amount").expect("amount metadata");
+        assert_eq!(amount.source, "witness");
+        assert!(amount.witness_data_source);
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "token"));
+    }
+
+    #[test]
     fn compile_accepts_state_machine_on_custom_state_field() {
         let source = r#"
 module test
@@ -21355,7 +21518,7 @@ flow OfferFlow for Offer.status {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) moves input.status Live -> Filled {
+action accept(input: Offer) move input.status Live -> Filled {
     let amount = input.amount
     consume input
     create Offer {
@@ -21430,7 +21593,7 @@ flow Offer.state {
     Live -> Created;
 }
 
-action reset(input: Offer) moves input.state Live -> Created {
+action reset(input: Offer) move input.state Live -> Created {
     let amount = input.amount
     consume input
     create Offer {
@@ -21443,7 +21606,7 @@ action reset(input: Offer) moves input.state Live -> Created {
     }
 
     #[test]
-    fn compile_rejects_state_move_that_does_not_consume_binding() {
+    fn compile_rejects_state_edge_that_does_not_consume_binding() {
         let source = r#"
 module test
 
@@ -21462,7 +21625,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept(input: &Offer) moves input.state Live -> Filled {
+action accept(input: &Offer) move input.state Live -> Filled {
     create Offer {
         state: OfferState::Filled,
         amount: input.amount,
@@ -21506,7 +21669,7 @@ action accept(input: Offer) {
     }
 
     #[test]
-    fn compile_accepts_state_machine_by_action_without_moves_clause() {
+    fn compile_accepts_state_machine_by_action_without_move_clause() {
         let source = r#"
 module test
 
@@ -21575,7 +21738,7 @@ action accept(left: Offer, right: Offer) {
     }
 
     #[test]
-    fn compile_rejects_undeclared_action_state_move() {
+    fn compile_rejects_undeclared_action_state_edge() {
         let source = r#"
 module test
 
@@ -21594,7 +21757,7 @@ flow Offer.state {
     Created -> Live;
 }
 
-action accept(input: Offer) moves input.state Live -> Filled {
+action accept(input: Offer) move input.state Live -> Filled {
     consume input
     create Offer {
         state: OfferState::Filled,
@@ -21927,7 +22090,7 @@ source_roots = ["src", "shared"]
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output lock verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: lock verification incomplete for this create pattern"),
             "constant output lock should not fail closed as incomplete:\n{}",
             asm
         );
@@ -22079,8 +22242,8 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -22122,8 +22285,8 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, ledger_after: output Ledger, delta: u64)
-    replaces ledger_before with ledger_after
+action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+    replace ledger_before -> ledger_after
 {
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -22153,8 +22316,8 @@ resource NFT has store, destroy {
     royalty_bps: u16
 }
 
-action transfer(nft_before: NFT, nft_after: output NFT, to: Address)
-    replaces nft_before with nft_after
+action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
+    replace nft_before -> nft_after
 {
     assert(nft_before.owner != to, "cannot transfer to self")
     require nft_after.token_id == nft_before.token_id
@@ -22619,8 +22782,8 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection, collection_after: output Collection)
-    replaces collection_before with collection_after
+action mint(collection_before: Collection, output collection_after: Collection)
+    replace collection_before -> collection_after
 {
     assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
     require collection_after.name == collection_before.name

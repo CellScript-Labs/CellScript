@@ -11,7 +11,7 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
-- how `action(before: input T, after: output T)` plus `replaces` expresses the verifier core for
+- how `action(before: T) -> after: T` plus `replace` expresses the verifier core for
   replacement-style transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
@@ -19,11 +19,12 @@ place. A transaction spends Cells and creates new Cells.
 
 | Effect | Read it as |
 |---|---|
-| `param: input T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
-| `param: output T` | Explicit proposed output Cell parameter. |
+| `input param: T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
+| `-> output: T` | Named proposed output Cell binding. |
+| `output param: T` | Explicit proposed output Cell parameter for escape-hatch cases. |
 | `consume value` | Spend an input-backed linear value. |
-| `create T { ... }` | Sugar for validating a typed proposed output Cell. |
-| `read_ref T` | Read dependency-backed state without consuming it. |
+| `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
+| `read param: T` | Read dependency-backed state without consuming it. |
 | `transfer value to` | Move a value to a new lock or owner. |
 | `destroy value` | Consume a value without replacement, if the type allows `destroy`. |
 | `claim receipt` | Consume a receipt and materialize the claim path. |
@@ -81,15 +82,15 @@ flow GrantFlow for VestingGrant.state {
 ```
 
 Bind each action to the transition it is allowed to prove. The semantic core is
-an `action(before: input T, after: output T)` verifier form: `before` is the consumed
-input Cell view, `after` is the proposed output Cell view, and `moves` names
-both state fields explicitly. The `replaces` clause declares the deterministic
-one-to-one relationship.
+an input-to-output verifier signature: the left side names consumed input Cell
+views, the right side names proposed output Cell bindings, and `move` names both
+state fields explicitly. The `replace` clause declares the deterministic
+one-to-one lineage relationship.
 
 ```cellscript
-action unlock_grant(input: input VestingGrant, output: output VestingGrant)
-    replaces input with output
-    moves input.state Granted -> output.state Claimable
+action unlock_grant(input: VestingGrant) -> output: VestingGrant
+    replace input -> output
+    move input.state Granted -> output.state Claimable
 {
     require input.beneficiary == output.beneficiary
     require input.total_amount == output.total_amount
@@ -100,17 +101,16 @@ action unlock_grant(input: input VestingGrant, output: output VestingGrant)
 `flow Type.field { ... }` is the compact form when the flow does not
 need a separate name. The compiler keeps the state field explicit in Molecule
 layout, lowers enum states to their ordinal values, verifies old/new state at
-runtime, and rejects action moves that are not declared in the state graph. A
+runtime, and rejects action `move` clauses that are not declared in the state graph. A
 state field may have only one flow declaration, so keep all legal edges for
 that field in one named or compact flow block.
 
-Output binding is deterministic. Output parameters are bound to transaction
-outputs in action parameter order among output parameters, starting at
-`Output#0`. A field-to-field transition such as
-`moves input.state A -> output.state B` must have a matching
-`replaces input with output` clause. The compiler rejects ambiguous shorthand
+Output binding is deterministic. Named action outputs are bound to transaction
+outputs in signature order, starting at `Output#0`. A field-to-field transition such as
+`move input.state A -> output.state B` must have a matching
+`replace input -> output` clause. The compiler rejects ambiguous shorthand
 instead of guessing which output is the replacement. Existing `consume input`
-plus `create T { ... }` remains accepted as front-end sugar for the same
+plus `create output = T { ... }` remains accepted as front-end sugar for the same
 verifier shape.
 
 ## Creating Output Cells
@@ -121,14 +121,14 @@ output; the script still validates an existing transaction, it does not allocate
 Cells inside CKB-VM.
 
 ```cellscript
-create Token {
+create token = Token {
     amount,
     symbol: auth.token_symbol
 } with_lock(to)
 ```
 
 Persistent state enters the transaction output set only through explicit output
-evidence: either a core `output: T` parameter or a `create T { ... }` sugar
+evidence: either a named action output or a `create output = T { ... }` sugar
 expression. Local variables are just local variables. They do not become
 on-chain storage unless they are tied to a proposed output Cell.
 
@@ -148,10 +148,10 @@ For example, a transfer consumes one token and validates a replacement token
 under a different lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -166,8 +166,8 @@ the new Cell is a proposed output that the verifier checks.
 For one-to-one state replacement, make both cells visible:
 
 ```cellscript
-action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Address, amount: u64) -> Token
-    replaces auth_before with auth_after
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    replace auth_before -> auth_after
 {
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -175,7 +175,7 @@ action mint(auth_before: MintAuthority, auth_after: output MintAuthority, to: Ad
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)

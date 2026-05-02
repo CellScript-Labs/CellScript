@@ -18,7 +18,7 @@ If CellScript is new to you, read the tutorials in order. The first three
 chapters are about the language. They explain how a `.cell` file is shaped, how
 resources move, and why effects such as `consume` and `create` are explicit.
 
-After that, the wiki moves outward:
+After that, the wiki continues outward:
 
 - packages make builds repeatable;
 - the CKB profile chooses the chain-facing runtime rules;

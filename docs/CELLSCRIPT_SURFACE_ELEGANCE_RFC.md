@@ -226,8 +226,8 @@ source visible without claiming cryptographic signer authority:
 
 ```cell
 lock nft_ownership(
-    nft: protected NFT,
-    claimed_owner: witness Address
+    protected nft: NFT,
+    witness claimed_owner: Address
 ) {
     require claimed_owner == nft.owner
 }
@@ -277,7 +277,7 @@ Implicit signer syntax is rejected:
 
 ```cell
 lock nft_ownership(
-    nft: protected NFT,
+    protected nft: NFT,
     signer: Signer
 ) {
     require signer.address == nft.owner
@@ -291,7 +291,7 @@ Plain `Address` signer naming is also rejected:
 
 ```cell
 lock nft_ownership(
-    nft: protected NFT,
+    protected nft: NFT,
     signer: Address
 ) {
     require signer == nft.owner
@@ -305,7 +305,7 @@ Hidden sighash defaults are rejected:
 
 ```cell
 lock nft_ownership(
-    nft: protected NFT,
+    protected nft: NFT,
     signer: verified Signer
 ) {
     require signer.address == nft.owner
@@ -316,9 +316,9 @@ The safe shape is explicit:
 
 ```cell
 lock owner_signed_token(
-    token: protected Token,
-    owner: lock_args Address,
-    sig: witness Signature
+    protected token: Token,
+    lock_args owner: Address,
+    witness sig: Signature
 ) {
     require verify_sighash_all(sig, owner)
     require owner == token.owner
@@ -329,7 +329,7 @@ The eventual ergonomic form must keep the digest mode visible:
 
 ```cell
 lock owner_signed_token(
-    token: protected Token,
+    protected token: Token,
     signer: verified Signer<sighash_all>
 ) {
     require signer.address == token.owner
@@ -344,8 +344,8 @@ Stage 1 is honest classification only:
 
 ```cell
 lock nft_ownership(
-    nft: protected NFT,
-    claimed_owner: witness Address
+    protected nft: NFT,
+    witness claimed_owner: Address
 ) {
     require claimed_owner == nft.owner
 }
@@ -358,9 +358,9 @@ Stage 2 introduces explicit lock-args binding:
 
 ```cell
 lock owner_bound_token(
-    token: protected Token,
-    owner: lock_args Address,
-    claimed_owner: witness Address
+    protected token: Token,
+    lock_args owner: Address,
+    witness claimed_owner: Address
 ) {
     require claimed_owner == owner
     require owner == token.owner
@@ -373,9 +373,9 @@ Stage 3 introduces explicit signature verification primitives:
 
 ```cell
 lock owner_signed_token(
-    token: protected Token,
-    owner: lock_args Address,
-    sig: witness Signature
+    protected token: Token,
+    lock_args owner: Address,
+    witness sig: Signature
 ) {
     require verify_sighash_all(sig, owner)
     require owner == token.owner
@@ -390,7 +390,7 @@ Stage 4 may introduce first-class verified signer values:
 
 ```cell
 lock owner_signed_token(
-    token: protected Token,
+    protected token: Token,
     signer: verified Signer<sighash_all>
 ) {
     require signer.address == token.owner
@@ -444,7 +444,7 @@ A future `examples/canonical_style.cell` should demonstrate:
 - namespace module declaration;
 - resource, shared, and receipt declarations;
 - create/consume/destroy flows;
-- explicit `output` parameters plus `replaces before with after` for replacement semantics;
+- named action outputs plus `replace before -> after` for replacement semantics;
 - a lock boundary;
 - field shorthand;
 - bounded collection literals;
@@ -500,7 +500,7 @@ This list is the living implementation tracker for the RFC.
 
 ## Summary
 
-This RFC moves CellScript examples from compiler coverage artifacts toward a
+This RFC shifts CellScript examples from compiler coverage artifacts toward a
 canonical language surface for external developers. The easy style wins should
 land first; lock authorization syntax should land only when the CKB security
 binding is explicit enough to audit.
