@@ -15,7 +15,7 @@ concepts:
 | `shared` | Contention-sensitive state Cell, read through CellDeps or updated by consume/create. |
 | `receipt` | Single-use proof Cell for claim, settlement, or protocol evidence. |
 | `consume` | Spend an input Cell. |
-| `create` | Materialize a typed output Cell. |
+| `create output = T { ... }` | Constrain a named proposed output Cell with typed data and optional lock. |
 | `read param: T` / `read_ref<T>()` | Load read-only CellDep-backed state. |
 | `action` | Transaction-shaped state transition entrypoint. |
 | `lock` | Spend predicate entrypoint compiled to ckb-vm RISC-V. |
@@ -25,9 +25,11 @@ concepts:
 | `require` | Fail the current script validation when a lock condition is false. |
 
 The strongest design point is that persistent state is explicit. Ordinary local
-values do not silently become chain state; only `create` materializes Cells, and
-linear values must be consumed, destroyed, transferred, claimed, settled, or
-returned. This is a good fit for CKB because it keeps the transaction input,
+values do not silently become chain state; action signatures bind transaction
+inputs and named proposed outputs, while `create output = T { ... }` constrains
+those outputs rather than allocating runtime objects. Linear values must be
+consumed, destroyed, transferred, claimed, settled, or linked to explicit output
+constraints. This is a good fit for CKB because it keeps the transaction input,
 output, data, witness, and dependency shape visible to the compiler and release
 evidence.
 

@@ -21,7 +21,6 @@ place. A transaction spends Cells and creates new Cells.
 |---|---|
 | `input param: T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
 | `-> output: T` | Named proposed output Cell binding. |
-| `output param: T` | Explicit proposed output Cell parameter for escape-hatch cases. |
 | `consume value` | Spend an input-backed linear value. |
 | `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read param: T` | Read dependency-backed state without consuming it. |

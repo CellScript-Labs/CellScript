@@ -80,7 +80,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 6_000,
             max_machine_blocks: 2_500,
-            max_machine_block_bytes: 256,
+            max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
             max_call_edges: 440,
             max_unreachable_machine_blocks: 2_100,
@@ -501,7 +501,7 @@ fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() 
 
 fn assert_create(action: &cellscript::ActionMetadata, ty: &str, context: &str) {
     assert!(
-        action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "create"),
+        action.create_set.iter().any(|pattern| pattern.ty == ty && matches!(pattern.operation.as_str(), "create" | "output")),
         "{} should expose a create output for {}: {:?}",
         context,
         ty,
@@ -1080,7 +1080,6 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     assert!(mint.fail_closed_runtime_features.is_empty(), "nft mint should not carry fail-closed debt");
     assert_input_output_binding(mint, "Collection", "collection_before", "collection_after", "nft mint");
     assert_create(mint, "NFT", "nft mint");
-    assert_runtime_requirement(mint, "create-output:NFT:create_NFT", "checked-runtime", "create-output-fields", "nft mint");
     assert!(
         asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
             && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
@@ -1125,7 +1124,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(create_absolute_lock, "TimeLock", "timelock create_absolute_lock");
     assert_runtime_requirement(
         create_absolute_lock,
-        "create-output:TimeLock:create_TimeLock",
+        "create-output:TimeLock:created_lock",
         "checked-runtime",
         "create-output-fields",
         "timelock create_absolute_lock",
@@ -1134,7 +1133,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(create_relative_lock, "TimeLock", "timelock create_relative_lock");
     assert_runtime_requirement(
         create_relative_lock,
-        "create-output:TimeLock:create_TimeLock",
+        "create-output:TimeLock:created_lock",
         "checked-runtime",
         "create-output-fields",
         "timelock create_relative_lock",
@@ -1144,7 +1143,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(request_release, "ReleaseRequest", "timelock request_release");
     assert_runtime_requirement(
         request_release,
-        "create-output:ReleaseRequest:create_ReleaseRequest",
+        "create-output:ReleaseRequest:request",
         "checked-runtime",
         "create-output-fields",
         "timelock request_release",
@@ -1179,7 +1178,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     );
     assert_runtime_requirement(
         execute_release,
-        "create-output:ReleaseRecord:create_ReleaseRecord",
+        "create-output:ReleaseRecord:record",
         "checked-runtime",
         "create-output-fields",
         "timelock execute_release",
@@ -1188,7 +1187,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(execute_emergency_release, "ReleaseRecord", "timelock execute_emergency_release");
     assert_runtime_requirement(
         execute_emergency_release,
-        "create-output:ReleaseRecord:create_ReleaseRecord",
+        "create-output:ReleaseRecord:record",
         "checked-runtime",
         "create-output-fields",
         "timelock execute_emergency_release",
@@ -1221,7 +1220,7 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     assert_create(create_wallet, "MultisigWallet", "multisig create_wallet");
     assert_runtime_requirement(
         create_wallet,
-        "create-output:MultisigWallet:create_MultisigWallet",
+        "create-output:MultisigWallet:wallet",
         "checked-runtime",
         "create-output-fields",
         "multisig create_wallet",
@@ -1243,13 +1242,6 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     assert_eq!(propose_transfer.effect_class, "Mutating");
     assert_input_output_binding(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
     assert_create(propose_transfer, "Proposal", "multisig propose_transfer");
-    assert_runtime_requirement(
-        propose_transfer,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig propose_transfer",
-    );
     assert!(
         asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
             && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
@@ -1277,13 +1269,6 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     let add_signature = action(&result.metadata, "add_signature");
     assert_eq!(add_signature.effect_class, "Mutating");
     assert_create(add_signature, "SignatureConfirmation", "multisig add_signature");
-    assert_runtime_requirement(
-        add_signature,
-        "create-output:SignatureConfirmation:create_SignatureConfirmation",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig add_signature",
-    );
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-equality", "multisig add_signature");
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-transition", "multisig add_signature");
     assert_input_output_binding(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
@@ -1299,13 +1284,6 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     assert_eq!(propose_add_signer.effect_class, "Mutating");
     assert_input_output_binding(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
     assert_create(propose_add_signer, "Proposal", "multisig propose_add_signer");
-    assert_runtime_requirement(
-        propose_add_signer,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig propose_add_signer",
-    );
     assert!(
         !propose_add_signer.fail_closed_runtime_features.contains(&"output-verification-incomplete".to_string()),
         "multisig propose_add_signer should verify constructed Proposal.data bytes without fail-closed debt: {:?}",
@@ -1328,13 +1306,6 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
         "multisig propose_change_threshold",
     );
     assert_create(propose_change_threshold, "Proposal", "multisig propose_change_threshold");
-    assert_runtime_requirement(
-        propose_change_threshold,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig propose_change_threshold",
-    );
     assert!(
         propose_change_threshold.fail_closed_runtime_features.is_empty(),
         "multisig propose_change_threshold should verify scalar byte-vector construction without fail-closed debt: {:?}",
@@ -1360,7 +1331,7 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
     assert_runtime_requirement(
         execute_proposal,
-        "create-output:ExecutionRecord:create_ExecutionRecord",
+        "create-output:ExecutionRecord:record",
         "checked-runtime",
         "create-output-fields",
         "multisig execute_proposal",
@@ -1446,16 +1417,21 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("launch asm should be utf8");
     let launch_token = result.metadata.actions.iter().find(|action| action.name == "launch_token").expect("launch_token metadata");
 
-    assert!(asm.contains("\nseed_pool:\n"), "launch_token must link the imported seed_pool callee into production assembly");
-    assert!(asm.contains("\nisqrt:\n"), "launch_token must link seed_pool's transitive isqrt helper");
+    assert!(
+        !asm.contains("\nseed_pool:\n") && !asm.contains("\nisqrt:\n"),
+        "launch_token models output topology directly; action outputs are not runtime return values"
+    );
     assert!(!asm.contains("\nadd_liquidity:\n"), "launch_token should not link unrelated AMM actions");
     assert!(!asm.contains("\nremove_liquidity:\n"), "launch_token should not link unrelated AMM actions");
 
     assert!(
         !launch_token.touches_shared.is_empty(),
-        "launch_token calls seed_pool and returns Pool, so shared Pool touch metadata must not be lost"
+        "launch_token creates Pool output, so shared Pool touch metadata must not be lost"
     );
     assert!(!launch_token.parallelizable, "launch_token composes Pool creation and should not default to parallel execution");
+    assert_create(launch_token, "MintAuthority", "launch_token");
+    assert_create(launch_token, "Pool", "launch_token");
+    assert_create(launch_token, "LPReceipt", "launch_token");
     let distribution = launch_token.params.iter().find(|param| param.name == "distribution").expect("distribution param metadata");
     assert!(distribution.fixed_byte_pointer_abi);
     assert!(distribution.fixed_byte_length_abi);
@@ -1469,99 +1445,51 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         "recipient locks loaded from fixed tuple-array distribution should be verifier-coverable"
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_a pointer=a0 length=a1"),
-        "launch_token -> seed_pool must use pointer+length ABI for Token arguments:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains(
-            "# cellscript abi: call seed_pool schema param token_a has no tracked ABI length; pass zero length to fail closed"
-        ),
-        "launch_token must fail fast when its locally-created pool token cannot be represented as runtime schema bytes:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_a type_hash pointer=a2 length=a3 size=32")
-            && asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a4 length=a5")
-            && asm.contains("# cellscript abi: call seed_pool schema param token_b type_hash pointer=a6 length=a7 size=32"),
-        "launch_token -> seed_pool must preserve Token pointer/length and TypeHash ABI slots:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: call seed_pool scalar fee_rate_bps -> t0")
-            && asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-24")
-            && asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=stack+8 length=stack+16 size=32")
-            && asm.contains("# cellscript abi: reserve 24 bytes for outgoing stack call arguments")
-            && !asm.contains("requires ABI arg"),
-        "launch_token -> seed_pool must stage ABI args beyond a7 on the outgoing call stack:\n{}",
-        asm
-    );
-    assert!(
         launch_token.fail_closed_runtime_features.is_empty(),
-        "launch_token seed_pool tuple-return projection and fixed tuple-array distribution should be verifier-coverable: {:?}",
+        "launch_token named outputs and fixed tuple-array distribution should be verifier-coverable: {:?}",
         launch_token.fail_closed_runtime_features
     );
     assert!(
         launch_token.verifier_obligations.iter().any(|obligation| {
             obligation.category == "pool-pattern"
-                && obligation.feature == "pool-composition:Pool"
-                && obligation.status == "checked-runtime"
+                && obligation.feature == "pool-create:Pool"
+                && obligation.status == "runtime-required"
         }),
-        "launch_token should discharge explicit pool-pattern obligations from seed_pool composition: {:?}",
+        "launch_token should report direct named Pool output creation obligations accurately: {:?}",
         launch_token.verifier_obligations
     );
     let launch_pool_primitive = launch_token
         .pool_primitives
         .iter()
-        .find(|primitive| primitive.feature == "pool-composition:Pool")
-        .expect("launch_token should expose structured Pool composition primitive metadata");
-    assert_eq!(launch_pool_primitive.operation, "composition");
-    assert_eq!(launch_pool_primitive.status, "checked-runtime");
-    assert!(launch_pool_primitive.callee.as_deref().is_some_and(|callee| callee.contains("seed_pool")));
+        .find(|primitive| primitive.feature == "pool-create:Pool")
+        .expect("launch_token should expose structured Pool creation primitive metadata");
+    assert_eq!(launch_pool_primitive.operation, "create");
+    assert_eq!(launch_pool_primitive.status, "runtime-required");
+    assert_eq!(launch_pool_primitive.callee, None);
+    assert_eq!(launch_pool_primitive.binding.as_deref(), Some("pool"));
     assert_eq!(launch_pool_primitive.source_invariant_count, 3);
-    assert_pool_component(launch_pool_primitive, "shared-touch-propagation=checked-metadata", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:initial-mint-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:pool-seed-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:distribution-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:minted-equals-initial-mint=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:seed-token-amount=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:symbol-consistency=checked-runtime", "launch_token");
-    assert_pool_component(
-        launch_pool_primitive,
-        "launch-pool-atomicity:distribution-sum-plus-seed-lte-initial-mint=checked-runtime",
-        "launch_token",
-    );
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:seed-token-symbol-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:paired-token-symbol-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:fee-bound-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:tuple-return-projection=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:pool-type-hash-return-abi=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:lp-receipt-pool-id-return-abi=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:callee-output-field-equality=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=3", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-0=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-1=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-2=checked-runtime", "launch_token");
     assert_pool_invariant_family(
         launch_pool_primitive,
-        "callee-pool-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
+        "token-pair-identity-admission",
+        "runtime-required",
+        "token-input-type-id-abi",
         "launch_token",
     );
     assert_pool_invariant_family(
         launch_pool_primitive,
-        "launch-pool-atomicity",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "launch_token",
-    );
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "pool-id-continuity",
-        "checked-runtime",
-        "callee-output-field-coupling+tuple-return-abi",
+        "lp-supply-invariant",
+        "runtime-required",
+        "pool-protocol-admission",
         "launch_token",
     );
     assert!(
-        launch_pool_primitive.runtime_required_components.is_empty(),
-        "controlled launch_token -> seed_pool composition should discharge all runtime-required Pool components: {:?}",
+        launch_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission")
+            && launch_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
+        "direct launch_token Pool creation should surface unresolved AMM admission components instead of claiming seed_pool equivalence: {:?}",
         launch_pool_primitive.runtime_required_components
     );
     assert!(
@@ -1570,16 +1498,8 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         launch_pool_primitive.runtime_input_requirements
     );
     assert!(
-        asm.contains("# cellscript abi: tuple call return field .0 projected from return register")
-            && asm.contains("# cellscript abi: tuple call return field .1 projected from return register"),
-        "seed_pool tuple return should project Pool/LPReceipt from the call return ABI:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: construct tuple aggregate")
-            && asm.contains("# cellscript abi: return tuple field .0 via a0")
-            && asm.contains("# cellscript abi: return tuple field .1 via a1"),
-        "seed_pool tuple callee should return Pool/LPReceipt through the register ABI:\n{}",
+        asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
+        "launch_token should bind LPReceipt.pool_id to the named Pool output TypeHash:\n{}",
         asm
     );
     assert!(

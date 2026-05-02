@@ -599,8 +599,8 @@ impl LspServer {
 
     fn keyword_completions(&self) -> Vec<CompletionItem> {
         let keywords = vec![
-            ("module", "module ${1:name};"),
-            ("use", "use ${1:path};"),
+            ("module", "module ${1:name}"),
+            ("use", "use ${1:path}"),
             ("resource", "resource ${1:Name} {\n    $0\n}"),
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
@@ -608,25 +608,24 @@ impl LspServer {
             ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
-            ("output", "output ${1:name}: ${2:CellType}"),
-            ("move", "move ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
+            ("move", "move ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2:state}: ${5:Live}"),
             (
                 "lock",
                 "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
             ),
-            ("let", "let ${1:name} = $0;"),
+            ("let", "let ${1:name} = $0"),
             ("if", "if ${1:condition} {\n    $0\n}"),
             ("for", "for ${1:item} in ${2:iterable} {\n    $0\n}"),
             ("while", "while ${1:condition} {\n    $0\n}"),
-            ("return", "return $0;"),
+            ("return", "return $0"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
-            ("destroy", "destroy ${1:expr};"),
-            ("transfer", "transfer ${1:expr} to ${2:addr};"),
+            ("destroy", "destroy ${1:expr}"),
+            ("transfer", "transfer ${1:expr} to ${2:addr}"),
             ("assert", "assert(${1:condition}, \"${2:message}\")"),
             ("require", "require ${1:condition}, \"${2:message}\""),
-            ("protected", "protected ${1:CellType}"),
-            ("witness", "witness ${1:Address}"),
-            ("lock_args", "lock_args ${1:Address}"),
+            ("protected", "protected ${1:cell}: ${2:CellType}"),
+            ("witness", "witness ${1:arg}: ${2:Address}"),
+            ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
         ];
 
         keywords
@@ -2175,7 +2174,7 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "action"));
         assert!(keywords.iter().any(|k| k.label == "flow"));
         assert!(keywords.iter().any(|k| k.label == "input"));
-        assert!(keywords.iter().any(|k| k.label == "output"));
+        assert!(!keywords.iter().any(|k| k.label == "output"));
         assert!(keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
@@ -2239,7 +2238,7 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket, output active_ticket: Ticket)
+action activate(ticket: Ticket) -> active_ticket: Ticket
     move ticket.state: Created -> active_ticket.state: Active
 where
     assert_invariant(ticket.state < Ticket::Closed, "closed")
@@ -2289,7 +2288,7 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer, output output: Offer)
+action accept(input: Offer) -> output: Offer
     move input.state: Live -> output.state: Filled
 where
     require output.state == Offer::Filled
@@ -2405,7 +2404,7 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket, output active_ticket: Ticket)
+action activate(ticket: Ticket) -> active_ticket: Ticket
     move ticket.state: Created -> active_ticket.state: Active
 where
     let active = Ticket::Active

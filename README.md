@@ -367,6 +367,7 @@ CellScript includes production-style local language tooling for early users:
 - [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
 - [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 - [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
+- [Signature-direction execution plan](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
 - [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)

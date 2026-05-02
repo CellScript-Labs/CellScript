@@ -91,9 +91,10 @@ Completed syntax delta from the `0.12` tag:
   `action f(input: T) -> (left: T, right: Receipt)`. These named outputs are
   deterministic proposed transaction outputs.
 - Action and lock parameters support prefix source qualifiers:
-  `input name: T`, `output name: T`, `read name: T`, `protected name: T`,
-  `witness name: T`, and `lock_args name: T`. Expression `read_ref<T>()`
-  remains the explicit CellDep read effect.
+  `input name: T`, `read name: T`, `protected name: T`, `witness name: T`,
+  and `lock_args name: T`. Proposed output Cells are named on the action return
+  side, not in the parameter list. Expression `read_ref<T>()` remains the
+  explicit CellDep read effect.
 - One-to-one input/output transitions are expressed by action signatures and
   explicit constraints, not a separate lineage keyword: `action(before: T) ->
   after: T` names the consumed input and proposed output, while `require` proves
@@ -263,10 +264,10 @@ New in 0.13:
   declarations.
 - The semantic core for state transitions is now proposed-cell verification:
   `action(before: T) -> after: T` treats `before` as a transaction input and
-  `after` as a proposed transaction output. Explicit `output after: T`
-  parameters remain accepted as a precision layer, but named action outputs are
-  the canonical surface. `create after = T { ... }` constrains a declared output
-  binding rather than allocating runtime storage.
+  `after` as a proposed transaction output. `output after: T` parameter syntax
+  was removed before release; named action outputs are the only output-binding
+  surface. `create after = T { ... }` constrains a declared output binding
+  rather than allocating runtime storage.
 - Cell updates are expressed with signature-direction outputs, `move`, and
   explicit `require` constraints, keeping the CKB transaction shape visible in
   source.

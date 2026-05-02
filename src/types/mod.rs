@@ -1309,7 +1309,7 @@ impl<'a> TypeChecker<'a> {
                 .to_string();
             let Some(output_binding) = output_bindings.get(&to_path.base) else {
                 return Err(CompileError::new(
-                    format!("state move output binding '{}' must be an explicit output parameter", to_path.base),
+                    format!("state move output binding '{}' must be a named action return", to_path.base),
                     to_path.span,
                 ));
             };
@@ -1589,9 +1589,7 @@ impl<'a> TypeChecker<'a> {
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
             self.validate_callable_param_mutability(param)?;
-            let is_linear = self.is_linear_type(&param.ty)
-                && param.source != ParamSource::Output
-                && !non_linear_params.contains(param.name.as_str());
+            let is_linear = self.is_linear_type(&param.ty) && !non_linear_params.contains(param.name.as_str());
             env.bind_new(param.name.clone(), param.ty.clone(), is_linear, param.is_mut, param.span)?;
         }
         Ok(())
@@ -1636,38 +1634,13 @@ impl<'a> TypeChecker<'a> {
             return Ok(());
         }
         if param.source == ParamSource::Output {
-            if callable_kind != "action" {
-                return Err(CompileError::new(
-                    format!(
-                        "{} '{}' parameter '{}' cannot use output source classification; output parameters are action verifier bindings",
-                        callable_kind, callable_name, param.name
-                    ),
-                    param.span,
-                ));
-            }
-            if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
-                return Err(CompileError::new(
-                    format!("output action parameter '{}' must use 'output name: T' or a named action return without mut/ref/read_ref modifiers", param.name),
-                    param.span,
-                ));
-            }
-            let Some(name) = Self::base_type_name(&param.ty) else {
-                return Err(CompileError::new(
-                    format!("output action parameter '{}' must name a Cell-backed resource, shared cell, or receipt type", param.name),
-                    param.span,
-                ));
-            };
-            if self.resolve_cell_type_kind(name).is_none() {
-                return Err(CompileError::new(
-                    format!(
-                        "output action parameter '{}' references non-Cell type {}; output only marks a proposed transaction output Cell",
-                        param.name,
-                        type_repr(&param.ty)
-                    ),
-                    param.span,
-                ));
-            }
-            return Ok(());
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' parameter '{}' cannot use output source classification; bind transaction outputs on the action return side (`action f(...) -> name: T`)",
+                    callable_kind, callable_name, param.name
+                ),
+                param.span,
+            ));
         }
         if param.source == ParamSource::Witness {
             if callable_kind != "action" && callable_kind != "lock" {
@@ -1768,6 +1741,24 @@ impl<'a> TypeChecker<'a> {
                 format!(
                     "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `move` and `require` constraints in {} '{}'",
                     callable_kind, callable_name
+                ),
+                param.span,
+            ));
+        }
+        if matches!(callable_kind, "action" | "lock")
+            && matches!(param.ty, Type::Ref(_))
+            && !param.is_read_ref
+            && param.source != ParamSource::Protected
+        {
+            let help = if callable_kind == "lock" {
+                "use `protected name: T` for the guarded lock cell or `read name: T` for a read-only referenced cell"
+            } else {
+                "use `read name: T` for a read-only referenced cell, or a signature input/output binding for consumed/proposed cells"
+            };
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' parameter '{}' cannot use bare `&T` at the verifier boundary; {}",
+                    callable_kind, callable_name, param.name, help
                 ),
                 param.span,
             ));
@@ -4281,12 +4272,7 @@ fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Opti
             return Some(type_name.split('<').next().unwrap_or(type_name.as_str()));
         }
     }
-    action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
-        Type::Named(type_name) if param.source == ParamSource::Output && !param.is_read_ref && !param.is_ref && !param.is_mut => {
-            Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
-        }
-        _ => None,
-    })
+    None
 }
 
 fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutputBinding> {
@@ -4297,16 +4283,6 @@ fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutp
                 output.name.clone(),
                 ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
             );
-        }
-    }
-    for param in &action.params {
-        if param.source == ParamSource::Output {
-            if let Type::Named(type_name) = &param.ty {
-                bindings.insert(
-                    param.name.clone(),
-                    ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
-                );
-            }
         }
     }
     bindings
@@ -4659,6 +4635,7 @@ where
             let is_linear = checker.is_linear_type(&param.ty);
             env.insert(param.name.clone(), param.ty.clone(), is_linear, param.is_mut);
         }
+        checker.bind_action_outputs(&mut env, &action).unwrap();
 
         for stmt in &action.body {
             checker.check_stmt(&mut env, stmt).unwrap();

@@ -1,53 +1,38 @@
-
 module cellscript::acceptance::fungible_token
 
 resource Token has store, transfer, destroy {
-    amount: u64
-    symbol: [u8; 8]
+    amount: u64,
+    symbol: [u8; 8],
 }
 
 resource MintAuthority has store {
-    token_symbol: [u8; 8]
-    max_supply: u64
-    minted: u64
+    token_symbol: [u8; 8],
+    max_supply: u64,
+    minted: u64,
 }
 
-// The signature names the consumed authority input and proposed authority output.
-// `require` guards prove the relationship explicitly; this is not account-style
-// in-place storage.
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
-    
-    create token = Token {
-        amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+    create token = Token { amount, symbol: auth_before.token_symbol } with_lock(to)
 
-action transfer_token(token: Token, to: Address) -> Token
+action transfer_token(token: Token, to: Address) -> next_token: Token
 where
     consume token
-    create Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+    create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)
 
 action burn(token: Token)
 where
     assert(token.amount > 0, "cannot burn zero")
     destroy token
 
-action merge(a: Token, b: Token, to: Address) -> Token
+action merge(a: Token, b: Token, to: Address) -> merged: Token
 where
     assert(a.symbol == b.symbol, "symbol mismatch")
     let total = a.amount + b.amount
     consume a
     consume b
-    
-    create Token {
-        amount: total,
-        symbol: a.symbol
-    } with_lock(to)
+    create merged = Token { amount: total, symbol: a.symbol } with_lock(to)

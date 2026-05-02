@@ -405,7 +405,7 @@ resource MintAuthority has store {
 
 TOKEN_ACTION_SOURCES = {
     "mint": """
-action mint(auth_before: MintAuthority, output auth_after: MintAuthority, to: Address, amount: u64) -> Token
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert_invariant(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -413,16 +413,16 @@ where
     require auth_after.max_supply == auth_before.max_supply
     require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount: amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
 """,
     "transfer_token": """
-action transfer_token(token: Token, to: Address) -> Token
+action transfer_token(token: Token, to: Address) -> next_token: Token
 where
     consume token
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
@@ -434,14 +434,14 @@ where
     destroy token
 """,
     "merge": """
-action merge(a: Token, b: Token, to: Address) -> Token
+action merge(a: Token, b: Token, to: Address) -> merged: Token
 where
     assert_invariant(a.symbol == b.symbol, "symbol mismatch")
     let total = a.amount + b.amount
     consume a
     consume b
 
-    create Token {
+    create merged = Token {
         amount: total,
         symbol: a.symbol
     } with_lock(to)
@@ -491,7 +491,7 @@ receipt RoyaltyPayment {
 
 NFT_ACTION_SOURCES = {
     "mint": """
-action mint(collection_before: Collection, output collection_after: Collection, to: Address, metadata_hash: Hash) -> NFT
+action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where
     assert_invariant(collection_before.total_supply < collection_before.max_supply, "max supply reached")
     let token_id = collection_before.total_supply + 1
@@ -500,7 +500,7 @@ where
     require collection_after.max_supply == collection_before.max_supply
     require collection_after.total_supply == token_id
 
-    create NFT {
+    create nft = NFT {
         token_id: token_id,
         owner: to,
         metadata_hash: metadata_hash,
@@ -509,7 +509,7 @@ where
     }
 """,
     "transfer": """
-action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
 where
     assert_invariant(nft_before.owner != to, "cannot transfer to self")
     require nft_after.token_id == nft_before.token_id
@@ -519,10 +519,10 @@ where
     require nft_after.royalty_bps == nft_before.royalty_bps
 """,
     "create_listing": """
-action create_listing(nft: &NFT, price: u64, current_time: u64) -> Listing
+action create_listing(read nft: NFT, price: u64, current_time: u64) -> listing: Listing
 where
     assert_invariant(price > 0, "price must be positive")
-    create Listing {
+    create listing = Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
@@ -535,7 +535,7 @@ where
     destroy listing
 """,
     "buy_from_listing": """
-action buy_from_listing(nft_before: NFT, output nft_after: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (RoyaltyPayment, RoyaltyPayment)
+action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
     assert_invariant(payment >= listing.price, "insufficient payment")
 
@@ -550,26 +550,24 @@ where
 
     destroy listing
 
-    let royalty_payment = create RoyaltyPayment {
+    create royalty_payment = RoyaltyPayment {
         token_id: nft_before.token_id,
         recipient: nft_before.royalty_recipient,
         amount: royalty_amount
     }
 
-    let seller_payment = create RoyaltyPayment {
+    create seller_payment = RoyaltyPayment {
         token_id: nft_before.token_id,
         recipient: seller,
         amount: seller_amount
     }
-
-    (royalty_payment, seller_payment)
 """,
     "create_offer": """
-action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> Offer
+action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> offer: Offer
 where
     assert_invariant(price > 0, "price must be positive")
     assert_invariant(expires_at > 0, "expiration must be in the future")
-    create Offer {
+    create offer = Offer {
         token_id: token_id,
         buyer: buyer,
         price: price,
@@ -577,7 +575,7 @@ where
     }
 """,
     "accept_offer": """
-action accept_offer(nft_before: NFT, output nft_after: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (RoyaltyPayment, RoyaltyPayment)
+action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
     assert_invariant(current_time < offer.expires_at, "offer expired")
 
@@ -592,19 +590,17 @@ where
 
     destroy offer
 
-    let royalty_payment = create RoyaltyPayment {
+    create royalty_payment = RoyaltyPayment {
         token_id: nft_before.token_id,
         recipient: nft_before.royalty_recipient,
         amount: royalty_amount
     }
 
-    let seller_payment = create RoyaltyPayment {
+    create seller_payment = RoyaltyPayment {
         token_id: nft_before.token_id,
         recipient: seller,
         amount: seller_amount
     }
-
-    (royalty_payment, seller_payment)
 """,
     "burn": """
 action burn(nft: NFT)
@@ -614,10 +610,9 @@ where
     "batch_mint": """
 action batch_mint(
     collection_before: Collection,
-    output collection_after: Collection,
     recipients: [Address; 4],
     metadata_hashes: [Hash; 4],
-) -> (NFT, NFT, NFT, NFT)
+) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT)
 where
     assert_invariant(collection_before.total_supply + 4 <= collection_before.max_supply, "max supply reached")
     let first_token_id = collection_before.total_supply + 1
@@ -626,36 +621,34 @@ where
     require collection_after.max_supply == collection_before.max_supply
     require collection_after.total_supply == collection_before.total_supply + 4
 
-    let nft0 = create NFT {
+    create nft0 = NFT {
         token_id: first_token_id,
         owner: recipients[0],
         metadata_hash: metadata_hashes[0],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft1 = create NFT {
+    create nft1 = NFT {
         token_id: first_token_id + 1,
         owner: recipients[1],
         metadata_hash: metadata_hashes[1],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft2 = create NFT {
+    create nft2 = NFT {
         token_id: first_token_id + 2,
         owner: recipients[2],
         metadata_hash: metadata_hashes[2],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft3 = create NFT {
+    create nft3 = NFT {
         token_id: first_token_id + 3,
         owner: recipients[3],
         metadata_hash: metadata_hashes[3],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-
-    (nft0, nft1, nft2, nft3)
 """,
 }
 
@@ -699,11 +692,11 @@ receipt ReleaseRecord {
 
 TIMELOCK_ACTION_SOURCES = {
     "create_absolute_lock": """
-action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> TimeLock
+action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock
 where
     assert_invariant(unlock_height > current_height + 10, "too close")
     assert_invariant(unlock_height <= current_height + 2628000, "too far")
-    create TimeLock {
+    create created_lock = TimeLock {
         owner: owner,
         lock_type: 0,
         unlock_height: unlock_height,
@@ -711,11 +704,11 @@ where
     }
 """,
     "create_relative_lock": """
-action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> TimeLock
+action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock
 where
     assert_invariant(lock_period >= 10, "too short")
     assert_invariant(lock_period <= 2628000, "too long")
-    create TimeLock {
+    create created_lock = TimeLock {
         owner: owner,
         lock_type: 1,
         unlock_height: current_height + lock_period,
@@ -723,30 +716,30 @@ where
     }
 """,
     "lock_asset": """
-action lock_asset(time_lock: &TimeLock, lock_hash: Hash, amount: u64) -> LockedAsset
+action lock_asset(read time_lock: TimeLock, lock_hash: Hash, amount: u64) -> locked: LockedAsset
 where
     assert_invariant(amount > 0, "amount must be positive")
-    create LockedAsset {
+    create locked = LockedAsset {
         amount: amount,
         lock_hash: lock_hash
     }
 """,
     "request_release": """
-action request_release(time_lock: &TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> ReleaseRequest
+action request_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> request: ReleaseRequest
 where
     assert_invariant(current_height >= time_lock.unlock_height, "cannot unlock yet")
-    create ReleaseRequest {
+    create request = ReleaseRequest {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height
     }
 """,
     "request_emergency_release": """
-action request_emergency_release(time_lock: &TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> EmergencyRelease
+action request_emergency_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> emergency: EmergencyRelease
 where
     assert_invariant(time_lock.owner == requester, "not owner")
     assert_invariant(current_height < time_lock.unlock_height, "already unlockable")
-    create EmergencyRelease {
+    create emergency = EmergencyRelease {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height,
@@ -754,7 +747,7 @@ where
     }
 """,
     "approve_emergency_release": """
-action approve_emergency_release(emergency_before: EmergencyRelease, output emergency_after: EmergencyRelease, approver: Address, required_approvals: u8)
+action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease
 where
     assert_invariant(emergency_before.approvals < required_approvals, "already approved")
     require emergency_after.lock_hash == emergency_before.lock_hash
@@ -763,7 +756,7 @@ where
     require emergency_after.approvals == emergency_before.approvals + 1
 """,
     "extend_lock": """
-action extend_lock(time_lock_before: TimeLock, output time_lock_after: TimeLock, additional_period: u64, owner: Address, current_height: u64)
+action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock
 where
     assert_invariant(time_lock_before.owner == owner, "not owner")
     assert_invariant(current_height < time_lock_before.unlock_height, "already unlocked")
@@ -782,12 +775,12 @@ action execute_release(
     locked_asset: LockedAsset,
     request: ReleaseRequest,
     executor: Address
-) -> ReleaseRecord
+) -> record: ReleaseRecord
 where
     assert_invariant(time_lock.owner == executor, "not owner")
     assert_invariant(locked_asset.lock_hash == request.lock_hash, "asset/request mismatch")
 
-    let record = create ReleaseRecord {
+    create record = ReleaseRecord {
         lock_hash: request.lock_hash,
         released_at: 125,
         released_by: executor
@@ -796,8 +789,6 @@ where
     destroy time_lock
     destroy locked_asset
     destroy request
-
-    record
 """,
     "execute_emergency_release": """
 action execute_emergency_release(
@@ -806,13 +797,13 @@ action execute_emergency_release(
     emergency: EmergencyRelease,
     executor: Address,
     required_approvals: u8
-) -> ReleaseRecord
+) -> record: ReleaseRecord
 where
     assert_invariant(time_lock.owner == executor, "not owner")
     assert_invariant(emergency.approvals >= required_approvals, "not enough approvals")
     assert_invariant(locked_asset.lock_hash == emergency.lock_hash, "asset/emergency mismatch")
 
-    let record = create ReleaseRecord {
+    create record = ReleaseRecord {
         lock_hash: emergency.lock_hash,
         released_at: 125,
         released_by: executor
@@ -821,15 +812,13 @@ where
     destroy time_lock
     destroy locked_asset
     destroy emergency
-
-    record
 """,
     "batch_create_locks": """
 action batch_create_locks(
     owners: [Address; 4],
     unlock_heights: [u64; 4],
     current_height: u64,
-) -> (TimeLock, TimeLock, TimeLock, TimeLock)
+) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock)
 where
     assert_invariant(unlock_heights[0] > current_height + 10, "too close")
     assert_invariant(unlock_heights[1] > current_height + 10, "too close")
@@ -840,32 +829,30 @@ where
     assert_invariant(unlock_heights[2] <= current_height + 2628000, "too far")
     assert_invariant(unlock_heights[3] <= current_height + 2628000, "too far")
 
-    let lock0 = create TimeLock {
+    create lock0 = TimeLock {
         owner: owners[0],
         lock_type: 0,
         unlock_height: unlock_heights[0],
         created_at: current_height
     }
-    let lock1 = create TimeLock {
+    create lock1 = TimeLock {
         owner: owners[1],
         lock_type: 0,
         unlock_height: unlock_heights[1],
         created_at: current_height
     }
-    let lock2 = create TimeLock {
+    create lock2 = TimeLock {
         owner: owners[2],
         lock_type: 0,
         unlock_height: unlock_heights[2],
         created_at: current_height
     }
-    let lock3 = create TimeLock {
+    create lock3 = TimeLock {
         owner: owners[3],
         lock_type: 0,
         unlock_height: unlock_heights[3],
         created_at: current_height
     }
-
-    (lock0, lock1, lock2, lock3)
 """,
 }
 
@@ -897,7 +884,7 @@ receipt LPReceipt {
     provider: Address
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt)
+action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt)
 where
     assert_invariant(token_a.symbol != token_b.symbol, "same token")
     assert_invariant(token_a.amount > 0 && token_b.amount > 0, "empty reserve")
@@ -908,7 +895,7 @@ where
     consume token_a
     consume token_b
 
-    let pool = create Pool {
+    create pool = Pool {
         token_a_symbol: token_a.symbol,
         token_b_symbol: token_b.symbol,
         reserve_a: token_a.amount,
@@ -917,13 +904,11 @@ where
         fee_rate_bps: fee_rate_bps
     }
 
-    let receipt = create LPReceipt {
+    create receipt = LPReceipt {
         pool_id: pool.type_hash(),
         lp_amount: initial_lp,
         provider: provider
     } with_lock(provider)
-
-    (pool, receipt)
 
 action isqrt(n: u64) -> u64
 where
@@ -962,7 +947,7 @@ receipt LPReceipt {
     provider: Address
 }
 
-action add_liquidity(pool_before: Pool, output pool_after: Pool, token_a: Token, token_b: Token, provider: Address) -> LPReceipt
+action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt)
 where
     assert_invariant(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
     assert_invariant(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
@@ -981,7 +966,7 @@ where
     require pool_after.total_lp == pool_before.total_lp + lp_amount
     require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    create LPReceipt {
+    create receipt = LPReceipt {
         pool_id: pool_before.type_hash(),
         lp_amount: lp_amount,
         provider: provider
@@ -1006,7 +991,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-action swap_a_for_b(pool_before: Pool, output pool_after: Pool, input: Token, min_output: u64, to: Address) -> Token
+action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token)
 where
     assert_invariant(input.symbol == pool_before.token_a_symbol, "wrong input token")
 
@@ -1027,7 +1012,7 @@ where
     require pool_after.total_lp == pool_before.total_lp
     require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    create Token {
+    create token_out = Token {
         amount: amount_out,
         symbol: pool_before.token_b_symbol
     } with_lock(to)
@@ -1053,7 +1038,7 @@ receipt LPReceipt {
     provider: Address
 }
 
-action remove_liquidity(pool_before: Pool, output pool_after: Pool, receipt: LPReceipt, provider: Address) -> (Token, Token)
+action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token)
 where
     assert_invariant(receipt.pool_id == pool_before.type_hash(), "wrong pool")
 
@@ -1069,17 +1054,15 @@ where
     require pool_after.total_lp == pool_before.total_lp - receipt.lp_amount
     require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    let token_a = create Token {
+    create token_a_out = Token {
         amount: amount_a,
         symbol: pool_before.token_a_symbol
     } with_lock(provider)
 
-    let token_b = create Token {
+    create token_b_out = Token {
         amount: amount_b,
         symbol: pool_before.token_b_symbol
     } with_lock(provider)
-
-    (token_a, token_b)
 """,
     "isqrt": """
 action isqrt(n: u64) -> u64
@@ -1148,13 +1131,13 @@ receipt ExecutionRecord {
 
 MULTISIG_ACTION_SOURCES = {
     "create_wallet": """
-action create_wallet(signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> MultisigWallet
+action create_wallet(signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet
 where
     assert_invariant(signer_a != signer_b, "duplicate signer")
     assert_invariant(threshold >= 2, "threshold too low")
     assert_invariant(threshold <= 2, "threshold too high")
 
-    create MultisigWallet {
+    create wallet = MultisigWallet {
         signer_a: signer_a,
         signer_b: signer_b,
         threshold: threshold,
@@ -1163,7 +1146,7 @@ where
     }
 """,
     "propose_transfer": """
-action propose_transfer(wallet_before: MultisigWallet, output wallet_after: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> Proposal
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
 where
     assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(amount > 0, "amount must be positive")
@@ -1176,7 +1159,7 @@ where
     require wallet_after.nonce == proposal_id
     require wallet_after.created_at == wallet_before.created_at
 
-    create Proposal {
+    create proposal = Proposal {
         wallet_hash: Hash::zero(),
         proposal_id: proposal_id,
         proposer: proposer,
@@ -1190,7 +1173,7 @@ where
     }
 """,
     "add_signature": """
-action add_signature(proposal_before: Proposal, output proposal_after: Proposal, signer: Address, current_time: u64) -> SignatureConfirmation
+action add_signature(proposal_before: Proposal, signer: Address, current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation)
 where
     assert_invariant(current_time < proposal_before.expires_at, "proposal expired")
     assert_invariant(proposal_before.signature_count < proposal_before.required_signatures, "already enough signatures")
@@ -1206,14 +1189,14 @@ where
     require proposal_after.created_at == proposal_before.created_at
     require proposal_after.expires_at == proposal_before.expires_at
 
-    create SignatureConfirmation {
+    create confirmation = SignatureConfirmation {
         proposal_id: proposal_before.proposal_id,
         signer: signer,
         timestamp: current_time
     }
 """,
     "propose_add_signer": """
-action propose_add_signer(wallet_before: MultisigWallet, output wallet_after: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> Proposal
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
 where
     assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(new_signer != wallet_before.signer_a, "already signer")
@@ -1227,7 +1210,7 @@ where
     require wallet_after.nonce == proposal_id
     require wallet_after.created_at == wallet_before.created_at
 
-    create Proposal {
+    create proposal = Proposal {
         wallet_hash: Hash::zero(),
         proposal_id: proposal_id,
         proposer: proposer,
@@ -1241,7 +1224,7 @@ where
     }
 """,
     "propose_remove_signer": """
-action propose_remove_signer(wallet_before: MultisigWallet, output wallet_after: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> Proposal
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
 where
     assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(signer_to_remove == wallet_before.signer_b, "not removable signer")
@@ -1255,7 +1238,7 @@ where
     require wallet_after.nonce == proposal_id
     require wallet_after.created_at == wallet_before.created_at
 
-    create Proposal {
+    create proposal = Proposal {
         wallet_hash: Hash::zero(),
         proposal_id: proposal_id,
         proposer: proposer,
@@ -1269,7 +1252,7 @@ where
     }
 """,
     "propose_change_threshold": """
-action propose_change_threshold(wallet_before: MultisigWallet, output wallet_after: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> Proposal
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
 where
     assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(new_threshold >= 1, "threshold too low")
@@ -1283,7 +1266,7 @@ where
     require wallet_after.nonce == proposal_id
     require wallet_after.created_at == wallet_before.created_at
 
-    create Proposal {
+    create proposal = Proposal {
         wallet_hash: Hash::zero(),
         proposal_id: proposal_id,
         proposer: proposer,
@@ -1297,12 +1280,12 @@ where
     }
 """,
     "execute_proposal": """
-action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> ExecutionRecord
+action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord
 where
     assert_invariant(current_time < proposal.expires_at, "proposal expired")
     assert_invariant(proposal.signature_count >= proposal.required_signatures, "not enough signatures")
 
-    let record = create ExecutionRecord {
+    create record = ExecutionRecord {
         proposal_id: proposal.proposal_id,
         executor: executor,
         executed_at: current_time,
@@ -1310,8 +1293,6 @@ where
     }
 
     destroy proposal
-
-    record
 """,
     "cancel_proposal": """
 action cancel_proposal(proposal: Proposal, canceller: Address)

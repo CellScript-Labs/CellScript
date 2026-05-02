@@ -683,14 +683,8 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) = self.lower_signature_and_body(
-            &function.params,
-            &[],
-            &function.body,
-            function.return_type.is_some(),
-            &HashSet::new(),
-            &HashSet::new(),
-        );
+        let (params, body) =
+            self.lower_signature_and_body(&function.params, &[], &function.body, function.return_type.is_some(), &HashSet::new());
 
         IrPureFn { name: function.name.clone(), params, return_type: function.return_type.as_ref().map(Self::convert_type), body }
     }
@@ -756,14 +750,12 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let output_bindings = action_output_binding_names(action);
         let core_input_bindings = action_core_input_binding_names(action);
         let (params, body) = self.lower_signature_and_body(
             &action.params,
             &action.outputs,
             &action.body,
             action.return_type.is_some(),
-            &output_bindings,
             &core_input_bindings,
         );
 
@@ -872,7 +864,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
-        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, true, &HashSet::new(), &HashSet::new());
+        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, true, &HashSet::new());
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
@@ -1109,7 +1101,6 @@ impl IrGenerator {
         outputs: &[crate::ast::ActionOutput],
         stmts: &[Stmt],
         tail_expr_returns: bool,
-        output_bindings: &HashSet<String>,
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
         let mut vars = HashMap::new();
@@ -1118,14 +1109,13 @@ impl IrGenerator {
             .map(|param| {
                 let binding = self.new_var(param.name.clone(), Self::convert_type(&param.ty));
                 vars.insert(param.name.clone(), binding.clone());
-                let source = if output_bindings.contains(param.name.as_str()) { ParamSource::Output } else { param.source };
                 IrParam {
                     name: param.name.clone(),
                     ty: Self::convert_type(&param.ty),
                     is_mut: param.is_mut,
                     is_ref: param.is_ref,
                     is_read_ref: param.is_read_ref,
-                    source,
+                    source: param.source,
                     binding,
                 }
             })
@@ -4498,12 +4488,6 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
     }
 }
 
-fn action_output_binding_names(action: &ActionDef) -> HashSet<String> {
-    let mut names = action.outputs.iter().map(|output| output.name.clone()).collect::<HashSet<_>>();
-    names.extend(action.params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()));
-    names
-}
-
 fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
     action_inferred_lineage_bindings(action).keys().cloned().collect()
 }
@@ -4557,13 +4541,6 @@ fn action_output_binding_types(action: &ActionDef) -> HashMap<String, String> {
     for output in &action.outputs {
         if let Some(type_name) = ast_named_cell_type_name(&output.ty) {
             bindings.insert(output.name.clone(), type_name.to_string());
-        }
-    }
-    for param in &action.params {
-        if param.source == ParamSource::Output {
-            if let Some(type_name) = ast_named_cell_type_name(&param.ty) {
-                bindings.insert(param.name.clone(), type_name.to_string());
-            }
         }
     }
     bindings

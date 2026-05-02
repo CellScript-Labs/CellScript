@@ -4996,7 +4996,7 @@ fn create_output_verification_obligation(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
 ) -> Option<TransactionResourceObligation> {
-    if pattern.operation != "create" {
+    if pattern.operation != "create" && pattern.operation != "output" {
         return None;
     }
     let fields_checked = metadata_can_verify_create_output_fields(pattern, type_layouts, availability);
@@ -11891,7 +11891,7 @@ fn param_metadata(
         ty: ir_type_to_string(&param.ty),
         is_mut: param.is_mut,
         is_ref: param.is_ref,
-        source: param_source_metadata(param.source).to_string(),
+        source: if param.is_read_ref { "read" } else { param_source_metadata(param.source) }.to_string(),
         protected_spend_surface: param.source == ast::ParamSource::Protected,
         witness_data_source: param.source == ast::ParamSource::Witness,
         lock_args_data_source: param.source == ast::ParamSource::LockArgs,
@@ -13036,6 +13036,18 @@ resource Token {
     lock bad(token: Token) -> bool {
         return true
     }
+"#;
+
+    const LOCK_BARE_REF_PARAM_PROGRAM: &str = r#"
+module test
+
+resource Token {
+    amount: u64,
+}
+
+lock bad(token: &Token) -> bool {
+    return token.amount > 0
+}
 "#;
 
     const CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
@@ -15604,7 +15616,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
 where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -15618,7 +15630,7 @@ shared BigState has store {
     pad: [u8; 600],
 }
 
-action update(state_before: BigState, output state_after: BigState, delta: u64)
+action update(state_before: BigState, delta: u64) -> state_after: BigState
 where
     require state_after.balance == state_before.balance + delta
     require state_after.pad == state_before.pad
@@ -16416,6 +16428,13 @@ where
             err.message
         );
 
+        let err = compile(LOCK_BARE_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            err.message.contains("lock 'bad' parameter 'token' cannot use bare `&T` at the verifier boundary"),
+            "unexpected error: {}",
+            err.message
+        );
+
         let err = compile(CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
             err.message.contains(
@@ -16463,11 +16482,7 @@ where
         );
 
         let err = compile(CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("parameter 'view' in function 'bad' cannot contain nested reference type &&Point"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`read_ref` is not a type qualifier"), "unexpected error: {}", err.message);
 
         let err = compile(ACTION_REF_PARAM_MODIFIER_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("parameter modifier 'ref' is reserved but unsupported"), "unexpected error: {}", err.message);
@@ -17078,7 +17093,7 @@ where
     }
 
     #[test]
-    fn compile_binds_readonly_schema_entry_params_to_input_cells() {
+    fn compile_binds_read_action_schema_params_to_cell_deps() {
         let program = r#"
 module entry_read_ref
 
@@ -17093,9 +17108,9 @@ receipt Listing has destroy {
     price: u64,
 }
 
-action create_listing(nft: &NFT, price: u64) -> Listing
+action create_listing(read nft: NFT, price: u64) -> listing: Listing
 where
-    create Listing {
+    create listing = Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
@@ -17106,13 +17121,13 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("# cellscript abi: bind read-only param nft to Input#0 cell data"),
-            "read-only schema entry parameter was not bound to an input cell:\n{}",
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_dep source=CellDep index=0"),
+            "explicit read schema entry parameter did not use the CellDep LOAD_CELL ABI:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_input source=Input index=0"),
-            "read-only schema entry parameter did not use the Input LOAD_CELL ABI:\n{}",
+            !asm.contains("# cellscript abi: bind read-only param nft to Input#0 cell data"),
+            "explicit read schema entry parameter regressed to implicit Input binding:\n{}",
             asm
         );
         assert!(
@@ -19379,7 +19394,7 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection_before: Collection, output collection_after: Collection, recipients: Vec<Address>)
+action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection
 where
     require collection_after.name == collection_before.name
     require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
@@ -21110,7 +21125,7 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input input: Offer, output output: Offer)
+action accept(input input: Offer) -> output: Offer
     move input.state: Live -> output.state: Filled
 where
     require input.amount == output.amount
@@ -21263,7 +21278,7 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer, output output: Offer)
+action cancel(input: Offer) -> output: Offer
     move input.state: Live -> output.state: Cancelled
 where
     require input.amount == output.amount
@@ -21328,7 +21343,7 @@ where
         amount,
     }
 
-action accept_core(input: Offer, output output: Offer)
+action accept_core(input: Offer) -> output: Offer
     move input.state: Live -> output.state: Filled
 where
     require input.amount == output.amount
@@ -21489,6 +21504,8 @@ where
             asm
         );
         let action = result.metadata.actions.iter().find(|action| action.name == "grant").expect("grant metadata");
+        let config_param = action.params.iter().find(|param| param.name == "config").expect("config param metadata");
+        assert_eq!(config_param.source, "read");
         assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "grant"));
     }
 
@@ -21652,11 +21669,7 @@ where
     }
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("must be an owned Cell input parameter") || err.message.contains("must be consumed"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("cannot use bare `&T` at the verifier boundary"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -22197,7 +22210,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
 where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -22238,7 +22251,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
 where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -22267,7 +22280,7 @@ resource NFT has store, destroy {
     royalty_bps: u16
 }
 
-action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
 where
     assert(nft_before.owner != to, "cannot transfer to self")
     require nft_after.token_id == nft_before.token_id
@@ -22463,7 +22476,7 @@ receipt Proposal {
     expires_at: u64,
 }
 
-lock not_expired(proposal: &Proposal, now: u64) -> bool {
+lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
     now < proposal.expires_at
 }
 "#;
@@ -22549,7 +22562,7 @@ where
     };
     locked
 
-lock asset_matches(locked_asset: &LockedAsset, expected: Hash) -> bool {
+lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) -> bool {
     locked_asset.lock_hash == expected
 }
 "#;
@@ -22599,7 +22612,7 @@ resource Collection {
     creator: Address,
 }
 
-lock collection_creator(collection: &Collection, claimed_creator: Address) -> bool {
+lock collection_creator(protected collection: Collection, witness claimed_creator: Address) -> bool {
     collection.creator == claimed_creator
 }
 "#;
@@ -22640,7 +22653,7 @@ receipt Emergency {
     approvers: Vec<Address>,
 }
 
-lock enough(emergency: &Emergency, required: u8) -> bool {
+lock enough(protected emergency: Emergency, witness required: u8) -> bool {
     emergency.approvers.len() >= required as usize
 }
 "#;
@@ -22689,7 +22702,7 @@ fn is_signer(wallet: &Wallet, addr: Address) -> bool {
     false
 }
 
-lock signer(wallet: &Wallet, addr: Address) -> bool {
+lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
     is_signer(wallet, addr)
 }
 "#;
@@ -22731,7 +22744,7 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection, output collection_after: Collection)
+action mint(collection_before: Collection) -> collection_after: Collection
 where
     assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
     require collection_after.name == collection_before.name

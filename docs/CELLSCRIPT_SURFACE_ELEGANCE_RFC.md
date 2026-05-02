@@ -2,6 +2,13 @@
 
 ## Status
 
+Superseded for action/update syntax by
+[`CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`](CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md).
+Keep this RFC as historical design context only. The active surface uses
+signature-direction action outputs, `where` proof blocks, singular
+`move input.state: A -> output.state: B`, prefix source qualifiers, and no
+`replace` / `replaces` clause.
+
 0.13 low-risk surface pass implemented. Authority-sensitive binding remains
 deferred.
 

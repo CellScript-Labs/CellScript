@@ -39,7 +39,7 @@ syntax forms you will see in the examples:
 | `flow T.state { A -> B; }` | Compact state graph when a separate flow name is unnecessary. |
 | `action(old: T) -> new: T` | Core input-to-output verifier signature. |
 | `-> (left: T, right: Receipt)` | Multiple named proposed output Cell bindings. |
-| `input x: T` / `output y: T` | Explicit source qualifiers when the default action side is not enough. |
+| `input x: T` | Explicit consumed input Cell qualifier when the default action side is not enough. |
 | `read cfg: T` | Read-only CellDep-backed action input. |
 | `protected cell: T` | Lock-guarded input Cell view. |
 | `witness arg: T` | Decoded witness data. |

@@ -630,15 +630,15 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token
+action mint(amount: u64, symbol: [u8; 8]) -> token: Token
 where
-    create Token { amount: amount, symbol: symbol }
+    create token = Token { amount: amount, symbol: symbol }
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
-        assert!(formatted.contains("create Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("create token = Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
     }
 
     #[test]

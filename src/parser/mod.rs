@@ -235,11 +235,11 @@ impl<'a> Parser<'a> {
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
                         let effect_name = self.parse_name()?;
                         match effect_name.as_str() {
-                            "Pure" => {}
-                            "ReadOnly" => has_read_only = true,
-                            "Mutating" => has_mutating = true,
-                            "Creating" => has_creating = true,
-                            "Destroying" => has_destroying = true,
+                            "Pure" | "pure" => {}
+                            "ReadOnly" | "readonly" | "read_only" => has_read_only = true,
+                            "Mutating" | "mutating" => has_mutating = true,
+                            "Creating" | "creating" => has_creating = true,
+                            "Destroying" | "destroying" => has_destroying = true,
                             _ => return Err(CompileError::new("expected effect class", self.current().span)),
                         }
 
@@ -861,8 +861,10 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::ReadRef => {
-                self.advance();
-                Type::Ref(Box::new(self.parse_type()?))
+                return Err(CompileError::new(
+                    "`read_ref` is not a type qualifier; use `read name: T` for action/lock parameters or `read_ref<T>()` as an expression",
+                    self.current().span,
+                ));
             }
             _ => {
                 return Err(CompileError::new(format!("expected type, found {}", self.current().kind), self.current().span));
@@ -886,7 +888,7 @@ impl<'a> Parser<'a> {
             Type::Array(elem, size) => format!("[{}; {}]", Self::render_type(elem), size),
             Type::Tuple(types) => format!("({})", types.iter().map(Self::render_type).collect::<Vec<_>>().join(", ")),
             Type::Named(name) => name.clone(),
-            Type::Ref(inner) => format!("read_ref {}", Self::render_type(inner)),
+            Type::Ref(inner) => format!("&{}", Self::render_type(inner)),
             Type::MutRef(inner) => format!("&mut {}", Self::render_type(inner)),
         }
     }
@@ -989,6 +991,12 @@ impl<'a> Parser<'a> {
 
     fn parse_action_where_block(&mut self) -> Result<Vec<Stmt>> {
         if !self.check(&TokenKind::Where) {
+            if self.check(&TokenKind::LBrace) {
+                return Err(CompileError::new(
+                    "action proof blocks use `where`; `{ ... }` action bodies are not part of the current syntax",
+                    self.current().span,
+                ));
+            }
             return Ok(Vec::new());
         }
 
@@ -1193,7 +1201,7 @@ impl<'a> Parser<'a> {
             false
         };
 
-        let (prefix_source, prefix_read_ref) = self.parse_param_source_prefix();
+        let (prefix_source, prefix_read_ref) = self.parse_param_source_prefix()?;
         let name = self.parse_name()?;
 
         self.expect(TokenKind::Colon)?;
@@ -1235,33 +1243,33 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_param_source_prefix(&mut self) -> (ParamSource, bool) {
+    fn parse_param_source_prefix(&mut self) -> Result<(ParamSource, bool)> {
         match (&self.current().kind, &self.peek(1).kind, &self.peek(2).kind) {
             (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "read" => {
                 self.advance();
-                (ParamSource::Default, true)
+                Ok((ParamSource::Default, true))
             }
             (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "input" => {
                 self.advance();
-                (ParamSource::Input, false)
+                Ok((ParamSource::Input, false))
             }
-            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "output" => {
-                self.advance();
-                (ParamSource::Output, false)
-            }
+            (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "output" => Err(CompileError::new(
+                "`output name: T` is only valid on the action return side; write `action f(input: T) -> output: T`",
+                self.current().span,
+            )),
             (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "protected" => {
                 self.advance();
-                (ParamSource::Protected, false)
+                Ok((ParamSource::Protected, false))
             }
             (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "witness" => {
                 self.advance();
-                (ParamSource::Witness, false)
+                Ok((ParamSource::Witness, false))
             }
             (TokenKind::Identifier(name), TokenKind::Identifier(_), TokenKind::Colon) if name == "lock_args" => {
                 self.advance();
-                (ParamSource::LockArgs, false)
+                Ok((ParamSource::LockArgs, false))
             }
-            _ => (ParamSource::Default, false),
+            _ => Ok((ParamSource::Default, false)),
         }
     }
 
@@ -2204,9 +2212,9 @@ resource Vault<T> has store {
         let input = r#"
 module test
 
-action mint(amount: u64) -> Token
+action mint(amount: u64) -> token: Token
 where
-    create Token { amount: amount, symbol: b"TEST" }
+    create token = Token { amount: amount, symbol: b"TEST" }
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2257,6 +2265,48 @@ where
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("state move must put ':' before the source state"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_action_brace_body() {
+        let input = r#"
+module test
+
+action accept(input: Offer) -> output: Offer {
+    require input.state == output.state
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("action proof blocks use `where`"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_read_ref_as_type_qualifier() {
+        let input = r#"
+module test
+
+action grant(config: read_ref Config) -> grant: Grant
+where
+    create grant = Grant { admin: config.admin }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("`read_ref` is not a type qualifier"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_output_parameter_source_prefix() {
+        let input = r#"
+module test
+
+action accept(input: Offer, output output: Offer)
+where
+    require output.state == 1
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("only valid on the action return side"), "unexpected error: {}", err.message);
     }
 
     #[test]

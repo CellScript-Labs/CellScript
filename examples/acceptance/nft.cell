@@ -1,11 +1,8 @@
-
 module cellscript::acceptance::nft
 
+const MAX_SUPPLY: u64 = 10000
 
-const MAX_SUPPLY: u64 = 10000;
-
-const ROYALTY_BASIS_POINTS: u16 = 250; // 2.5%
-
+const ROYALTY_BASIS_POINTS: u16 = 250
 
 struct Metadata {
     name: String,
@@ -53,234 +50,106 @@ receipt RoyaltyPayment {
     amount: u64,
 }
 
-
-#[effect(Mutating)]
+#[effect(mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 5000)]
-action mint(
-    collection_before: Collection,
-    output collection_after: Collection,
-    to: Address,
-    metadata_hash: Hash,
-) -> NFT
+action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where
-    assert(collection_before.total_supply < collection_before.max_supply, "Max supply reached");
-    
-    let token_id = collection_before.total_supply + 1;
+    assert(collection_before.total_supply < collection_before.max_supply, "Max supply reached")
+    let token_id = collection_before.total_supply + 1
     require collection_after.name == collection_before.name
     require collection_after.symbol == collection_before.symbol
     require collection_after.creator == collection_before.creator
     require collection_after.total_supply == token_id
     require collection_after.max_supply == collection_before.max_supply
     require collection_after.base_uri == collection_before.base_uri
-    
-    let nft = create NFT {
-        token_id,
-        owner: to,
-        metadata_hash,
-        royalty_recipient: collection_before.creator,
-        royalty_bps: ROYALTY_BASIS_POINTS,
-    };
-    
-    nft
+    create nft = NFT { token_id, owner: to, metadata_hash, royalty_recipient: collection_before.creator, royalty_bps: ROYALTY_BASIS_POINTS }
 
-#[effect(Mutating)]
+#[effect(mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
-action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
 where
-    assert(nft_before.owner != to, "Cannot transfer to self");
+    assert(nft_before.owner != to, "Cannot transfer to self")
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == to
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
 
-#[effect(Creating)]
+#[effect(creating)]
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
-action create_listing(
-    nft: &NFT,
-    price: u64,
-    current_time: u64,
-) -> Listing
+action create_listing(read nft: NFT, price: u64, current_time: u64) -> listing: Listing
 where
-    assert(price > 0, "Price must be positive");
-    
-    let listing = create Listing {
-        token_id: nft.token_id,
-        seller: nft.owner,
-        price,
-        created_at: current_time,
-        state: 0,
-    };
-    
-    listing
+    assert(price > 0, "Price must be positive")
+    create listing = Listing { token_id: nft.token_id, seller: nft.owner, price, created_at: current_time, state: 0 }
 
-#[effect(Destroying)]
+#[effect(destroying)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
 action cancel_listing(listing: Listing)
 where
-    
-    destroy listing;
+    destroy listing
 
-#[effect(Mutating, Destroying)]
+#[effect(mutating)]
 #[scheduler_hint(sequential, estimated_cycles = 8000)]
-action buy_from_listing(
-    nft_before: NFT,
-    output nft_after: NFT,
-    listing: Listing,
-    buyer: Address,
-    seller: Address,
-    payment: u64,
-) -> (RoyaltyPayment, RoyaltyPayment)
+action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
-    assert(payment >= listing.price, "Insufficient payment");
-    
-    let royalty_amount = (payment * nft_before.royalty_bps as u64) / 10000;
-    let seller_amount = payment - royalty_amount;
+    assert(payment >= listing.price, "Insufficient payment")
+    let royalty_amount = payment * nft_before.royalty_bps as u64 / 10000
+    let seller_amount = payment - royalty_amount
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == buyer
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
-    
-    destroy listing;
-    
-    let royalty_payment = create RoyaltyPayment {
-        token_id: nft_before.token_id,
-        recipient: nft_before.royalty_recipient,
-        amount: royalty_amount,
-    };
-    
-    let seller_payment = create RoyaltyPayment {
-        token_id: nft_before.token_id,
-        recipient: seller,
-        amount: seller_amount,
-    };
-    
-    (royalty_payment, seller_payment)
+    destroy listing
+    create royalty_payment = RoyaltyPayment { token_id: nft_before.token_id, recipient: nft_before.royalty_recipient, amount: royalty_amount }
+    create seller_payment = RoyaltyPayment { token_id: nft_before.token_id, recipient: seller, amount: seller_amount }
 
-#[effect(Creating)]
+#[effect(creating)]
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
-action create_offer(
-    token_id: u64,
-    buyer: Address,
-    price: u64,
-    expires_at: u64,
-) -> Offer
+action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> offer: Offer
 where
-    assert(price > 0, "Price must be positive");
-    assert(expires_at > 0, "Expiration must be in the future");
-    
-    let offer = create Offer {
-        token_id,
-        buyer,
-        price,
-        expires_at,
-        state: 0,
-    };
-    
-    offer
+    assert(price > 0, "Price must be positive")
+    assert(expires_at > 0, "Expiration must be in the future")
+    create offer = Offer { token_id, buyer, price, expires_at, state: 0 }
 
-#[effect(Mutating, Destroying)]
+#[effect(mutating)]
 #[scheduler_hint(sequential, estimated_cycles = 8000)]
-action accept_offer(
-    nft_before: NFT,
-    output nft_after: NFT,
-    offer: Offer,
-    buyer: Address,
-    seller: Address,
-    price: u64,
-    current_time: u64,
-) -> (RoyaltyPayment, RoyaltyPayment)
+action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
-    assert(current_time < offer.expires_at, "Offer expired");
-    
-    
-    let royalty_amount = (price * nft_before.royalty_bps as u64) / 10000;
-    let seller_amount = price - royalty_amount;
+    assert(current_time < offer.expires_at, "Offer expired")
+    let royalty_amount = price * nft_before.royalty_bps as u64 / 10000
+    let seller_amount = price - royalty_amount
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == buyer
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
-    
-    destroy offer;
-    
-    let royalty_payment = create RoyaltyPayment {
-        token_id: nft_before.token_id,
-        recipient: nft_before.royalty_recipient,
-        amount: royalty_amount,
-    };
-    
-    let seller_payment = create RoyaltyPayment {
-        token_id: nft_before.token_id,
-        recipient: seller,
-        amount: seller_amount,
-    };
-    
-    (royalty_payment, seller_payment)
+    destroy offer
+    create royalty_payment = RoyaltyPayment { token_id: nft_before.token_id, recipient: nft_before.royalty_recipient, amount: royalty_amount }
+    create seller_payment = RoyaltyPayment { token_id: nft_before.token_id, recipient: seller, amount: seller_amount }
 
-#[effect(Destroying)]
+#[effect(destroying)]
 #[scheduler_hint(parallel, estimated_cycles = 1000)]
 action burn(nft: NFT)
 where
-    destroy nft;
+    destroy nft
 
-#[effect(Mutating)]
+#[effect(mutating)]
 #[scheduler_hint(sequential, estimated_cycles = 30000)]
-action batch_mint(
-    collection_before: Collection,
-    output collection_after: Collection,
-    recipients: [Address; 4],
-    metadata_hashes: [Hash; 4],
-) -> (NFT, NFT, NFT, NFT)
+action batch_mint(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT)
 where
-    assert(
-        collection_before.total_supply + 4 <= collection_before.max_supply,
-        "Max supply would be exceeded"
-    );
-
-    let first_token_id = collection_before.total_supply + 1;
+    assert(collection_before.total_supply + 4 <= collection_before.max_supply, "Max supply would be exceeded")
+    let first_token_id = collection_before.total_supply + 1
     require collection_after.name == collection_before.name
     require collection_after.symbol == collection_before.symbol
     require collection_after.creator == collection_before.creator
     require collection_after.total_supply == collection_before.total_supply + 4
     require collection_after.max_supply == collection_before.max_supply
     require collection_after.base_uri == collection_before.base_uri
-
-    let nft0 = create NFT {
-        token_id: first_token_id,
-        owner: recipients[0],
-        metadata_hash: metadata_hashes[0],
-        royalty_recipient: collection_before.creator,
-        royalty_bps: ROYALTY_BASIS_POINTS,
-    };
-
-    let nft1 = create NFT {
-        token_id: first_token_id + 1,
-        owner: recipients[1],
-        metadata_hash: metadata_hashes[1],
-        royalty_recipient: collection_before.creator,
-        royalty_bps: ROYALTY_BASIS_POINTS,
-    };
-
-    let nft2 = create NFT {
-        token_id: first_token_id + 2,
-        owner: recipients[2],
-        metadata_hash: metadata_hashes[2],
-        royalty_recipient: collection_before.creator,
-        royalty_bps: ROYALTY_BASIS_POINTS,
-    };
-
-    let nft3 = create NFT {
-        token_id: first_token_id + 3,
-        owner: recipients[3],
-        metadata_hash: metadata_hashes[3],
-        royalty_recipient: collection_before.creator,
-        royalty_bps: ROYALTY_BASIS_POINTS,
-    };
-
-    (nft0, nft1, nft2, nft3)
-
+    create nft0 = NFT { token_id: first_token_id, owner: recipients[0], metadata_hash: metadata_hashes[0], royalty_recipient: collection_before.creator, royalty_bps: ROYALTY_BASIS_POINTS }
+    create nft1 = NFT { token_id: first_token_id + 1, owner: recipients[1], metadata_hash: metadata_hashes[1], royalty_recipient: collection_before.creator, royalty_bps: ROYALTY_BASIS_POINTS }
+    create nft2 = NFT { token_id: first_token_id + 2, owner: recipients[2], metadata_hash: metadata_hashes[2], royalty_recipient: collection_before.creator, royalty_bps: ROYALTY_BASIS_POINTS }
+    create nft3 = NFT { token_id: first_token_id + 3, owner: recipients[3], metadata_hash: metadata_hashes[3], royalty_recipient: collection_before.creator, royalty_bps: ROYALTY_BASIS_POINTS }
 
 lock nft_ownership(protected nft: NFT, witness claimed_owner: Address) -> bool {
     require nft.owner == claimed_owner
