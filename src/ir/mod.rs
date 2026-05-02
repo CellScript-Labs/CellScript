@@ -50,7 +50,7 @@ pub struct IrLifecycleRule {
 }
 
 #[derive(Debug, Clone)]
-pub struct IrLifecycleMove {
+pub struct IrStateTransitionMove {
     pub input_binding: Option<String>,
     pub output_binding: Option<String>,
     pub type_name: String,
@@ -101,7 +101,7 @@ pub struct IrAction {
     pub name: String,
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
-    pub lifecycle_moves: Vec<IrLifecycleMove>,
+    pub state_transition_moves: Vec<IrStateTransitionMove>,
     pub body: IrBody,
     pub effect_class: EffectClass,
     pub scheduler_hints: SchedulerHints,
@@ -333,7 +333,7 @@ pub struct IrGenerator {
     lifecycle_states: HashMap<String, Vec<String>>,
     lifecycle_state_fields: HashMap<String, String>,
     lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
-    state_machine_action_moves: HashMap<String, Vec<IrLifecycleMove>>,
+    state_machine_action_moves: HashMap<String, Vec<IrStateTransitionMove>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, Expr>,
     function_effects: HashMap<String, EffectClass>,
@@ -554,7 +554,7 @@ impl IrGenerator {
                 let Some(to_index) = states.iter().position(|state| state == &to) else {
                     continue;
                 };
-                self.state_machine_action_moves.entry(action.clone()).or_default().push(IrLifecycleMove {
+                self.state_machine_action_moves.entry(action.clone()).or_default().push(IrStateTransitionMove {
                     input_binding: None,
                     output_binding: None,
                     type_name: type_name.clone(),
@@ -822,7 +822,7 @@ impl IrGenerator {
             name: action.name.clone(),
             params,
             return_type: action.return_type.as_ref().map(Self::convert_type),
-            lifecycle_moves: self.action_lifecycle_moves(action),
+            state_transition_moves: self.action_state_transition_moves(action),
             body,
             effect_class: if action.effect_declared { declared_effect_class } else { effect_class },
             scheduler_hints: action
@@ -837,7 +837,7 @@ impl IrGenerator {
         }
     }
 
-    fn action_lifecycle_moves(&self, action: &ActionDef) -> Vec<IrLifecycleMove> {
+    fn action_state_transition_moves(&self, action: &ActionDef) -> Vec<IrStateTransitionMove> {
         let mut moves = self.state_machine_action_moves.get(&action.name).cloned().unwrap_or_default();
         for state_move in &action.state_moves {
             if let Some(path) = &state_move.path {
@@ -847,7 +847,7 @@ impl IrGenerator {
                 let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
                     continue;
                 };
-                if let Some(mut lowered) = self.lifecycle_move_for(type_name, &path.field, &state_move.from, &state_move.to) {
+                if let Some(mut lowered) = self.state_transition_move_for(type_name, &path.field, &state_move.from, &state_move.to) {
                     lowered.input_binding = Some(path.base.clone());
                     lowered.output_binding = state_move.to_path.as_ref().map(|to_path| to_path.base.clone());
                     moves.push(lowered);
@@ -865,7 +865,7 @@ impl IrGenerator {
 
         let mut unique = Vec::new();
         for state_move in moves {
-            if !unique.iter().any(|existing: &IrLifecycleMove| {
+            if !unique.iter().any(|existing: &IrStateTransitionMove| {
                 existing.type_name == state_move.type_name
                     && existing.field_name == state_move.field_name
                     && existing.input_binding == state_move.input_binding
@@ -879,7 +879,7 @@ impl IrGenerator {
         unique
     }
 
-    fn lifecycle_move_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrLifecycleMove> {
+    fn state_transition_move_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrStateTransitionMove> {
         if self.lifecycle_state_fields.get(type_name).is_some_and(|field| field != field_name) {
             return None;
         }
@@ -888,7 +888,7 @@ impl IrGenerator {
         let to = self.canonical_state_name(type_name, to);
         let from_index = states.iter().position(|state| state == &from)?;
         let to_index = states.iter().position(|state| state == &to)?;
-        Some(IrLifecycleMove {
+        Some(IrStateTransitionMove {
             input_binding: None,
             output_binding: None,
             type_name: type_name.to_string(),

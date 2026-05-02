@@ -138,7 +138,8 @@ cellc check --target-profile ckb
 
 ## Core Model
 
-CellScript programs are written in terms of Cell lifecycle operations:
+CellScript programs are written as verifier constraints over proposed Cell
+transformations:
 
 | Concept | What it compiles to |
 |---|---|
@@ -168,12 +169,14 @@ CellScript programs are written in terms of Cell lifecycle operations:
   an operation happened and can later be claimed or settled.
 - **Capability gates** — `has store, transfer, destroy` makes asset permissions
   explicit instead of implicit.
-- **Declarative state machines** — state remains explicit schema data, while
-  `state_machine Name for Type.field { A -> B by action; }` or compact
-  `state Type.field { A -> B; }` declares allowed edges, and
+- **Declarative flows** — state remains explicit schema data, while
+  `flow Name for Type.field { A -> B by action; }` or compact
+  `flow Type.field { A -> B; }` declares allowed edges, and
   `action(input: T, output: T) moves input.field A -> output.field B` binds
   proposed transaction cells to the edge it proves. Legacy `consume`/`create`
-  actions are front-end sugar over the same verifier constraints.
+  actions are front-end sugar over the same verifier constraints. Each state
+  field has exactly one flow declaration; split/partial flow merging is not
+  supported.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -192,7 +195,8 @@ CellScript programs are written in terms of Cell lifecycle operations:
 
 A module contains schema declarations and executable entries. Persistent values
 are declared as `resource`, `shared`, or `receipt`; executable logic as `action`
-or `lock`; effects are written with explicit lifecycle operations.
+or `lock`; effects are written with explicit Cell operations and state
+transition clauses.
 
 **Declarations:**
 
@@ -396,17 +400,17 @@ line/column span for diagnostics.
 **2. Parsing** (`parser/`)
 Builds an AST from the token stream. The AST models the full surface:
 `resource`, `shared`, `receipt`, `struct`, `enum`, `action`, `lock`,
-`function`, `use`, `const`, capability gates, declarative state machines,
+`function`, `use`, `const`, capability gates, declarative flows,
 action `moves` clauses, and all statement/expression forms.
 
-**3. Semantic analysis** (`types/` + `lifecycle/`)
+**3. Semantic analysis** (`types/` + state-transition checks)
 - *Type checking* — enforces linear resource semantics: every
   `resource`/`receipt` value must be consumed, transferred, destroyed, claimed,
   or settled before the action body exits. Also validates shared-state
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
 - *State transition checking* — validates explicit state fields,
-  `state_machine` transition graphs, action `moves` clauses, legal state
+  `flow` transition graphs, action `moves` clauses, legal state
   transitions, and static create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)

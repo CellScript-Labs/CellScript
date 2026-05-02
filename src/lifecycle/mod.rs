@@ -5,21 +5,21 @@ use std::collections::{HashMap, HashSet};
 pub const LIFECYCLE_STATE_FIELD_NAME: &str = "state";
 
 #[derive(Debug, Clone)]
-struct LifecycleSpec {
+struct StateMachineSpec {
     states: Vec<String>,
     state_field_name: String,
     state_field_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ActionLifecycleContext {
-    variable_lifecycle_types: HashMap<String, String>,
-    consumed_lifecycle_types: HashSet<String>,
+struct ActionStateContext {
+    variable_state_machine_types: HashMap<String, String>,
+    consumed_state_machine_types: HashSet<String>,
     integer_aliases: HashMap<String, u64>,
 }
 
 /// Validate declared state-machine transitions and statically check
-/// lifecycle-aware creates that can be decided from source.
+/// state-machine-aware creates that can be decided from source.
 pub fn check(module: &Module) -> Result<()> {
     let mut specs = HashMap::new();
 
@@ -37,24 +37,24 @@ pub fn check(module: &Module) -> Result<()> {
             }
         }
         if states.len() < 2 {
-            return Err(CompileError::new("state machine must mention at least two states", machine.span));
+            return Err(CompileError::new("flow must mention at least two states", machine.span));
         }
         specs.insert(
             machine.target.base.clone(),
-            LifecycleSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
+            StateMachineSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
         );
     }
 
     for item in &module.items {
         match item {
             Item::Action(action) => {
-                let context = action_lifecycle_context(&specs, action);
+                let context = action_state_context(&specs, action);
                 validate_stmt_list(&specs, &context, &action.body)?;
             }
             Item::Function(function) => {
-                validate_stmt_list(&specs, &ActionLifecycleContext::default(), &function.body)?;
+                validate_stmt_list(&specs, &ActionStateContext::default(), &function.body)?;
             }
-            Item::Lock(lock) => validate_stmt_list(&specs, &ActionLifecycleContext::default(), &lock.body)?,
+            Item::Lock(lock) => validate_stmt_list(&specs, &ActionStateContext::default(), &lock.body)?,
             _ => {}
         }
     }
@@ -62,22 +62,22 @@ pub fn check(module: &Module) -> Result<()> {
     Ok(())
 }
 
-fn action_lifecycle_context(specs: &HashMap<String, LifecycleSpec>, action: &ActionDef) -> ActionLifecycleContext {
-    let mut context = ActionLifecycleContext::default();
+fn action_state_context(specs: &HashMap<String, StateMachineSpec>, action: &ActionDef) -> ActionStateContext {
+    let mut context = ActionStateContext::default();
 
     for param in &action.params {
         if let Type::Named(ty) = &param.ty {
             if specs.contains_key(ty) {
-                context.variable_lifecycle_types.insert(param.name.clone(), ty.clone());
+                context.variable_state_machine_types.insert(param.name.clone(), ty.clone());
             }
         }
     }
 
-    collect_lifecycle_stmt_context(specs, &mut context, &action.body);
+    collect_state_context_from_stmts(specs, &mut context, &action.body);
     context
 }
 
-fn collect_lifecycle_stmt_context(specs: &HashMap<String, LifecycleSpec>, context: &mut ActionLifecycleContext, stmts: &[Stmt]) {
+fn collect_state_context_from_stmts(specs: &HashMap<String, StateMachineSpec>, context: &mut ActionStateContext, stmts: &[Stmt]) {
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => {
@@ -85,144 +85,144 @@ fn collect_lifecycle_stmt_context(specs: &HashMap<String, LifecycleSpec>, contex
                     if let Some(value) = integer_literal(&let_stmt.value) {
                         context.integer_aliases.insert(name.clone(), value);
                     }
-                    if let Some(ty) = lifecycle_expr_type(specs, context, &let_stmt.value) {
-                        context.variable_lifecycle_types.insert(name.clone(), ty);
+                    if let Some(ty) = state_machine_expr_type(specs, context, &let_stmt.value) {
+                        context.variable_state_machine_types.insert(name.clone(), ty);
                     } else if let Some(Type::Named(ty)) = &let_stmt.ty {
                         if specs.contains_key(ty) {
-                            context.variable_lifecycle_types.insert(name.clone(), ty.clone());
+                            context.variable_state_machine_types.insert(name.clone(), ty.clone());
                         }
                     }
                 }
-                collect_lifecycle_expr_context(specs, context, &let_stmt.value);
+                collect_state_context_from_expr(specs, context, &let_stmt.value);
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_lifecycle_expr_context(specs, context, expr),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_state_context_from_expr(specs, context, expr),
             Stmt::Return(None) => {}
             Stmt::If(if_stmt) => {
-                collect_lifecycle_expr_context(specs, context, &if_stmt.condition);
-                collect_lifecycle_stmt_context(specs, context, &if_stmt.then_branch);
+                collect_state_context_from_expr(specs, context, &if_stmt.condition);
+                collect_state_context_from_stmts(specs, context, &if_stmt.then_branch);
                 if let Some(else_branch) = &if_stmt.else_branch {
-                    collect_lifecycle_stmt_context(specs, context, else_branch);
+                    collect_state_context_from_stmts(specs, context, else_branch);
                 }
             }
             Stmt::For(for_stmt) => {
-                collect_lifecycle_expr_context(specs, context, &for_stmt.iterable);
-                collect_lifecycle_stmt_context(specs, context, &for_stmt.body);
+                collect_state_context_from_expr(specs, context, &for_stmt.iterable);
+                collect_state_context_from_stmts(specs, context, &for_stmt.body);
             }
             Stmt::While(while_stmt) => {
-                collect_lifecycle_expr_context(specs, context, &while_stmt.condition);
-                collect_lifecycle_stmt_context(specs, context, &while_stmt.body);
+                collect_state_context_from_expr(specs, context, &while_stmt.condition);
+                collect_state_context_from_stmts(specs, context, &while_stmt.body);
             }
         }
     }
 }
 
-fn collect_lifecycle_expr_context(specs: &HashMap<String, LifecycleSpec>, context: &mut ActionLifecycleContext, expr: &Expr) {
+fn collect_state_context_from_expr(specs: &HashMap<String, StateMachineSpec>, context: &mut ActionStateContext, expr: &Expr) {
     match expr {
         Expr::Consume(consume) => {
             if let Expr::Identifier(name) = consume.expr.as_ref() {
-                if let Some(ty) = context.variable_lifecycle_types.get(name) {
-                    context.consumed_lifecycle_types.insert(ty.clone());
+                if let Some(ty) = context.variable_state_machine_types.get(name) {
+                    context.consumed_state_machine_types.insert(ty.clone());
                 }
             }
-            collect_lifecycle_expr_context(specs, context, &consume.expr);
+            collect_state_context_from_expr(specs, context, &consume.expr);
         }
         Expr::Create(create) => {
             for (_, value) in &create.fields {
-                collect_lifecycle_expr_context(specs, context, value);
+                collect_state_context_from_expr(specs, context, value);
             }
             if let Some(lock) = &create.lock {
-                collect_lifecycle_expr_context(specs, context, lock);
+                collect_state_context_from_expr(specs, context, lock);
             }
         }
         Expr::Assign(assign) => {
-            collect_lifecycle_expr_context(specs, context, &assign.target);
-            collect_lifecycle_expr_context(specs, context, &assign.value);
+            collect_state_context_from_expr(specs, context, &assign.target);
+            collect_state_context_from_expr(specs, context, &assign.value);
         }
         Expr::Binary(bin) => {
-            collect_lifecycle_expr_context(specs, context, &bin.left);
-            collect_lifecycle_expr_context(specs, context, &bin.right);
+            collect_state_context_from_expr(specs, context, &bin.left);
+            collect_state_context_from_expr(specs, context, &bin.right);
         }
-        Expr::Unary(unary) => collect_lifecycle_expr_context(specs, context, &unary.expr),
+        Expr::Unary(unary) => collect_state_context_from_expr(specs, context, &unary.expr),
         Expr::Call(call) => {
-            collect_lifecycle_expr_context(specs, context, &call.func);
+            collect_state_context_from_expr(specs, context, &call.func);
             for arg in &call.args {
-                collect_lifecycle_expr_context(specs, context, arg);
+                collect_state_context_from_expr(specs, context, arg);
             }
         }
-        Expr::FieldAccess(field) => collect_lifecycle_expr_context(specs, context, &field.expr),
+        Expr::FieldAccess(field) => collect_state_context_from_expr(specs, context, &field.expr),
         Expr::Index(index) => {
-            collect_lifecycle_expr_context(specs, context, &index.expr);
-            collect_lifecycle_expr_context(specs, context, &index.index);
+            collect_state_context_from_expr(specs, context, &index.expr);
+            collect_state_context_from_expr(specs, context, &index.index);
         }
         Expr::Transfer(transfer) => {
-            collect_lifecycle_expr_context(specs, context, &transfer.expr);
-            collect_lifecycle_expr_context(specs, context, &transfer.to);
+            collect_state_context_from_expr(specs, context, &transfer.expr);
+            collect_state_context_from_expr(specs, context, &transfer.to);
         }
-        Expr::Destroy(destroy) => collect_lifecycle_expr_context(specs, context, &destroy.expr),
-        Expr::Claim(claim) => collect_lifecycle_expr_context(specs, context, &claim.receipt),
-        Expr::Settle(settle) => collect_lifecycle_expr_context(specs, context, &settle.expr),
+        Expr::Destroy(destroy) => collect_state_context_from_expr(specs, context, &destroy.expr),
+        Expr::Claim(claim) => collect_state_context_from_expr(specs, context, &claim.receipt),
+        Expr::Settle(settle) => collect_state_context_from_expr(specs, context, &settle.expr),
         Expr::Assert(assert_expr) => {
-            collect_lifecycle_expr_context(specs, context, &assert_expr.condition);
-            collect_lifecycle_expr_context(specs, context, &assert_expr.message);
+            collect_state_context_from_expr(specs, context, &assert_expr.condition);
+            collect_state_context_from_expr(specs, context, &assert_expr.message);
         }
         Expr::Require(require_expr) => {
-            collect_lifecycle_expr_context(specs, context, &require_expr.condition);
+            collect_state_context_from_expr(specs, context, &require_expr.condition);
         }
-        Expr::Block(stmts) => collect_lifecycle_stmt_context(specs, context, stmts),
+        Expr::Block(stmts) => collect_state_context_from_stmts(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
-                collect_lifecycle_expr_context(specs, context, item);
+                collect_state_context_from_expr(specs, context, item);
             }
         }
         Expr::If(if_expr) => {
-            collect_lifecycle_expr_context(specs, context, &if_expr.condition);
-            collect_lifecycle_expr_context(specs, context, &if_expr.then_branch);
-            collect_lifecycle_expr_context(specs, context, &if_expr.else_branch);
+            collect_state_context_from_expr(specs, context, &if_expr.condition);
+            collect_state_context_from_expr(specs, context, &if_expr.then_branch);
+            collect_state_context_from_expr(specs, context, &if_expr.else_branch);
         }
-        Expr::Cast(cast) => collect_lifecycle_expr_context(specs, context, &cast.expr),
+        Expr::Cast(cast) => collect_state_context_from_expr(specs, context, &cast.expr),
         Expr::Range(range) => {
-            collect_lifecycle_expr_context(specs, context, &range.start);
-            collect_lifecycle_expr_context(specs, context, &range.end);
+            collect_state_context_from_expr(specs, context, &range.start);
+            collect_state_context_from_expr(specs, context, &range.end);
         }
         Expr::StructInit(init) => {
             for (_, value) in &init.fields {
-                collect_lifecycle_expr_context(specs, context, value);
+                collect_state_context_from_expr(specs, context, value);
             }
         }
         Expr::Match(match_expr) => {
-            collect_lifecycle_expr_context(specs, context, &match_expr.expr);
+            collect_state_context_from_expr(specs, context, &match_expr.expr);
             for arm in &match_expr.arms {
-                collect_lifecycle_expr_context(specs, context, &arm.value);
+                collect_state_context_from_expr(specs, context, &arm.value);
             }
         }
         Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
     }
 }
 
-fn lifecycle_expr_type(specs: &HashMap<String, LifecycleSpec>, context: &ActionLifecycleContext, expr: &Expr) -> Option<String> {
+fn state_machine_expr_type(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Identifier(name) => context.variable_lifecycle_types.get(name).cloned(),
+        Expr::Identifier(name) => context.variable_state_machine_types.get(name).cloned(),
         Expr::Create(create) if specs.contains_key(&create.ty) => Some(create.ty.clone()),
-        Expr::Cast(cast) => lifecycle_expr_type(specs, context, &cast.expr),
+        Expr::Cast(cast) => state_machine_expr_type(specs, context, &cast.expr),
         _ => None,
     }
 }
 
-fn validate_stmt_list(specs: &HashMap<String, LifecycleSpec>, context: &ActionLifecycleContext, stmts: &[Stmt]) -> Result<()> {
+fn validate_stmt_list(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, stmts: &[Stmt]) -> Result<()> {
     for stmt in stmts {
-        validate_lifecycle_stmt(specs, context, stmt)?;
+        validate_state_transition_stmt(specs, context, stmt)?;
     }
     Ok(())
 }
 
-fn validate_lifecycle_stmt(specs: &HashMap<String, LifecycleSpec>, context: &ActionLifecycleContext, stmt: &Stmt) -> Result<()> {
+fn validate_state_transition_stmt(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, stmt: &Stmt) -> Result<()> {
     match stmt {
-        Stmt::Let(let_stmt) => validate_lifecycle_expr(specs, context, &let_stmt.value),
-        Stmt::Expr(expr) => validate_lifecycle_expr(specs, context, expr),
-        Stmt::Return(Some(expr)) => validate_lifecycle_expr(specs, context, expr),
+        Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
+        Stmt::Expr(expr) => validate_state_transition_expr(specs, context, expr),
+        Stmt::Return(Some(expr)) => validate_state_transition_expr(specs, context, expr),
         Stmt::Return(None) => Ok(()),
         Stmt::If(if_stmt) => {
-            validate_lifecycle_expr(specs, context, &if_stmt.condition)?;
+            validate_state_transition_expr(specs, context, &if_stmt.condition)?;
             validate_stmt_list(specs, context, &if_stmt.then_branch)?;
             if let Some(else_branch) = &if_stmt.else_branch {
                 validate_stmt_list(specs, context, else_branch)?;
@@ -230,89 +230,89 @@ fn validate_lifecycle_stmt(specs: &HashMap<String, LifecycleSpec>, context: &Act
             Ok(())
         }
         Stmt::For(for_stmt) => {
-            validate_lifecycle_expr(specs, context, &for_stmt.iterable)?;
+            validate_state_transition_expr(specs, context, &for_stmt.iterable)?;
             validate_stmt_list(specs, context, &for_stmt.body)
         }
         Stmt::While(while_stmt) => {
-            validate_lifecycle_expr(specs, context, &while_stmt.condition)?;
+            validate_state_transition_expr(specs, context, &while_stmt.condition)?;
             validate_stmt_list(specs, context, &while_stmt.body)
         }
     }
 }
 
-fn validate_lifecycle_expr(specs: &HashMap<String, LifecycleSpec>, context: &ActionLifecycleContext, expr: &Expr) -> Result<()> {
+fn validate_state_transition_expr(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, expr: &Expr) -> Result<()> {
     match expr {
         Expr::Create(create) => {
-            validate_lifecycle_create(specs, context, create)?;
+            validate_state_transition_create(specs, context, create)?;
             for (_, value) in &create.fields {
-                validate_lifecycle_expr(specs, context, value)?;
+                validate_state_transition_expr(specs, context, value)?;
             }
             if let Some(lock) = &create.lock {
-                validate_lifecycle_expr(specs, context, lock)?;
+                validate_state_transition_expr(specs, context, lock)?;
             }
             Ok(())
         }
         Expr::Assign(assign) => {
-            validate_lifecycle_expr(specs, context, &assign.target)?;
-            validate_lifecycle_expr(specs, context, &assign.value)
+            validate_state_transition_expr(specs, context, &assign.target)?;
+            validate_state_transition_expr(specs, context, &assign.value)
         }
         Expr::Binary(bin) => {
-            validate_lifecycle_expr(specs, context, &bin.left)?;
-            validate_lifecycle_expr(specs, context, &bin.right)
+            validate_state_transition_expr(specs, context, &bin.left)?;
+            validate_state_transition_expr(specs, context, &bin.right)
         }
-        Expr::Unary(unary) => validate_lifecycle_expr(specs, context, &unary.expr),
+        Expr::Unary(unary) => validate_state_transition_expr(specs, context, &unary.expr),
         Expr::Call(call) => {
-            validate_lifecycle_expr(specs, context, &call.func)?;
+            validate_state_transition_expr(specs, context, &call.func)?;
             for arg in &call.args {
-                validate_lifecycle_expr(specs, context, arg)?;
+                validate_state_transition_expr(specs, context, arg)?;
             }
             Ok(())
         }
-        Expr::FieldAccess(field) => validate_lifecycle_expr(specs, context, &field.expr),
+        Expr::FieldAccess(field) => validate_state_transition_expr(specs, context, &field.expr),
         Expr::Index(index) => {
-            validate_lifecycle_expr(specs, context, &index.expr)?;
-            validate_lifecycle_expr(specs, context, &index.index)
+            validate_state_transition_expr(specs, context, &index.expr)?;
+            validate_state_transition_expr(specs, context, &index.index)
         }
-        Expr::Consume(consume) => validate_lifecycle_expr(specs, context, &consume.expr),
+        Expr::Consume(consume) => validate_state_transition_expr(specs, context, &consume.expr),
         Expr::Transfer(transfer) => {
-            validate_lifecycle_expr(specs, context, &transfer.expr)?;
-            validate_lifecycle_expr(specs, context, &transfer.to)
+            validate_state_transition_expr(specs, context, &transfer.expr)?;
+            validate_state_transition_expr(specs, context, &transfer.to)
         }
-        Expr::Destroy(destroy) => validate_lifecycle_expr(specs, context, &destroy.expr),
-        Expr::Claim(claim) => validate_lifecycle_expr(specs, context, &claim.receipt),
-        Expr::Settle(settle) => validate_lifecycle_expr(specs, context, &settle.expr),
+        Expr::Destroy(destroy) => validate_state_transition_expr(specs, context, &destroy.expr),
+        Expr::Claim(claim) => validate_state_transition_expr(specs, context, &claim.receipt),
+        Expr::Settle(settle) => validate_state_transition_expr(specs, context, &settle.expr),
         Expr::Assert(assert_expr) => {
-            validate_lifecycle_expr(specs, context, &assert_expr.condition)?;
-            validate_lifecycle_expr(specs, context, &assert_expr.message)
+            validate_state_transition_expr(specs, context, &assert_expr.condition)?;
+            validate_state_transition_expr(specs, context, &assert_expr.message)
         }
-        Expr::Require(require_expr) => validate_lifecycle_expr(specs, context, &require_expr.condition),
+        Expr::Require(require_expr) => validate_state_transition_expr(specs, context, &require_expr.condition),
         Expr::Block(stmts) => validate_stmt_list(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
-                validate_lifecycle_expr(specs, context, item)?;
+                validate_state_transition_expr(specs, context, item)?;
             }
             Ok(())
         }
         Expr::If(if_expr) => {
-            validate_lifecycle_expr(specs, context, &if_expr.condition)?;
-            validate_lifecycle_expr(specs, context, &if_expr.then_branch)?;
-            validate_lifecycle_expr(specs, context, &if_expr.else_branch)
+            validate_state_transition_expr(specs, context, &if_expr.condition)?;
+            validate_state_transition_expr(specs, context, &if_expr.then_branch)?;
+            validate_state_transition_expr(specs, context, &if_expr.else_branch)
         }
-        Expr::Cast(cast) => validate_lifecycle_expr(specs, context, &cast.expr),
+        Expr::Cast(cast) => validate_state_transition_expr(specs, context, &cast.expr),
         Expr::Range(range) => {
-            validate_lifecycle_expr(specs, context, &range.start)?;
-            validate_lifecycle_expr(specs, context, &range.end)
+            validate_state_transition_expr(specs, context, &range.start)?;
+            validate_state_transition_expr(specs, context, &range.end)
         }
         Expr::StructInit(init) => {
             for (_, value) in &init.fields {
-                validate_lifecycle_expr(specs, context, value)?;
+                validate_state_transition_expr(specs, context, value)?;
             }
             Ok(())
         }
         Expr::Match(match_expr) => {
-            validate_lifecycle_expr(specs, context, &match_expr.expr)?;
+            validate_state_transition_expr(specs, context, &match_expr.expr)?;
             for arm in &match_expr.arms {
-                validate_lifecycle_expr(specs, context, &arm.value)?;
+                validate_state_transition_expr(specs, context, &arm.value)?;
             }
             Ok(())
         }
@@ -320,9 +320,9 @@ fn validate_lifecycle_expr(specs: &HashMap<String, LifecycleSpec>, context: &Act
     }
 }
 
-fn validate_lifecycle_create(
-    specs: &HashMap<String, LifecycleSpec>,
-    context: &ActionLifecycleContext,
+fn validate_state_transition_create(
+    specs: &HashMap<String, StateMachineSpec>,
+    context: &ActionStateContext,
     create: &CreateExpr,
 ) -> Result<()> {
     let Some(spec) = specs.get(&create.ty) else {
@@ -334,14 +334,14 @@ fn validate_lifecycle_create(
     }
 
     let Some((_, state_expr)) = create.fields.iter().find(|(name, _)| name == &spec.state_field_name) else {
-        return Err(CompileError::new(format!("create of state-machine type '{}' must set its state field", create.ty), create.span));
+        return Err(CompileError::new(format!("create of flow type '{}' must set its state field", create.ty), create.span));
     };
 
-    let updates_existing = context.consumed_lifecycle_types.contains(&create.ty);
-    let Some(state_index) = static_lifecycle_state_value(state_expr, context, &create.ty, &spec.states) else {
+    let updates_existing = context.consumed_state_machine_types.contains(&create.ty);
+    let Some(state_index) = static_state_machine_state_value(state_expr, context, &create.ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
-                format!("initial create of state-machine type '{}' must use a statically known declared state", create.ty),
+                format!("initial create of flow type '{}' must use a statically known declared state", create.ty),
                 create.span,
             ));
         }
@@ -366,14 +366,14 @@ fn integer_literal(expr: &Expr) -> Option<u64> {
     }
 }
 
-fn static_integer_value(expr: &Expr, context: &ActionLifecycleContext) -> Option<u64> {
+fn static_integer_value(expr: &Expr, context: &ActionStateContext) -> Option<u64> {
     match expr {
         Expr::Identifier(name) => context.integer_aliases.get(name).copied(),
         _ => integer_literal(expr),
     }
 }
 
-fn static_lifecycle_state_value(expr: &Expr, context: &ActionLifecycleContext, _type_name: &str, states: &[String]) -> Option<u64> {
+fn static_state_machine_state_value(expr: &Expr, context: &ActionStateContext, _type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
         Expr::Identifier(name) => {
             let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {

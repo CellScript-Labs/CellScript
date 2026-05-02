@@ -479,7 +479,7 @@ pub struct CodeGenerator {
     /// Declared lifecycle/state-machine transition graph keyed by schema type.
     lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
     /// Action-specific state moves for the function currently being emitted.
-    current_lifecycle_moves: Vec<IrLifecycleMove>,
+    current_state_transition_moves: Vec<IrStateTransitionMove>,
     /// ABI summaries for locally emitted actions/functions/locks.
     callable_abis: HashMap<String, CallableAbi>,
     /// Function parameters whose slot contains a pointer to encoded schema bytes.
@@ -642,7 +642,7 @@ impl CodeGenerator {
             lifecycle_states: HashMap::new(),
             lifecycle_state_fields: HashMap::new(),
             lifecycle_rules: HashMap::new(),
-            current_lifecycle_moves: Vec::new(),
+            current_state_transition_moves: Vec::new(),
             callable_abis: HashMap::new(),
             schema_pointer_vars: BTreeSet::new(),
             param_vars: BTreeSet::new(),
@@ -1374,7 +1374,7 @@ impl CodeGenerator {
 
     fn generate_action(&mut self, action: &IrAction) -> Result<()> {
         self.current_function = Some(action.name.clone());
-        self.current_lifecycle_moves = action.lifecycle_moves.clone();
+        self.current_state_transition_moves = action.state_transition_moves.clone();
         self.bind_readonly_schema_params = true;
         self.fail_handler_codes.clear();
         self.prepare_function_layout(&action.body, &action.params);
@@ -1401,7 +1401,7 @@ impl CodeGenerator {
         self.emit_shared_epilogue();
 
         self.current_function = None;
-        self.current_lifecycle_moves.clear();
+        self.current_state_transition_moves.clear();
         self.bind_readonly_schema_params = false;
         self.schema_pointer_vars.clear();
         self.schema_pointer_size_offsets.clear();
@@ -2300,7 +2300,7 @@ impl CodeGenerator {
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
                 self.emit_stack_store("t0", var_id * 8);
-                self.emit_lifecycle_transition_check(pattern, size_offset, buffer_offset);
+                self.emit_state_transition_check(pattern, size_offset, buffer_offset);
                 self.next_virtual_output = self.next_virtual_output.max(index + 1);
                 return Ok(());
             }
@@ -5509,7 +5509,7 @@ impl CodeGenerator {
         if pattern.operation == "settle" {
             self.emit_settle_final_state_check(pattern, size_offset, buffer_offset);
         } else {
-            self.emit_lifecycle_transition_check(pattern, size_offset, buffer_offset);
+            self.emit_state_transition_check(pattern, size_offset, buffer_offset);
         }
     }
 
@@ -5777,13 +5777,13 @@ impl CodeGenerator {
         self.emit_loaded_field_bytes_equals_expected(size_offset, buffer_offset, &layout, expected, "output lock hash")
     }
 
-    fn emit_lifecycle_transition_check(&mut self, pattern: &CreatePattern, output_size_offset: usize, output_buffer_offset: usize) {
+    fn emit_state_transition_check(&mut self, pattern: &CreatePattern, output_size_offset: usize, output_buffer_offset: usize) {
         let Some(states) = self.lifecycle_states.get(&pattern.ty) else {
             return;
         };
         let state_count = states.len();
-        let action_moves = self.lifecycle_transition_moves_for_pattern(pattern);
-        let Some(consumed_var_id) = self.consumed_var_for_lifecycle_transition(&pattern.ty, &action_moves) else {
+        let action_moves = self.state_transition_moves_for_pattern(pattern);
+        let Some(consumed_var_id) = self.consumed_var_for_state_transition(&pattern.ty, &action_moves) else {
             if !action_moves.is_empty() {
                 self.emit_fail(CellScriptRuntimeError::LifecycleTransitionMismatch);
             }
@@ -5831,7 +5831,7 @@ impl CodeGenerator {
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", state_layout.offset, width);
         let ok_label = self.fresh_label("lifecycle_transition_ok");
-        let rules = self.lifecycle_transition_rules_for_pattern(pattern, &action_moves);
+        let rules = self.state_transition_rules_for_pattern(pattern, &action_moves);
         if rules.is_empty() {
             self.emit("addi t0, t0, 1");
             self.emit("sub t2, t1, t0");
@@ -5859,8 +5859,8 @@ impl CodeGenerator {
         self.emit_label(&range_ok_label);
     }
 
-    fn lifecycle_transition_moves_for_pattern(&self, pattern: &CreatePattern) -> Vec<IrLifecycleMove> {
-        self.current_lifecycle_moves
+    fn state_transition_moves_for_pattern(&self, pattern: &CreatePattern) -> Vec<IrStateTransitionMove> {
+        self.current_state_transition_moves
             .iter()
             .filter(|state_move| {
                 state_move.type_name == pattern.ty
@@ -5870,10 +5870,10 @@ impl CodeGenerator {
             .collect()
     }
 
-    fn lifecycle_transition_rules_for_pattern(
+    fn state_transition_rules_for_pattern(
         &self,
         pattern: &CreatePattern,
-        action_moves: &[IrLifecycleMove],
+        action_moves: &[IrStateTransitionMove],
     ) -> Vec<IrLifecycleRule> {
         if !action_moves.is_empty() {
             return action_moves
@@ -5889,7 +5889,7 @@ impl CodeGenerator {
         self.lifecycle_rules.get(&pattern.ty).cloned().unwrap_or_default()
     }
 
-    fn consumed_var_for_lifecycle_transition(&self, type_name: &str, action_moves: &[IrLifecycleMove]) -> Option<usize> {
+    fn consumed_var_for_state_transition(&self, type_name: &str, action_moves: &[IrStateTransitionMove]) -> Option<usize> {
         if let Some(binding) = action_moves.iter().filter_map(|state_move| state_move.input_binding.as_ref()).next() {
             let var_id = self.consume_binding_ids.get(binding).copied()?;
             if self.consume_type_names.get(&var_id).is_some_and(|consumed_type| consumed_type == type_name) {
@@ -10918,7 +10918,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_moves_use_explicit_consumed_binding() {
+    fn state_transition_moves_use_explicit_consumed_binding() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.consume_order = vec![1, 2];
         generator.consume_type_names.insert(1, "Offer".to_string());
@@ -10926,7 +10926,7 @@ mod tests {
         generator.consume_binding_ids.insert("left".to_string(), 1);
         generator.consume_binding_ids.insert("right".to_string(), 2);
 
-        let state_move = IrLifecycleMove {
+        let state_move = IrStateTransitionMove {
             input_binding: Some("right".to_string()),
             output_binding: None,
             type_name: "Offer".to_string(),
@@ -10937,7 +10937,7 @@ mod tests {
             to_index: 2,
         };
 
-        assert_eq!(generator.consumed_var_for_lifecycle_transition("Offer", &[state_move]), Some(2));
+        assert_eq!(generator.consumed_var_for_state_transition("Offer", &[state_move]), Some(2));
     }
 
     #[test]
@@ -11294,7 +11294,7 @@ mod tests {
                 name: "shape".to_string(),
                 params: vec![],
                 return_type: Some(IrType::U64),
-                lifecycle_moves: vec![],
+                state_transition_moves: vec![],
                 effect_class: EffectClass::Pure,
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {

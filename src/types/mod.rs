@@ -534,35 +534,35 @@ impl<'a> TypeChecker<'a> {
                 continue;
             };
             if machine.transitions.is_empty() {
-                return Err(CompileError::new("state machine must declare at least one transition", machine.span));
+                return Err(CompileError::new("flow must declare at least one transition", machine.span));
             }
             let type_name = machine.target.base.clone();
             let field_name = machine.target.field.clone();
             let target_key = format!("{}.{}", type_name, field_name);
             if !seen_targets.insert(target_key.clone()) {
-                return Err(CompileError::new(format!("duplicate state machine for '{}'", target_key), machine.target.span));
+                return Err(CompileError::new(format!("duplicate flow for '{}'", target_key), machine.target.span));
             }
             if self.lifecycle_states.contains_key(&type_name) {
                 return Err(CompileError::new(
-                    format!("type '{}' already has state-machine policy; declare one state machine per Cell type", type_name),
+                    format!(
+                        "type '{}' already has flow policy; this release supports one flow-backed state field per Cell type",
+                        type_name
+                    ),
                     machine.target.span,
                 ));
             }
             if self.resolve_cell_type_kind(&type_name).is_none() {
                 return Err(CompileError::new(
-                    format!("state machine target type '{}' must be a resource, shared, or receipt Cell type", type_name),
+                    format!("flow target type '{}' must be a resource, shared, or receipt Cell type", type_name),
                     machine.target.span,
                 ));
             }
 
-            let fields = self.resolve_named_type_fields(&type_name).ok_or_else(|| {
-                CompileError::new(format!("state machine target type '{}' is not defined", type_name), machine.target.span)
-            })?;
+            let fields = self
+                .resolve_named_type_fields(&type_name)
+                .ok_or_else(|| CompileError::new(format!("flow target type '{}' is not defined", type_name), machine.target.span))?;
             let field_ty = fields.get(&field_name).ok_or_else(|| {
-                CompileError::new(
-                    format!("state machine target field '{}.{}' is not defined", type_name, field_name),
-                    machine.target.span,
-                )
+                CompileError::new(format!("flow target field '{}.{}' is not defined", type_name, field_name), machine.target.span)
             })?;
 
             let (states, field_enum_type) = self.state_machine_states(machine, field_ty)?;
@@ -693,7 +693,7 @@ impl<'a> TypeChecker<'a> {
                 if variants.iter().any(|variant| self.enum_variant_has_payload(enum_name, variant)) {
                     return Err(CompileError::new(
                         format!(
-                            "state machine field '{}.{}' enum '{}' must not have payload variants",
+                            "flow field '{}.{}' enum '{}' must not have payload variants",
                             machine.target.base, machine.target.field, enum_name
                         ),
                         machine.target.span,
@@ -722,7 +722,7 @@ impl<'a> TypeChecker<'a> {
         if !is_state_storage_type(field_ty) {
             return Err(CompileError::new(
                 format!(
-                    "state machine field '{}.{}' must be an unsigned integer or no-payload enum",
+                    "flow field '{}.{}' must be an unsigned integer or no-payload enum",
                     machine.target.base, machine.target.field
                 ),
                 machine.target.span,
@@ -739,7 +739,7 @@ impl<'a> TypeChecker<'a> {
             }
         }
         if states.len() < 2 {
-            return Err(CompileError::new("state machine must mention at least two states", machine.span));
+            return Err(CompileError::new("flow must mention at least two states", machine.span));
         }
         Ok((states, None))
     }
@@ -946,11 +946,11 @@ impl<'a> TypeChecker<'a> {
                     let spec = self
                         .state_machines
                         .get(&type_name)
-                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
+                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
                     if spec.field_name != path.field {
                         return Err(CompileError::new(
                             format!(
-                                "state move field '{}.{}' does not match declared state machine field '{}.{}'",
+                                "state move field '{}.{}' does not match declared flow field '{}.{}'",
                                 path.base, path.field, type_name, spec.field_name
                             ),
                             path.span,
@@ -959,7 +959,7 @@ impl<'a> TypeChecker<'a> {
                     if spec.field_name != to_path.field {
                         return Err(CompileError::new(
                             format!(
-                                "state move output field '{}.{}' does not match declared state machine field '{}.{}'",
+                                "state move output field '{}.{}' does not match declared flow field '{}.{}'",
                                 to_path.base, to_path.field, type_name, spec.field_name
                             ),
                             to_path.span,
@@ -995,11 +995,11 @@ impl<'a> TypeChecker<'a> {
                     let spec = self
                         .state_machines
                         .get(&type_name)
-                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), path.span))?;
+                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
                     if spec.field_name != path.field {
                         return Err(CompileError::new(
                             format!(
-                                "state move field '{}.{}' does not match declared state machine field '{}.{}'",
+                                "state move field '{}.{}' does not match declared flow field '{}.{}'",
                                 path.base, path.field, type_name, spec.field_name
                             ),
                             path.span,
@@ -1049,7 +1049,7 @@ impl<'a> TypeChecker<'a> {
                         state_move.span,
                     ));
                 }
-                let spec = matches.pop().expect("exactly one state machine");
+                let spec = matches.pop().expect("exactly one flow");
                 let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
                 if consumed.len() != 1 {
                     return Err(CompileError::new(
@@ -1076,7 +1076,7 @@ impl<'a> TypeChecker<'a> {
             let states = self
                 .lifecycle_states
                 .get(&type_name)
-                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared state machine", type_name), state_move.span))?;
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), state_move.span))?;
             let from = self.canonical_state_name_for_machine(
                 &type_name,
                 field_enum_type.as_deref(),
@@ -1092,11 +1092,11 @@ impl<'a> TypeChecker<'a> {
                 state_move.span,
             )?;
             let Some(spec) = self.state_machines.get(&type_name) else {
-                return Err(CompileError::new(format!("type '{}' has no declared state machine", type_name), state_move.span));
+                return Err(CompileError::new(format!("type '{}' has no declared flow", type_name), state_move.span));
             };
             if spec.field_name != field_name {
                 return Err(CompileError::new(
-                    format!("state machine for '{}' is bound to field '{}'", type_name, spec.field_name),
+                    format!("flow for '{}' is bound to field '{}'", type_name, spec.field_name),
                     state_move.span,
                 ));
             }
@@ -1375,7 +1375,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "lock" {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use {} source classification; protected/witness/lock_args are lock-boundary syntax",
+                    "{} '{}' parameter '{}' cannot use {} source classification; protected/witness/lock_args are lock parameter source syntax",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -2243,7 +2243,7 @@ impl<'a> TypeChecker<'a> {
         if self.resolve_lifecycle_states(qualified_type).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "state-machine field '{}.{}' cannot be initialized with '{}::{}'",
+                    "flow field '{}.{}' cannot be initialized with '{}::{}'",
                     type_name, field_name, qualified_type, qualified_state
                 ),
                 expr_span(value),

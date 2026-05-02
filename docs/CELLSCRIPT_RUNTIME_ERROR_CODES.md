@@ -27,8 +27,8 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 4 | `exact-size-mismatch` | Loaded bytes did not match the exact fixed-size schema requirement. | Check fixed-width schema fields and ensure the builder encodes the exact Molecule byte length. |
 | 5 | `assertion-failed` | A source-level assert or invariant check evaluated to false. | Inspect the action invariant or assert expression and the transaction values that feed it. |
 | 7 | `lifecycle-transition-mismatch` | A state-machine transition did not match the declared transition rule. | Compare consumed and produced state fields with the declared state-machine transitions. |
-| 8 | `lifecycle-new-state-invalid` | A created or replacement state value was outside the declared state range. | Check created output state values and declared state-machine states. |
-| 9 | `lifecycle-old-state-invalid` | A consumed state value was outside the declared state range. | Check consumed input state values and declared state-machine states. |
+| 8 | `lifecycle-new-state-invalid` | A created or replacement state value was outside the declared state range. | Check created output state values and declared flow states. |
+| 9 | `lifecycle-old-state-invalid` | A consumed state value was outside the declared state range. | Check consumed input state values and declared flow states. |
 | 10 | `entry-witness-magic-mismatch` | Entry witness bytes did not start with the CellScript witness ABI magic. | Encode entry witnesses with `cellc entry-witness` or the documented `CSARGv1\0` wire format. |
 | 11 | `type-hash-preservation-mismatch` | A replacement output did not preserve the consumed input type hash. | Check the replacement output type script and builder output ordering. |
 | 12 | `lock-hash-preservation-mismatch` | A replacement output did not preserve the consumed input lock hash. | Check the replacement output lock script and builder output ordering. |

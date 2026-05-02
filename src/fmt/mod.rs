@@ -134,9 +134,9 @@ impl Formatter {
 
     fn format_state_machine(&mut self, machine: &StateMachineDef) -> Result<()> {
         let header = if let Some(name) = &machine.name {
-            format!("state_machine {} for {}.{} {{", name, machine.target.base, machine.target.field)
+            format!("flow {} for {}.{} {{", name, machine.target.base, machine.target.field)
         } else {
-            format!("state {}.{} {{", machine.target.base, machine.target.field)
+            format!("flow {}.{} {{", machine.target.base, machine.target.field)
         };
         self.push_line(&header);
         self.indent_level += 1;

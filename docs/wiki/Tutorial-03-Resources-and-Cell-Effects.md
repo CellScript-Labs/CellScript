@@ -73,7 +73,7 @@ receipt VestingGrant has store {
 Then declare the allowed transition graph separately:
 
 ```cellscript
-state_machine GrantFlow for VestingGrant.state {
+flow GrantFlow for VestingGrant.state {
     Granted -> Claimable by unlock_grant;
     Claimable -> FullyClaimed by claim_all;
 }
@@ -93,10 +93,12 @@ action unlock_grant(input: VestingGrant, output: VestingGrant)
 }
 ```
 
-`state Type.field { ... }` is the compact form when the state machine does not
+`flow Type.field { ... }` is the compact form when the flow does not
 need a separate name. The compiler keeps the state field explicit in Molecule
 layout, lowers enum states to their ordinal values, verifies old/new state at
-runtime, and rejects action moves that are not declared in the state graph.
+runtime, and rejects action moves that are not declared in the state graph. A
+state field may have only one flow declaration, so keep all legal edges for
+that field in one named or compact flow block.
 
 Output binding is deterministic. Output parameters are bound to transaction
 outputs in action parameter order among output parameters, starting at

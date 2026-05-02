@@ -4672,8 +4672,7 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in
-        body_lifecycle_transition_checks(body, lifecycle_states, lifecycle_state_fields, type_layouts, params, pure_const_returns)
+    for check in body_state_transition_checks(body, lifecycle_states, lifecycle_state_fields, type_layouts, params, pure_const_returns)
     {
         push_verifier_obligation(
             &mut obligations,
@@ -8983,21 +8982,21 @@ fn push_verifier_obligation(
     }
 }
 
-struct LifecycleTransitionCheck {
+struct StateTransitionCheck {
     feature: String,
     field: String,
     status: String,
     detail: String,
 }
 
-fn body_lifecycle_transition_checks(
+fn body_state_transition_checks(
     body: &ir::IrBody,
     lifecycle_states: &HashMap<String, Vec<String>>,
     lifecycle_state_fields: &HashMap<String, String>,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     pure_const_returns: &HashMap<String, ir::IrConst>,
-) -> Vec<LifecycleTransitionCheck> {
+) -> Vec<StateTransitionCheck> {
     let mut consumed_types = body_consumed_named_types(body);
     for pattern in &body.consume_set {
         if let Some(type_name) = params.iter().find(|param| param.name == pattern.binding).and_then(|param| named_type_name(&param.ty))
@@ -9021,15 +9020,15 @@ fn body_lifecycle_transition_checks(
         if !seen.insert(pattern.ty.clone()) {
             continue;
         }
-        if metadata_can_verify_lifecycle_transition(pattern, type_layouts, lifecycle_state_fields, &availability) {
-            checks.push(LifecycleTransitionCheck {
+        if metadata_can_verify_state_transition(pattern, type_layouts, lifecycle_state_fields, &availability) {
+            checks.push(StateTransitionCheck {
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
                 detail: "Compiler emits runtime state graph and old/new state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
             });
         } else {
-            checks.push(LifecycleTransitionCheck {
+            checks.push(StateTransitionCheck {
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-partial".to_string(),
@@ -9040,7 +9039,7 @@ fn body_lifecycle_transition_checks(
     checks
 }
 
-fn metadata_can_verify_lifecycle_transition(
+fn metadata_can_verify_state_transition(
     pattern: &ir::CreatePattern,
     type_layouts: &MetadataTypeLayouts,
     lifecycle_state_fields: &HashMap<String, String>,
@@ -15686,7 +15685,7 @@ receipt Settlement has store {
     amount: u64,
 }
 
-state Settlement.state {
+flow Settlement.state {
     Pending -> Settled;
 }
 
@@ -15849,7 +15848,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Created;
 }
 
@@ -15866,7 +15865,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15884,7 +15883,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15901,7 +15900,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15918,7 +15917,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15938,7 +15937,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15958,7 +15957,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15978,7 +15977,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -15999,7 +15998,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -16020,7 +16019,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -16040,7 +16039,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -16067,11 +16066,11 @@ receipt OtherTicket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
-state OtherTicket.state {
+flow OtherTicket.state {
     Draft -> Live;
 }
 
@@ -16570,7 +16569,7 @@ action activate(ticket: Ticket) -> Ticket {
     fn compile_rejects_lock_boundary_sources_outside_supported_scope() {
         let action_err = compile(ACTION_PROTECTED_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            action_err.message.contains("protected/witness/lock_args are lock-boundary syntax"),
+            action_err.message.contains("protected/witness/lock_args are lock parameter source syntax"),
             "unexpected error: {}",
             action_err.message
         );
@@ -20873,7 +20872,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     fn compile_rejects_noop_state_machine_transition_on_main_path() {
         let err = compile(STATE_MACHINE_NOOP_TRANSITION_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("state machine must mention at least two states"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("flow must mention at least two states"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -20887,7 +20886,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     fn compile_rejects_lifecycle_receipt_without_state_field() {
         let err = compile(LIFECYCLE_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("state machine target field 'Ticket.state' is not defined"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("flow target field 'Ticket.state' is not defined"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -20895,7 +20894,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("state machine field 'Ticket.state' must be an unsigned integer or no-payload enum"),
+            err.message.contains("flow field 'Ticket.state' must be an unsigned integer or no-payload enum"),
             "unexpected error: {}",
             err.message
         );
@@ -20922,7 +20921,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("initial create of state-machine type 'Ticket' must use a statically known declared state"),
+            err.message.contains("initial create of flow type 'Ticket' must use a statically known declared state"),
             "unexpected error: {}",
             err.message
         );
@@ -20962,7 +20961,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let err = compile(LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("state-machine field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
+            err.message.contains("flow field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
             "unexpected error: {}",
             err.message
         );
@@ -21020,7 +21019,7 @@ resource Offer has store {
     amount: u64
 }
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Created -> Live;
     Live -> Filled by accept;
     Live -> Cancelled;
@@ -21071,7 +21070,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Filled;
     Live -> Cancelled;
 }
@@ -21120,7 +21119,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Filled;
 }
 
@@ -21130,6 +21129,34 @@ action cancel(input: Offer, output: Offer) moves input.state Live -> output.stat
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_duplicate_flow_for_same_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow OfferFlow for Offer.state {
+    Created -> Live;
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("duplicate flow for 'Offer.state'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21147,7 +21174,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Filled;
 }
 
@@ -21175,7 +21202,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Filled;
 }
 
@@ -21228,7 +21255,7 @@ resource Offer has store {
     amount: u64
 }
 
-state_machine OfferFlow for Offer.status {
+flow OfferFlow for Offer.status {
     Created -> Live;
     Live -> Filled by accept;
 }
@@ -21274,7 +21301,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Created -> Live;
     Live -> Filled;
 }
@@ -21304,7 +21331,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Created;
 }
 
@@ -21336,7 +21363,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Live -> Filled;
 }
 
@@ -21371,7 +21398,7 @@ resource Offer has store {
     amount: u64
 }
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
@@ -21399,7 +21426,7 @@ resource Offer has store {
     amount: u64
 }
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Live -> Filled by accept;
     Live -> Cancelled;
 }
@@ -21434,7 +21461,7 @@ resource Offer has store {
     amount: u64
 }
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
@@ -21468,7 +21495,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Created -> Live;
 }
 
@@ -21499,7 +21526,7 @@ resource Offer has store {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Created -> Live;
 }
 "#;
@@ -21517,7 +21544,7 @@ struct Offer {
     amount: u64
 }
 
-state Offer.state {
+flow Offer.state {
     Created -> Live;
 }
 "#;

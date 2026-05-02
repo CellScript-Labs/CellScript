@@ -22,7 +22,7 @@ receipt VestingGrant has store {
     token_symbol: [u8; 8]
 }
 
-state VestingGrant.state {
+flow VestingGrant.state {
     Granted -> Claimable;
     Granted -> FullyClaimed;
     Claimable -> FullyClaimed;

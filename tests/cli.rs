@@ -1299,7 +1299,7 @@ receipt VestingGrant has store {
     end_timepoint: u64
 }
 
-state VestingGrant.state {
+flow VestingGrant.state {
     Granted -> Claimable;
     Granted -> FullyClaimed;
     Claimable -> FullyClaimed;

@@ -322,8 +322,7 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("state_machine", "state_machine ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
-            ("state", "state ${1:Type}.${2:state} {\n    ${3:Created} -> ${4:Live};\n}"),
+            ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
             (
                 "lock",
@@ -404,8 +403,8 @@ impl LspServer {
                 states.into_iter().enumerate().map(move |(index, state)| CompletionItem {
                     label: state.clone(),
                     kind: CompletionItemKind::EnumMember,
-                    detail: Some(format!("state machine state {}::{}", type_name, state)),
-                    documentation: Some(format!("State index {} for state machine field `{}.{}`.", index, type_name, field_name)),
+                    detail: Some(format!("flow state {}::{}", type_name, state)),
+                    documentation: Some(format!("State index {} for flow field `{}.{}`.", index, type_name, field_name)),
                     insert_text: Some(state),
                 })
             })
@@ -607,8 +606,7 @@ impl LspServer {
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
-            ("state_machine", "state_machine ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
-            ("state", "state ${1:Type}.${2:state} {\n    ${3:Created} -> ${4:Live};\n}"),
+            ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
             (
                 "lock",
@@ -1791,7 +1789,7 @@ fn receipt_lifecycle_hover(receipt: &ReceiptDef, metadata: Option<&crate::Compil
         };
 
         return format!(
-            "\n\n**State machine metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
+            "\n\n**Flow metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
             type_metadata.lifecycle_states.join(" -> "),
             transitions
         );
@@ -2114,7 +2112,7 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "module"));
         assert!(keywords.iter().any(|k| k.label == "resource"));
         assert!(keywords.iter().any(|k| k.label == "action"));
-        assert!(keywords.iter().any(|k| k.label == "state_machine"));
+        assert!(keywords.iter().any(|k| k.label == "flow"));
         assert!(keywords.iter().any(|k| k.label == "moves"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
@@ -2169,12 +2167,12 @@ receipt OtherTicket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
     Active -> Closed;
 }
 
-state OtherTicket.state {
+flow OtherTicket.state {
     Draft -> Live;
 }
 
@@ -2199,11 +2197,11 @@ action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
         assert!(labels.contains("Created"));
         assert!(labels.contains("Active"));
         assert!(labels.contains("Closed"));
-        assert!(!labels.contains("Live"), "Ticket:: completion must not leak OtherTicket state-machine states");
+        assert!(!labels.contains("Live"), "Ticket:: completion must not leak OtherTicket flow states");
         assert!(completions.iter().any(|item| {
             item.label == "Active"
                 && item.kind == CompletionItemKind::EnumMember
-                && item.detail.as_deref() == Some("state machine state Ticket::Active")
+                && item.detail.as_deref() == Some("flow state Ticket::Active")
         }));
     }
 
@@ -2225,7 +2223,7 @@ resource Offer has store {
     amount: u64,
 }
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Created -> Live;
     Live -> Filled by accept;
 }
@@ -2253,7 +2251,7 @@ action accept(input: Offer) moves input.state Live -> Filled {
         assert!(completions.iter().any(|item| {
             item.label == "Filled"
                 && item.kind == CompletionItemKind::EnumMember
-                && item.detail.as_deref() == Some("state machine state Offer::Filled")
+                && item.detail.as_deref() == Some("flow state Offer::Filled")
         }));
     }
 
@@ -2343,7 +2341,7 @@ receipt Ticket has store {
     id: u64,
 }
 
-state Ticket.state {
+flow Ticket.state {
     Created -> Active;
 }
 
@@ -2361,7 +2359,7 @@ action activate(ticket: Ticket) -> Ticket moves ticket.state Created -> Active {
         let offset = source.find("Ticket has").expect("receipt name");
         let hover = server.hover(&uri, offset_to_position(source, offset)).expect("hover");
         assert!(hover.contents.contains("receipt Ticket"));
-        assert!(hover.contents.contains("State machine metadata"));
+        assert!(hover.contents.contains("Flow metadata"));
         assert!(hover.contents.contains("States: `Created -> Active`"));
         assert!(hover.contents.contains("Created[0] -> Active[1]"));
     }

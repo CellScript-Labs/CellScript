@@ -90,7 +90,7 @@ Completed in 0.13:
 - Clean business examples are separated from profiled acceptance examples, while
   the flat `examples/*.cell` files remain compatibility mirrors.
 - LSP completions plus VS Code grammar and snippets are refreshed for the new
-  lock-boundary syntax.
+  lock parameter source syntax.
 
 Important boundaries:
 
@@ -200,20 +200,21 @@ New in 0.13:
   consumed.
 - Legacy `#[lifecycle(...)]` receipt syntax has been removed. State remains
   explicit schema data, and transition policy is declared with `state` /
-  `state_machine` plus action-level `moves`.
-- State-machine storage remains explicit cell data: the compiler does not
+  `flow` plus action-level `moves`.
+- State storage remains explicit cell data: the compiler does not
   inject hidden state fields or mutate Molecule layout. `create` initializers
   may now use declared state names such as `state: Created`, while
   guards and computed expressions can use qualified names such as
   `Ticket::Active` instead of numeric state indexes. The LSP now completes
-  those qualified state-machine states after `Type::`.
-- Declarative state machines can now be expressed without hidden layout changes:
-  `state_machine Name for Type.field { A -> B by action; }` and compact
-  `state Type.field { A -> B; }` declare the graph, while action signatures can
+  those qualified flow states after `Type::`.
+- Declarative flows can now be expressed without hidden layout changes:
+  `flow Name for Type.field { A -> B by action; }` and compact
+  `flow Type.field { A -> B; }` declare the graph, while action signatures can
   bind the edge they prove with explicit field-to-field moves such as
   `moves input.state Live -> output.state Filled`. The type checker, state
   static checks, IR metadata, runtime verifier, formatter, docs generator, and
-  LSP all carry the explicit state field name.
+  LSP all carry the explicit state field name. A state field may have only one
+  flow declaration; CellScript does not merge partial flow declarations.
 - The semantic core for state transitions is now proposed-cell verification:
   `action(input: T, output: T)` treats `input` as a transaction input and
   `output` as a transaction output. `consume` plus `create` remains accepted as

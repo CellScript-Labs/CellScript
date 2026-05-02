@@ -228,7 +228,7 @@ impl<'a> Parser<'a> {
                 }
                 "lifecycle" => {
                     return Err(CompileError::new(
-                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use state/state_machine plus action moves",
+                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use flow plus action moves",
                         self.current().span,
                     ));
                 }
@@ -349,13 +349,9 @@ impl<'a> Parser<'a> {
             TokenKind::Shared => Ok(Item::Shared(self.parse_shared(attrs.type_id, attrs.capabilities)?)),
             TokenKind::Receipt => Ok(Item::Receipt(self.parse_receipt(attrs.type_id, attrs.capabilities)?)),
             TokenKind::Struct => Ok(Item::Struct(self.parse_struct(attrs.type_id)?)),
-            TokenKind::Identifier(name) if name == "state_machine" => {
+            TokenKind::Identifier(name) if name == "flow" => {
                 self.reject_type_id_attr(&attrs)?;
-                Ok(Item::StateMachine(self.parse_state_machine(false)?))
-            }
-            TokenKind::Identifier(name) if name == "state" => {
-                self.reject_type_id_attr(&attrs)?;
-                Ok(Item::StateMachine(self.parse_state_machine(true)?))
+                Ok(Item::StateMachine(self.parse_flow()?))
             }
             TokenKind::Const => {
                 self.reject_type_id_attr(&attrs)?;
@@ -532,7 +528,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::LBracket) {
             return Err(CompileError::new(
-                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use state/state_machine plus action moves",
+                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use flow plus action moves",
                 self.current().span,
             ));
         }
@@ -577,29 +573,32 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_state_machine(&mut self, shorthand: bool) -> Result<StateMachineDef> {
+    fn parse_flow(&mut self) -> Result<StateMachineDef> {
         let start_span = self.current().span;
         let keyword = self.parse_name()?;
-        debug_assert!((shorthand && keyword == "state") || (!shorthand && keyword == "state_machine"));
+        debug_assert_eq!(keyword, "flow");
 
-        let name = if shorthand
-            || self.check(&TokenKind::For)
-            || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "for")
-        {
-            None
-        } else {
-            Some(self.parse_name_path()?)
-        };
-
-        if !shorthand {
-            match &self.current().kind {
-                TokenKind::For => self.advance(),
-                TokenKind::Identifier(name) if name == "for" => self.advance(),
-                _ => return Err(CompileError::new("expected 'for' in state_machine declaration", self.current().span)),
+        let first = self.parse_name_path()?;
+        let (name, target) =
+            if self.check(&TokenKind::For) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "for") {
+                self.advance();
+                (Some(first), self.parse_state_field_path()?)
+            } else if self.check(&TokenKind::Dot) {
+                self.advance();
+                let field_start = self.current().span;
+                let field = self.parse_name()?;
+                let field_end = self.current().span;
+                (
+                    None,
+                    StateFieldPath {
+                        base: first,
+                        field,
+                        span: Span::new(start_span.start, field_end.end, field_start.line, field_start.column),
+                    },
+                )
+            } else {
+                return Err(CompileError::new("expected 'for' or '.field' in flow declaration", self.current().span));
             };
-        }
-
-        let target = self.parse_state_field_path()?;
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
@@ -2072,11 +2071,11 @@ action mint(amount: u64) -> Token {
     }
 
     #[test]
-    fn test_parse_state_machine_and_action_moves() {
+    fn test_parse_flow_and_action_moves() {
         let input = r#"
 module test
 
-state_machine OfferFlow for Offer.state {
+flow OfferFlow for Offer.state {
     Created -> Live by publish;
     Live -> Filled by accept;
 }

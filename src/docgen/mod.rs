@@ -781,14 +781,13 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             summary: format!("Fields: {}", format_fields(&struct_def.fields)),
         }),
         Item::StateMachine(machine) => Some(ItemDoc {
-            kind: "state_machine".to_string(),
+            kind: "flow".to_string(),
             name: machine.name.clone().unwrap_or_else(|| format!("{}.{}", machine.target.base, machine.target.field)),
-            signature: format!(
-                "state_machine{} for {}.{}",
-                machine.name.as_ref().map(|name| format!(" {}", name)).unwrap_or_default(),
-                machine.target.base,
-                machine.target.field
-            ),
+            signature: if let Some(name) = &machine.name {
+                format!("flow {} for {}.{}", name, machine.target.base, machine.target.field)
+            } else {
+                format!("flow {}.{}", machine.target.base, machine.target.field)
+            },
             summary: format!(
                 "Transitions: {}",
                 machine
