@@ -70,7 +70,7 @@ impl Optimizer {
                 | Item::Shared(_)
                 | Item::Receipt(_)
                 | Item::Struct(_)
-                | Item::StateMachine(_)
+                | Item::Flow(_)
                 | Item::Enum(_)
                 | Item::Use(_) => {}
             }
@@ -933,7 +933,6 @@ mod tests {
                 params: Vec::new(),
                 return_type: None,
                 outputs: Vec::new(),
-                replacements: Vec::new(),
                 state_edges: Vec::new(),
                 body: vec![Stmt::If(IfStmt {
                     condition: Expr::Bool(false),
@@ -1002,7 +1001,6 @@ mod tests {
                     params: Vec::new(),
                     return_type: Some(Type::U64),
                     outputs: Vec::new(),
-                    replacements: Vec::new(),
                     state_edges: Vec::new(),
                     body: vec![
                         Stmt::Let(LetStmt {

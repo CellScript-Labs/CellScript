@@ -70,8 +70,9 @@ Cells.
 That is why the language has:
 
 - `resource`, `shared`, and `receipt` for persistent Cell-backed values;
-- explicit effects such as `consume`, `create`, `read_ref`, `transfer`,
-  `destroy`, `claim`, and `settle`;
+- explicit effects such as `consume`, `create`, action-boundary `read`
+  parameters, expression-level `read_ref<T>()`, `transfer`, `destroy`, `claim`,
+  and `settle`;
 - `action` entries for type-script style state transitions;
 - `lock` entries for spend-boundary predicates;
 - `protected`, `witness`, and `require` so lock source data and failure points
@@ -140,4 +141,4 @@ production-ready.
 - [CKB hashing workflow](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
 - [Collections matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Mutate append](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
+- [Output append](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)

@@ -94,7 +94,7 @@ Implemented:
 
 Design boundary:
 
-- the syntax pass must not hide Cell lifecycle;
+- the syntax pass must not hide Cell movement;
 - examples must not imply signer authority from `Address` values;
 - acceptance/profiled examples keep production metadata where evidence needs it.
 
@@ -108,7 +108,7 @@ Detailed design:
 0.13 adds classification syntax for locks:
 
 ```cellscript
-lock owner_only(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner
 }
 ```

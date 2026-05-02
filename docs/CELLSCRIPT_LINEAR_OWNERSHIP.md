@@ -4,7 +4,7 @@
 
 CellScript treats cell-backed resources as linear values. A linear value cannot
 be copied, silently dropped, or used after it has been consumed, transferred,
-destroyed, claimed, settled, or moved into a replacement transition.
+destroyed, claimed, settled, or moved into an input/output transition.
 
 ## Compile-Time Rules
 
@@ -32,7 +32,7 @@ Every acquired cell-backed value must reach an explicit terminal operation:
 - `destroy`
 - `claim`
 - `settle`
-- `mutate` replacement
+- named output binding
 - another verified operation documented in metadata
 
 Silent end-of-scope loss is rejected.

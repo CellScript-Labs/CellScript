@@ -44,17 +44,16 @@ syntax forms you will see in the examples:
 | `protected cell: T` | Lock-guarded input Cell view. |
 | `witness arg: T` | Decoded witness data. |
 | `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
-| `replace old -> new` | One-to-one logical Cell lineage. |
-| `move old.state A -> new.state B` | Explicit field-to-field state edge. |
+| `move old.state: A -> new.state: B` | Explicit field-to-field state edge. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
 | `require condition, "message"` | Action or lock verifier guard with an optional message. |
 | `assert(condition, "message")` | Internal checked assertion. |
 | `let mut xs: Vec<Hash> = []` | Typed empty local `Vec<T>` literal. |
 
 Names such as `old`, `new`, `input`, and `output` are ordinary bindings. The
-semantics come from the action side, source qualifier, `replace`, `move`, and
-`create` clauses. Do not use `&mut` on action-boundary Cell parameters; Cell
-replacement is expressed by naming the input and proposed output Cell.
+semantics come from the action side, source qualifier, `move`, `create`, and
+`require` clauses. Do not use `&mut` on action-boundary Cell parameters; Cell
+updates are expressed by naming the input and proposed output Cell.
 
 ## Module Declaration
 
@@ -172,7 +171,7 @@ resource Token has store, transfer, destroy {
 ```
 
 Resources are linear values. When an action receives one, the action must say
-where it goes: consume it, validate a replacement output, transfer it, return
+where it goes: consume it, validate a proposed output, transfer it, return
 it, claim it, settle it, or destroy it.
 
 Persistent declarations can also declare the default CKB script hash type used
@@ -230,18 +229,16 @@ verifier over proposed transaction Cells: Cell-backed parameters on the left are
 input Cell evidence, named outputs on the right are proposed output Cell
 evidence, and `require` states the guard conditions that must pass.
 
-For state-machine transitions, prefer the input-to-output signature form. Given
+For flow transitions, prefer the input-to-output signature form. Given
 an `Offer.state` graph such as `Live -> Filled`, the action names both Cell
 views:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    replace input -> output
-    move input.state Live -> output.state Filled
-{
+    move input.state: Live -> output.state: Filled
+where
     require input.price == output.price
     require input.seller == output.seller
-}
 ```
 
 The `move` clause only proves the state edge. Authorization, preservation, and
@@ -250,7 +247,8 @@ conservation checks still belong in explicit `require` statements.
 Consume/create-style actions remain valid as front-end sugar:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     assert(token.amount > 0, "empty token")
     consume token
 
@@ -258,11 +256,10 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
-Read this as a Cell transition: spend one token input, then validate a
-replacement token output under a new lock. The verifier checks a proposed
+Read this as a Cell transition: spend one token input, then validate a proposed
+token output under a new lock. The verifier checks a proposed
 transaction; it does not allocate Cells inside CKB-VM.
 
 ## Locks
@@ -376,7 +373,7 @@ CellScript supports line comments and nested block comments:
 */
 ```
 
-Use comments where they help the reader understand Cell lifecycle, witness
+Use comments where they help the reader understand Cell movement, witness
 scope, builder obligations, or a security boundary. Avoid comments that merely
 repeat arithmetic.
 

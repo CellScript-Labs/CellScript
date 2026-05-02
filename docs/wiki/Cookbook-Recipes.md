@@ -37,8 +37,7 @@ Use `create` when an action materializes new Cell state.
 
 ```cellscript
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-    replace auth_before -> auth_after
-{
+where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
@@ -48,25 +47,22 @@ action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
 The field shorthand `amount` means `amount: amount`. The `with_lock(to)` part is
 the lock on the created output Cell.
 
-## Recipe: Replace State Instead Of Updating In Place
+## Recipe: Update State Without Updating In Place
 
-Use an input-to-output action signature when the transaction replaces state. The
-input and output names are ordinary bindings; `replace` is the Cell lineage
-relationship.
+Use an input-to-output action signature when the transaction updates state. The
+input and output names are ordinary bindings; `require` clauses prove continuity
+and the allowed field changes.
 
 ```cellscript
 action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet
-    replace wallet_before -> wallet_after
-{
+where
     require wallet_after.owner == wallet_before.owner
     require wallet_after.nonce == wallet_before.nonce + 1
-}
 ```
 
 When reviewing this pattern, inspect metadata and builder evidence for the input
@@ -186,7 +182,7 @@ Start with the smallest example that teaches the idea you need:
 
 | Goal | Read |
 |---|---|
-| Linear resource lifecycle | `examples/token.cell` |
+| Linear resource effects | `examples/token.cell` |
 | Unique assets and ownership | `examples/nft.cell` |
 | Time-gated releases | `examples/timelock.cell` |
 | Threshold proposals | `examples/multisig.cell` |

@@ -50,7 +50,7 @@ Do not re-plan v0.15:
 - Covenant ProofPlan
 - trigger/scope/reads/coverage modeling
 - protocol macro lowering
-- identity lifecycle primitives
+- identity policy primitives
 - explicit destroy policies
 
 ---

@@ -46,7 +46,7 @@ scripts force authors to work close to the wire format:
 
 CellScript raises that programming model to explicit language constructs:
 `resource`, `shared`, `receipt`, `action`, `lock`, `consume`, `create`,
-`read_ref`, `transfer`, `destroy`, `claim`, and `settle`. These constructs are
+`read`, `transfer`, `destroy`, `claim`, and `settle`. These constructs are
 not metaphors — they lower directly to the Cell transaction shape that the
 target chain already executes.
 
@@ -172,11 +172,18 @@ transformations:
 - **Declarative flows** — state remains explicit schema data, while
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
-  shape is `action(old: T) -> new: T replace old -> new move old.field A -> new.field B`.
-  Legacy explicit `output` parameters and `consume`/`create` actions remain
-  accepted, but the signature direction is the normal input-to-output surface.
+  shape separates topology, state edge, and proof obligations:
+  `action(old: T) -> new: T`, `move old.field: A -> new.field: B`, then a
+  `where` proof block with explicit `require` constraints. Explicit `output`
+  parameters and `consume`/`create` actions remain accepted, but the signature
+  direction is the normal input-to-output surface.
   Each state field has exactly one flow declaration; split/partial flow merging
   is not supported.
+- **Scoped proof blocks** — action proof logic lives under `where`; `move` is an
+  action-level state edge declaration before `where`, not a statement inside
+  conditional proof logic. The type checker rejects asymmetric branch
+  constraints when an output field is required in one proof branch but not its
+  siblings.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -235,7 +242,8 @@ lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> boo
 **Effects:**
 
 ```cellscript
-action move_token(token: Token, to: Address) -> next_token: Token {
+action move_token(token: Token, to: Address) -> next_token: Token
+where
     assert(token.amount > 0, "empty token")
 
     consume token
@@ -244,12 +252,12 @@ action move_token(token: Token, to: Address) -> next_token: Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
 The compiler treats `consume`, `create`, `transfer`, `destroy`, `claim`,
-`settle`, and `read_ref` as **Cell effects**, not ordinary function calls. Those
-effects are reflected in metadata so CKB admission policy,
+`settle`, action-boundary `read` parameters, and expression-level
+`read_ref<T>()` as **Cell effects**, not ordinary function calls. Those effects
+are reflected in metadata so CKB admission policy,
 schema decoding, and artifact verification can audit the generated script.
 
 **Complete fungible-token example:**
@@ -269,8 +277,7 @@ resource MintAuthority has store {
 }
 
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-    replace auth_before -> auth_after
-{
+where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
     require auth_after.token_symbol == auth_before.token_symbol
@@ -281,21 +288,20 @@ action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after
         amount: amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
-}
 
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
     create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 ```
 
 **Bundled protocol examples:**
@@ -348,7 +354,7 @@ CellScript includes production-style local language tooling for early users:
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
   references, rename, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
-  `tower-lsp` JSON-RPC transport over stdio. Completions include state-machine
+  `tower-lsp` JSON-RPC transport over stdio. Completions include flow
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
@@ -360,7 +366,7 @@ CellScript includes production-style local language tooling for early users:
 - [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
 - [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
 - [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Mutate and replacement outputs](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
+- [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
 - [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
@@ -370,7 +376,7 @@ CellScript includes production-style local language tooling for early users:
 - [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
 - [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
+- [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
 - [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 
@@ -530,7 +536,7 @@ This separates three boundaries:
 Capacity in this profile has two layers. `with_capacity_floor(shannons)`
 declares a type-level output floor that is visible in metadata and constraints.
 `occupied_capacity("TypeName")` keeps runtime-visible capacity checks available.
-Neither replaces builder evidence: the final transaction still has to measure
+Neither supersedes builder evidence: the final transaction still has to measure
 occupied capacity, provide enough output capacity, and record tx-size evidence.
 
 ### Wasm Gate

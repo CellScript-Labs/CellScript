@@ -11,8 +11,8 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
-- how `action(before: T) -> after: T` plus `replace` expresses the verifier core for
-  replacement-style transitions;
+- how `action(before: T) -> after: T` expresses the verifier core for
+  input-to-output transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
 ## The Main Effects
@@ -26,7 +26,7 @@ place. A transaction spends Cells and creates new Cells.
 | `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read param: T` | Read dependency-backed state without consuming it. |
 | `transfer value to` | Move a value to a new lock or owner. |
-| `destroy value` | Consume a value without replacement, if the type allows `destroy`. |
+| `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
 | `claim receipt` | Consume a receipt and materialize the claim path. |
 | `settle receipt` | Finalize a receipt-backed process. |
 
@@ -41,17 +41,17 @@ Resources are linear. In plain terms: if an action receives a resource, the
 action must say where it goes.
 
 ```cellscript
-action burn(token: Token) {
+action burn(token: Token)
+where
     assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 ```
 
 The `Token` cannot simply disappear. It must be consumed, returned, transferred,
 claimed, settled, or destroyed. Silent loss is rejected because silent loss would
-make the Cell lifecycle unclear.
+make Cell movement unclear.
 
-## State Machines Use Explicit State Fields
+## Flows Use Explicit State Fields
 
 State is ordinary schema data. Declare the state field yourself, usually as a
 no-payload enum so SDKs, indexers, and explorers can decode the layout without
@@ -84,18 +84,15 @@ flow GrantFlow for VestingGrant.state {
 Bind each action to the transition it is allowed to prove. The semantic core is
 an input-to-output verifier signature: the left side names consumed input Cell
 views, the right side names proposed output Cell bindings, and `move` names both
-state fields explicitly. The `replace` clause declares the deterministic
-one-to-one lineage relationship.
+state fields explicitly.
 
 ```cellscript
 action unlock_grant(input: VestingGrant) -> output: VestingGrant
-    replace input -> output
-    move input.state Granted -> output.state Claimable
-{
+    move input.state: Granted -> output.state: Claimable
+where
     require input.beneficiary == output.beneficiary
     require input.total_amount == output.total_amount
     require input.claimed_amount == output.claimed_amount
-}
 ```
 
 `flow Type.field { ... }` is the compact form when the flow does not
@@ -107,11 +104,25 @@ that field in one named or compact flow block.
 
 Output binding is deterministic. Named action outputs are bound to transaction
 outputs in signature order, starting at `Output#0`. A field-to-field transition such as
-`move input.state A -> output.state B` must have a matching
-`replace input -> output` clause. The compiler rejects ambiguous shorthand
-instead of guessing which output is the replacement. Existing `consume input`
-plus `create output = T { ... }` remains accepted as front-end sugar for the same
-verifier shape.
+`move input.state: A -> output.state: B` names both the input and proposed output
+directly. Existing `consume input` plus `create output = T { ... }` remains
+accepted as front-end sugar for the same verifier shape.
+
+Action proof logic is scoped by `where`. Put `move` clauses before `where` and
+keep proof obligations below it:
+
+```cellscript
+action fill_offer(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    require output.price == input.price
+    require output.seller == input.seller
+```
+
+Inside `where`, conditional proof branches must constrain output fields
+symmetrically. If one branch requires `output.claimable`, sibling branches must
+also constrain `output.claimable` unless it was already constrained in the
+surrounding proof scope.
 
 ## Creating Output Cells
 
@@ -136,39 +147,38 @@ The `with_lock(to)` part matters. It says which lock will guard the newly
 created Cell. If a later transaction wants to spend that Cell, the lock must
 accept the spend.
 
-## Consuming And Replacing State
+## Consuming And Updating State
 
 A common CellScript sugar pattern is:
 
 1. read or consume an input Cell;
 2. check the transition;
-3. validate a replacement output Cell.
+3. validate a proposed output Cell.
 
-For example, a transfer consumes one token and validates a replacement token
+For example, a transfer consumes one token and validates a proposed token
 under a different lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
     create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
 This is closer to CKB than an account-style assignment. The old Cell is spent;
 the new Cell is a proposed output that the verifier checks.
 
-## Replacing Existing State
+## Updating Existing State
 
-For one-to-one state replacement, make both cells visible:
+For one-to-one state updates, make both cells visible:
 
 ```cellscript
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-    replace auth_before -> auth_after
-{
+where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
     require auth_after.token_symbol == auth_before.token_symbol
@@ -179,11 +189,10 @@ action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
 This is intentionally explicit: `auth_before` is the existing state Cell,
-`auth_after` is the proposed replacement output, and the `require` guards prove
+`auth_after` is the proposed output, and the `require` guards prove
 which fields may change. There is no hidden account-style mutation.
 
 ## Read-Only Dependencies

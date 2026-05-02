@@ -1,7 +1,8 @@
 module cellscript::language::registry
 
 
-action local_registry_membership(owner: Address, candidate: Address) -> bool {
+action local_registry_membership(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::with_capacity(2);
     owners.push(owner);
     owners.insert(0, candidate);
@@ -16,9 +17,9 @@ action local_registry_membership(owner: Address, candidate: Address) -> bool {
     }
 
     false
-}
 
-action local_registry_key_roundtrip(first: Hash, second: Hash) -> bool {
+action local_registry_key_roundtrip(first: Hash, second: Hash) -> bool
+where
     let mut keys: Vec<Hash> = [];
     keys.push(first);
     keys.push(second);
@@ -32,4 +33,3 @@ action local_registry_key_roundtrip(first: Hash, second: Hash) -> bool {
     }
 
     false
-}

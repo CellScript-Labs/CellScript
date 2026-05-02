@@ -204,7 +204,7 @@ impl LspServer {
         };
 
         self.ast_cache.insert(uri.to_string(), ast.clone());
-        let diagnostics = match crate::types::check(&ast).and_then(|_| crate::lifecycle::check(&ast)) {
+        let diagnostics = match crate::types::check(&ast).and_then(|_| crate::flow::check(&ast)) {
             Ok(()) => {
                 let mut diagnostics = Vec::new();
                 if let Ok(metadata) = crate::compile_metadata(content, None) {
@@ -323,7 +323,7 @@ impl LspServer {
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
-            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\n    replace ${2:input} -> ${4:output}\n{\n    $0\n}"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             (
                 "lock",
                 "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
@@ -382,22 +382,22 @@ impl LspServer {
                 _ => {}
             }
         }
-        items.extend(Self::state_machine_state_completions(module, type_name));
+        items.extend(Self::flow_state_completions(module, type_name));
         items
     }
 
-    fn state_machine_state_completions(module: &Module, type_name: &str) -> Vec<CompletionItem> {
+    fn flow_state_completions(module: &Module, type_name: &str) -> Vec<CompletionItem> {
         module
             .items
             .iter()
             .filter_map(|item| {
-                let Item::StateMachine(machine) = item else {
+                let Item::Flow(machine) = item else {
                     return None;
                 };
                 (machine.target.base == type_name).then_some(machine)
             })
             .flat_map(|machine| {
-                let states = Self::state_machine_enum_states(module, type_name, &machine.target.field)
+                let states = Self::flow_enum_states(module, type_name, &machine.target.field)
                     .unwrap_or_else(|| Self::transition_states(machine));
                 let field_name = machine.target.field.clone();
                 states.into_iter().enumerate().map(move |(index, state)| CompletionItem {
@@ -411,7 +411,7 @@ impl LspServer {
             .collect()
     }
 
-    fn state_machine_enum_states(module: &Module, type_name: &str, field_name: &str) -> Option<Vec<String>> {
+    fn flow_enum_states(module: &Module, type_name: &str, field_name: &str) -> Option<Vec<String>> {
         let enum_name = module.items.iter().find_map(|item| {
             let fields = match item {
                 Item::Resource(def) if def.name == type_name => Some(&def.fields),
@@ -439,7 +439,7 @@ impl LspServer {
         })
     }
 
-    fn transition_states(machine: &StateMachineDef) -> Vec<String> {
+    fn transition_states(machine: &FlowDef) -> Vec<String> {
         let mut states = Vec::new();
         for transition in &machine.transitions {
             for raw in [&transition.from, &transition.to] {
@@ -605,11 +605,10 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\n    replace ${2:input} -> ${4:output}\n{\n    $0\n}"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
             ("output", "output ${1:name}: ${2:CellType}"),
-            ("replace", "replace ${1:before} -> ${2:after}"),
             ("move", "move ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
             (
                 "lock",
@@ -966,11 +965,11 @@ impl LspServer {
             for param in params {
                 if param.name == symbol {
                     let note = if param.is_mut {
-                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `action(before: T) -> after: T replace before -> after`."
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates should be modeled with `action(before: T) -> after: T` plus `move` and `require` constraints."
                     } else if param.source == ParamSource::Input {
                         "\n\n`input` marks a consumed transaction input Cell explicitly. Omitting it is equivalent for Cell-backed action parameters."
                     } else if param.source == ParamSource::Output {
-                        "\n\n`output` marks a proposed transaction output Cell. Bind it to an input Cell with `replace before -> after` when it is a replacement."
+                        "\n\n`output` marks a proposed transaction output Cell. Use `move input.state: Live -> output.state: Filled` for state transitions and `require` for field continuity."
                     } else if param.source == ParamSource::LockArgs {
                         "\n\n`lock_args` is decoded from the executing lock Script.args bytes."
                     } else {
@@ -1029,7 +1028,7 @@ impl LspServer {
             }),
             Item::Shared(s) => Some(Hover { contents: format!("```cellscript\nshared {}\n```", s.name), range: Some(range) }),
             Item::Receipt(r) => Some(Hover {
-                contents: format!("```cellscript\nreceipt {}\n```{}", r.name, receipt_lifecycle_hover(r, metadata)),
+                contents: format!("```cellscript\nreceipt {}\n```{}", r.name, receipt_flow_hover(r, metadata)),
                 range: Some(range),
             }),
             Item::Struct(s) => Some(Hover { contents: format!("```cellscript\nstruct {}\n```", s.name), range: Some(range) }),
@@ -1730,7 +1729,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Shared(s) => Some(&s.name),
         Item::Receipt(r) => Some(&r.name),
         Item::Struct(s) => Some(&s.name),
-        Item::StateMachine(machine) => machine.name.as_deref(),
+        Item::Flow(machine) => machine.name.as_deref(),
         Item::Const(c) => Some(&c.name),
         Item::Enum(e) => Some(&e.name),
         Item::Action(a) => Some(&a.name),
@@ -1746,7 +1745,7 @@ fn item_span(item: &Item) -> Span {
         Item::Shared(s) => s.span,
         Item::Receipt(r) => r.span,
         Item::Struct(s) => s.span,
-        Item::StateMachine(machine) => machine.span,
+        Item::Flow(machine) => machine.span,
         Item::Const(c) => c.span,
         Item::Enum(e) => e.span,
         Item::Action(a) => a.span,
@@ -1829,19 +1828,19 @@ fn position_in_range(pos: Position, range: Range) -> bool {
     position_le(range.start, pos) && position_le(pos, range.end)
 }
 
-fn receipt_lifecycle_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMetadata>) -> String {
+fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMetadata>) -> String {
     if let Some(type_metadata) =
         metadata.and_then(|metadata| metadata.types.iter().find(|type_metadata| type_metadata.name == receipt.name))
     {
-        if type_metadata.lifecycle_states.is_empty() {
+        if type_metadata.flow_states.is_empty() {
             return String::new();
         }
 
-        let transitions = if type_metadata.lifecycle_transitions.is_empty() {
+        let transitions = if type_metadata.flow_transitions.is_empty() {
             "none".to_string()
         } else {
             type_metadata
-                .lifecycle_transitions
+                .flow_transitions
                 .iter()
                 .map(|transition| {
                     format!("{}[{}] -> {}[{}]", transition.from, transition.from_index, transition.to, transition.to_index)
@@ -1852,7 +1851,7 @@ fn receipt_lifecycle_hover(receipt: &ReceiptDef, metadata: Option<&crate::Compil
 
         return format!(
             "\n\n**Flow metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
-            type_metadata.lifecycle_states.join(" -> "),
+            type_metadata.flow_states.join(" -> "),
             transitions
         );
     }
@@ -2154,7 +2153,7 @@ mod tests {
         let mut server = LspServer::new();
 
         let uri = "file:///test.cell".to_string();
-        let content = "module test;\n\naction answer() -> u64 {\n    42\n}\n".to_string();
+        let content = "module test;\n\naction answer() -> u64\nwhere\n    42\n".to_string();
 
         server.open_document(uri.clone(), content);
         assert!(server.get_diagnostics(&uri).is_empty());
@@ -2177,7 +2176,6 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "flow"));
         assert!(keywords.iter().any(|k| k.label == "input"));
         assert!(keywords.iter().any(|k| k.label == "output"));
-        assert!(keywords.iter().any(|k| k.label == "replace"));
         assert!(keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
@@ -2216,11 +2214,11 @@ mod tests {
     }
 
     #[test]
-    fn test_state_machine_u8_namespace_completions() {
+    fn test_flow_u8_namespace_completions() {
         let mut server = LspServer::new();
-        let uri = "file:///lifecycle_completion.cell".to_string();
+        let uri = "file:///flow_completion.cell".to_string();
         let source = r#"
-module lifecycle_completion
+module flow_completion
 
 receipt Ticket has store {
     state: u8,
@@ -2242,13 +2240,11 @@ flow OtherTicket.state {
 }
 
 action activate(ticket: Ticket, output active_ticket: Ticket)
-    replace ticket -> active_ticket
-    move ticket.state Created -> active_ticket.state Active
-{
+    move ticket.state: Created -> active_ticket.state: Active
+where
     assert_invariant(ticket.state < Ticket::Closed, "closed")
     require active_ticket.state == Ticket::Active
     require active_ticket.id == ticket.id
-}
 "#
         .to_string();
 
@@ -2271,11 +2267,11 @@ action activate(ticket: Ticket, output active_ticket: Ticket)
     }
 
     #[test]
-    fn test_state_machine_namespace_completions() {
+    fn test_flow_namespace_completions() {
         let mut server = LspServer::new();
-        let uri = "file:///state_machine_completion.cell".to_string();
+        let uri = "file:///flow_completion.cell".to_string();
         let source = r#"
-module state_machine_completion
+module flow_completion
 
 enum OfferState {
     Created,
@@ -2294,12 +2290,10 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer, output output: Offer)
-    replace input -> output
-    move input.state Live -> output.state Filled
-{
+    move input.state: Live -> output.state: Filled
+where
     require output.state == Offer::Filled
     require output.amount == input.amount
-}
 "#
         .to_string();
 
@@ -2334,13 +2328,14 @@ action accept(input: Offer, output output: Offer)
     fn test_goto_definition_and_references() {
         let mut server = LspServer::new();
         let uri = "file:///defs.cell".to_string();
-        let source = "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64 {\n    let token = Token { amount: 1 };\n    token.amount\n}\n";
+        let source =
+            "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64\nwhere\n    let token = Token { amount: 1 };\n    token.amount\n";
         server.open_document(uri.clone(), source.to_string());
 
-        let definition = server.goto_definition(&uri, Position { line: 7, character: 16 }).expect("definition");
+        let definition = server.goto_definition(&uri, Position { line: 8, character: 16 }).expect("definition");
         assert_eq!(definition.range.start.line, 2);
 
-        let refs = server.find_references(&uri, Position { line: 7, character: 16 });
+        let refs = server.find_references(&uri, Position { line: 8, character: 16 });
         assert!(refs.len() >= 2);
     }
 
@@ -2348,7 +2343,7 @@ action accept(input: Offer, output output: Offer)
     fn test_hover() {
         let mut server = LspServer::new();
         let uri = "file:///hover.cell".to_string();
-        let source = "module hover;\n\naction demo(x: u64)->u64{\n    x\n}\n";
+        let source = "module hover;\n\naction demo(x: u64)->u64\nwhere\n    x\n";
         server.open_document(uri.clone(), source.to_string());
 
         let hover = server.hover(&uri, Position { line: 2, character: 7 }).expect("hover");
@@ -2370,12 +2365,12 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(amount: u64) -> u64
+where
     let cfg = read_ref<Config>()
     let token = create Token { amount: amount }
     consume token
     return cfg.threshold
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2395,11 +2390,11 @@ action update(amount: u64) -> u64 {
     }
 
     #[test]
-    fn test_receipt_hover_includes_state_machine_metadata() {
+    fn test_receipt_hover_includes_flow_metadata() {
         let mut server = LspServer::new();
-        let uri = "file:///lifecycle_hover.cell".to_string();
+        let uri = "file:///flow_hover.cell".to_string();
         let source = r#"
-module lifecycle_hover
+module flow_hover
 
 receipt Ticket has store {
     state: u8,
@@ -2411,13 +2406,11 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket, output active_ticket: Ticket)
-    replace ticket -> active_ticket
-    move ticket.state Created -> active_ticket.state Active
-{
+    move ticket.state: Created -> active_ticket.state: Active
+where
     let active = Ticket::Active
     require active_ticket.state == active
     require active_ticket.id == ticket.id
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2427,27 +2420,6 @@ action activate(ticket: Ticket, output active_ticket: Ticket)
         assert!(hover.contents.contains("Flow metadata"));
         assert!(hover.contents.contains("States: `Created -> Active`"));
         assert!(hover.contents.contains("Created[0] -> Active[1]"));
-    }
-
-    #[test]
-    fn test_legacy_lifecycle_attribute_becomes_lsp_diagnostic() {
-        let mut server = LspServer::new();
-        let uri = "file:///bad_lifecycle.cell".to_string();
-        let source = r#"
-module bad_lifecycle
-
-#[lifecycle(Created -> Created)]
-receipt Ticket has store {
-    state: u8,
-    id: u64,
-}
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let diagnostics = server.get_diagnostics(&uri);
-        let error = diagnostics.iter().find(|diagnostic| diagnostic.source == "cellscript").expect("lifecycle diagnostic");
-        assert_eq!(error.severity, DiagnosticSeverity::Error);
-        assert!(error.message.contains("legacy #[lifecycle(...)] has been removed"));
     }
 
     #[test]
@@ -2465,12 +2437,12 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(amount: u64) -> u64
+where
     let cfg = read_ref<Config>()
     let token = create Token { amount: amount }
     consume token
     return cfg.threshold
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2492,14 +2464,14 @@ resource NFT {
     token_id: u64,
 }
 
-action use_collection() -> Vec<NFT> {
+action use_collection() -> Vec<NFT>
+where
     let mut items = Vec::new()
     let nft = create NFT {
         token_id: 1,
     }
     items.push(nft)
     return items
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2514,12 +2486,12 @@ action use_collection() -> Vec<NFT> {
     fn test_format_document() {
         let mut server = LspServer::new();
         let uri = "file:///fmt.cell".to_string();
-        let source = "module fmt\naction demo(x:u64)->u64{x}\n";
+        let source = "module fmt\naction demo(x:u64)->u64\nwhere\nx\n";
         server.open_document(uri.clone(), source.to_string());
 
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
-        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {"));
+        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64\nwhere"));
     }
 
     #[test]
@@ -2530,7 +2502,7 @@ action use_collection() -> Vec<NFT> {
         std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    token.amount\n}\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -2553,7 +2525,7 @@ action use_collection() -> Vec<NFT> {
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    token.amount\n}\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
         std::fs::write(root.join("src/main.cell"), main_source).unwrap();
 
         let mut server = LspServer::new();
@@ -2576,7 +2548,7 @@ action use_collection() -> Vec<NFT> {
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    token.amount\n}\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -2628,9 +2600,9 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(token: Token) -> u64
+where
     token.amount
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2653,10 +2625,10 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(token: Token) -> u64
+where
     let label = "Token"
     token.amount
-}
 "#;
         server.open_document(uri.clone(), source.to_string());
 

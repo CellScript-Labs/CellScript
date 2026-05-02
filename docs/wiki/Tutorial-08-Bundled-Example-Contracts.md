@@ -14,7 +14,7 @@ example.
 | `examples/nft.cell` | Unique assets, metadata, ownership transitions, and owner locks. |
 | `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
 | `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
-| `examples/vesting.cell` | Vesting grants, receipts, claim lifecycle, and admin-boundary comments. |
+| `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
 | `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
 | `examples/launch.cell` | Launch/pool composition patterns. |
 
@@ -44,7 +44,7 @@ For small reusable patterns drawn from the same ideas, see
 If you are learning the language, read them in this order:
 
 1. `token.cell`: start here. It is the smallest example with a clear resource
-   lifecycle.
+   flow.
 2. `nft.cell`: learn unique assets and ownership-style locks.
 3. `timelock.cell`: learn time guards and release evidence.
 4. `multisig.cell`: learn proposal records and threshold logic.
@@ -91,12 +91,11 @@ resource MintAuthority has store {
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
 minted.
 
-`mint` replaces authority state and validates a proposed new token output:
+`mint` updates authority state and validates a proposed new token output:
 
 ```cellscript
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-    replace auth_before -> auth_after
-{
+where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
     require auth_after.token_symbol == auth_before.token_symbol
@@ -107,38 +106,37 @@ action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
 Read `auth_before` as the existing authority Cell and `auth_after` as the
-proposed replacement output. The `replace` clause is the relationship; the
+proposed output. The action signature names the input/output topology; the
 `require` guards are the field-level proof.
 
-`transfer_token` consumes an input token and validates a replacement output
+`transfer_token` consumes an input token and validates a proposed output
 under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
     create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
 `burn` consumes the token and destroys it:
 
 ```cellscript
-action burn(token: Token) {
+action burn(token: Token)
+where
     assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 ```
 
-These three actions show the basic resource lifecycle: propose an output,
-replace state, destroy state.
+These three actions show the basic resource effect flow: propose an output,
+update state, destroy state.
 
 ## Locks In The Examples
 

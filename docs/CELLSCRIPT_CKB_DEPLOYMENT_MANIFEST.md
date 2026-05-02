@@ -26,7 +26,7 @@ dep_type = "dep_group"
 hash_type = "type"
 ```
 
-`[[deploy.ckb.cell_deps]]` also accepts the older split location form:
+`[[deploy.ckb.cell_deps]]` also accepts the split location form:
 `tx_hash = "0x..."` plus `index = 0`. Use one form per dependency. A manifest
 that specifies both forms for the same dependency is rejected.
 

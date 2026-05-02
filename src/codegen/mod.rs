@@ -1,7 +1,7 @@
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::error::{CompileError, Result};
+use crate::flow::FLOW_STATE_FIELD_NAME;
 use crate::ir::*;
-use crate::lifecycle::LIFECYCLE_STATE_FIELD_NAME;
 use crate::runtime_errors::CellScriptRuntimeError;
 use crate::{ArtifactFormat, TargetProfile, ENTRY_WITNESS_ABI_MAGIC};
 use serde::Serialize;
@@ -481,12 +481,12 @@ pub struct CodeGenerator {
     receipt_type_names: BTreeSet<String>,
     /// Named types that are transaction cell-backed values.
     cell_type_names: BTreeSet<String>,
-    /// State names for schemas that declared state-machine policy.
-    lifecycle_states: HashMap<String, Vec<String>>,
-    /// State-machine field name keyed by schema type.
-    lifecycle_state_fields: HashMap<String, String>,
-    /// Declared lifecycle/state-machine transition graph keyed by schema type.
-    lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
+    /// State names for schemas that declared flow policy.
+    flow_states: HashMap<String, Vec<String>>,
+    /// Flow field name keyed by schema type.
+    flow_state_fields: HashMap<String, String>,
+    /// Declared flow/flow transition graph keyed by schema type.
+    flow_rules: HashMap<String, Vec<IrFlowRule>>,
     /// Action-specific state edges for the function currently being emitted.
     current_state_transition_edges: Vec<IrStateTransitionEdge>,
     /// ABI summaries for locally emitted actions/functions/locks.
@@ -517,7 +517,7 @@ pub struct CodeGenerator {
     prelude_fixed_byte_constants: HashMap<usize, Vec<u8>>,
     /// Function-local fixed-byte storage for wide scalar temporaries such as u128.
     fixed_byte_local_offsets: HashMap<usize, usize>,
-    /// Named IR variable slots used only by legacy StoreVar/LoadVar instructions.
+    /// Named IR variable slots used by StoreVar/LoadVar instructions.
     named_var_offsets: HashMap<String, usize>,
     /// Deduplicated immutable byte constants emitted into .rodata.
     const_data_labels: HashMap<Vec<u8>, String>,
@@ -648,9 +648,9 @@ impl CodeGenerator {
             type_fixed_sizes: HashMap::new(),
             receipt_type_names: BTreeSet::new(),
             cell_type_names: BTreeSet::new(),
-            lifecycle_states: HashMap::new(),
-            lifecycle_state_fields: HashMap::new(),
-            lifecycle_rules: HashMap::new(),
+            flow_states: HashMap::new(),
+            flow_state_fields: HashMap::new(),
+            flow_rules: HashMap::new(),
             current_state_transition_edges: Vec::new(),
             callable_abis: HashMap::new(),
             schema_pointer_vars: BTreeSet::new(),
@@ -1431,14 +1431,14 @@ impl CodeGenerator {
         if let Some(fixed_size) = type_def.fields.iter().try_fold(0usize, |acc, field| field.fixed_size.map(|size| acc + size)) {
             self.type_fixed_sizes.insert(type_def.name.clone(), fixed_size);
         }
-        if let Some(states) = &type_def.lifecycle_states {
-            self.lifecycle_states.insert(type_def.name.clone(), states.clone());
+        if let Some(states) = &type_def.flow_states {
+            self.flow_states.insert(type_def.name.clone(), states.clone());
         }
-        if let Some(field) = &type_def.lifecycle_state_field {
-            self.lifecycle_state_fields.insert(type_def.name.clone(), field.clone());
+        if let Some(field) = &type_def.flow_state_field {
+            self.flow_state_fields.insert(type_def.name.clone(), field.clone());
         }
-        if !type_def.lifecycle_rules.is_empty() {
-            self.lifecycle_rules.insert(type_def.name.clone(), type_def.lifecycle_rules.clone());
+        if !type_def.flow_rules.is_empty() {
+            self.flow_rules.insert(type_def.name.clone(), type_def.flow_rules.clone());
         }
         if matches!(type_def.kind, IrTypeKind::Resource | IrTypeKind::Shared | IrTypeKind::Receipt) {
             self.cell_type_names.insert(type_def.name.clone());
@@ -2019,30 +2019,44 @@ impl CodeGenerator {
         self.operation_output_indices.clear();
         self.verified_operation_outputs.clear();
 
-        let mut output_index = 0usize;
         for block in &body.blocks {
             for instruction in &block.instructions {
                 match instruction {
-                    IrInstruction::Create { dest, .. } => {
-                        self.operation_output_indices.insert(dest.id, output_index);
-                        output_index += 1;
+                    IrInstruction::Create { dest, pattern } => {
+                        if let Some(output_index) = Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
+                        {
+                            self.operation_output_indices.insert(dest.id, output_index);
+                        }
                     }
                     IrInstruction::Transfer { dest, .. } => {
-                        self.record_verified_operation_output(body, output_index, dest, "transfer");
-                        output_index += 1;
+                        if let Some(type_name) = named_type_name(&dest.ty) {
+                            if let Some(output_index) = Self::create_output_index(body, "transfer", &dest.name, type_name) {
+                                self.record_verified_operation_output(body, output_index, dest, "transfer");
+                            }
+                        }
                     }
                     IrInstruction::Claim { dest, .. } => {
-                        self.record_verified_operation_output(body, output_index, dest, "claim");
-                        output_index += 1;
+                        if let Some(type_name) = named_type_name(&dest.ty) {
+                            if let Some(output_index) = Self::create_output_index(body, "claim", &dest.name, type_name) {
+                                self.record_verified_operation_output(body, output_index, dest, "claim");
+                            }
+                        }
                     }
                     IrInstruction::Settle { dest, .. } => {
-                        self.record_verified_operation_output(body, output_index, dest, "settle");
-                        output_index += 1;
+                        if let Some(type_name) = named_type_name(&dest.ty) {
+                            if let Some(output_index) = Self::create_output_index(body, "settle", &dest.name, type_name) {
+                                self.record_verified_operation_output(body, output_index, dest, "settle");
+                            }
+                        }
                     }
                     _ => {}
                 }
             }
         }
+    }
+
+    fn create_output_index(body: &IrBody, operation: &str, binding: &str, ty: &str) -> Option<usize> {
+        body.create_set.iter().position(|pattern| pattern.operation == operation && pattern.binding == binding && pattern.ty == ty)
     }
 
     fn set_verified_collection_push_values(&mut self, body: &IrBody) {
@@ -2476,7 +2490,25 @@ impl CodeGenerator {
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
                 self.emit_stack_store("t0", var_id * 8);
-                self.emit_state_transition_check(pattern, size_offset, buffer_offset);
+                self.operation_output_indices.insert(var_id, index);
+                if pattern.fields.is_empty() {
+                    self.emit_state_transition_check(pattern, size_offset, buffer_offset);
+                } else if self.can_verify_create_output_fields(pattern) {
+                    self.emit_create_output_checks_at(pattern, size_offset, buffer_offset);
+                } else {
+                    self.emit("# cellscript abi: output field verification incomplete for this named output");
+                    self.emit("# cellscript abi: fail closed because the output state is not fully verified");
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                }
+                if let Some(lock) = &pattern.lock {
+                    if !(self.can_verify_output_lock(pattern) && self.emit_output_lock_hash_check(index, lock)) {
+                        self.emit("# cellscript abi: output lock verification incomplete for this named output");
+                        self.emit("# cellscript abi: fail closed because the output lock is not fully verified");
+                        self.emit_fail(CellScriptRuntimeError::EntryWitnessMagicMismatch);
+                        return Ok(());
+                    }
+                }
                 self.next_virtual_output = self.next_virtual_output.max(index + 1);
                 return Ok(());
             }
@@ -2513,7 +2545,7 @@ impl CodeGenerator {
 
     fn generate_mutate_replacement(&mut self, pattern: &MutatePattern) -> Result<()> {
         self.emit(format!(
-            "# mutate replacement {} {} Input#{} -> Output#{}",
+            "# mutate output {} {} Input#{} -> Output#{}",
             pattern.binding, pattern.ty, pattern.input_index, pattern.output_index
         ));
         self.emit_mutate_parameter_binding(pattern);
@@ -3444,7 +3476,7 @@ impl CodeGenerator {
         self.emit_loaded_schema_exact_size_check(input_size_offset, 32, &format!("mutate input {}", field_name));
         self.emit_loaded_schema_exact_size_check(output_size_offset, 32, &format!("mutate output {}", field_name));
         self.emit(format!(
-            "# cellscript abi: verify mutate replacement {} {} Input#{} == Output#{} size=32",
+            "# cellscript abi: verify mutate output {} {} Input#{} == Output#{} size=32",
             pattern.ty, field_name, pattern.input_index, pattern.output_index
         ));
         self.emit_sp_addi("t4", input_buffer_offset);
@@ -3682,10 +3714,7 @@ impl CodeGenerator {
 
         self.emit_label(&type_hash_label);
         self.emit_loaded_schema_exact_size_check(output_size_offset, 32, "destroy output type hash");
-        self.emit(format!(
-            "# cellscript abi: reject destroy replacement when Output#t6 TypeHash matches consumed {}",
-            pattern.binding
-        ));
+        self.emit(format!("# cellscript abi: reject destroy successor when Output#t6 TypeHash matches consumed {}", pattern.binding));
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_sp_addi("t5", input_buffer_offset);
         for byte_index in 0..32 {
@@ -5638,6 +5667,10 @@ impl CodeGenerator {
     fn emit_create_output_checks(&mut self, pattern: &CreatePattern) {
         let size_offset = self.runtime_scratch_size_offset();
         let buffer_offset = self.runtime_scratch_buffer_offset();
+        self.emit_create_output_checks_at(pattern, size_offset, buffer_offset);
+    }
+
+    fn emit_create_output_checks_at(&mut self, pattern: &CreatePattern, size_offset: usize, buffer_offset: usize) {
         let is_fixed_type = self.type_fixed_sizes.contains_key(&pattern.ty);
         if let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() {
             self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &pattern.ty);
@@ -5962,14 +5995,14 @@ impl CodeGenerator {
     }
 
     fn emit_state_transition_check(&mut self, pattern: &CreatePattern, output_size_offset: usize, output_buffer_offset: usize) {
-        let Some(states) = self.lifecycle_states.get(&pattern.ty) else {
+        let Some(states) = self.flow_states.get(&pattern.ty) else {
             return;
         };
         let state_count = states.len();
         let action_edges = self.state_transition_edges_for_pattern(pattern);
         let Some(consumed_var_id) = self.consumed_var_for_state_transition(&pattern.ty, &action_edges) else {
             if !action_edges.is_empty() {
-                self.emit_fail(CellScriptRuntimeError::LifecycleTransitionMismatch);
+                self.emit_fail(CellScriptRuntimeError::FlowTransitionMismatch);
             }
             return;
         };
@@ -5979,8 +6012,7 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let state_field =
-            self.lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| LIFECYCLE_STATE_FIELD_NAME.to_string());
+        let state_field = self.flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| FLOW_STATE_FIELD_NAME.to_string());
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
@@ -6005,16 +6037,16 @@ impl CodeGenerator {
         );
         self.emit_sp_addi("t4", input_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", state_layout.offset, width);
-        let old_range_ok_label = self.fresh_label("lifecycle_old_state_range_ok");
+        let old_range_ok_label = self.fresh_label("flow_old_state_range_ok");
         self.emit(format!("li t3, {}", state_count));
         self.emit("sltu t2, t0, t3");
         self.emit(format!("bnez t2, {}", old_range_ok_label));
-        self.emit_fail(CellScriptRuntimeError::LifecycleOldStateInvalid);
+        self.emit_fail(CellScriptRuntimeError::FlowOldStateInvalid);
         self.emit_label(&old_range_ok_label);
 
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t1", "t2", state_layout.offset, width);
-        let ok_label = self.fresh_label("lifecycle_transition_ok");
+        let ok_label = self.fresh_label("flow_transition_ok");
         let rules = self.state_transition_rules_for_pattern(pattern, &action_edges);
         if rules.is_empty() {
             self.emit("addi t0, t0, 1");
@@ -6022,7 +6054,7 @@ impl CodeGenerator {
             self.emit(format!("beqz t2, {}", ok_label));
         } else {
             for rule in rules {
-                let next_rule_label = self.fresh_label("lifecycle_transition_next_rule");
+                let next_rule_label = self.fresh_label("flow_transition_next_rule");
                 self.emit(format!("li t3, {}", rule.from_index));
                 self.emit("sub t2, t0, t3");
                 self.emit(format!("bnez t2, {}", next_rule_label));
@@ -6032,14 +6064,14 @@ impl CodeGenerator {
                 self.emit_label(&next_rule_label);
             }
         }
-        self.emit_fail(CellScriptRuntimeError::LifecycleTransitionMismatch);
+        self.emit_fail(CellScriptRuntimeError::FlowTransitionMismatch);
         self.emit_label(&ok_label);
 
-        let range_ok_label = self.fresh_label("lifecycle_state_range_ok");
+        let range_ok_label = self.fresh_label("flow_state_range_ok");
         self.emit(format!("li t3, {}", state_count));
         self.emit("sltu t2, t1, t3");
         self.emit(format!("bnez t2, {}", range_ok_label));
-        self.emit_fail(CellScriptRuntimeError::LifecycleNewStateInvalid);
+        self.emit_fail(CellScriptRuntimeError::FlowNewStateInvalid);
         self.emit_label(&range_ok_label);
     }
 
@@ -6054,15 +6086,11 @@ impl CodeGenerator {
             .collect()
     }
 
-    fn state_transition_rules_for_pattern(
-        &self,
-        pattern: &CreatePattern,
-        action_edges: &[IrStateTransitionEdge],
-    ) -> Vec<IrLifecycleRule> {
+    fn state_transition_rules_for_pattern(&self, pattern: &CreatePattern, action_edges: &[IrStateTransitionEdge]) -> Vec<IrFlowRule> {
         if !action_edges.is_empty() {
             return action_edges
                 .iter()
-                .map(|state_edge| IrLifecycleRule {
+                .map(|state_edge| IrFlowRule {
                     from: state_edge.from.clone(),
                     to: state_edge.to.clone(),
                     from_index: state_edge.from_index,
@@ -6070,7 +6098,7 @@ impl CodeGenerator {
                 })
                 .collect();
         }
-        self.lifecycle_rules.get(&pattern.ty).cloned().unwrap_or_default()
+        self.flow_rules.get(&pattern.ty).cloned().unwrap_or_default()
     }
 
     fn consumed_var_for_state_transition(&self, type_name: &str, action_edges: &[IrStateTransitionEdge]) -> Option<usize> {
@@ -6085,7 +6113,7 @@ impl CodeGenerator {
     }
 
     fn emit_settle_final_state_check(&mut self, pattern: &CreatePattern, output_size_offset: usize, output_buffer_offset: usize) {
-        let Some(states) = self.lifecycle_states.get(&pattern.ty) else {
+        let Some(states) = self.flow_states.get(&pattern.ty) else {
             return;
         };
         if states.len() < 2 {
@@ -6101,8 +6129,7 @@ impl CodeGenerator {
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
             return;
         };
-        let state_field =
-            self.lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| LIFECYCLE_STATE_FIELD_NAME.to_string());
+        let state_field = self.flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| FLOW_STATE_FIELD_NAME.to_string());
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
@@ -8507,7 +8534,27 @@ impl CodeGenerator {
 
     /// create
     fn emit_create(&mut self, dest: &IrVar, pattern: &CreatePattern) -> Result<()> {
-        self.generate_create(pattern, self.next_virtual_output)?;
+        let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
+        if pattern.operation == "output" {
+            self.emit(format!("# constrain named output {}", pattern.ty));
+            for (field, value) in &pattern.fields {
+                match value {
+                    IrOperand::Const(IrConst::U64(n)) => self.emit(format!("#   field {} = {}", field, n)),
+                    IrOperand::Const(IrConst::Bool(b)) => self.emit(format!("#   field {} = {}", field, b)),
+                    IrOperand::Var(var) => self.emit(format!("#   field {} <- {}", field, var.name)),
+                    _ => self.emit(format!("#   field {} <- <value>", field)),
+                }
+            }
+            if pattern.lock.is_some() {
+                self.emit("#   with_lock <expr>");
+            }
+            self.emit(format!("li t0, {}", output_index));
+            self.emit_stack_store("t0", dest.id * 8);
+            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+            return Ok(());
+        }
+
+        self.generate_create(pattern, output_index)?;
         self.emit(format!("# create {}", pattern.ty));
         for (field, value) in &pattern.fields {
             match value {
@@ -8520,9 +8567,9 @@ impl CodeGenerator {
         if pattern.lock.is_some() {
             self.emit("#   with_lock <expr>");
         }
-        self.emit(format!("li t0, {}", self.next_virtual_output));
+        self.emit(format!("li t0, {}", output_index));
         self.emit_stack_store("t0", dest.id * 8);
-        self.next_virtual_output += 1;
+        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
         Ok(())
     }
 

@@ -16,8 +16,8 @@ Each action can expose:
 - scheduler-visible input/output/cell-dep accesses
 - binding hashes for conflict grouping
 
-Mutating shared state sets `parallelizable = false` and records mutate-input and
-mutate-output accesses.
+Updating shared state sets `parallelizable = false` and records input/output
+accesses for the affected shared-state binding.
 
 ## Consumption Boundary
 

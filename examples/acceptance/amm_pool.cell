@@ -25,7 +25,8 @@ action seed_pool(
     token_b: Token,
     fee_rate_bps: u16,
     provider: Address
-) -> (Pool, LPReceipt) {
+) -> (Pool, LPReceipt)
+where
     assert(token_a.symbol != token_b.symbol, "same token")
     assert(token_a.amount > 0 && token_b.amount > 0, "zero liquidity")
     assert(fee_rate_bps <= 10000, "fee too high")
@@ -52,7 +53,6 @@ action seed_pool(
     } with_lock(provider)
 
     (pool, receipt)
-}
 
 action swap_a_for_b(
     pool_before: Pool,
@@ -61,8 +61,7 @@ action swap_a_for_b(
     min_output: u64,
     to: Address
 ) -> Token
-    replace pool_before -> pool_after
-{
+where
     assert(input.symbol == pool_before.token_a_symbol, "wrong input token")
 
     let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
@@ -85,7 +84,6 @@ action swap_a_for_b(
         amount: amount_out,
         symbol: pool_before.token_b_symbol
     } with_lock(to)
-}
 
 action add_liquidity(
     pool_before: Pool,
@@ -94,8 +92,7 @@ action add_liquidity(
     token_b: Token,
     provider: Address
 ) -> LPReceipt
-    replace pool_before -> pool_after
-{
+where
     assert(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
     assert(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
 
@@ -117,7 +114,6 @@ action add_liquidity(
         lp_amount,
         provider
     } with_lock(provider)
-}
 
 action remove_liquidity(
     pool_before: Pool,
@@ -125,8 +121,7 @@ action remove_liquidity(
     receipt: LPReceipt,
     provider: Address
 ) -> (Token, Token)
-    replace pool_before -> pool_after
-{
+where
     assert(receipt.pool_id == pool_before.type_hash(), "wrong pool")
 
     let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
@@ -151,9 +146,9 @@ action remove_liquidity(
     } with_lock(provider)
 
     (token_a, token_b)
-}
 
-action isqrt(n: u64) -> u64 {
+action isqrt(n: u64) -> u64
+where
     if n == 0 {
         return 0
     }
@@ -167,8 +162,7 @@ action isqrt(n: u64) -> u64 {
     }
 
     x
-}
 
-action min(a: u64, b: u64) -> u64 {
+action min(a: u64, b: u64) -> u64
+where
     if a < b { a } else { b }
-}

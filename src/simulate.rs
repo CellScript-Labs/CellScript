@@ -571,10 +571,10 @@ mod tests {
         let source = r#"
 module sim_test
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     let result = a + b
     return result
-}
 "#;
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 1000);
@@ -592,11 +592,11 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action mint(amount: u64) -> u64 {
+action mint(amount: u64) -> u64
+where
     let token = create Token { amount: amount }
     consume token
     return amount
-}
 "#;
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 1000);
@@ -615,10 +615,10 @@ shared Config {
     threshold: u64,
 }
 
-action check() -> u64 {
+action check() -> u64
+where
     let cfg = read_ref<Config>()
     cfg.threshold
-}
 "#;
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 1000);
@@ -632,13 +632,13 @@ action check() -> u64 {
         let source = r#"
 module branch_test
 
-action classify(x: u64) -> u64 {
+action classify(x: u64) -> u64
+where
     let result = 0
     if x > 10 {
         return 1
     }
     return 0
-}
 "#;
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 1000);
@@ -651,10 +651,10 @@ action classify(x: u64) -> u64 {
         let source = r#"
 module limit_test
 
-action infinite() -> u64 {
+action infinite() -> u64
+where
     let x = 0
     return x
-}
 "#;
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 2);

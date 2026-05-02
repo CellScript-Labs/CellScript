@@ -71,7 +71,8 @@ action create_wallet(
     signers: Vec<Address>,
     threshold: u8,
     current_time: u64,
-) -> MultisigWallet {
+) -> MultisigWallet
+where
     assert(
         signers.len() >= MIN_SIGNERS as usize,
         "Not enough signers"
@@ -99,7 +100,6 @@ action create_wallet(
     };
 
     wallet
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
@@ -111,8 +111,7 @@ action propose_transfer(
     amount: u64,
     current_time: u64,
 ) -> Proposal
-    replace wallet_before -> wallet_after
-{
+where
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
     assert(amount > 0, "Amount must be positive");
@@ -141,7 +140,6 @@ action propose_transfer(
 
 
     proposal
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
@@ -153,8 +151,7 @@ action add_signature(
     signature: [u8; 64],
     current_time: u64,
 ) -> SignatureConfirmation
-    replace proposal_before -> proposal_after
-{
+where
     assert(current_time < proposal_before.expires_at, "Proposal expired");
 
     assert(is_signer(wallet, signer), "Not a signer");
@@ -180,7 +177,6 @@ action add_signature(
     };
 
     confirmation
-}
 
 #[effect(Mutating, Destroying)]
 #[scheduler_hint(sequential, estimated_cycles = 6000)]
@@ -189,7 +185,8 @@ action execute_proposal(
     proposal: Proposal,
     executor: Address,
     current_time: u64,
-) -> ExecutionRecord {
+) -> ExecutionRecord
+where
     assert(is_signer(wallet, executor), "Not a signer");
 
     assert(current_time < proposal.expires_at, "Proposal expired");
@@ -208,7 +205,9 @@ action execute_proposal(
         OperationType::Transfer => {
             true
         }
-        _ => false,
+        _ => {
+            false
+        }
     };
 
     destroy proposal;
@@ -221,7 +220,6 @@ action execute_proposal(
     };
 
     record
-}
 
 #[effect(Destroying)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
@@ -229,7 +227,8 @@ action cancel_proposal(
     wallet: &MultisigWallet,
     proposal: Proposal,
     canceller: Address,
-) {
+)
+where
     assert(proposal.proposer == canceller, "Only proposer can cancel");
 
     assert(
@@ -238,7 +237,6 @@ action cancel_proposal(
     );
 
     destroy proposal;
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
@@ -249,8 +247,7 @@ action propose_add_signer(
     new_signer: Address,
     current_time: u64,
 ) -> Proposal
-    replace wallet_before -> wallet_after
-{
+where
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
     assert(!is_signer(&wallet_before, new_signer), "Already a signer");
@@ -285,7 +282,6 @@ action propose_add_signer(
     };
 
     proposal
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
@@ -296,8 +292,7 @@ action propose_remove_signer(
     signer_to_remove: Address,
     current_time: u64,
 ) -> Proposal
-    replace wallet_before -> wallet_after
-{
+where
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
     assert(is_signer(&wallet_before, signer_to_remove), "Not a signer");
@@ -329,7 +324,6 @@ action propose_remove_signer(
     };
 
     proposal
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 4000)]
@@ -340,8 +334,7 @@ action propose_change_threshold(
     new_threshold: u8,
     current_time: u64,
 ) -> Proposal
-    replace wallet_before -> wallet_after
-{
+where
     assert(is_signer(&wallet_before, proposer), "Not a signer");
 
     assert(
@@ -374,7 +367,6 @@ action propose_change_threshold(
     };
 
     proposal
-}
 
 
 fn is_signer(wallet: &MultisigWallet, addr: Address) -> bool {

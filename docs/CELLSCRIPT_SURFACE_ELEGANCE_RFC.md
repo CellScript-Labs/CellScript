@@ -14,7 +14,7 @@ guarantees.
 
 ## Goal
 
-CellScript's core CKB lifecycle model is already clear: persistent state is
+CellScript's core CKB Cell movement model is already clear: persistent state is
 created, consumed, destroyed, transferred, claimed, settled, or read by
 transaction-shaped entries. The remaining issue is surface discipline. Bundled
 examples should teach how to write Cell protocols, not merely prove compiler
@@ -37,7 +37,7 @@ are.
 
 ## Design Principles
 
-- Keep Cell lifecycle visible.
+- Keep Cell movement visible.
 - Prefer CellScript-native syntax over compiler-looking metadata.
 - Do not hide CKB security boundaries.
 - Separate business readability from acceptance stress coverage.
@@ -98,7 +98,7 @@ The security-sensitive boundary remains deliberately narrow:
 
 ## Phase 1: Canonical Style
 
-Phase 1 is source-compatible and should not change execution semantics.
+Phase 1 should not change execution semantics.
 
 ### Module Names
 
@@ -139,14 +139,14 @@ receipt Listing has store, destroy {
 }
 ```
 
-Attributes remain useful for lifecycle and profiled metadata, but capabilities
+Attributes remain useful for profiled metadata, but capabilities
 are business-facing Cell semantics and should read as first-class language
 syntax.
 
 ### Comments
 
 Comments should explain Cell movement and security boundaries, not ordinary
-arithmetic. A good comment explains consume/create replacement, lock/witness
+arithmetic. A good comment explains consume/create output binding, lock/witness
 scope, or builder obligations.
 
 ## Phase 2: Syntax Sugar
@@ -158,7 +158,7 @@ Phase 2 adds readability features with no semantic expansion.
 Support shorthand create fields:
 
 ```cell
-create Proposal {
+create proposal = Proposal {
     proposal_id
     proposer
     target
@@ -180,7 +180,7 @@ Support collection literals only where boundedness and element width are known:
 let owners: Vec<Address> = []
 let owners: Vec<Address> = [owner, backup_owner]
 
-create Group {
+create group = Group {
     members: [owner, backup_owner],
     labels: [],
 }
@@ -212,14 +212,6 @@ until the type grammar has a first-class bounded-vector form.
 Phase 3 is security-sensitive and must not be treated as pure surface sugar.
 It is a boundary-explicitness pass, not an authorization-syntax beautification
 pass.
-
-Current lock declarations look like ordinary boolean functions:
-
-```cell
-lock nft_ownership(nft: &NFT, claimed_owner: Address) -> bool {
-    nft.owner == claimed_owner
-}
-```
 
 The current boundary-aware syntax makes the protected input Cell and witness
 source visible without claiming cryptographic signer authority:
@@ -257,16 +249,6 @@ CKB vocabulary mapping:
 | `witness T` | Typed data decoded from the transaction witness surface for the entry. |
 | `lock_args T` | Typed decoding of fixed-width values from the executing script args. |
 | `require condition` | Fail the current script if `condition` is false. |
-
-The older `protects NFT { self ... }` spelling may still be considered later,
-but it should wait until the language precisely defines:
-
-- which group input is bound to `self`;
-- whether `self` is a single current input or a script-group aggregate;
-- how `witness` values are decoded;
-- whether a value is just witness data or a cryptographic signer;
-- how `false` or failed `require` maps to CKB script failure;
-- how lock args, script hash, and sighash authorization are represented.
 
 Until first-class signer or lock-args binding exists, examples must not imply
 that an `Address` witness parameter proves signature authorization by itself.
@@ -444,7 +426,7 @@ A future `examples/canonical_style.cell` should demonstrate:
 - namespace module declaration;
 - resource, shared, and receipt declarations;
 - create/consume/destroy flows;
-- named action outputs plus `replace before -> after` for replacement semantics;
+- named action outputs plus `move`/`require` constraints for update semantics;
 - a lock boundary;
 - field shorthand;
 - bounded collection literals;
@@ -470,8 +452,8 @@ This list is the living implementation tracker for the RFC.
 | Item | Status | Notes |
 |---|---|---|
 | Canonical namespace module names for bundled examples | Done | Bundled examples use `module cellscript::...`. |
-| DSL-native capability declarations in bundled examples | Done | Examples prefer `resource/shared/receipt X has ...`; attribute capability syntax remains parser-compatible. |
-| Short lifecycle comments at security or Cell movement boundaries | In progress | Comments should explain consume/create replacement, lock/witness scope, or builder obligations only. |
+| DSL-native capability declarations in bundled examples | Done | Examples use `resource/shared/receipt X has ...` as the canonical capability surface. |
+| Short Cell movement comments at security or Cell movement boundaries | In progress | Comments should explain consume/create output binding, lock/witness scope, or builder obligations only. |
 | `create` field shorthand | Done | `field` lowers as `field: field`; formatter canonicalizes redundant initializers. |
 | Ordinary struct literal field shorthand | Done | Same shorthand rule as `create`. |
 | Contextual bounded collection literals | Done | `[]` and `[x, y]` lower to existing stack `Vec<T>` construction only when the expected type is `Vec<T>`. Untyped `[]` remains rejected. |
@@ -482,7 +464,6 @@ This list is the living implementation tracker for the RFC.
 | `lock_args` data-source binding | Implemented for fixed-width lock parameters | Entry wrapper decodes the executing Script.args bytes and rejects trailing bytes after declared typed parameters. |
 | Explicit sighash verification primitive | Not started | Must define digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class verified signer abstraction | Deferred | Only after explicit verification primitives are proven and documented. |
-| `protects T { self ... }` sugar | Deferred | Wait until `self` binding and lock-group aggregation semantics are exact. |
 | Hidden sighash defaults | Rejected | Digest mode and signature scope must be visible. |
 | Implicit `Address` as signer | Rejected | Address values do not become authorization proofs by name. |
 | Business/language/acceptance example directory split | Done | `examples/business` holds clean canonical examples, `examples/acceptance` holds production/profiled examples, and `examples/language` holds `registry.cell`. Flat `examples/*.cell` remains a compatibility mirror for existing commands. |

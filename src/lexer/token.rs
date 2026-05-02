@@ -14,6 +14,7 @@ pub enum TokenKind {
     Action,     // action
     Fn,         // fn
     Lock,       // lock
+    Where,      // where
     Has,        // has
     Store,      // store
     Transfer,   // transfer
@@ -114,6 +115,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Action => write!(f, "'action'"),
             TokenKind::Fn => write!(f, "'fn'"),
             TokenKind::Lock => write!(f, "'lock'"),
+            TokenKind::Where => write!(f, "'where'"),
             TokenKind::Has => write!(f, "'has'"),
             TokenKind::Store => write!(f, "'store'"),
             TokenKind::Transfer => write!(f, "'transfer'"),
@@ -228,6 +230,7 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "action" => TokenKind::Action,
         "fn" => TokenKind::Fn,
         "lock" => TokenKind::Lock,
+        "where" => TokenKind::Where,
         "has" => TokenKind::Has,
         "store" => TokenKind::Store,
         "transfer" => TokenKind::TransferKw,

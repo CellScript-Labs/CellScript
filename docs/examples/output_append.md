@@ -1,7 +1,7 @@
-# Mutate Append Example
+# Output Append Example
 
-CellScript `mutate` is modeled as a replacement output. It is not physical
-in-place mutation of a CKB cell.
+CellScript models updates as proposed output Cells. It does not update a CKB
+cell in place.
 
 Conceptual source shape:
 
@@ -11,20 +11,21 @@ resource Log has store, transfer {
     bytes: Vec<u8>,
 }
 
-action append(log: Log, suffix: Vec<u8>) {
-    let next = log.bytes;
-    next.extend(suffix);
-    mutate log {
+action append(log: Log, suffix: Vec<u8>) -> next_log: Log
+where
+    let next = log.bytes
+    next.extend_from_slice(suffix)
+    create next_log = Log {
+        owner: log.owner,
         bytes: next
-    };
-}
+    }
 ```
 
 Expected transaction shape:
 
 - one input consumes the old `Log`
-- one output creates the replacement `Log`
-- preserved fields such as `owner` must match
+- one output creates the updated `Log`
+- preserved fields such as `owner` must be constrained explicitly
 - changed fields such as `bytes` must satisfy the compiled transition checks
 
 Relevant inspection commands:
@@ -35,4 +36,4 @@ cellc constraints contract.cell --target-profile ckb --json
 ```
 
 For CKB, the builder must also provide occupied-capacity and transaction-size
-evidence for the replacement output.
+evidence for the proposed output.

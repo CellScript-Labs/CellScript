@@ -12,7 +12,7 @@
 
 CellScript's evolution follows a deliberate maturity curve:
 
-- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, replacement output checks, low-level time helpers, dep cell reads).
+- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, output preservation checks, low-level time helpers, dep cell reads).
 - **v0.13** — Performance and expressiveness: bounded value-vector helpers, zero-cost abstractions (deserialization specialization, inlining, DCE, const propagation), CLI ergonomics.
 - **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and WASM simulation backend.
 
@@ -31,11 +31,11 @@ The following capabilities are already delivered and will not be re-planned:
 - ✅ Entry witness ABI (CSARGv1) for CellScript action/lock parameters
 - ✅ Scheduler witness ABI and claim witness runtime loading/signature metadata
 - ✅ secp256k1 signature verification
-- ✅ MutatePattern + MutateTransitionOp (Set/Add/Sub/Append)
+- ✅ Output transition patterns (Set/Add/Sub/Append)
 - ✅ type_hash / lock_hash preservation
 - ✅ Low-level `ckb::input_since()` and CKB header epoch helper APIs
 - ✅ Timelock fixtures and runtime since validation for profile time/timestamp
-- ✅ Dep cell typed reads for declared `read_ref<T>` CellDep paths
+- ✅ Dep cell typed reads for declared action-boundary `read` parameters and expression-level `read_ref<T>()` CellDep paths
 - ✅ 43/43 production actions, 7/7 bundled examples deployed
 - ✅ Molecule ABI manifest, metadata schema 29
 - ✅ Package manager local workflow (registry fail-closed)
@@ -85,21 +85,21 @@ Full protocol composability remains a v0.15+ ProofPlan / scoped-invariant concer
 
 **Basic spawn — launch a child script for verification**:
 ```cellscript
-action verify_with_delegate(proof: Proof) {
+action verify_with_delegate(proof: Proof)
+where
     let result = spawn("secp256k1_verifier", args: [proof.pubkey, proof.signature])
     assert(result == 0, "delegate verification failed")
-}
 ```
 
 **Pipe-based verification chain**:
 ```cellscript
-action multi_step_verify(data: VerifyData) {
+action multi_step_verify(data: VerifyData)
+where
     let (read_fd, write_fd) = pipe()
     spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
     let hash_result = wait()
     assert(hash_result == 0, "hash check failed")
-}
 ```
 
 **Implementation Path**:
@@ -136,18 +136,16 @@ action multi_step_verify(data: VerifyData) {
 **DSL Design**:
 
 ```cellscript
-lock standard_lock(pubkey_hash: Hash160) -> bool {
+lock standard_lock(lock_args args: OwnerArgs, witness sig: RecoverableSignature) -> bool {
     let sig = witness::lock<RecoverableSignature>(source: source::group_input(0))
     let sighash = env::sighash_all(source: source::group_input(0))
-    return secp256k1_verify(pubkey_hash, sig, sighash)
+    return secp256k1_verify(args.pubkey_hash, sig, sighash)
 }
 
-action prove_type_transition(state_before: State, state_after: output State)
-    replaces state_before with state_after
-{
+action prove_type_transition(state_before: State) -> state_after: State
+where
     let proof = witness::input_type<TransitionProof>(source: source::group_input(0))
     assert(verify_transition(proof, state_before, state_after), "bad transition proof")
-}
 ```
 
 **Implementation Items**:
@@ -227,11 +225,11 @@ action prove_type_transition(state_before: State, state_after: output State)
 |------|---------|
 | ScriptGroup metadata | Emit `entry_group_kind`, input/output group index sets, selected Source view, and source-to-group mapping for every CKB entry |
 | Source conformance tests | Cover `Input`, `Output`, `CellDep`, `HeaderDep`, `GroupInput`, `GroupOutput`, out-of-bounds access, and wrong-profile access |
-| Output data binding | Emit output-data index obligations for every create/mutate output; reject metadata where output data is detached from the output cell index |
+| Output data binding | Emit output-data index obligations for every created or updated output; reject metadata where output data is detached from the output cell index |
 | TYPE_ID metadata validation MVP | For `#[type_id]` under CKB profile, validate output index, first-input args source, one-input/one-output group rule, duplicate output rejection, and missing-plan rejection |
 | Acceptance fixtures | Add positive/negative fixture transactions for ScriptGroup views, outputs_data mismatch, and TYPE_ID create/continue failure cases |
 
-**Boundary**: This is not the v0.15 identity lifecycle redesign. v0.14 validates CKB transaction-shape facts and existing TYPE_ID metadata plans. It does not add new identity primitives, destruction policies, or protocol macro lowering.
+**Boundary**: This is not the v0.15 identity-policy redesign. v0.14 validates CKB transaction-shape facts and existing TYPE_ID metadata plans. It does not add new identity primitives, destruction policies, or protocol macro lowering.
 
 **Risk**: **HIGH** — Mis-modeling ScriptGroup or TYPE_ID behavior creates false confidence in CKB strict mode
 **Depends on**: Structured CKB WitnessArgs and Source Views (#2), Target Profile Formalization (#3)
@@ -257,12 +255,12 @@ resource Token has store, transfer, destroy {
 
 **Action-level explicit capacity control**:
 ```cellscript
-action transfer_with_fee(token: Token, fee: u64) {
+action transfer_with_fee(token: Token, fee: u64) -> next_token: Token
+where
     let freed_cap = consume token
     assert(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
-    create Token { amount: token.amount } with_lock(recipient)
+    create next_token = Token { amount: token.amount } with_lock(recipient)
     // remaining capacity implicitly becomes miner fee
-}
 ```
 
 **Implementation Items**:
@@ -286,12 +284,12 @@ action transfer_with_fee(token: Token, fee: u64) {
 **DSL Design**:
 
 ```cellscript
-action claim_after_ckb_timeout(htlc: HtlcReceipt) {
+action claim_after_ckb_timeout(htlc: HtlcReceipt)
+where
     require_maturity(blocks: 100)          // CKB: block-number delta
     require_time(after: Timestamp(target)) // CKB: absolute timestamp since
     require_epoch(relative: EpochFraction(10, 0, 1)) // CKB-only epoch since
     claim htlc
-}
 ```
 
 **Profile-gated Compilation**:
@@ -339,7 +337,7 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 |------|---------|
 | Script reference metadata | Emit `code_hash`, `hash_type`, `args`, dep source, and resolved profile for lock/type/spawn targets |
 | HashType validation | Accept only CKB-supported hash types under CKB profile; reject unknown or profile-incompatible values |
-| Dep-cell linkage checks | Verify every script reference used by `spawn`, lock/type metadata, or `read_ref` has a resolvable CellDep/DepGroup path |
+| Dep-cell linkage checks | Verify every script reference used by `spawn`, lock/type metadata, action-boundary `read` parameters, or expression-level `read_ref<T>()` has a resolvable CellDep/DepGroup path |
 | Audit output | Include script reference table in generated audit docs and metadata validation errors |
 
 **Boundary**: This does not split `Address`, `LockScript`, and `LockHash` in the type system. That is v0.15. v0.14 only makes CKB artifact references precise and auditable.
@@ -396,10 +394,10 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 **Problem**: v0.13 intentionally prioritizes verifier correctness and explicit CKB semantics over syntax sugar. Several useful ergonomic features are good candidates for v0.14 design, but they are not v0.13 correctness blockers.
 
 **Deferred from the 0.13 syntax audit**:
-- `transfer token { ... } with_lock(to)` sugar for consume+create replacement/transfer cases where most fields are preserved.
+- `transfer token { ... } with_lock(to)` sugar for consume+create transfer cases where most fields are preserved.
 - `create_each` or bounded batch-create sugar that compiles to statically auditable repeated `create` operations.
 - Named tuple returns such as `-> (royalty: Payment, seller: Payment)` for readability without changing ABI layout.
-- Multi-field `moves` sugar for compactly declaring several field transitions while preserving explicit guards.
+- Multi-field `move` sugar for compactly declaring several field transitions while preserving explicit guards.
 - `Option<T>` / `Result<T, E>` as an explicit optional/error model, including type checking, lowering, ABI representation, and match-pattern support.
 - Attribute-form hash type declarations such as `#[default_hash_type(Data1)]` as a possible spelling alongside or instead of `with_default_hash_type(Data1)`.
 
@@ -560,9 +558,9 @@ done
 
 ### Risk 9: TYPE_ID MVP Scope Creep 🟡
 
-**Scenario**: v0.14 TYPE_ID validation turns into a full identity/lifecycle primitive redesign.
+**Scenario**: v0.14 TYPE_ID validation turns into a full identity-policy primitive redesign.
 
-**Mitigation**: v0.14 only validates existing `#[type_id]` metadata plans and CKB transaction-shape facts. New identity policies, explicit lifecycle primitives, and destruction-policy redesign remain v0.15 scope.
+**Mitigation**: v0.14 only validates existing `#[type_id]` metadata plans and CKB transaction-shape facts. New identity policies and destruction-policy redesign remain v0.15 scope.
 
 ---
 

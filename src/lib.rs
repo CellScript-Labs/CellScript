@@ -9,11 +9,11 @@ pub mod codegen;
 pub mod debug;
 pub mod docgen;
 pub mod error;
+pub mod flow;
 pub mod fmt;
 pub mod incremental;
 pub mod ir;
 pub mod lexer;
-pub mod lifecycle;
 pub mod lsp;
 pub mod optimize;
 pub mod package;
@@ -1937,10 +1937,10 @@ pub struct TypeMetadata {
     pub kind: String,
     pub capabilities: Vec<String>,
     pub claim_output: Option<String>,
-    pub lifecycle_states: Vec<String>,
+    pub flow_states: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lifecycle_state_field: Option<String>,
-    pub lifecycle_transitions: Vec<LifecycleTransitionMetadata>,
+    pub flow_state_field: Option<String>,
+    pub flow_transitions: Vec<FlowTransitionMetadata>,
     pub encoded_size: Option<usize>,
     pub fields: Vec<FieldMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1971,7 +1971,7 @@ pub struct MoleculeSchemaMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LifecycleTransitionMetadata {
+pub struct FlowTransitionMetadata {
     pub from: String,
     pub to: String,
     pub from_index: usize,
@@ -2681,7 +2681,7 @@ pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileM
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
     let target_profile = TargetProfile::Ckb;
     types::check(&ast)?;
-    lifecycle::check(&ast)?;
+    flow::check(&ast)?;
     let ir = ir::generate(&ast)?;
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
@@ -2717,7 +2717,7 @@ fn compile_ast_with_build(
     } else {
         types::check(ast)?;
     }
-    lifecycle::check(ast)?;
+    flow::check(ast)?;
 
     let optimized_ast = if options.opt_level > 0 {
         let mut optimized = ast.clone();
@@ -2727,7 +2727,7 @@ fn compile_ast_with_build(
         } else {
             types::check(&optimized)?;
         }
-        lifecycle::check(&optimized)?;
+        flow::check(&optimized)?;
         Some(optimized)
     } else {
         None
@@ -3259,21 +3259,15 @@ fn metadata_output_path_from_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
 fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, target_profile: TargetProfile) -> CompileMetadata {
     let type_layouts = metadata_type_layouts(ir);
     let type_defs = metadata_type_defs_by_name(ir);
-    let lifecycle_states = metadata_lifecycle_states(ir);
-    let lifecycle_state_fields = metadata_lifecycle_state_fields(ir);
+    let flow_states = metadata_flow_states(ir);
+    let flow_state_fields = metadata_flow_state_fields(ir);
     let cell_type_kinds = metadata_cell_type_kinds(ir);
     let pure_const_returns = metadata_pure_const_returns(ir);
     let fail_closed_runtime_features = module_fail_closed_runtime_features(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
     let ckb_runtime_features = module_ckb_runtime_features(ir, &cell_type_kinds, &type_layouts);
     let ckb_runtime_accesses = module_ckb_runtime_accesses(ir, &cell_type_kinds, &type_layouts);
-    let verifier_obligations = module_verifier_obligations(
-        ir,
-        &type_layouts,
-        &lifecycle_states,
-        &lifecycle_state_fields,
-        &cell_type_kinds,
-        &pure_const_returns,
-    );
+    let verifier_obligations =
+        module_verifier_obligations(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
     let collection_instantiations = module_collection_instantiation_metadata(ir, &type_layouts, &pure_const_returns);
     let transaction_runtime_input_requirements = transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
     let pool_primitives = module_pool_primitive_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
@@ -3368,8 +3362,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &action.params,
-                        &lifecycle_states,
-                        &lifecycle_state_fields,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         action.return_type.as_ref(),
                         &pure_const_returns,
@@ -3457,8 +3451,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &function.params,
-                        &lifecycle_states,
-                        &lifecycle_state_fields,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         function.return_type.as_ref(),
                         &pure_const_returns,
@@ -3518,8 +3512,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &lock.params,
-                        &lifecycle_states,
-                        &lifecycle_state_fields,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         None,
                         &pure_const_returns,
@@ -4016,8 +4010,8 @@ fn module_ckb_runtime_features(
 fn module_verifier_obligations(
     ir: &ir::IrModule,
     type_layouts: &MetadataTypeLayouts,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<VerifierObligationMetadata> {
@@ -4046,8 +4040,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &action.params,
-                    lifecycle_states,
-                    lifecycle_state_fields,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     action.return_type.as_ref(),
                     pure_const_returns,
@@ -4075,8 +4069,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &function.params,
-                    lifecycle_states,
-                    lifecycle_state_fields,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     function.return_type.as_ref(),
                     pure_const_returns,
@@ -4104,8 +4098,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &lock.params,
-                    lifecycle_states,
-                    lifecycle_state_fields,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     None,
                     pure_const_returns,
@@ -4603,8 +4597,8 @@ fn body_verifier_obligations(
     ckb_runtime_accesses: &[CkbRuntimeAccessMetadata],
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     return_type: Option<&ir::IrType>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
@@ -4654,8 +4648,8 @@ fn body_verifier_obligations(
         body,
         type_layouts,
         params,
-        lifecycle_states,
-        lifecycle_state_fields,
+        flow_states,
+        flow_state_fields,
         cell_type_kinds,
         pure_const_returns,
     ) {
@@ -4688,8 +4682,7 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in body_state_transition_checks(body, lifecycle_states, lifecycle_state_fields, type_layouts, params, pure_const_returns)
-    {
+    for check in body_state_transition_checks(body, flow_states, flow_state_fields, type_layouts, params, pure_const_returns) {
         push_verifier_obligation(
             &mut obligations,
             &mut seen,
@@ -4737,7 +4730,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
                         checks.push(StaticResourceOperationCheck {
                             feature: format!("destroy:{}", type_name),
                             detail: format!(
-                                "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of replacement outputs remains a runtime/protocol obligation",
+                                "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of successor outputs remains a runtime/protocol obligation",
                                 type_name
                             ),
                         });
@@ -4777,8 +4770,8 @@ fn body_transaction_resource_obligations(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<TransactionResourceObligation> {
@@ -4908,8 +4901,8 @@ fn body_transaction_resource_obligations(
                             body,
                             type_layouts,
                             &availability,
-                            lifecycle_states,
-                            lifecycle_state_fields,
+                            flow_states,
+                            flow_state_fields,
                             output_index,
                             &type_name,
                         );
@@ -4921,8 +4914,8 @@ fn body_transaction_resource_obligations(
                                 body,
                                 type_layouts,
                                 &availability,
-                                lifecycle_states,
-                                lifecycle_state_fields,
+                                flow_states,
+                                flow_state_fields,
                                 "settle",
                                 operand,
                                 &type_name,
@@ -6244,8 +6237,8 @@ fn transaction_condition_detail(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     operation: &str,
     operand: &ir::IrOperand,
     type_name: &str,
@@ -6255,15 +6248,15 @@ fn transaction_condition_detail(
     let input_summary = transaction_condition_input_summary(body, type_layouts, operation, binding, type_name);
     match (operation, checked) {
         ("settle", true) => format!(
-            "Compiler-emitted runtime verifier proves '{}' lifecycle final-state invariants and admits the settle-created output{}; settle-output-admission=checked-runtime; runtime inputs: {}",
+            "Compiler-emitted runtime verifier proves '{}' flow final-state invariants and admits the settle-created output{}; settle-output-admission=checked-runtime; runtime inputs: {}",
             type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name),
+            settle_final_state_detail(body, type_layouts, availability, flow_states, flow_state_fields, type_name),
             input_summary
         ),
         ("settle", false) => format!(
             "Runtime verifier must prove '{}' finalization invariants and reject invalid pending-to-final state transitions{}; runtime inputs: {}",
             type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name),
+            settle_final_state_detail(body, type_layouts, availability, flow_states, flow_state_fields, type_name),
             input_summary
         ),
         _ => format!("Runtime verifier must prove '{}' transaction conditions; runtime inputs: {}", type_name, input_summary),
@@ -6369,12 +6362,12 @@ fn settle_final_state_detail(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     type_name: &str,
 ) -> String {
-    if settle_final_state_is_checked(body, type_layouts, availability, lifecycle_states, lifecycle_state_fields, type_name) {
-        "; settle-final-state=checked-runtime; settle-state-policy=lifecycle-final-state".to_string()
+    if settle_final_state_is_checked(body, type_layouts, availability, flow_states, flow_state_fields, type_name) {
+        "; settle-final-state=checked-runtime; settle-state-policy=flow-final-state".to_string()
     } else {
         String::new()
     }
@@ -6505,14 +6498,14 @@ fn settle_final_state_is_checked(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     type_name: &str,
 ) -> bool {
     body.create_set.iter().any(|pattern| {
         pattern.operation == "settle"
             && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states, lifecycle_state_fields)
+            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, flow_states, flow_state_fields)
     })
 }
 
@@ -6520,15 +6513,15 @@ fn settle_finalization_is_checked(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     output_index: usize,
     type_name: &str,
 ) -> bool {
     body.create_set.get(output_index).is_some_and(|pattern| {
         pattern.operation == "settle"
             && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states, lifecycle_state_fields)
+            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, flow_states, flow_state_fields)
     })
 }
 
@@ -6536,12 +6529,12 @@ fn metadata_can_verify_settle_final_state(
     pattern: &ir::CreatePattern,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
 ) -> bool {
-    lifecycle_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
+    flow_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
         && type_layouts.get(&pattern.ty).is_some_and(|layouts| {
-            let state_field = lifecycle_state_fields.get(&pattern.ty).map_or(lifecycle::LIFECYCLE_STATE_FIELD_NAME, String::as_str);
+            let state_field = flow_state_fields.get(&pattern.ty).map_or(flow::FLOW_STATE_FIELD_NAME, String::as_str);
             layouts.get(state_field).and_then(metadata_layout_fixed_scalar_width).is_some()
         })
         && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
@@ -6569,7 +6562,7 @@ fn body_mutable_cell_state_obligations(
                 feature: format!("shared-mutation:{}", type_name),
                 status: obligation_status,
                 detail: format!(
-                    "Runtime verifier must bind mutable shared parameter '{}' to the consumed '{}' cell and replacement output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes scheduler contention and mutate_set field summary ({})",
+                    "Runtime verifier must bind mutable shared parameter '{}' to the consumed '{}' cell and proposed output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes scheduler contention and mutate_set field summary ({})",
                     param.name, type_name, mutated_fields
                 ),
             }),
@@ -6578,7 +6571,7 @@ fn body_mutable_cell_state_obligations(
                 feature: format!("mutable-cell:{}", type_name),
                 status: obligation_status,
                 detail: format!(
-                    "Runtime verifier must bind mutable cell parameter '{}' to the consumed '{}' cell and replacement output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes mutate_set field summary ({})",
+                    "Runtime verifier must bind mutable cell parameter '{}' to the consumed '{}' cell and proposed output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes mutate_set field summary ({})",
                     param.name, type_name, mutated_fields
                 ),
             }),
@@ -8919,7 +8912,7 @@ fn pool_primitive_obligation_detail(primitive: &PoolPrimitiveMetadata) -> String
             primitive.ty, unresolved_detail
         ),
         "mutation-invariants" => format!(
-            "Generic shared mutation checks for '{}' prove replacement identity and source-level field transitions; {}",
+            "Generic shared mutation checks for '{}' prove input/output identity and source-level field transitions; {}",
             primitive.ty, unresolved_detail
         ),
         "composition" => format!(
@@ -9007,8 +9000,8 @@ struct StateTransitionCheck {
 
 fn body_state_transition_checks(
     body: &ir::IrBody,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     pure_const_returns: &HashMap<String, ir::IrConst>,
@@ -9028,20 +9021,19 @@ fn body_state_transition_checks(
         if pattern.operation == "settle" {
             continue;
         }
-        if !lifecycle_states.contains_key(&pattern.ty) || !consumed_types.contains(&pattern.ty) {
+        if !flow_states.contains_key(&pattern.ty) || !consumed_types.contains(&pattern.ty) {
             continue;
         }
-        let state_field =
-            lifecycle_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| lifecycle::LIFECYCLE_STATE_FIELD_NAME.to_string());
+        let state_field = flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| flow::FLOW_STATE_FIELD_NAME.to_string());
         if !seen.insert(pattern.ty.clone()) {
             continue;
         }
-        if metadata_can_verify_state_transition(pattern, type_layouts, lifecycle_state_fields, &availability) {
+        if metadata_can_verify_state_transition(pattern, type_layouts, flow_state_fields, &availability) {
             checks.push(StateTransitionCheck {
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime state graph and old/new state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
             });
         } else {
             checks.push(StateTransitionCheck {
@@ -9058,7 +9050,7 @@ fn body_state_transition_checks(
 fn metadata_can_verify_state_transition(
     pattern: &ir::CreatePattern,
     type_layouts: &MetadataTypeLayouts,
-    lifecycle_state_fields: &HashMap<String, String>,
+    flow_state_fields: &HashMap<String, String>,
     availability: &MetadataPreludeAvailability,
 ) -> bool {
     let Some(layouts) = type_layouts.get(&pattern.ty) else {
@@ -9067,7 +9059,7 @@ fn metadata_can_verify_state_transition(
     if metadata_type_encoded_size_from_layouts(layouts).is_none() {
         return false;
     }
-    let state_field = lifecycle_state_fields.get(&pattern.ty).map_or(lifecycle::LIFECYCLE_STATE_FIELD_NAME, String::as_str);
+    let state_field = flow_state_fields.get(&pattern.ty).map_or(flow::FLOW_STATE_FIELD_NAME, String::as_str);
     let Some(state_layout) = layouts.get(state_field) else {
         return false;
     };
@@ -11023,28 +11015,28 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
     layouts
 }
 
-fn metadata_lifecycle_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> {
+fn metadata_flow_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> {
     let mut states = HashMap::new();
     for type_def in &ir.external_type_defs {
-        if let Some(lifecycle_states) = &type_def.lifecycle_states {
-            states.insert(type_def.name.clone(), lifecycle_states.clone());
+        if let Some(flow_states) = &type_def.flow_states {
+            states.insert(type_def.name.clone(), flow_states.clone());
         }
     }
     for item in &ir.items {
         let ir::IrItem::TypeDef(type_def) = item else {
             continue;
         };
-        if let Some(lifecycle_states) = &type_def.lifecycle_states {
-            states.insert(type_def.name.clone(), lifecycle_states.clone());
+        if let Some(flow_states) = &type_def.flow_states {
+            states.insert(type_def.name.clone(), flow_states.clone());
         }
     }
     states
 }
 
-fn metadata_lifecycle_state_fields(ir: &ir::IrModule) -> HashMap<String, String> {
+fn metadata_flow_state_fields(ir: &ir::IrModule) -> HashMap<String, String> {
     let mut fields = HashMap::new();
     for type_def in &ir.external_type_defs {
-        if let Some(state_field) = &type_def.lifecycle_state_field {
+        if let Some(state_field) = &type_def.flow_state_field {
             fields.insert(type_def.name.clone(), state_field.clone());
         }
     }
@@ -11052,7 +11044,7 @@ fn metadata_lifecycle_state_fields(ir: &ir::IrModule) -> HashMap<String, String>
         let ir::IrItem::TypeDef(type_def) = item else {
             continue;
         };
-        if let Some(state_field) = &type_def.lifecycle_state_field {
+        if let Some(state_field) = &type_def.flow_state_field {
             fields.insert(type_def.name.clone(), state_field.clone());
         }
     }
@@ -11096,7 +11088,7 @@ fn type_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
     target_profile: TargetProfile,
 ) -> TypeMetadata {
-    let lifecycle_states = type_def.lifecycle_states.clone().unwrap_or_default();
+    let flow_states = type_def.flow_states.clone().unwrap_or_default();
     let type_id = type_def.type_id.clone();
     let type_id_hash = type_id.as_ref().map(|value| hex_encode(&ckb_blake2b256(value.as_bytes())));
     let ckb_type_id = ckb_type_id_metadata(type_def, target_profile);
@@ -11114,13 +11106,13 @@ fn type_metadata(
         kind: format!("{:?}", type_def.kind),
         capabilities: type_def.capabilities.iter().map(metadata_capability_name).collect(),
         claim_output: type_def.claim_output.as_ref().map(ir_type_to_string),
-        lifecycle_state_field: type_def.lifecycle_state_field.clone(),
-        lifecycle_transitions: if type_def.lifecycle_rules.is_empty() {
-            lifecycle_transition_metadata(&lifecycle_states)
+        flow_state_field: type_def.flow_state_field.clone(),
+        flow_transitions: if type_def.flow_rules.is_empty() {
+            flow_transition_metadata(&flow_states)
         } else {
-            type_def.lifecycle_rules.iter().map(lifecycle_rule_metadata).collect()
+            type_def.flow_rules.iter().map(flow_rule_metadata).collect()
         },
-        lifecycle_states,
+        flow_states,
         encoded_size: type_encoded_size(type_def, type_defs),
         fields: type_def.fields.iter().map(|field| field_metadata(field, type_defs)).collect(),
         molecule_schema: type_molecule_schema_metadata(type_def, type_defs),
@@ -11553,11 +11545,11 @@ fn metadata_capability_name(capability: &crate::ast::Capability) -> String {
     .to_string()
 }
 
-fn lifecycle_transition_metadata(states: &[String]) -> Vec<LifecycleTransitionMetadata> {
+fn flow_transition_metadata(states: &[String]) -> Vec<FlowTransitionMetadata> {
     states
         .windows(2)
         .enumerate()
-        .map(|(index, window)| LifecycleTransitionMetadata {
+        .map(|(index, window)| FlowTransitionMetadata {
             from: window[0].clone(),
             to: window[1].clone(),
             from_index: index,
@@ -11566,8 +11558,8 @@ fn lifecycle_transition_metadata(states: &[String]) -> Vec<LifecycleTransitionMe
         .collect()
 }
 
-fn lifecycle_rule_metadata(rule: &ir::IrLifecycleRule) -> LifecycleTransitionMetadata {
-    LifecycleTransitionMetadata { from: rule.from.clone(), to: rule.to.clone(), from_index: rule.from_index, to_index: rule.to_index }
+fn flow_rule_metadata(rule: &ir::IrFlowRule) -> FlowTransitionMetadata {
+    FlowTransitionMetadata { from: rule.from.clone(), to: rule.to.clone(), from_index: rule.from_index, to_index: rule.to_index }
 }
 
 fn field_metadata(field: &ir::IrField, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> FieldMetadata {
@@ -12396,7 +12388,7 @@ mod tests {
     ) -> crate::CompileMetadata {
         let ast = parse_module_for_test(source);
         crate::types::check(&ast).unwrap();
-        crate::lifecycle::check(&ast).unwrap();
+        crate::flow::check(&ast).unwrap();
         let ir = ir::generate(&ast).unwrap();
         let metadata = crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile);
         crate::validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap();
@@ -12406,10 +12398,10 @@ mod tests {
     const SIMPLE_PROGRAM: &str = r#"
 module test
 
-action add(x: u64, y: u64) -> u64 {
+action add(x: u64, y: u64) -> u64
+where
     let z = x + y
     return z
-}
 "#;
 
     #[derive(Debug)]
@@ -12517,86 +12509,86 @@ action add(x: u64, y: u64) -> u64 {
     const OPTIMIZER_PROGRAM: &str = r#"
 module test
 
-action calc() -> u64 {
+action calc() -> u64
+where
     return (2 + 3) * 4
-}
 "#;
 
     const IF_PROGRAM: &str = r#"
 module test
 
-action increment_if(flag: bool, x: u64) -> u64 {
+action increment_if(flag: bool, x: u64) -> u64
+where
     if flag {
         let tmp = x + 1
     }
     return x
-}
 "#;
 
     const CALL_PROGRAM: &str = r#"
 module test
 
-action double(x: u64) -> u64 {
+action double(x: u64) -> u64
+where
     return x + x
-}
 
-action run(y: u64) -> u64 {
+action run(y: u64) -> u64
+where
     let z = double(y)
     return z
-}
 "#;
 
     const IF_EXPR_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool, x: u64) -> u64 {
+action choose(flag: bool, x: u64) -> u64
+where
     let y = if flag { x + 1 } else { x + 2 }
     return y
-}
 "#;
 
     const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
 module test
 
-action choose_zero(flag: bool, target: Address) -> bool {
+action choose_zero(flag: bool, target: Address) -> bool
+where
     let selected = if flag { Address::zero() } else { Address::zero() }
     return target == selected
-}
 "#;
 
     const WHILE_PROGRAM: &str = r#"
 module test
 
-action spin(flag: bool, x: u64) -> u64 {
+action spin(flag: bool, x: u64) -> u64
+where
     while flag {
         let tmp = x + 1
     }
     return x
-}
 "#;
 
     const FOR_RANGE_PROGRAM: &str = r#"
 module test
 
-action visit(n: u64) -> u64 {
+action visit(n: u64) -> u64
+where
     for i in 0..n {
         let tmp = i + 1
     }
     return n
-}
 "#;
 
     const ASSIGN_PROGRAM: &str = r#"
 module test
 
-action countdown(n: u64) -> u64 {
+action countdown(n: u64) -> u64
+where
     let mut x: u64 = n
     while x > 0 {
         x = x - 1
     }
     x += 1
     return x
-}
 "#;
 
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
@@ -12606,14 +12598,14 @@ resource Token has destroy {
     amount: u64,
 }
 
-action ok(n: u64) {
+action ok(n: u64)
+where
     for i in 0..n {
         let out = create Token {
             amount: i
         }
         destroy out
     }
-}
 "#;
 
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
@@ -12623,13 +12615,13 @@ resource Token {
     amount: u64,
 }
 
-action bad(n: u64) {
+action bad(n: u64)
+where
     for i in 0..n {
         let out = create Token {
             amount: i
         }
     }
-}
 "#;
 
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -12639,12 +12631,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, n: u64) {
+action bad(token: Token, n: u64)
+where
     for i in 0..n {
         destroy token
     }
     destroy token
-}
 "#;
 
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -12654,12 +12646,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) {
+action bad(token: Token, flag: bool)
+where
     while flag {
         destroy token
     }
     destroy token
-}
 "#;
 
     const STRUCT_FIELD_PROGRAM: &str = r#"
@@ -12670,13 +12662,13 @@ struct Point {
     y: u64,
 }
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut p = Point { x: 1, y: 2 }
     let a = p.x
     p.x = a + 4
     p.x += 1
     return p.x
-}
 "#;
 
     const TEMPORARY_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -12691,10 +12683,10 @@ fn point() -> Point {
     return Point { x: 1, y: 2 }
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     point().x = 3
     return 0
-}
 "#;
 
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -12704,10 +12696,10 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     read_ref<Config>().threshold = 2
     return 0
-}
 "#;
 
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -12717,11 +12709,11 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut cfg = read_ref<Config>()
     cfg.threshold = 2
     return cfg.threshold
-}
 "#;
 
     const READ_ONLY_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -12731,12 +12723,12 @@ struct Point {
     x: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut point = Point { x: 1 }
     let mut view = &point
     view.x = 2
     return point.x
-}
 "#;
 
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
@@ -12746,9 +12738,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(mut token: Token) {
+action bad(mut token: Token)
+where
     consume token
-}
 "#;
 
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
@@ -12758,9 +12750,9 @@ shared Config {
     threshold: u64,
 }
 
-action bad(mut read cfg: Config) -> u64 {
+action bad(mut read cfg: Config) -> u64
+where
     return cfg.threshold
-}
 "#;
 
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -12770,9 +12762,9 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(mut pool: &mut Pool) {
+action bad(mut pool: &mut Pool)
+where
     pool.reserve = pool.reserve + 1
-}
 "#;
 
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -12808,11 +12800,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let alias = pool
     alias.reserve = alias.reserve + 1
     return alias.reserve
-}
 "#;
 
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
@@ -12822,11 +12814,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let pair = (pool, 0)
     pair.0.reserve = pair.0.reserve + 1
     return pair.0.reserve
-}
 "#;
 
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
@@ -12836,11 +12828,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool, flag: bool) -> u64 {
+action bad(pool: &mut Pool, flag: bool) -> u64
+where
     let alias = if flag { pool } else { pool }
     alias.reserve = alias.reserve + 1
     return alias.reserve
-}
 "#;
 
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
@@ -12850,11 +12842,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let mut alias = read_ref<Pool>()
     alias = pool
     return alias.reserve
-}
 "#;
 
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -12864,11 +12856,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad() {
+action bad()
+where
     let mut token = create Token { amount: 1 }
     token.amount = 2
     destroy token
-}
 "#;
 
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -12878,11 +12870,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let view = &token
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -12892,11 +12884,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let amount = &token.amount
     destroy token
     return 0
-}
 "#;
 
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -12906,11 +12898,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let pair = (&token, 0)
     destroy token
     return pair.0.amount
-}
 "#;
 
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
@@ -12920,11 +12912,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let refs = [&token]
     destroy token
     return refs[0].amount
-}
 "#;
 
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
@@ -12934,11 +12926,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(token: Token, flag: bool) -> u64
+where
     let view = if flag { &token } else { &token }
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
@@ -12948,12 +12940,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut view = read_ref<Token>()
     view = &token
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -12963,12 +12955,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut pair = (read_ref<Token>(), 0)
     pair = (&token, 0)
     destroy token
     return pair.0.amount
-}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
@@ -12978,12 +12970,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut pair = (read_ref<Token>(), 0)
     pair.0 = &token
     destroy token
     return pair.0.amount
-}
 "#;
 
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
@@ -12993,9 +12985,9 @@ resource Token {
     amount: u64,
 }
 
-action leak(token: Token) -> &Token {
+action leak(token: Token) -> &Token
+where
     return &token
-}
 "#;
 
     const FUNCTION_RETURN_REF_PROGRAM: &str = r#"
@@ -13065,9 +13057,9 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut (Pool, u64)) -> u64 {
+action bad(pool: &mut (Pool, u64)) -> u64
+where
     return 0
-}
 "#;
 
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
@@ -13101,11 +13093,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let points = Vec::new()
     points.push(&point)
     return 0
-}
 "#;
 
     const CALLABLE_TUPLE_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -13127,8 +13119,8 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pools: [&mut Pool; 1]) {
-}
+action bad(pools: [&mut Pool; 1])
+where
 "#;
 
     const CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -13150,9 +13142,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(ref token: Token) {
+action bad(ref token: Token)
+where
     consume token
-}
 "#;
 
     const FUNCTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
@@ -13203,10 +13195,10 @@ enum MaybeToken {
     const IF_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     let y = if flag { 1 } else { false }
     return 1
-}
 "#;
 
     const UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -13216,9 +13208,9 @@ struct Point {
     x: u64,
 }
 
-action read(p: Point) -> u64 {
+action read(p: Point) -> u64
+where
     return p.y
-}
 "#;
 
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
@@ -13259,9 +13251,9 @@ struct Point {
     const UNKNOWN_FUNCTION_PROGRAM: &str = r#"
 module test
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return missing(x)
-}
 "#;
 
     const CONSTANT_PROGRAM: &str = r#"
@@ -13269,26 +13261,26 @@ module test
 
 const STEP: u64 = 3;
 
-action bump(x: u64) -> u64 {
+action bump(x: u64) -> u64
+where
     return x + STEP
-}
 "#;
 
     const CAST_PROGRAM: &str = r#"
 module test
 
-action widen(x: u16) -> u64 {
+action widen(x: u16) -> u64
+where
     return x as u64
-}
 "#;
 
     const ASSERT_PROGRAM: &str = r#"
 module test
 
-action checked(x: u64) -> u64 {
+action checked(x: u64) -> u64
+where
     assert_invariant(x > 0, "x must be positive")
     return x
-}
 "#;
 
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
@@ -13310,9 +13302,9 @@ resource Token {
     owner: Address,
 }
 
-action bad(protected token: Token) -> u64 {
+action bad(protected token: Token) -> u64
+where
     return 0
-}
 "#;
 
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
@@ -13330,25 +13322,25 @@ lock bad(protected token: Token, lock_args owner: Address) -> bool {
     const ACTION_REQUIRE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool {
+action bad(x: u64) -> bool
+where
     require x > 0
-}
 "#;
 
     const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action checked(x: u64) -> bool {
+action checked(x: u64) -> bool
+where
     require x > 0, "x must be positive"
-}
 "#;
 
     const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64, msg: String) -> bool {
+action bad(x: u64, msg: String) -> bool
+where
     require x > 0, msg
-}
 "#;
 
     const FUNCTION_REQUIRE_PROGRAM: &str = r#"
@@ -13362,44 +13354,44 @@ fn bad(x: u64) -> bool {
     const ASSERT_NON_BOOL_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     assert_invariant(x, "x must be boolean")
     return x
-}
 "#;
 
     const ASSERT_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     assert_invariant(x > 0, x)
     return x
-}
 "#;
 
     const ASSERT_BINDING_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     let ok = assert_invariant(x > 0, "x must be positive")
     return x
-}
 "#;
 
     const ASSERT_TAIL_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool {
+action bad(x: u64) -> bool
+where
     assert_invariant(x > 0, "x must be positive")
-}
 "#;
 
     const STRING_VALUE_PROGRAM: &str = r#"
 module test
 
-action bad() -> String {
+action bad() -> String
+where
     return "not a lowered runtime value"
-}
 "#;
 
     const CREATE_PROGRAM: &str = r#"
@@ -13409,12 +13401,12 @@ resource Token {
     amount: u64,
 }
 
-action mint(owner: Address) -> Token {
+action mint(owner: Address) -> Token
+where
     let token = create Token {
         amount: 42
     } with_lock(owner)
     return token
-}
 "#;
 
     const CREATE_VERIFY_PROGRAM: &str = r#"
@@ -13424,12 +13416,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     let token = create Token {
         amount: 42
     }
     return token
-}
 "#;
 
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
@@ -13439,12 +13431,12 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let token = create Token {
         amount: amount * 2
     }
     return token
-}
 "#;
 
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
@@ -13454,12 +13446,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: 1,
         amount: 2,
     }
-}
 "#;
 
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
@@ -13470,11 +13462,11 @@ resource Token {
     owner: Address,
 }
 
-action issue(owner: Address) -> Token {
+action issue(owner: Address) -> Token
+where
     return create Token {
         amount: 1,
     }
-}
 "#;
 
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -13484,12 +13476,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: 1,
         owner: Address::zero(),
     }
-}
 "#;
 
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -13499,11 +13491,11 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: false,
     }
-}
 "#;
 
     const CREATE_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -13513,11 +13505,11 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> Snapshot {
+action bad() -> Snapshot
+where
     return create Snapshot {
         amount: 1,
     }
-}
 "#;
 
     const CONSUME_NON_CELL_PROGRAM: &str = r#"
@@ -13527,10 +13519,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad(snapshot: Snapshot) -> u64 {
+action bad(snapshot: Snapshot) -> u64
+where
     consume snapshot
     return 0
-}
 "#;
 
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
@@ -13540,10 +13532,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     consume if true { token } else { token }
     return 0
-}
 "#;
 
     const TRANSFER_NON_NAMED_CELL_PROGRAM: &str = r#"
@@ -13553,9 +13545,9 @@ resource Token has transfer {
     amount: u64,
 }
 
-action bad(owner: Address) -> Token {
+action bad(owner: Address) -> Token
+where
     return transfer create Token { amount: 1 } to owner
-}
 "#;
 
     const LINEAR_LET_MOVE_PROGRAM: &str = r#"
@@ -13565,10 +13557,10 @@ resource Token has transfer {
     amount: u64,
 }
 
-action move_alias(token: Token, owner: Address) -> Token {
+action move_alias(token: Token, owner: Address) -> Token
+where
     let moved = token
     return transfer moved to owner
-}
 "#;
 
     const LINEAR_LET_COPY_PROGRAM: &str = r#"
@@ -13578,11 +13570,11 @@ resource Token has transfer, destroy {
     amount: u64,
 }
 
-action duplicate(token: Token, owner: Address) {
+action duplicate(token: Token, owner: Address)
+where
     let copied = token
     transfer token to owner
     destroy copied
-}
 "#;
 
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
@@ -13592,13 +13584,13 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     } else {
         consume token
     }
-}
 "#;
 
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -13608,12 +13600,12 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     }
     consume token
-}
 "#;
 
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -13623,14 +13615,14 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     } else {
         let amount = token.amount
     }
     consume token
-}
 "#;
 
     const CONSUME_DESTROY_PROGRAM: &str = r#"
@@ -13640,10 +13632,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(a: Token, b: Token) {
+action burn(a: Token, b: Token)
+where
     consume a
     destroy b
-}
 "#;
 
     const PARAM_FIELD_PROGRAM: &str = r#"
@@ -13653,9 +13645,9 @@ struct Snapshot {
     amount: u64,
 }
 
-action inspect(snapshot: Snapshot) -> u64 {
+action inspect(snapshot: Snapshot) -> u64
+where
     return snapshot.amount
-}
 "#;
 
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
@@ -13665,12 +13657,12 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action same_symbol(left: Token, right: Token) -> bool {
+action same_symbol(left: Token, right: Token) -> bool
+where
     let same = left.symbol == right.symbol
     consume left
     consume right
     return same
-}
 "#;
 
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
@@ -13681,11 +13673,11 @@ shared Flags {
     nonce: u32,
 }
 
-action inspect() -> u32 {
+action inspect() -> u32
+where
     let flags = read_ref<Flags>()
     let enabled = flags.enabled
     return flags.nonce
-}
 "#;
 
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
@@ -13696,14 +13688,14 @@ resource Flags {
     nonce: u32,
 }
 
-action issue(nonce: u32) -> Flags {
+action issue(nonce: u32) -> Flags
+where
     let enabled = true
     let out = create Flags {
         enabled: enabled,
         nonce: nonce
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
@@ -13714,7 +13706,8 @@ resource Flags {
     nonce: u32,
 }
 
-action pass(flags: Flags) -> Flags {
+action pass(flags: Flags) -> Flags
+where
     let enabled = flags.enabled
     let nonce = flags.nonce
     consume flags
@@ -13723,7 +13716,6 @@ action pass(flags: Flags) -> Flags {
         nonce: nonce
     }
     return out
-}
 "#;
 
     const READ_REF_FIELD_PROGRAM: &str = r#"
@@ -13733,10 +13725,10 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let cfg = read_ref<Config>()
     return cfg.threshold
-}
 "#;
 
     const READ_REF_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -13746,10 +13738,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let snapshot = read_ref<Snapshot>()
     return snapshot.amount
-}
 "#;
 
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
@@ -13760,10 +13752,10 @@ shared Config {
 }
 
 #[effect(ReadOnly)]
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let cfg = read_ref<Config>()
     return cfg.threshold
-}
 "#;
 
     const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -13774,12 +13766,12 @@ resource Token {
 }
 
 #[effect(ReadOnly)]
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 "#;
 
     const IMPURE_FN_PROGRAM: &str = r#"
@@ -13802,13 +13794,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action issue(amount: u64) -> u64 {
+action issue(amount: u64) -> u64
+where
     let out = create Token {
         amount: amount
     }
     destroy out
     return amount
-}
 
 fn helper(amount: u64) -> u64 {
     return issue(amount)
@@ -13850,9 +13842,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add_one(x)
-}
 "#;
 
     const CALL_MISSING_ARGUMENT_PROGRAM: &str = r#"
@@ -13862,9 +13854,9 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add(x)
-}
 "#;
 
     const CALL_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -13874,9 +13866,9 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add(x, false)
-}
 "#;
 
     const QUALIFIED_ACTION_CALLS_FN_PROGRAM: &str = r#"
@@ -13886,9 +13878,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return test::add_one(x)
-}
 "#;
 
     const QUALIFIED_CALL_EXTRA_ARGUMENT_PROGRAM: &str = r#"
@@ -13898,9 +13890,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return test::add_one(x, 2)
-}
 "#;
 
     const BOOL_FN_CALL_PROGRAM: &str = r#"
@@ -13910,25 +13902,25 @@ fn ready() -> bool {
     return true
 }
 
-action run() -> bool {
+action run() -> bool
+where
     return test::ready()
-}
 "#;
 
     const DUPLICATE_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64, x: u64) -> u64 {
+action bad(x: u64, x: u64) -> u64
+where
     return x
-}
 "#;
 
     const WILDCARD_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(_: u64) -> u64 {
+action bad(_: u64) -> u64
+where
     return 1
-}
 "#;
 
     const DUPLICATE_FN_PARAM_PROGRAM: &str = r#"
@@ -13938,9 +13930,9 @@ fn bad(x: u64, x: u64) -> u64 {
     return x
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 1
-}
 "#;
 
     const WILDCARD_LOCK_PARAM_PROGRAM: &str = r#"
@@ -13954,33 +13946,33 @@ lock owned(_: Address) -> bool {
     const LOCAL_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
     let x = 2
     return x
-}
 "#;
 
     const TUPLE_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let (x, x) = (1, 2)
     return x
-}
 "#;
 
     const BLOCK_BINDING_SHADOW_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
     let y = {
         let x = 2
         x
     }
     return x + y
-}
 "#;
 
     const UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -13990,10 +13982,10 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     note(x)
     return x
-}
 "#;
 
     const BIND_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -14003,10 +13995,10 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     let y = note(x)
     return x
-}
 "#;
 
     const RETURN_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -14016,33 +14008,33 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     return note(x)
-}
 "#;
 
     const RETURN_VALUE_FROM_UNIT_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad() {
+action bad()
+where
     return 1
-}
 "#;
 
     const BARE_RETURN_FROM_VALUE_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return
-}
 "#;
 
     const MISSING_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
-}
 "#;
 
     const MISSING_FUNCTION_RETURN_PROGRAM: &str = r#"
@@ -14052,29 +14044,29 @@ fn bad() -> u64 {
     let x = 1
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 1
-}
 "#;
 
     const TAIL_EXPR_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     1
-}
 "#;
 
     const BRANCH_COMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         return 2
     }
-}
 "#;
 
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
@@ -14084,13 +14076,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     if flag {
         return token
     } else {
         return token
     }
-}
 "#;
 
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -14100,14 +14092,14 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(token: Token, flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         consume token
         return 2
     }
-}
 "#;
 
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
@@ -14117,9 +14109,9 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     if flag { token } else { token }
-}
 "#;
 
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -14129,9 +14121,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     if flag { left } else { right }
-}
 "#;
 
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -14141,10 +14133,10 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     let moved = if flag { token } else { token }
     return moved
-}
 "#;
 
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -14154,10 +14146,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     let moved = if flag { left } else { right }
     return moved
-}
 "#;
 
     const LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM: &str = r#"
@@ -14167,9 +14159,9 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) -> u64 {
+action burn(token: Token, flag: bool) -> u64
+where
     if flag { destroy token } else { destroy token }
-}
 "#;
 
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -14179,9 +14171,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let pair = (left, right)
-}
 "#;
 
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -14191,9 +14183,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let items = [left, right]
-}
 "#;
 
     const LINEAR_TUPLE_DESTRUCTURE_HANDLES_ITEMS_PROGRAM: &str = r#"
@@ -14203,11 +14195,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action choose(left: Token, right: Token) -> Token {
+action choose(left: Token, right: Token) -> Token
+where
     let (kept, burned) = (left, right)
     destroy burned
     return kept
-}
 "#;
 
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -14217,9 +14209,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) {
+action bad(token: Token)
+where
     let _ = token
-}
 "#;
 
     const LINEAR_TUPLE_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -14229,10 +14221,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let (_, kept) = (left, right)
     destroy kept
-}
 "#;
 
     const LINEAR_TUPLE_FIELD_PROJECTION_PROGRAM: &str = r#"
@@ -14242,12 +14234,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) -> (Token, Token) {
+action bad(left: Token, right: Token) -> (Token, Token)
+where
     let pair = (left, right)
     let first = pair.0
     destroy first
     pair
-}
 "#;
 
     const LINEAR_ARRAY_INDEX_PROJECTION_PROGRAM: &str = r#"
@@ -14257,11 +14249,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let items = [left, right]
     let first = items[0]
     destroy first
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -14271,10 +14263,10 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(token: Token) -> Token
+where
     let moved = { token }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
@@ -14284,13 +14276,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(token: Token) -> Token
+where
     let moved = {
         let inner = token
         inner
     }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM: &str = r#"
@@ -14300,9 +14292,9 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) -> u64 {
+action burn(token: Token) -> u64
+where
     { destroy token }
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
@@ -14312,20 +14304,21 @@ resource Token {
     amount: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     {
         let out = create Token {
             amount: 1
         }
         1
     }
-}
 "#;
 
     const BLOCK_TAIL_IF_VALUE_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     let value = {
         if flag {
             1
@@ -14334,7 +14327,6 @@ action choose(flag: bool) -> u64 {
         }
     }
     return value
-}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
@@ -14344,13 +14336,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     let moved = {
         let inner = token
         if flag { inner } else { inner }
     }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
@@ -14360,98 +14352,98 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     let moved = {
         if flag { left } else { right }
     }
     return moved
-}
 "#;
 
     const TAIL_IF_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     if flag { 1 } else { 2 }
-}
 "#;
 
     const BRANCH_INCOMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64 {
+action bad(flag: bool) -> u64
+where
     if flag {
         return 1
     }
     let x = 2
-}
 "#;
 
     const UNREACHABLE_AFTER_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return 1
     let x = 2
-}
 "#;
 
     const UNREACHABLE_AFTER_BRANCH_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64 {
+action bad(flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         return 2
     }
     let x = 3
-}
 "#;
 
     const CKB_HEADER_EPOCH_PROGRAM: &str = r#"
 module test
 
-action epoch() -> u64 {
+action epoch() -> u64
+where
     let number = ckb::header_epoch_number()
     let start = ckb::header_epoch_start_block_number()
     let length = ckb::header_epoch_length()
     let since = ckb::input_since()
     return number + start + length + since
-}
 "#;
 
     const BUILTIN_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action now(x: u64) -> u64 {
+action now(x: u64) -> u64
+where
     return env::current_timepoint(x)
-}
 "#;
 
     const NUMERIC_BUILTIN_TYPE_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return min(1, false)
-}
 "#;
 
     const UNKNOWN_NAMESPACED_CONSTRUCTOR_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let value = Missing::new()
     return 0
-}
 "#;
 
     const METHOD_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64 {
+action count(items: [u64; 3]) -> u64
+where
     return items.len(1)
-}
 "#;
 
     const LOCK_CALLS_FN_PROGRAM: &str = r#"
@@ -14485,17 +14477,17 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token {
+action wrapper(amount: u64) -> Token
+where
     return issue(amount)
-}
 "#;
 
     const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -14505,17 +14497,17 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token {
+action wrapper(amount: u64) -> Token
+where
     return test::issue(amount)
-}
 "#;
 
     const CONSUME_FIELD_PROGRAM: &str = r#"
@@ -14525,11 +14517,11 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(token: Token) -> u64
+where
     let amount = token.amount
     consume token
     return amount
-}
 "#;
 
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
@@ -14539,14 +14531,14 @@ resource Token {
     amount: u64,
 }
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     let amount = token.amount
     consume token
     let out = create Token {
         amount: amount
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -14556,7 +14548,8 @@ resource Token {
     amount: u64,
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(left: Token, right: Token) -> Token
+where
     let left_amount = left.amount
     let right_amount = right.amount
     let total = left_amount + right_amount
@@ -14566,7 +14559,6 @@ action merge(left: Token, right: Token) -> Token {
         amount: total
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
@@ -14576,7 +14568,8 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token) {
+action split(token: Token, fee: u64) -> (Token, Token)
+where
     let amount = token.amount
     let remaining = amount - fee
     consume token
@@ -14587,7 +14580,6 @@ action split(token: Token, fee: u64) -> (Token, Token) {
         amount: fee
     }
     return (change, paid_fee)
-}
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -14598,7 +14590,8 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(left: Token, right: Token) -> Token
+where
     assert_invariant(left.symbol == right.symbol, "symbol mismatch")
     let left_amount = left.amount
     let right_amount = right.amount
@@ -14611,7 +14604,6 @@ action merge(left: Token, right: Token) -> Token {
         symbol: symbol
     }
     return out
-}
 "#;
 
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
@@ -14621,125 +14613,125 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let left = read_ref<Config>()
     let right = read_ref<Config>()
     return left.threshold + right.threshold
-}
 "#;
 
     const INDEXED_TUPLE_PROGRAM: &str = r#"
 module test
 
-action second(entries: [(Address, u64); 2]) -> u64 {
+action second(entries: [(Address, u64); 2]) -> u64
+where
     return entries[0].1
-}
 "#;
 
     const FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum(items: [u64; 3]) -> u64 {
+action sum(items: [u64; 3]) -> u64
+where
     let mut total: u64 = 0
     for item in items {
         total += item
     }
     return total
-}
 "#;
 
     const LOCAL_FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64 {
+action sum() -> u64
+where
     let items = [1, 2, 3]
     let mut total: u64 = 0
     for item in items {
         total += item
     }
     return total
-}
 "#;
 
     const LOCAL_FOREACH_ARRAY_OF_TUPLES_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64 {
+action sum() -> u64
+where
     let entries = [(Address::zero, 2), (Address::zero, 5)]
     let mut total: u64 = 0
     for (_, amount) in entries {
         total += amount
     }
     return total
-}
 "#;
 
     const LEN_METHOD_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64 {
+action count(items: [u64; 3]) -> u64
+where
     return items.len()
-}
 "#;
 
     const FORBIDDEN_UNWRAP_CALL_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return unwrap(value)
-}
 "#;
 
     const FORBIDDEN_EXPECT_METHOD_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return value.expect("checked")
-}
 "#;
 
     const FORBIDDEN_NAMESPACED_UNWRAP_OR_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return Option::unwrap_or(value, 0)
-}
 "#;
 
     const LOCAL_ARRAY_LEN_PROGRAM: &str = r#"
 module test
 
-action count() -> u64 {
+action count() -> u64
+where
     let items = [1, 2, 3]
     return items.len()
-}
 "#;
 
     const TYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action count() -> u64 {
+action count() -> u64
+where
     let items: [u8; 0] = []
     return items.len()
-}
 "#;
 
     const UNTYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = []
     return 0
-}
 "#;
 
     const WRONG_LENGTH_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items: [u8; 1] = []
     return 0
-}
 "#;
 
     const EMPTY_LITERAL_NON_VEC_CONTEXT_PROGRAM: &str = r#"
@@ -14749,101 +14741,101 @@ struct Snapshot {
     values: [u8; 1],
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let snapshot = Snapshot {
         values: [],
     }
     return 0
-}
 "#;
 
     const LOCAL_ARRAY_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut items = [1, 2, 3]
     items[1] += 5
     items[0] = 7
     return items[0] + items[1] + items[2]
-}
 "#;
 
     const IMMUTABLE_ARRAY_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, 2]
     items[0] = 3
     return items[0]
-}
 "#;
 
     const HETEROGENEOUS_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, false]
     return 1
-}
 "#;
 
     const LOCAL_ARRAY_OOB_READ_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, 2]
     return items[2]
-}
 "#;
 
     const LOCAL_ARRAY_OOB_WRITE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut items = [1, 2]
     items[2] = 3
     return items[0]
-}
 "#;
 
     const LOCAL_TUPLE_STATIC_FIELD_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut pair = (1, 2)
     pair.1 += 5
     pair.0 = 7
     return pair.0 + pair.1
-}
 "#;
 
     const ARRAY_OF_TUPLES_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action pick() -> u64 {
+action pick() -> u64
+where
     let entries = [(Address::zero, 2), (Address::zero, 5)]
     return entries[1].1
-}
 "#;
 
     const IMMUTABLE_TUPLE_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let pair = (1, 2)
     pair.1 = 3
     return pair.1
-}
 "#;
 
     const LOCAL_TUPLE_DESTRUCTURE_PROGRAM: &str = r#"
 module test
 
-action split() -> u64 {
+action split() -> u64
+where
     let pair = (1, 2)
     let (a, b) = pair
     return a + b
-}
 "#;
 
     const MATCH_PROGRAM: &str = r#"
@@ -14854,12 +14846,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        _ => 2,
+        Flag::On => { 1 }
+        _ => { 2 }
     }
-}
 "#;
 
     const EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -14870,12 +14862,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        Flag::Off => 2,
+        Flag::On => { 1 }
+        Flag::Off => { 2 }
     }
-}
 "#;
 
     const LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -14890,13 +14882,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: Flag) -> Token {
+action choose(token: Token, flag: Flag) -> Token
+where
     let moved = match flag {
-        Flag::On => token,
-        Flag::Off => token,
+        Flag::On => { token }
+        Flag::Off => { token }
     }
     return moved
-}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -14911,13 +14903,13 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: Flag) -> Token {
+action bad(left: Token, right: Token, flag: Flag) -> Token
+where
     let moved = match flag {
-        Flag::On => left,
-        Flag::Off => right,
+        Flag::On => { left }
+        Flag::Off => { right }
     }
     return moved
-}
 "#;
 
     const LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -14932,12 +14924,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: Flag) {
+action burn(token: Token, flag: Flag)
+where
     match flag {
-        Flag::On => destroy token,
-        Flag::Off => destroy token,
+        Flag::On => { destroy token }
+        Flag::Off => { destroy token }
     }
-}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -14952,12 +14944,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: Flag) {
+action bad(token: Token, flag: Flag)
+where
     match flag {
-        Flag::On => destroy token,
-        Flag::Off => 0,
+        Flag::On => { destroy token }
+        Flag::Off => { 0 }
     }
-}
 "#;
 
     const UNKNOWN_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -14968,12 +14960,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::Maybe => 1,
-        _ => 2,
+        Flag::Maybe => { 1 }
+        _ => { 2 }
     }
-}
 "#;
 
     const DUPLICATE_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -14984,13 +14976,13 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        On => 2,
-        _ => 3,
+        Flag::On => { 1 }
+        On => { 2 }
+        _ => { 3 }
     }
-}
 "#;
 
     const NON_EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -15001,11 +14993,11 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
+        Flag::On => { 1 }
     }
-}
 "#;
 
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
@@ -15016,12 +15008,12 @@ enum MaybeAmount {
     None,
 }
 
-action select(value: MaybeAmount) -> u64 {
+action select(value: MaybeAmount) -> u64
+where
     return match value {
-        MaybeAmount::Some => 1,
-        _ => 0,
+        MaybeAmount::Some => { 1 }
+        _ => { 0 }
     }
-}
 "#;
 
     const ENUM_PAYLOAD_VALUE_PROGRAM: &str = r#"
@@ -15032,9 +15024,9 @@ enum AssetType {
     Token(Hash),
 }
 
-action bad() -> AssetType {
+action bad() -> AssetType
+where
     return AssetType::Token
-}
 "#;
 
     const UNKNOWN_ENUM_VALUE_PROGRAM: &str = r#"
@@ -15045,9 +15037,9 @@ enum Flag {
     Off,
 }
 
-action bad() -> Flag {
+action bad() -> Flag
+where
     return Flag::Maybe
-}
 "#;
 
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
@@ -15057,18 +15049,18 @@ resource Bad {
     missing: MissingType,
 }
 
-action run(value: Bad) -> u64 {
+action run(value: Bad) -> u64
+where
     destroy value
     return 0
-}
 "#;
 
     const RESERVED_OPTION_TYPE_PROGRAM: &str = r#"
 module test
 
-action bad(value: Option<u64>) -> u64 {
+action bad(value: Option<u64>) -> u64
+where
     return 0
-}
 "#;
 
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
@@ -15082,9 +15074,9 @@ resource Vault has store {
     amount: u64,
 }
 
-action bad(input: Vault<Token>) -> u64 {
+action bad(input: Vault<Token>) -> u64
+where
     return 0
-}
 "#;
 
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
@@ -15094,20 +15086,20 @@ resource Token {
     amount: u64,
 }
 
-action Token() -> u64 {
+action Token() -> u64
+where
     return 0
-}
 "#;
 
     const VEC_BUILTIN_PROGRAM: &str = r#"
 module test
 
-action pack(bytes: [u8; 3]) -> u64 {
+action pack(bytes: [u8; 3]) -> u64
+where
     let mut data = Vec::new()
     data.push(bytes[0])
     data.extend_from_slice(bytes)
     return data.len()
-}
 "#;
 
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
@@ -15118,7 +15110,8 @@ resource Group {
     anchors: Vec<Hash>,
 }
 
-action create_group(owner: Address, seed: Hash) -> Group {
+action create_group(owner: Address, seed: Hash) -> Group
+where
     let mut members = Vec::new()
     members.push(owner)
     let mut anchors = Vec::new()
@@ -15127,47 +15120,46 @@ action create_group(owner: Address, seed: Hash) -> Group {
         members: members,
         anchors: anchors,
     }
-}
 "#;
 
     const STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_sum() -> u64 {
+action stack_vec_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     return values.len() + values[1]
-}
 "#;
 
     const STACK_VEC_WITH_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_with_capacity_sum() -> u64 {
+action stack_vec_with_capacity_sum() -> u64
+where
     let mut values = Vec::with_capacity(2)
     values.push(7)
     values.push(9)
     return values.len() + values[1]
-}
 "#;
 
     const BOUNDED_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action bounded_vec_literal_sum() -> u64 {
+action bounded_vec_literal_sum() -> u64
+where
     let mut values: Vec<u64> = [7, 9]
     return values.len() + values[1]
-}
 "#;
 
     const EMPTY_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action empty_vec_literal_capacity() -> u64 {
+action empty_vec_literal_capacity() -> u64
+where
     let values: Vec<Address> = []
     return values.capacity()
-}
 "#;
 
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
@@ -15178,51 +15170,52 @@ resource Group has store {
     labels: Vec<u8>,
 }
 
-action create_group(owner: Address) -> Group {
+action create_group(owner: Address) -> Group
+where
     return create Group {
         members: [owner],
         labels: [],
     }
-}
 "#;
 
     const STACK_VEC_CAPACITY_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_capacity_value() -> u64 {
+action stack_vec_capacity_value() -> u64
+where
     let mut values = Vec::with_capacity(2)
     values.push(7)
     return values.capacity()
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_capacity(owner: Address) -> u64 {
+action stack_vec_address_capacity(owner: Address) -> u64
+where
     let mut owners = Vec::with_capacity(2)
     owners.push(owner)
     return owners.capacity()
-}
 "#;
 
     const STACK_VEC_REMOVE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_remove_middle() -> u64 {
+action stack_vec_remove_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     let removed = values.remove(1)
     return removed + values.len() + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REMOVE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_remove(first: Address, second: Address) -> bool {
+action stack_vec_address_remove(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -15231,48 +15224,48 @@ action stack_vec_address_remove(first: Address, second: Address) -> bool {
         return owners[0] == second
     }
     return false
-}
 "#;
 
     const STACK_VEC_POP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_pop_last() -> u64 {
+action stack_vec_pop_last() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     let popped = values.pop()
     return popped + values.len() + values[0]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_POP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_pop(owner: Address) -> bool {
+action stack_vec_address_pop(owner: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     let popped = owners.pop()
     return popped == owner
-}
 "#;
 
     const STACK_VEC_INSERT_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_insert_middle() -> u64 {
+action stack_vec_insert_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     values.insert(1, 9)
     return values.len() + values[1] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_INSERT_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_insert(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     owners.insert(0, candidate)
@@ -15280,25 +15273,25 @@ action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
         return owners[1] == owner
     }
     return false
-}
 "#;
 
     const STACK_VEC_SET_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_set_middle() -> u64 {
+action stack_vec_set_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     values.set(1, 9)
     return values.len() + values[0] + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SET_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_set(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     owners.push(owner)
@@ -15307,26 +15300,26 @@ action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
         return owners[1] == candidate
     }
     return false
-}
 "#;
 
     const STACK_VEC_REVERSE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_reverse_sum() -> u64 {
+action stack_vec_reverse_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.reverse()
     return values[0] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REVERSE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_reverse(first: Address, second: Address) -> bool {
+action stack_vec_address_reverse(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -15335,26 +15328,26 @@ action stack_vec_address_reverse(first: Address, second: Address) -> bool {
         return owners[1] == first
     }
     return false
-}
 "#;
 
     const STACK_VEC_SWAP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_swap_sum() -> u64 {
+action stack_vec_swap_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.swap(0, 2)
     return values[0] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SWAP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_swap(first: Address, second: Address) -> bool {
+action stack_vec_address_swap(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -15363,25 +15356,25 @@ action stack_vec_address_swap(first: Address, second: Address) -> bool {
         return owners[1] == first
     }
     return false
-}
 "#;
 
     const STACK_VEC_FIRST_LAST_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_first_last_sum() -> u64 {
+action stack_vec_first_last_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     return values.first() + values.last()
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_FIRST_LAST_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_first_last(first: Address, second: Address) -> bool {
+action stack_vec_address_first_last(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -15389,26 +15382,26 @@ action stack_vec_address_first_last(first: Address, second: Address) -> bool {
         return owners.last() == second
     }
     return false
-}
 "#;
 
     const STACK_VEC_TRUNCATE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_truncate_len() -> u64 {
+action stack_vec_truncate_len() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.truncate(2)
     return values.len() + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_TRUNCATE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_truncate(first: Address, second: Address) -> bool {
+action stack_vec_address_truncate(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -15417,33 +15410,33 @@ action stack_vec_address_truncate(first: Address, second: Address) -> bool {
         return owners[0] == first
     }
     return false
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_roundtrip(owner: Address) -> bool {
+action stack_vec_address_roundtrip(owner: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     return owners[0] == owner
-}
 "#;
 
     const STACK_VEC_EXTEND_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_extend_len(seed: [u8; 3]) -> u64 {
+action stack_vec_extend_len(seed: [u8; 3]) -> u64
+where
     let mut bytes = Vec::new()
     bytes.extend_from_slice(seed)
     return bytes.len()
-}
 "#;
 
     const STACK_VEC_CLEAR_IS_EMPTY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_clear_len() -> u64 {
+action stack_vec_clear_len() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.clear()
@@ -15451,13 +15444,13 @@ action stack_vec_clear_len() -> u64 {
         return values.len()
     }
     return 99
-}
 "#;
 
     const STACK_VEC_CONTAINS_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_contains_hit() -> u64 {
+action stack_vec_contains_hit() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
@@ -15465,17 +15458,16 @@ action stack_vec_contains_hit() -> u64 {
         return 1
     }
     return 0
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CONTAINS_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_contains(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_contains(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     return owners.contains(candidate)
-}
 "#;
 
     const FIXED_SCHEMA_STACK_VEC_PROGRAM: &str = r#"
@@ -15486,7 +15478,8 @@ struct Snapshot {
     amount: u64,
 }
 
-action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool {
+action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool
+where
     let mut snapshots = Vec::with_capacity(3)
     snapshots.push(first)
     snapshots.insert(0, second)
@@ -15507,9 +15500,9 @@ action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Sn
     }
 
     return false
-}
 
-action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool {
+action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool
+where
     let mut snapshots = Vec::new()
     snapshots.push(first)
     snapshots.push(second)
@@ -15519,9 +15512,9 @@ action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool 
     }
 
     return false
-}
 
-action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
+action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64
+where
     let mut snapshots = Vec::new()
     snapshots.push(snapshot)
     snapshots.clear()
@@ -15531,9 +15524,9 @@ action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
     }
 
     return 99
-}
 
-action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
+action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool
+where
     let mut snapshots = Vec::new()
     snapshots.push(snapshot)
 
@@ -15545,7 +15538,6 @@ action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
     }
 
     return false
-}
 "#;
 
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
@@ -15556,7 +15548,8 @@ resource NFT {
     owner: Address,
 }
 
-action batch_mint(owner: Address) -> Vec<NFT> {
+action batch_mint(owner: Address) -> Vec<NFT>
+where
     let mut nfts = Vec::new()
     let nft = create NFT {
         token_id: 1,
@@ -15564,7 +15557,6 @@ action batch_mint(owner: Address) -> Vec<NFT> {
     }
     nfts.push(nft)
     return nfts
-}
 "#;
 
     const TYPE_HASH_PROGRAM: &str = r#"
@@ -15574,34 +15566,34 @@ struct Pool {
     amount: u64,
 }
 
-action pool_id(pool: Pool) -> Hash {
+action pool_id(pool: Pool) -> Hash
+where
     return pool.type_hash()
-}
 "#;
 
     const ZERO_PROGRAM: &str = r#"
 module test
 
-action is_zero(target: Address) -> bool {
+action is_zero(target: Address) -> bool
+where
     return target == Address::zero()
-}
 "#;
 
     const LOCAL_ZERO_PROGRAM: &str = r#"
 module test
 
-action is_zero(target: Address) -> bool {
+action is_zero(target: Address) -> bool
+where
     let zero = Address::zero()
     return target == zero
-}
 "#;
 
     const U128_EQ_PROGRAM: &str = r#"
 module test
 
-action eq128(left: u128, right: u128) -> bool {
+action eq128(left: u128, right: u128) -> bool
+where
     return left == right
-}
 "#;
 
     const U128_MUTATE_PROGRAM: &str = r#"
@@ -15613,11 +15605,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
-    replace ledger_before -> ledger_after
-{
+where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
-}
 "#;
 
     const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
@@ -15629,11 +15619,9 @@ shared BigState has store {
 }
 
 action update(state_before: BigState, output state_after: BigState, delta: u64)
-    replace state_before -> state_after
-{
+where
     require state_after.balance == state_before.balance + delta
     require state_after.pad == state_before.pad
-}
 "#;
 
     const SUMMARY_PROGRAM: &str = r#"
@@ -15647,12 +15635,12 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(amount: u64) -> u64
+where
     let cfg = read_ref<Config>()
     let token = create Token { amount: amount }
     consume token
     return cfg.threshold
-}
 "#;
 
     const BAD_LOCK_PROGRAM: &str = r#"
@@ -15709,20 +15697,20 @@ receipt VestingReceipt -> Token {
     amount: u64,
 }
 
-action move_token(token: Token, to: Address) -> Token {
+action move_token(token: Token, to: Address) -> Token
+where
     return transfer token to to
-}
 
-action redeem(receipt: VestingReceipt) -> Token {
+action redeem(receipt: VestingReceipt) -> Token
+where
     return claim receipt
-}
 
-    action finalize(token: Token) -> Token {
-        return settle token
-    }
+action finalize(token: Token) -> Token
+where
+    return settle token
 "#;
 
-    const SETTLE_LIFECYCLE_FINAL_STATE_PROGRAM: &str = r#"
+    const SETTLE_FLOW_FINAL_STATE_PROGRAM: &str = r#"
 module test
 
 receipt Settlement has store {
@@ -15734,9 +15722,9 @@ flow Settlement.state {
     Pending -> Settled;
 }
 
-action finalize(settlement: Settlement) -> Settlement {
+action finalize(settlement: Settlement) -> Settlement
+where
     return settle settlement
-}
 "#;
 
     const CLAIM_SIGNER_PUBKEY_HASH_PROGRAM: &str = r#"
@@ -15752,9 +15740,9 @@ receipt SignedReceipt -> Token {
     signer_pubkey_hash: [u8; 20],
 }
 
-action redeem_signed(receipt: SignedReceipt) -> Token {
+action redeem_signed(receipt: SignedReceipt) -> Token
+where
     return claim receipt
-}
 "#;
 
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
@@ -15768,17 +15756,17 @@ resource Fingerprint has store {
     digest: Hash,
 }
 
-action make_config(symbol: [u8; 8]) -> Config {
+action make_config(symbol: [u8; 8]) -> Config
+where
     create Config {
         symbol: symbol
     }
-}
 
-action make_fingerprint() -> Fingerprint {
+action make_fingerprint() -> Fingerprint
+where
     create Fingerprint {
         digest: Hash::zero()
     }
-}
 "#;
 
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
@@ -15788,11 +15776,11 @@ resource Token has store {
     amount: u64,
 }
 
-action mint() -> Token {
+action mint() -> Token
+where
     create Token {
         amount: 42
     } with_lock(Address::zero())
-}
 "#;
 
     const MISSING_TRANSFER_CAPABILITY_PROGRAM: &str = r#"
@@ -15802,9 +15790,9 @@ resource Token has store {
     amount: u64,
 }
 
-action move_token(token: Token, to: Address) -> Token {
+action move_token(token: Token, to: Address) -> Token
+where
     return transfer token to to
-}
 "#;
 
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
@@ -15814,9 +15802,9 @@ resource Token has store {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     destroy token
-}
 "#;
 
     const CLAIM_NON_RECEIPT_PROGRAM: &str = r#"
@@ -15826,9 +15814,9 @@ resource Token has store {
     amount: u64,
 }
 
-action redeem(token: Token) -> u64 {
+action redeem(token: Token) -> u64
+where
     return claim token
-}
 "#;
 
     const CLAIM_OUTPUT_NON_CELL_PROGRAM: &str = r#"
@@ -15838,9 +15826,9 @@ receipt VestingReceipt -> u64 {
     amount: u64,
 }
 
-action redeem(receipt: VestingReceipt) -> u64 {
+action redeem(receipt: VestingReceipt) -> u64
+where
     return claim receipt
-}
 "#;
 
     const CLAIM_OUTPUT_RECEIPT_PROGRAM: &str = r#"
@@ -15854,9 +15842,9 @@ receipt VestingReceipt -> OtherReceipt {
     amount: u64,
 }
 
-action redeem(receipt: VestingReceipt) -> OtherReceipt {
+action redeem(receipt: VestingReceipt) -> OtherReceipt
+where
     return claim receipt
-}
 "#;
 
     const SETTLE_NON_CELL_PROGRAM: &str = r#"
@@ -15866,23 +15854,9 @@ struct Snapshot {
     amount: u64,
 }
 
-action finalize(snapshot: Snapshot) -> Snapshot {
+action finalize(snapshot: Snapshot) -> Snapshot
+where
     return settle snapshot
-}
-"#;
-
-    const LEGACY_LIFECYCLE_ATTRIBUTE_PROGRAM: &str = r#"
-module test
-
-#[lifecycle(Created -> Created)]
-receipt Ticket has store {
-    state: u8,
-    id: u64,
-}
-
-action noop() -> u64 {
-    return 0
-}
 "#;
 
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
@@ -15897,12 +15871,12 @@ flow Ticket.state {
     Created -> Created;
 }
 
-action noop() -> u64 {
+action noop() -> u64
+where
     return 0
-}
 "#;
 
-    const LIFECYCLE_MISSING_STATE_CREATE_PROGRAM: &str = r#"
+    const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -15914,14 +15888,14 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket {
+action make() -> Ticket
+where
     return create Ticket {
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_MISSING_STATE_FIELD_PROGRAM: &str = r#"
+    const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -15932,12 +15906,12 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action noop() -> u64 {
+action noop() -> u64
+where
     return 0
-}
 "#;
 
-    const LIFECYCLE_BAD_STATE_TYPE_PROGRAM: &str = r#"
+    const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -15949,12 +15923,12 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action noop() -> u64 {
+action noop() -> u64
+where
     return 0
-}
 "#;
 
-    const LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
+    const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -15966,15 +15940,15 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket {
+action make() -> Ticket
+where
     return create Ticket {
         state: 2,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_NON_INITIAL_CREATE_PROGRAM: &str = r#"
+    const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -15986,15 +15960,15 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket {
+action make() -> Ticket
+where
     return create Ticket {
         state: 1,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
+    const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16006,15 +15980,15 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make(state: u8) -> Ticket {
+action make(state: u8) -> Ticket
+where
     return create Ticket {
         state: state,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_RESET_UPDATE_PROGRAM: &str = r#"
+    const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16026,16 +16000,16 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action reset(ticket: Ticket) -> Ticket {
+action reset(ticket: Ticket) -> Ticket
+where
     consume ticket
     return create Ticket {
         state: 0,
         id: ticket.id,
     }
-}
 "#;
 
-    const LIFECYCLE_STATIC_UPDATE_PROGRAM: &str = r#"
+    const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16047,16 +16021,16 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> Ticket move ticket.state Created -> Active {
-    consume ticket
-    return create Ticket {
+action activate(ticket: Ticket) -> output: Ticket
+    move ticket.state: Created -> output.state: Active
+where
+    create output = Ticket {
         state: Active,
         id: ticket.id,
     }
-}
 "#;
 
-    const LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
+    const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16068,15 +16042,15 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket {
+action make() -> Ticket
+where
     return create Ticket {
         state: Created,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
+    const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16088,17 +16062,17 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> Ticket move ticket.state Created -> Active {
+action activate(ticket: Ticket) -> output: Ticket
+    move ticket.state: Created -> output.state: Active
+where
     assert_invariant(ticket.state < Ticket::Active, "already active")
-    consume ticket
-    return create Ticket {
+    create output = Ticket {
         state: Ticket::Active,
         id: ticket.id,
     }
-}
 "#;
 
-    const LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
+    const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
 receipt Ticket has store {
@@ -16119,13 +16093,13 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> Ticket {
+action activate(ticket: Ticket) -> Ticket
+where
     consume ticket
     return create Ticket {
         state: OtherTicket::Live,
         id: ticket.id,
     }
-}
 "#;
 
     #[test]
@@ -16308,28 +16282,44 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(err.message.contains("parameter 'cfg' is a read-only reference"), "unexpected error: {}", err.message);
 
         let err = compile(REDUNDANT_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
 
         let err = compile(FUNCTION_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
 
         let err = compile(LOCK_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_local_mutable_reference_aliases() {
         let err = compile(MUT_REF_LOCAL_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            "unexpected error: {}",
+            err.message
+        );
 
         let err = compile(MUT_REF_TUPLE_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            "unexpected error: {}",
+            err.message
+        );
 
         let err = compile(MUT_REF_IF_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            "unexpected error: {}",
+            err.message
+        );
 
         let err = compile(MUT_REF_ASSIGN_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("`&mut` Cell parameters have been removed"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -16437,7 +16427,7 @@ action activate(ticket: Ticket) -> Ticket {
 
         let err = compile(CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("`&mut` Cell parameters have been removed")
+            err.message.contains("`&mut` Cell parameters are not valid")
                 || err.message.contains(
                     "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
                 ),
@@ -17103,13 +17093,13 @@ receipt Listing has destroy {
     price: u64,
 }
 
-action create_listing(nft: &NFT, price: u64) -> Listing {
+action create_listing(nft: &NFT, price: u64) -> Listing
+where
     create Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
     }
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -17165,13 +17155,13 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> Grant {
+action grant(read config: Config, token: Token) -> Grant
+where
     consume token
     create Grant {
         admin: config.admin,
         amount: token.amount,
     } with_lock(config.admin)
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -18025,10 +18015,10 @@ action grant(read config: Config, token: Token) -> Grant {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let value = 7
     return value.len()
-}
 "#,
                 "len is only supported on array or Vec values",
             ),
@@ -18036,10 +18026,10 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> bool {
+action bad() -> bool
+where
     let value = 7
     return value.is_empty()
-}
 "#,
                 "is_empty is only supported on array or Vec values",
             ),
@@ -18047,11 +18037,11 @@ action bad() -> bool {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let value = 7
     value.extend_from_slice([1, 2])
     return value
-}
 "#,
                 "extend_from_slice is only supported on Vec values",
             ),
@@ -18059,11 +18049,11 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut values: Vec<u64> = []
     values.extend_from_slice([true])
     return values.len()
-}
 "#,
                 "Vec.extend_from_slice type mismatch",
             ),
@@ -18075,11 +18065,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let mut points = Vec::new()
     points.extend_from_slice([&point])
     return 0
-}
 "#,
                 "Vec.extend_from_slice cannot store reference type &Point",
             ),
@@ -18087,10 +18077,10 @@ action bad(point: Point) -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values = Vec::new()
     return values.capacity()
-}
 "#,
                 "Vec.capacity requires a typed Vec<T>",
             ),
@@ -18098,10 +18088,10 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values = Vec::new()
     return values.remove(0)
-}
 "#,
                 "Vec.remove requires a typed Vec<T>",
             ),
@@ -18109,10 +18099,10 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values = Vec::new()
     return values.first()
-}
 "#,
                 "Vec.first requires a typed Vec<T>",
             ),
@@ -18120,11 +18110,11 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad(owner: Address) -> bool {
+action bad(owner: Address) -> bool
+where
     let mut values = Vec::new()
     values.push(1)
     return values.contains(owner)
-}
 "#,
                 "Vec.contains type mismatch",
             ),
@@ -18132,12 +18122,12 @@ action bad(owner: Address) -> bool {
                 r#"
 module test
 
-action bad(owner: Address) -> u64 {
+action bad(owner: Address) -> u64
+where
     let mut values = Vec::new()
     values.push(1)
     values.insert(0, owner)
     return 0
-}
 "#,
                 "Vec.insert type mismatch",
             ),
@@ -18145,12 +18135,12 @@ action bad(owner: Address) -> u64 {
                 r#"
 module test
 
-action bad(owner: Address) -> u64 {
+action bad(owner: Address) -> u64
+where
     let mut values = Vec::new()
     values.push(1)
     values.set(0, owner)
     return 0
-}
 "#,
                 "Vec.set type mismatch",
             ),
@@ -18162,11 +18152,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let mut points = Vec::new()
     points.insert(0, &point)
     return 0
-}
 "#,
                 "Vec.insert cannot store reference type &Point",
             ),
@@ -18178,11 +18168,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let mut points = Vec::new()
     points.set(0, &point)
     return 0
-}
 "#,
                 "Vec.set cannot store reference type &Point",
             ),
@@ -18395,10 +18385,10 @@ action bad(point: Point) -> u64 {
             r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values: Vec<Address> = [1]
     return values.len()
-}
 "#,
             CompileOptions::default(),
         )
@@ -19390,11 +19380,9 @@ resource Collection {
 }
 
 action batch(collection_before: Collection, output collection_after: Collection, recipients: Vec<Address>)
-    replace collection_before -> collection_after
-{
+where
     require collection_after.name == collection_before.name
     require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "batch").expect("batch metadata");
@@ -19469,7 +19457,7 @@ action batch(collection_before: Collection, output collection_after: Collection,
         let result = compile(LOCAL_ZERO_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(!asm.contains("__const_data"), "legacy undefined const label leaked into assembly:\n{}", asm);
+        assert!(!asm.contains("__const_data"), "undefined const label leaked into assembly:\n{}", asm);
         assert!(asm.contains("__cellscript_const_data_0:"), "local fixed-byte constant should have a concrete rodata label:\n{}", asm);
 
         compile(LOCAL_ZERO_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
@@ -19523,13 +19511,13 @@ action batch(collection_before: Collection, output collection_after: Collection,
     }
 
     #[test]
-    fn compile_verifies_large_replacement_field_requirements_without_partial_fallback() {
+    fn compile_verifies_large_output_field_requirements_without_partial_fallback() {
         let result = compile(LARGE_PRESERVED_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
             asm.contains("# cellscript abi: fixed-byte Eq comparison size=600"),
-            "large explicit replacement field requirements should use the fixed-byte verifier path:\n{}",
+            "large explicit output field requirements should use the fixed-byte verifier path:\n{}",
             asm
         );
         let action = result.metadata.actions.iter().find(|action| action.name == "update").expect("update metadata");
@@ -19566,13 +19554,13 @@ action batch(collection_before: Collection, output collection_after: Collection,
         let program = r#"
 module vm::u64_literals
 
-action high_bit() -> u64 {
+action high_bit() -> u64
+where
     return 9223372036854775808
-}
 
-action max_value() -> u64 {
+action max_value() -> u64
+where
     return 18446744073709551615
-}
 "#;
 
         let result =
@@ -19584,11 +19572,11 @@ action max_value() -> u64 {
 
     #[test]
     fn compile_riscv_elf_accepts_large_stack_offsets() {
-        let mut program = String::from("module vm::large_stack\n\naction main() -> u64 {\n");
+        let mut program = String::from("module vm::large_stack\n\naction main() -> u64\nwhere\n");
         for index in 0..260 {
             program.push_str(&format!("    let x{} = {}\n", index, index));
         }
-        program.push_str("    return x259\n}\n");
+        program.push_str("    return x259\n");
 
         let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
         let asm = String::from_utf8(asm.artifact_bytes).unwrap();
@@ -19609,9 +19597,9 @@ struct Big {
     amount: u64,
 }
 
-action inspect(snapshot: Big) -> u64 {
+action inspect(snapshot: Big) -> u64
+where
     return snapshot.amount
-}
 "#;
 
         let scalar_asm =
@@ -19635,9 +19623,9 @@ struct Big {
     marker: [u8; 1],
 }
 
-action get_marker(snapshot: Big) -> [u8; 1] {
+action get_marker(snapshot: Big) -> [u8; 1]
+where
     return snapshot.marker
-}
 "#;
 
         let bytes_asm =
@@ -19742,12 +19730,12 @@ shared Config has store {
     enabled: bool,
 }
 
-action create_config(admin: Address, enabled: bool) -> Config {
+action create_config(admin: Address, enabled: bool) -> Config
+where
     create Config {
         admin: admin,
         enabled: enabled,
     } with_lock(admin)
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -19775,9 +19763,9 @@ action create_config(admin: Address, enabled: bool) -> Config {
             r#"
 module test::timepoint
 
-action now() -> u64 {
+action now() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -19795,9 +19783,9 @@ action now() -> u64 {
             r#"
 module test::timepoint
 
-action now() -> u64 {
+action now() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -19877,12 +19865,12 @@ resource Receipt {
     amount: u64,
 }
 
-action mint(amount: u64) -> Receipt {
+action mint(amount: u64) -> Receipt
+where
     let receipt = create Receipt {
         amount: amount,
     };
     receipt
-}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints metadata");
@@ -19937,9 +19925,9 @@ hash_type = "type"
             r#"
 module deploy_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -19980,9 +19968,9 @@ with_default_hash_type(Data1)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount }
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20023,9 +20011,9 @@ dep_type = "dep_group"
             r#"
 module conflicting_cell_dep_location
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20066,9 +20054,9 @@ dep_type = "dep_group"
             r#"
 module incomplete_cell_dep_location
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20107,9 +20095,9 @@ dep_type = "unknown"
             r#"
 module bad_deploy_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20144,9 +20132,9 @@ hash_type = "unsupported"
             r#"
 module bad_hash_type_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20179,9 +20167,9 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 module test
 
-action main() -> u64 {
+action main() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20197,13 +20185,13 @@ action main() -> u64 {
             r#"
 module test
 
-action needs_arg(value: u64) -> u64 {
+action needs_arg(value: u64) -> u64
+where
     value
-}
 
-action main() -> u64 {
+action main() -> u64
+where
     0
-}
 "#,
             CompileOptions::default(),
         )
@@ -20732,12 +20720,12 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(amount: u64, symbol: [u8; 8]) -> Token
+where
     create Token {
         amount,
         symbol,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         assert_eq!(result.metadata.actions.len(), 1);
@@ -20916,36 +20904,29 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_rejects_legacy_lifecycle_attribute() {
-        let err = compile(LEGACY_LIFECYCLE_ATTRIBUTE_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(err.message.contains("legacy #[lifecycle(...)] has been removed"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_noop_state_machine_transition_on_main_path() {
+    fn compile_rejects_noop_flow_transition_on_main_path() {
         let err = compile(STATE_MACHINE_NOOP_TRANSITION_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(err.message.contains("flow must mention at least two states"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn compile_rejects_missing_lifecycle_state_create_on_main_path() {
-        let err = compile(LIFECYCLE_MISSING_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_missing_flow_state_create_on_main_path() {
+        let err = compile(FLOW_MISSING_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(err.message.contains("create for 'Ticket' is missing field(s): state"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn compile_rejects_lifecycle_receipt_without_state_field() {
-        let err = compile(LIFECYCLE_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_flow_receipt_without_state_field() {
+        let err = compile(FLOW_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(err.message.contains("flow target field 'Ticket.state' is not defined"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn compile_rejects_bad_lifecycle_state_field_type_on_main_path() {
-        let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_bad_flow_state_field_type_on_main_path() {
+        let err = compile(FLOW_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
             err.message.contains("flow field 'Ticket.state' must be an unsigned integer or no-payload enum"),
@@ -20955,24 +20936,24 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_rejects_out_of_range_lifecycle_state_create_on_main_path() {
-        let err = compile(LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_out_of_range_flow_state_create_on_main_path() {
+        let err = compile(FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("state-machine state index 2 is out of range for 'Ticket' with 2 states"),
+            err.message.contains("flow state index 2 is out of range for 'Ticket' with 2 states"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_accepts_non_initial_state_machine_create_without_consumed_prior_state() {
-        compile(LIFECYCLE_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_accepts_non_initial_flow_create_without_consumed_prior_state() {
+        compile(FLOW_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap();
     }
 
     #[test]
-    fn compile_rejects_dynamic_initial_lifecycle_create_state() {
-        let err = compile(LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_dynamic_initial_flow_create_state() {
+        let err = compile(FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
             err.message.contains("initial create of flow type 'Ticket' must use a statically known declared state"),
@@ -20982,13 +20963,13 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_allows_state_machine_update_to_declared_initial_state_at_type_check() {
-        compile(LIFECYCLE_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_allows_flow_update_to_declared_initial_state_at_type_check() {
+        compile(FLOW_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
     }
 
     #[test]
-    fn compile_accepts_lifecycle_state_name_initializers() {
-        let result = compile(LIFECYCLE_INITIAL_STATE_NAME_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_accepts_flow_state_name_initializers() {
+        let result = compile(FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes).unwrap();
 
         assert!(
@@ -20999,20 +20980,20 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_accepts_qualified_lifecycle_state_names() {
-        let result = compile(LIFECYCLE_QUALIFIED_STATE_NAME_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_accepts_qualified_flow_state_names() {
+        let result = compile(FLOW_QUALIFIED_STATE_NAME_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
 
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
-        assert!(asm.contains("state_count=2"), "qualified state-machine state names should preserve verifier metadata:\n{}", asm);
+        assert!(asm.contains("state_count=2"), "qualified flow state names should preserve verifier metadata:\n{}", asm);
     }
 
     #[test]
-    fn compile_rejects_wrong_qualified_lifecycle_state_field_initializer() {
-        let err = compile(LIFECYCLE_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_wrong_qualified_flow_state_field_initializer() {
+        let err = compile(FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
             err.message.contains("flow field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
@@ -21022,19 +21003,19 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_accepts_static_lifecycle_update_to_non_initial_state() {
-        let result = compile(LIFECYCLE_STATIC_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_accepts_static_flow_update_to_non_initial_state() {
+        let result = compile(FLOW_STATIC_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let ticket = result.metadata.types.iter().find(|ty| ty.name == "Ticket").expect("Ticket type metadata");
         let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
 
         assert_eq!(result.metadata.module, "test");
-        assert_eq!(ticket.lifecycle_states, vec!["Created".to_string(), "Active".to_string()]);
-        assert_eq!(ticket.lifecycle_transitions.len(), 1);
-        assert_eq!(ticket.lifecycle_transitions[0].from, "Created");
-        assert_eq!(ticket.lifecycle_transitions[0].to, "Active");
-        assert_eq!(ticket.lifecycle_transitions[0].from_index, 0);
-        assert_eq!(ticket.lifecycle_transitions[0].to_index, 1);
+        assert_eq!(ticket.flow_states, vec!["Created".to_string(), "Active".to_string()]);
+        assert_eq!(ticket.flow_transitions.len(), 1);
+        assert_eq!(ticket.flow_transitions[0].from, "Created");
+        assert_eq!(ticket.flow_transitions[0].to, "Active");
+        assert_eq!(ticket.flow_transitions[0].from_index, 0);
+        assert_eq!(ticket.flow_transitions[0].to_index, 1);
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
@@ -21046,7 +21027,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         }));
         assert!(
             asm.contains("# cellscript abi: state transition Ticket.state state_count=2"),
-            "missing lifecycle runtime transition verifier:\n{}",
+            "missing flow runtime transition verifier:\n{}",
             asm
         );
         assert!(asm.contains("li a0, 7"), "missing state transition failure code in verifier:\n{}", asm);
@@ -21057,7 +21038,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_accepts_explicit_state_machine_action_edges() {
+    fn compile_accepts_explicit_flow_action_edges() {
         let source = r#"
 module test
 
@@ -21079,29 +21060,29 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) move input.state Live -> Filled {
+action accept(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
     let amount = input.amount
-    consume input
-    create Offer {
+    create output = Offer {
         state: OfferState::Filled,
         amount,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
         let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
 
-        assert_eq!(offer.lifecycle_states, vec!["Created", "Live", "Filled", "Cancelled"]);
-        assert_eq!(offer.lifecycle_state_field.as_deref(), Some("state"));
-        assert!(offer.lifecycle_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
+        assert_eq!(offer.flow_states, vec!["Created", "Live", "Filled", "Cancelled"]);
+        assert_eq!(offer.flow_state_field.as_deref(), Some("state"));
+        assert!(offer.flow_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
         }));
         assert!(
             asm.contains("# cellscript abi: state transition Offer.state state_count=4"),
-            "missing explicit state machine runtime transition marker:\n{}",
+            "missing explicit flow runtime transition marker:\n{}",
             asm
         );
         assert!(asm.contains("li t3, 1"), "action move should check source state Live=1:\n{}", asm);
@@ -21130,11 +21111,13 @@ flow Offer.state {
 }
 
 action accept(input input: Offer, output output: Offer)
-    replace input -> output
-    move input.state Live -> output.state Filled
-{
+    move input.state: Live -> output.state: Filled
+where
     require input.amount == output.amount
-}
+    create output = Offer {
+        state: OfferState::Filled,
+        amount: input.amount,
+    }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -21162,6 +21145,74 @@ action accept(input input: Offer, output output: Offer)
     }
 
     #[test]
+    fn compile_rejects_asymmetric_where_branch_output_constraints() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    price: u64
+    note: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    if input.price > 0 {
+        require output.price == input.price
+    } else {
+        require output.note == input.note
+    }
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("incomplete branch constraints"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("output."), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_symmetric_where_branch_output_constraints() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    price: u64
+    note: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    if input.price > 0 {
+        require output.price == input.price
+    } else {
+        require output.price == input.price + 1
+    }
+
+    require output.note == input.note
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn compile_rejects_input_source_outside_action_cell_params() {
         let function_source = r#"
 module test
@@ -21180,9 +21231,9 @@ fn helper(input token: Token) -> u64 {
         let scalar_source = r#"
 module test
 
-action main(input amount: u64) -> u64 {
+action main(input amount: u64) -> u64
+where
     amount
-}
 "#;
         let scalar_err = compile(scalar_source, CompileOptions::default()).unwrap_err();
         assert!(
@@ -21213,11 +21264,9 @@ flow Offer.state {
 }
 
 action cancel(input: Offer, output output: Offer)
-    replace input -> output
-    move input.state Live -> output.state Cancelled
-{
+    move input.state: Live -> output.state: Cancelled
+where
     require input.amount == output.amount
-}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
@@ -21252,34 +21301,6 @@ flow Offer.state {
     }
 
     #[test]
-    fn compile_rejects_output_binding_ambiguity_without_target_path() {
-        let source = r#"
-module test
-
-enum OfferState {
-    Live,
-    Filled,
-}
-
-resource Offer has store {
-    state: OfferState
-    amount: u64
-}
-
-flow Offer.state {
-    Live -> Filled;
-}
-
-action accept(input: Offer, output left: Offer, output right: Offer) move input.state Live -> Filled {
-    consume input
-    require left.amount == right.amount
-}
-"#;
-        let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("avoid guessing") || err.message.contains("ambiguous"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
     fn compile_reports_equivalent_state_transition_obligation_for_sugar_and_core_forms() {
         let source = r#"
 module test
@@ -21298,21 +21319,19 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept_sugar(input: Offer) move input.state Live -> Filled {
+action accept_sugar(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
     let amount = input.amount
-    consume input
-    create Offer {
+    create output = Offer {
         state: OfferState::Filled,
         amount,
     }
-}
 
 action accept_core(input: Offer, output output: Offer)
-    replace input -> output
-    move input.state Live -> output.state Filled
-{
+    move input.state: Live -> output.state: Filled
+where
     require input.amount == output.amount
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let sugar = result.metadata.actions.iter().find(|action| action.name == "accept_sugar").expect("sugar metadata");
@@ -21330,12 +21349,12 @@ action accept_core(input: Offer, output output: Offer)
 
         assert_eq!(sugar_obligations, 1);
         assert_eq!(core_obligations, sugar_obligations);
-        assert!(sugar.create_set.iter().any(|pattern| pattern.operation == "create" && pattern.ty == "Offer"));
+        assert!(sugar.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.ty == "Offer"));
         assert!(core.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
     }
 
     #[test]
-    fn compile_accepts_named_action_output_replacement_and_create_binding() {
+    fn compile_accepts_named_action_output_and_create_binding() {
         let source = r#"
 module test
 
@@ -21354,14 +21373,12 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer
-    replace old -> new
-    move old.state Live -> new.state Filled
-{
+    move old.state: Live -> new.state: Filled
+where
     create new = Offer {
         state: OfferState::Filled,
         amount: old.amount,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
@@ -21373,6 +21390,39 @@ action accept(old: Offer) -> new: Offer
                 && pattern.fields == vec!["state".to_string(), "amount".to_string()]
         }));
         assert!(action.params.iter().any(|param| param.name == "new" && param.source == "output"));
+    }
+
+    #[test]
+    fn named_action_output_create_binding_reuses_declared_output_index() {
+        let source = r#"
+module test
+
+resource Authority has store {
+    minted: u64
+}
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token)
+where
+    require next_auth.minted == auth.minted + amount
+
+    create token = Token {
+        amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let assembly = String::from_utf8(result.artifact_bytes).expect("assembly is utf8");
+        assert!(assembly.contains("LOAD_CELL_DATA reason=output_param source=Output index=0"));
+        assert!(assembly.contains("LOAD_CELL_DATA reason=output_param source=Output index=1"));
+        assert!(
+            !assembly.contains("source=Output index=2"),
+            "named output create must constrain its declared Output index instead of allocating a new output:\n{}",
+            assembly
+        );
+        assert!(assembly.contains("# constrain named output Token"));
     }
 
     #[test]
@@ -21397,44 +21447,12 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer
-    replace old -> new
-    move old.state Live -> new.state Cancelled
-{
-    require old.amount == new.amount
-}
+    move old.state: Live -> new.state: Cancelled
+where
+        require old.amount == new.amount
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("explicit move clause uses a different edge"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_legacy_moves_state_clause() {
-        let source = r#"
-module test
-
-enum OfferState {
-    Live,
-    Filled,
-}
-
-resource Offer has store {
-    state: OfferState
-    amount: u64
-}
-
-flow Offer.state {
-    Live -> Filled;
-}
-
-action accept(old: Offer) -> new: Offer
-    replace old -> new
-    moves old.state Live -> new.state Filled
-{
-    require old.amount == new.amount
-}
-"#;
-        let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("use `move`, not `moves`"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("must declare the exact field-to-field move"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21455,13 +21473,13 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> grant: Grant {
+action grant(read config: Config, token: Token) -> grant: Grant
+where
     consume token
     create grant = Grant {
         admin: config.admin,
         amount: token.amount,
     } with_lock(config.admin)
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -21483,11 +21501,11 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(witness amount: u64) -> token: Token {
+action mint(witness amount: u64) -> token: Token
+where
     create token = Token {
         amount,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
@@ -21498,7 +21516,7 @@ action mint(witness amount: u64) -> token: Token {
     }
 
     #[test]
-    fn compile_accepts_state_machine_on_custom_state_field() {
+    fn compile_accepts_flow_on_custom_state_field() {
         let source = r#"
 module test
 
@@ -21518,21 +21536,21 @@ flow OfferFlow for Offer.status {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) move input.status Live -> Filled {
+action accept(input: Offer) -> output: Offer
+    move input.status: Live -> output.status: Filled
+where
     let amount = input.amount
-    consume input
-    create Offer {
+    create output = Offer {
         status: OfferState::Filled,
         amount,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
         let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
 
-        assert_eq!(offer.lifecycle_state_field.as_deref(), Some("status"));
+        assert_eq!(offer.flow_state_field.as_deref(), Some("status"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Offer.status" && obligation.status == "checked-runtime"
         }));
@@ -21544,7 +21562,7 @@ action accept(input: Offer) move input.status Live -> Filled {
     }
 
     #[test]
-    fn compile_accepts_state_machine_initial_create_at_any_declared_state() {
+    fn compile_accepts_flow_initial_create_at_any_declared_state() {
         let source = r#"
 module test
 
@@ -21564,18 +21582,18 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action seed_live() -> Offer {
+action seed_live() -> Offer
+where
     create Offer {
         state: OfferState::Live,
         amount: 1,
     }
-}
 "#;
         compile(source, CompileOptions::default()).unwrap();
     }
 
     #[test]
-    fn compile_accepts_state_machine_edge_returning_to_first_state() {
+    fn compile_accepts_flow_edge_returning_to_first_state() {
         let source = r#"
 module test
 
@@ -21593,14 +21611,14 @@ flow Offer.state {
     Live -> Created;
 }
 
-action reset(input: Offer) move input.state Live -> Created {
+action reset(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Created
+where
     let amount = input.amount
-    consume input
-    create Offer {
+    create output = Offer {
         state: OfferState::Created,
         amount,
     }
-}
 "#;
         compile(source, CompileOptions::default()).unwrap();
     }
@@ -21625,12 +21643,13 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept(input: &Offer) move input.state Live -> Filled {
-    create Offer {
+action accept(input: &Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    create output = Offer {
         state: OfferState::Filled,
         amount: input.amount,
     }
-}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(
@@ -21641,35 +21660,7 @@ action accept(input: &Offer) move input.state Live -> Filled {
     }
 
     #[test]
-    fn compile_rejects_state_transition_action_without_single_replacement_output() {
-        let source = r#"
-module test
-
-enum OfferState {
-    Created,
-    Live,
-    Filled,
-}
-
-resource Offer has store {
-    state: OfferState
-    amount: u64
-}
-
-flow OfferFlow for Offer.state {
-    Live -> Filled by accept;
-}
-
-action accept(input: Offer) {
-    consume input
-}
-"#;
-        let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("must create exactly one replacement output"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_accepts_state_machine_by_action_without_move_clause() {
+    fn compile_rejects_flow_by_action_without_exact_move_clause() {
         let source = r#"
 module test
 
@@ -21689,52 +21680,17 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) {
+action accept(input: Offer)
+where
     let amount = input.amount
     consume input
     create Offer {
         state: OfferState::Filled,
         amount,
     }
-}
-"#;
-        let result = compile(source, CompileOptions::default()).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes).unwrap();
-        assert!(asm.contains("li t3, 0"), "by-action transition should check Live=0:\n{}", asm);
-        assert!(asm.contains("li t3, 1"), "by-action transition should check Filled=1:\n{}", asm);
-    }
-
-    #[test]
-    fn compile_rejects_by_action_with_ambiguous_consumed_inputs() {
-        let source = r#"
-module test
-
-enum OfferState {
-    Live,
-    Filled,
-}
-
-resource Offer has store {
-    state: OfferState
-    amount: u64
-}
-
-flow OfferFlow for Offer.state {
-    Live -> Filled by accept;
-}
-
-action accept(left: Offer, right: Offer) {
-    let amount = left.amount
-    consume left
-    consume right
-    create Offer {
-        state: OfferState::Filled,
-        amount,
-    }
-}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("must consume exactly one 'Offer' input"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("must declare the exact field-to-field move"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21757,20 +21713,20 @@ flow Offer.state {
     Created -> Live;
 }
 
-action accept(input: Offer) move input.state Live -> Filled {
-    consume input
-    create Offer {
+action accept(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    create output = Offer {
         state: OfferState::Filled,
         amount: 1,
     }
-}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn compile_rejects_state_machine_payload_enum_state_field() {
+    fn compile_rejects_flow_payload_enum_state_field() {
         let source = r#"
 module test
 
@@ -21793,7 +21749,7 @@ flow Offer.state {
     }
 
     #[test]
-    fn compile_rejects_state_machine_on_plain_struct() {
+    fn compile_rejects_flow_on_plain_struct() {
         let source = r#"
 module test
 
@@ -21811,8 +21767,8 @@ flow Offer.state {
     }
 
     #[test]
-    fn ir_carries_lifecycle_rules() {
-        let tokens = lexer::lex(LIFECYCLE_STATIC_UPDATE_PROGRAM).unwrap();
+    fn ir_carries_flow_rules() {
+        let tokens = lexer::lex(FLOW_STATIC_UPDATE_PROGRAM).unwrap();
         let ast = parser::parse(&tokens).unwrap();
         let module = ir::generate(&ast).unwrap();
         let ticket = module
@@ -21824,11 +21780,11 @@ flow Offer.state {
             })
             .expect("Ticket IR type");
 
-        assert_eq!(ticket.lifecycle_rules.len(), 1);
-        assert_eq!(ticket.lifecycle_rules[0].from, "Created");
-        assert_eq!(ticket.lifecycle_rules[0].to, "Active");
-        assert_eq!(ticket.lifecycle_rules[0].from_index, 0);
-        assert_eq!(ticket.lifecycle_rules[0].to_index, 1);
+        assert_eq!(ticket.flow_rules.len(), 1);
+        assert_eq!(ticket.flow_rules[0].from, "Created");
+        assert_eq!(ticket.flow_rules[0].to, "Active");
+        assert_eq!(ticket.flow_rules[0].from_index, 0);
+        assert_eq!(ticket.flow_rules[0].to_index, 1);
     }
 
     #[test]
@@ -21847,7 +21803,7 @@ source_roots = ["src", "shared"]
 "#,
         )
         .unwrap();
-        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64 { 1 }\n").unwrap();
+        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64\nwhere\n    1\n").unwrap();
         std::fs::write(root.join("shared/types.cell"), "module demo::types\nstruct Pair { left: u64, right: u64 }\n").unwrap();
 
         let modules = load_modules_for_input(root).unwrap();
@@ -21895,12 +21851,12 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
-    fn settle_lifecycle_final_state_field_is_checked_runtime() {
-        let result = compile(SETTLE_LIFECYCLE_FINAL_STATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn settle_flow_final_state_field_is_checked_runtime() {
+        let result = compile(SETTLE_FLOW_FINAL_STATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         assert!(
             asm.contains("# cellscript abi: settle final-state Settlement.state final_state=1 state_count=2"),
-            "settle did not emit the lifecycle final-state verifier check:\n{}",
+            "settle did not emit the flow final-state verifier check:\n{}",
             asm
         );
 
@@ -21912,14 +21868,14 @@ source_roots = ["src", "shared"]
             .expect("settle finalization obligation");
         assert_eq!(
             settle_finalization.status, "checked-runtime",
-            "fully verifier-covered lifecycle settle finalization should be checked: {}",
+            "fully verifier-covered flow settle finalization should be checked: {}",
             settle_finalization.detail
         );
         assert!(
             settle_finalization.detail.contains("settle-final-state=checked-runtime")
-                && settle_finalization.detail.contains("settle-state-policy=lifecycle-final-state")
+                && settle_finalization.detail.contains("settle-state-policy=flow-final-state")
                 && settle_finalization.detail.contains("settle-output-admission=checked-runtime"),
-            "settle finalization should expose checked lifecycle final-state and output admission policy: {}",
+            "settle finalization should expose checked flow final-state and output admission policy: {}",
             settle_finalization.detail
         );
         assert!(finalize.transaction_runtime_input_requirements.iter().any(|requirement| {
@@ -21991,7 +21947,6 @@ source_roots = ["src", "shared"]
         assert_eq!(transfer_action.body.write_intents.len(), 1);
         assert_eq!(transfer_action.body.write_intents[0].operation, "transfer");
         assert_eq!(transfer_action.body.write_intents[0].ty, "Token");
-        assert_eq!(transfer_action.body.write_intents[0].source, ir::WriteIntentSource::Output);
 
         let claim_action = ir
             .items
@@ -22243,11 +22198,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
-    replace ledger_before -> ledger_after
-{
+where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
-}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -22286,11 +22239,9 @@ shared Ledger has store {
 }
 
 action credit(ledger_before: Ledger, output ledger_after: Ledger, delta: u64)
-    replace ledger_before -> ledger_after
-{
+where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
-}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -22317,15 +22268,13 @@ resource NFT has store, destroy {
 }
 
 action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
-    replace nft_before -> nft_after
-{
+where
     assert(nft_before.owner != to, "cannot transfer to self")
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == to
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -22336,12 +22285,12 @@ action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
         assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "nft_after"));
         assert!(
             asm.contains("# cellscript abi: schema field NFT.owner offset=8 size=32"),
-            "fixed-byte output owner requirement should read the replacement output field:\n{}",
+            "fixed-byte output owner requirement should read the proposed output field:\n{}",
             asm
         );
         assert!(
             asm.contains("# cellscript abi: fixed-byte Eq comparison size=32"),
-            "fixed-byte replacement requirements should compare address/hash fields:\n{}",
+            "fixed-byte output requirements should compare address/hash fields:\n{}",
             asm
         );
         assert!(
@@ -22390,13 +22339,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     destroy token
-}
 
-action unsupported_timepoint() -> u64 {
+action unsupported_timepoint() -> u64
+where
     return env::current_timepoint()
-}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped.cell");
@@ -22440,12 +22389,12 @@ lock owner_lock(owner: Address) -> bool {
     true
 }
 
-action unsupported(name: String) -> DynamicCell {
+action unsupported(name: String) -> DynamicCell
+where
     let cell = create DynamicCell {
         name: name,
     };
     cell
-}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped_lock.cell");
@@ -22554,14 +22503,14 @@ resource TimeLock {
     unlock_height: u64,
 }
 
-action create_lock(owner: Address) -> TimeLock {
+action create_lock(owner: Address) -> TimeLock
+where
     let lock = create TimeLock {
         owner: owner,
         lock_type: LockType::Absolute,
         unlock_height: 42,
     };
     lock
-}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let time_lock = result.metadata.types.iter().find(|ty| ty.name == "TimeLock").expect("TimeLock metadata");
@@ -22591,14 +22540,14 @@ resource LockedAsset {
     lock_hash: Hash,
 }
 
-action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
+action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset
+where
     let locked = create LockedAsset {
         asset_type: asset_type,
         amount: amount,
         lock_hash: Hash::zero(),
     };
     locked
-}
 
 lock asset_matches(locked_asset: &LockedAsset, expected: Hash) -> bool {
     locked_asset.lock_hash == expected
@@ -22783,13 +22732,11 @@ resource Collection {
 }
 
 action mint(collection_before: Collection, output collection_after: Collection)
-    replace collection_before -> collection_after
-{
+where
     assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
     require collection_after.name == collection_before.name
     require collection_after.max_supply == collection_before.max_supply
     require collection_after.total_supply == collection_before.total_supply + 1
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let collection = result.metadata.types.iter().find(|ty| ty.name == "Collection").expect("Collection metadata");
@@ -22829,9 +22776,9 @@ resource Token has store {
     amount: u64,
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -22876,9 +22823,9 @@ resource Token has store {
     amount: u64
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result =
@@ -22911,13 +22858,13 @@ resource PlainToken has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     return create Token { amount: amount }
-}
 
-action mint_plain(amount: u64) -> PlainToken {
+action mint_plain(amount: u64) -> PlainToken
+where
     return create PlainToken { amount: amount }
-}
 "#;
 
         let ckb_metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -22951,9 +22898,9 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     return create Token { amount: amount }
-}
 "#;
 
         let mut metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -22977,9 +22924,9 @@ struct TokenSnapshot {
     amount: u64
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result =
@@ -23027,9 +22974,9 @@ struct TokenSnapshot {
         let program = r#"
 module vm::minimal
 
-action main() -> u64 {
+action main() -> u64
+where
     return 0
-}
 "#;
 
         let result =
@@ -23048,9 +22995,9 @@ action main() -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64 {
+action spend(amount: u64) -> u64
+where
     return amount
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23093,9 +23040,9 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64 {
+action spend(amount: u64) -> u64
+where
     return amount
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23113,9 +23060,9 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action owned(owner: Address) -> u64 {
+action owned(owner: Address) -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23148,12 +23095,12 @@ resource C has store, destroy {
     value: u64,
 }
 
-action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
+action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64
+where
     destroy a
     destroy b
     destroy c
     return required
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23186,21 +23133,21 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action bad(items: Vec<Address>) -> u64 {
+action bad(items: Vec<Address>) -> u64
+where
     return 0
-}
 
-action hashes(items: Vec<Hash>) -> u64 {
+action hashes(items: Vec<Hash>) -> u64
+where
     return 0
-}
 
-action nested(items: Vec<Vec<u8>>) -> u64 {
+action nested(items: Vec<Vec<u8>>) -> u64
+where
     return 0
-}
 
-action raw(data: Vec<u8>) -> u64 {
+action raw(data: Vec<u8>) -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23293,9 +23240,9 @@ module app::main
 
 use dep::token::Token
 
-action pass_through(token: Token) -> Token {
+action pass_through(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -23331,9 +23278,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23363,9 +23310,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23396,9 +23343,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23435,9 +23382,9 @@ out_dir = "artifacts"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23471,9 +23418,9 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23507,9 +23454,9 @@ target_profile = "ckb"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23544,9 +23491,9 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23580,9 +23527,9 @@ token_std = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23615,9 +23562,9 @@ token_std = { path = "../missing_dep" }
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23648,9 +23595,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23695,9 +23642,9 @@ module demo::main
 
 use demo::helper::Token
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -23734,9 +23681,9 @@ app_pkg = { path = "../app_pkg" }
             r#"
 module dep::main
 
-action dep_ping() -> u64 {
+action dep_ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23758,9 +23705,9 @@ dep_pkg = { path = "../dep_pkg" }
             r#"
 module app::main
 
-action app_ping() -> u64 {
+action app_ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23805,9 +23752,9 @@ module demo::main
 
 use demo::token::Token
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -23839,9 +23786,9 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -23874,9 +23821,9 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();

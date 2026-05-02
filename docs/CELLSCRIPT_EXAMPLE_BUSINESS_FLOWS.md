@@ -39,12 +39,12 @@ and same-symbol merge flows.
 flowchart TD
     A["MintAuthority input Cell"] --> B["mint"]
     B --> C["Check minted plus amount <= max_supply"]
-    C --> D["Mutate MintAuthority.minted"]
+    C --> D["Constrain MintAuthority output minted field"]
     D --> E["Create Token output Cell for recipient"]
 
     F["Token input Cell"] --> G["transfer_token"]
     G --> H["Consume old Token"]
-    H --> I["Create replacement Token locked to recipient"]
+    H --> I["Create proposed Token locked to recipient"]
 
     J["Token input Cell"] --> K["burn"]
     K --> L["Check amount > 0"]
@@ -78,21 +78,21 @@ flowchart TD
     J["Token A input Cell"] --> I
     I --> K["Check input symbol and slippage"]
     K --> L["Consume input token"]
-    L --> M["Replace Pool reserves"]
+    L --> M["Update Pool reserves"]
     M --> N["Create Token B output Cell"]
 
     O["Pool input Cell"] --> P["add_liquidity"]
     Q["Token A input Cell"] --> P
     R["Token B input Cell"] --> P
     P --> S["Check token symbols"]
-    S --> T["Replace Pool reserves and total LP"]
+    S --> T["Update Pool reserves and total LP"]
     T --> U["Create LPReceipt output Cell"]
 
     V["Pool input Cell"] --> W["remove_liquidity"]
     X["LPReceipt input Cell"] --> W
     W --> Y["Check receipt pool id"]
     Y --> Z["Destroy LPReceipt"]
-    Z --> AA["Replace Pool reserves and total LP"]
+    Z --> AA["Update Pool reserves and total LP"]
     AA --> AB["Create Token A and Token B outputs"]
 ```
 
@@ -144,7 +144,7 @@ flowchart TD
     H --> I["add_signature"]
     D --> I
     I --> J["Check signer, expiry, and no duplicate signature"]
-    J --> K["Append Signature to Proposal replacement"]
+    J --> K["Append Signature to proposed Proposal output"]
     K --> L["Create SignatureConfirmation receipt"]
 
     H --> M["execute_proposal"]
@@ -186,12 +186,12 @@ and batch mint flows.
 flowchart TD
     A["Collection input Cell"] --> B["mint"]
     B --> C["Check supply below max"]
-    C --> D["Replace Collection total_supply"]
+    C --> D["Update Collection total_supply"]
     D --> E["Create NFT output Cell"]
 
     F["NFT input Cell"] --> G["transfer"]
     G --> H["Check recipient differs from owner"]
-    H --> I["Replace NFT.owner"]
+    H --> I["Update NFT.owner"]
 
     F --> J["create_listing"]
     J --> K["Check positive price"]
@@ -203,7 +203,7 @@ flowchart TD
     F --> O["buy_from_listing"]
     L --> O
     O --> P["Check payment covers price"]
-    P --> Q["Replace NFT.owner with buyer"]
+    P --> Q["Update NFT.owner with buyer"]
     Q --> R["Destroy Listing"]
     R --> S["Create royalty and seller payment receipts"]
 
@@ -213,7 +213,7 @@ flowchart TD
     F --> W["accept_offer"]
     V --> W
     W --> X["Check offer not expired"]
-    X --> Y["Replace NFT.owner with buyer"]
+    X --> Y["Update NFT.owner with buyer"]
     Y --> Z["Destroy Offer"]
     Z --> AA["Create royalty and seller payment receipts"]
 
@@ -222,7 +222,7 @@ flowchart TD
 
     A --> AD["batch_mint"]
     AD --> AE["Check capacity for four new NFTs"]
-    AE --> AF["Replace Collection total_supply"]
+    AE --> AF["Update Collection total_supply"]
     AF --> AG["Create four NFT output Cells"]
 ```
 
@@ -278,7 +278,7 @@ flowchart TD
 
     U --> V["approve_emergency_release"]
     V --> W["Check approver not duplicated"]
-    W --> X["Append approver to replacement EmergencyRelease"]
+    W --> X["Append approver to proposed EmergencyRelease output"]
 
     D --> Y["execute_emergency_release"]
     K --> Y
@@ -289,7 +289,7 @@ flowchart TD
 
     D --> AC["extend_lock"]
     AC --> AD["Check owner and still locked"]
-    AD --> AE["Replace TimeLock.unlock_height"]
+    AD --> AE["Update TimeLock.unlock_height"]
 
     AF["Four owner and height pairs"] --> AG["batch_create_locks"]
     AG --> AH["Create four TimeLock Cells"]

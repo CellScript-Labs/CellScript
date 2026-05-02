@@ -13,10 +13,10 @@ concepts:
 |---|---|
 | `resource` | Linear Cell-backed asset, represented by input/output Cells and typed data. |
 | `shared` | Contention-sensitive state Cell, read through CellDeps or updated by consume/create. |
-| `receipt` | Single-use proof Cell for lifecycle, claim, settlement, or protocol evidence. |
+| `receipt` | Single-use proof Cell for claim, settlement, or protocol evidence. |
 | `consume` | Spend an input Cell. |
 | `create` | Materialize a typed output Cell. |
-| `read_ref` | Load read-only CellDep-backed state. |
+| `read param: T` / `read_ref<T>()` | Load read-only CellDep-backed state. |
 | `action` | Transaction-shaped state transition entrypoint. |
 | `lock` | Spend predicate entrypoint compiled to ckb-vm RISC-V. |
 | `protected` | Marks a typed input Cell view guarded by the current lock invocation. |
@@ -66,7 +66,7 @@ split across compiler metadata, builders, and production evidence.
 |---|---|---|
 | Signer authorization | `witness Address` parameters can prove equality only inside explicit lock predicates such as `vesting_admin`; they still do not prove witness-sighash ownership by themselves. | Add explicit script-args binding, script-hash policy, sighash verification, and later first-class verified signer binding. |
 | Lock behavior | All 16 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
-| Explicit Cell replacements | Metadata exposes input/output access through `replace before -> after`; source no longer looks like in-place account storage. | Keep continuity policy explicit for type id, lock, data schema, and capacity. |
+| Explicit Cell updates | Metadata exposes input/output access through action signatures and `require` constraints; source no longer looks like in-place account storage. | Keep continuity policy explicit for type id, lock, data schema, and capacity. |
 | Capacity policy | Capacity evidence is builder/runtime-required and validated by reports. | Promote common capacity requirements into declarative DSL policy where practical. |
 | Timelock policy | since/header/runtime features are visible in metadata. | Make since/header assumptions more directly declarative and statically auditable. |
 | Collection examples | `examples/language/registry.cell`, its top-level compatibility mirror `examples/registry.cell`, and `examples/language/order_book.cell` cover bounded local Vec language behavior. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |

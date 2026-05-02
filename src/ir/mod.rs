@@ -36,13 +36,13 @@ pub struct IrTypeDef {
     pub fields: Vec<IrField>,
     pub capabilities: Vec<Capability>,
     pub claim_output: Option<IrType>,
-    pub lifecycle_states: Option<Vec<String>>,
-    pub lifecycle_state_field: Option<String>,
-    pub lifecycle_rules: Vec<IrLifecycleRule>,
+    pub flow_states: Option<Vec<String>>,
+    pub flow_state_field: Option<String>,
+    pub flow_rules: Vec<IrFlowRule>,
 }
 
 #[derive(Debug, Clone)]
-pub struct IrLifecycleRule {
+pub struct IrFlowRule {
     pub from: String,
     pub to: String,
     pub from_index: usize,
@@ -181,15 +181,8 @@ pub struct WriteIntent {
     pub operation: String,
     pub ty: String,
     pub binding: String,
-    pub source: WriteIntentSource,
     pub index: usize,
     pub fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteIntentSource {
-    Output,
-    ReplacementOutput,
 }
 
 #[derive(Debug, Clone)]
@@ -330,10 +323,9 @@ pub struct IrGenerator {
     type_fields: HashMap<String, HashMap<String, IrType>>,
     type_kinds: HashMap<String, IrTypeKind>,
     receipt_claim_outputs: HashMap<String, Option<IrType>>,
-    lifecycle_states: HashMap<String, Vec<String>>,
-    lifecycle_state_fields: HashMap<String, String>,
-    lifecycle_rules: HashMap<String, Vec<IrLifecycleRule>>,
-    state_machine_action_edges: HashMap<String, Vec<IrStateTransitionEdge>>,
+    flow_states: HashMap<String, Vec<String>>,
+    flow_state_fields: HashMap<String, String>,
+    flow_rules: HashMap<String, Vec<IrFlowRule>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, Expr>,
     function_effects: HashMap<String, EffectClass>,
@@ -371,10 +363,9 @@ impl IrGenerator {
             type_fields: HashMap::new(),
             type_kinds: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
-            lifecycle_states: HashMap::new(),
-            lifecycle_state_fields: HashMap::new(),
-            lifecycle_rules: HashMap::new(),
-            state_machine_action_edges: HashMap::new(),
+            flow_states: HashMap::new(),
+            flow_state_fields: HashMap::new(),
+            flow_rules: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -397,14 +388,14 @@ impl IrGenerator {
         type_fields: HashMap<String, HashMap<String, IrType>>,
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
-        lifecycle_states: HashMap<String, Vec<String>>,
+        flow_states: HashMap<String, Vec<String>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_return_types: HashMap<String, Option<IrType>>,
     ) -> Self {
         let mut generator = Self::with_type_fields(module_name, type_fields);
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
-        generator.lifecycle_states.extend(lifecycle_states);
+        generator.flow_states.extend(flow_states);
         generator.external_function_effects = external_function_effects;
         generator.external_function_return_types = external_function_return_types;
         generator
@@ -468,12 +459,12 @@ impl IrGenerator {
                     self.function_return_types.insert(lock.name.clone(), Some(IrType::Bool));
                     self.function_return_types.insert(format!("{}::{}", self.module.name, lock.name), Some(IrType::Bool));
                 }
-                Item::StateMachine(_) => {}
+                Item::Flow(_) => {}
                 _ => {}
             }
         }
 
-        self.register_state_machines(&ast.items);
+        self.register_flows(&ast.items);
         self.infer_module_function_effects(&ast.items);
 
         for item in &ast.items {
@@ -511,7 +502,7 @@ impl IrGenerator {
                     let ir_item = IrItem::Lock(self.gen_lock(l));
                     self.module.items.push(ir_item);
                 }
-                Item::StateMachine(_) => {}
+                Item::Flow(_) => {}
                 Item::Use(_) => {}
             }
         }
@@ -522,14 +513,14 @@ impl IrGenerator {
         }
     }
 
-    fn register_state_machines(&mut self, items: &[Item]) {
+    fn register_flows(&mut self, items: &[Item]) {
         for item in items {
-            let Item::StateMachine(machine) = item else {
+            let Item::Flow(machine) = item else {
                 continue;
             };
             let type_name = machine.target.base.clone();
             let field_name = machine.target.field.clone();
-            let states = self.state_machine_states(machine);
+            let states = self.flow_states_for_decl(machine);
             let rules = machine
                 .transitions
                 .iter()
@@ -538,41 +529,17 @@ impl IrGenerator {
                     let to = self.canonical_state_name(&type_name, &transition.to);
                     let from_index = states.iter().position(|state| state == &from)?;
                     let to_index = states.iter().position(|state| state == &to)?;
-                    Some(IrLifecycleRule { from, to, from_index, to_index })
+                    Some(IrFlowRule { from, to, from_index, to_index })
                 })
                 .collect::<Vec<_>>();
 
-            for transition in &machine.transitions {
-                let Some(action) = &transition.action else {
-                    continue;
-                };
-                let from = self.canonical_state_name(&type_name, &transition.from);
-                let to = self.canonical_state_name(&type_name, &transition.to);
-                let Some(from_index) = states.iter().position(|state| state == &from) else {
-                    continue;
-                };
-                let Some(to_index) = states.iter().position(|state| state == &to) else {
-                    continue;
-                };
-                self.state_machine_action_edges.entry(action.clone()).or_default().push(IrStateTransitionEdge {
-                    input_binding: None,
-                    output_binding: None,
-                    type_name: type_name.clone(),
-                    field_name: field_name.clone(),
-                    from,
-                    to,
-                    from_index,
-                    to_index,
-                });
-            }
-
-            self.lifecycle_states.insert(type_name.clone(), states);
-            self.lifecycle_state_fields.insert(type_name.clone(), field_name);
-            self.lifecycle_rules.insert(type_name, rules);
+            self.flow_states.insert(type_name.clone(), states);
+            self.flow_state_fields.insert(type_name.clone(), field_name);
+            self.flow_rules.insert(type_name, rules);
         }
     }
 
-    fn state_machine_states(&self, machine: &StateMachineDef) -> Vec<String> {
+    fn flow_states_for_decl(&self, machine: &FlowDef) -> Vec<String> {
         if let Some(fields) = self.type_fields.get(&machine.target.base) {
             if let Some(IrType::Named(enum_name)) = fields.get(&machine.target.field) {
                 if let Some(variants) = self.enum_variants.get(enum_name) {
@@ -608,9 +575,9 @@ impl IrGenerator {
             fields: self.layout_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: self.lifecycle_states.get(&resource.name).cloned(),
-            lifecycle_state_field: self.lifecycle_state_fields.get(&resource.name).cloned(),
-            lifecycle_rules: self.lifecycle_rules.get(&resource.name).cloned().unwrap_or_default(),
+            flow_states: self.flow_states.get(&resource.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&resource.name).cloned(),
+            flow_rules: self.flow_rules.get(&resource.name).cloned().unwrap_or_default(),
         }
     }
 
@@ -623,9 +590,9 @@ impl IrGenerator {
             fields: self.layout_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: self.lifecycle_states.get(&shared.name).cloned(),
-            lifecycle_state_field: self.lifecycle_state_fields.get(&shared.name).cloned(),
-            lifecycle_rules: self.lifecycle_rules.get(&shared.name).cloned().unwrap_or_default(),
+            flow_states: self.flow_states.get(&shared.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&shared.name).cloned(),
+            flow_rules: self.flow_rules.get(&shared.name).cloned().unwrap_or_default(),
         }
     }
 
@@ -638,9 +605,9 @@ impl IrGenerator {
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(Self::convert_type),
-            lifecycle_states: self.lifecycle_states.get(&receipt.name).cloned(),
-            lifecycle_state_field: self.lifecycle_state_fields.get(&receipt.name).cloned(),
-            lifecycle_rules: self.lifecycle_rules.get(&receipt.name).cloned().unwrap_or_default(),
+            flow_states: self.flow_states.get(&receipt.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
+            flow_rules: self.flow_rules.get(&receipt.name).cloned().unwrap_or_default(),
         }
     }
 
@@ -653,9 +620,9 @@ impl IrGenerator {
             fields: self.layout_fields(&struct_def.fields),
             capabilities: Vec::new(),
             claim_output: None,
-            lifecycle_states: self.lifecycle_states.get(&struct_def.name).cloned(),
-            lifecycle_state_field: self.lifecycle_state_fields.get(&struct_def.name).cloned(),
-            lifecycle_rules: self.lifecycle_rules.get(&struct_def.name).cloned().unwrap_or_default(),
+            flow_states: self.flow_states.get(&struct_def.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&struct_def.name).cloned(),
+            flow_rules: self.flow_rules.get(&struct_def.name).cloned().unwrap_or_default(),
         }
     }
 
@@ -840,28 +807,19 @@ impl IrGenerator {
     }
 
     fn action_state_transition_edges(&self, action: &ActionDef) -> Vec<IrStateTransitionEdge> {
-        let mut edges = self.state_machine_action_edges.get(&action.name).cloned().unwrap_or_default();
+        let mut edges = Vec::new();
         for state_edge in &action.state_edges {
-            if let Some(path) = &state_edge.path {
-                let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
-                    continue;
-                };
-                let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
-                    continue;
-                };
-                if let Some(mut lowered) = self.state_transition_edge_for(type_name, &path.field, &state_edge.from, &state_edge.to) {
-                    lowered.input_binding = Some(path.base.clone());
-                    lowered.output_binding = state_edge.to_path.as_ref().map(|to_path| to_path.base.clone());
-                    edges.push(lowered);
-                }
-            } else {
-                for candidate in self.state_machine_action_edges.get(&action.name).into_iter().flatten() {
-                    if candidate.from == self.canonical_state_name(&candidate.type_name, &state_edge.from)
-                        && candidate.to == self.canonical_state_name(&candidate.type_name, &state_edge.to)
-                    {
-                        edges.push(candidate.clone());
-                    }
-                }
+            let path = &state_edge.path;
+            let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
+                continue;
+            };
+            let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
+                continue;
+            };
+            if let Some(mut lowered) = self.state_transition_edge_for(type_name, &path.field, &state_edge.from, &state_edge.to) {
+                lowered.input_binding = Some(path.base.clone());
+                lowered.output_binding = Some(state_edge.to_path.base.clone());
+                edges.push(lowered);
             }
         }
 
@@ -882,10 +840,10 @@ impl IrGenerator {
     }
 
     fn state_transition_edge_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrStateTransitionEdge> {
-        if self.lifecycle_state_fields.get(type_name).is_some_and(|field| field != field_name) {
+        if self.flow_state_fields.get(type_name).is_some_and(|field| field != field_name) {
             return None;
         }
-        let states = self.lifecycle_states.get(type_name)?;
+        let states = self.flow_states.get(type_name)?;
         let from = self.canonical_state_name(type_name, from);
         let to = self.canonical_state_name(type_name, to);
         let from_index = states.iter().position(|state| state == &from)?;
@@ -940,7 +898,7 @@ impl IrGenerator {
     }
 
     fn analyze_effect_class(&self, action: &ActionDef) -> EffectClass {
-        if !action.replacements.is_empty() {
+        if !action_core_input_binding_names(action).is_empty() {
             return EffectClass::Mutating;
         }
         self.analyze_body_effect_class(&action.body)
@@ -1206,7 +1164,6 @@ impl IrGenerator {
             operation: pattern.operation.clone(),
             ty: pattern.ty.clone(),
             binding: pattern.binding.clone(),
-            source: WriteIntentSource::Output,
             index,
             fields: pattern.fields.iter().map(|(field, _)| field.clone()).collect(),
         });
@@ -1214,7 +1171,6 @@ impl IrGenerator {
             operation: pattern.operation.clone(),
             ty: pattern.ty.clone(),
             binding: pattern.binding.clone(),
-            source: WriteIntentSource::ReplacementOutput,
             index: pattern.output_index,
             fields: pattern.fields.clone(),
         });
@@ -1784,8 +1740,8 @@ impl IrGenerator {
                     LoweredExpr { operand: zero, current: Some(current) }
                 } else if let Some(enum_variant) = self.lower_enum_variant(name) {
                     LoweredExpr { operand: enum_variant, current: Some(current) }
-                } else if let Some(lifecycle_state) = self.lower_lifecycle_state_name(name) {
-                    LoweredExpr { operand: lifecycle_state, current: Some(current) }
+                } else if let Some(flow_state) = self.lower_flow_state_name(name) {
+                    LoweredExpr { operand: flow_state, current: Some(current) }
                 } else {
                     self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), Span::default());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -2432,7 +2388,7 @@ impl IrGenerator {
 
         for (field_name, field_expr) in &create.fields {
             let expected_ty = self.type_fields.get(&create.ty).and_then(|fields| fields.get(field_name)).cloned();
-            let lowered = if let Some(state_operand) = self.lower_lifecycle_state_initializer(&create.ty, field_name, field_expr) {
+            let lowered = if let Some(state_operand) = self.lower_flow_state_initializer(&create.ty, field_name, field_expr) {
                 LoweredExpr { operand: state_operand, current: Some(active) }
             } else if let Some(expected_ty) = expected_ty {
                 self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
@@ -2477,14 +2433,14 @@ impl IrGenerator {
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
-    fn lower_lifecycle_state_initializer(&self, type_name: &str, field_name: &str, expr: &Expr) -> Option<IrOperand> {
-        if self.lifecycle_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
+    fn lower_flow_state_initializer(&self, type_name: &str, field_name: &str, expr: &Expr) -> Option<IrOperand> {
+        if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return None;
         }
         let Expr::Identifier(state_name) = expr else {
             return None;
         };
-        let index = self.lifecycle_state_index(type_name, state_name)?;
+        let index = self.flow_state_index(type_name, state_name)?;
         Some(IrOperand::Const(IrConst::U64(index as u64)))
     }
 
@@ -3684,14 +3640,14 @@ impl IrGenerator {
         Some(IrOperand::Const(IrConst::U64(ordinal)))
     }
 
-    fn lower_lifecycle_state_name(&self, name: &str) -> Option<IrOperand> {
+    fn lower_flow_state_name(&self, name: &str) -> Option<IrOperand> {
         let (type_name, _) = name.rsplit_once("::")?;
-        let index = self.lifecycle_state_index(type_name, name)?;
+        let index = self.flow_state_index(type_name, name)?;
         Some(IrOperand::Const(IrConst::U64(index as u64)))
     }
 
-    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
-        let states = self.lifecycle_states.get(type_name)?;
+    fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.flow_states.get(type_name)?;
         if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
             if qualified_type != type_name {
                 return None;
@@ -3864,7 +3820,7 @@ fn generate_with_resolver_inner(
     let mut type_fields = HashMap::new();
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
-    let mut lifecycle_states = HashMap::new();
+    let mut flow_states = HashMap::new();
     let mut external_type_defs = Vec::new();
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
@@ -3886,8 +3842,8 @@ fn generate_with_resolver_inner(
                 if let Some(output) = resolver_receipt_claim_output_to_ir(&type_def) {
                     receipt_claim_outputs.insert(local_name.clone(), output);
                 }
-                if let Some(states) = resolver_lifecycle_states_to_ir(&type_def) {
-                    lifecycle_states.insert(local_name.clone(), states);
+                if let Some(states) = resolver_flow_states_to_ir(&type_def) {
+                    flow_states.insert(local_name.clone(), states);
                 }
                 if let Some(fields) = resolver_type_fields_to_ir(&type_def) {
                     type_fields.insert(local_name.clone(), fields);
@@ -3918,7 +3874,7 @@ fn generate_with_resolver_inner(
         type_fields,
         type_kinds,
         receipt_claim_outputs,
-        lifecycle_states,
+        flow_states,
         external_function_effects,
         external_function_return_types,
     );
@@ -4235,7 +4191,7 @@ fn ast_type_to_ir(ty: &Type) -> IrType {
 }
 
 fn infer_action_effect_without_call_graph(action: &ActionDef) -> EffectClass {
-    if !action.replacements.is_empty() {
+    if !action_core_input_binding_names(action).is_empty() {
         return EffectClass::Mutating;
     }
     let mut footprint = EffectFootprint::default();
@@ -4426,9 +4382,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_state_field: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
         }),
         TypeDef::Shared(shared) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4438,9 +4394,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_state_field: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
         }),
         TypeDef::Receipt(receipt) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4450,9 +4406,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
-            lifecycle_states: None,
-            lifecycle_state_field: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4462,9 +4418,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&struct_def.fields),
             capabilities: Vec::new(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_state_field: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
         }),
         TypeDef::Enum(_) => None,
     }
@@ -4516,7 +4472,7 @@ fn resolver_receipt_claim_output_to_ir(type_def: &TypeDef) -> Option<Option<IrTy
     }
 }
 
-fn resolver_lifecycle_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
+fn resolver_flow_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
     match type_def {
         TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
         TypeDef::Receipt(_) => None,
@@ -4549,7 +4505,209 @@ fn action_output_binding_names(action: &ActionDef) -> HashSet<String> {
 }
 
 fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
-    action.replacements.iter().map(|replacement| replacement.input.clone()).collect()
+    action_inferred_lineage_bindings(action).keys().cloned().collect()
+}
+
+fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    for state_edge in &action.state_edges {
+        bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
+    }
+
+    let consumed = action_consumed_bindings(action);
+    let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, type_name) in action_output_binding_types(action) {
+        if bindings.values().any(|bound_output| bound_output == &name) {
+            continue;
+        }
+        outputs_by_type.entry(type_name).or_default().push(name);
+    }
+
+    let mut inputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for param in &action.params {
+        if consumed.contains(&param.name) || bindings.contains_key(&param.name) {
+            continue;
+        }
+        let Some(type_name) = ast_named_cell_type_name(&param.ty) else {
+            continue;
+        };
+        if param.source != ParamSource::Default && param.source != ParamSource::Input {
+            continue;
+        }
+        if param.is_ref || param.is_mut || param.is_read_ref {
+            continue;
+        }
+        inputs_by_type.entry(type_name.to_string()).or_default().push(param.name.clone());
+    }
+
+    for (type_name, inputs) in inputs_by_type {
+        let Some(outputs) = outputs_by_type.get(&type_name) else {
+            continue;
+        };
+        if inputs.len() == 1 && outputs.len() == 1 {
+            bindings.insert(inputs[0].clone(), outputs[0].clone());
+        }
+    }
+
+    bindings
+}
+
+fn action_output_binding_types(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    for output in &action.outputs {
+        if let Some(type_name) = ast_named_cell_type_name(&output.ty) {
+            bindings.insert(output.name.clone(), type_name.to_string());
+        }
+    }
+    for param in &action.params {
+        if param.source == ParamSource::Output {
+            if let Some(type_name) = ast_named_cell_type_name(&param.ty) {
+                bindings.insert(param.name.clone(), type_name.to_string());
+            }
+        }
+    }
+    bindings
+}
+
+fn ast_named_cell_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) => Some(name.split('<').next().unwrap_or(name.as_str())),
+        _ => None,
+    }
+}
+
+fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    collect_consumed_bindings_from_stmts(&action.body, &mut bindings);
+    bindings
+}
+
+fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_consumed_bindings_from_stmts(else_branch, bindings);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_consumed_bindings_from_expr(&for_stmt.iterable, bindings);
+                collect_consumed_bindings_from_stmts(&for_stmt.body, bindings);
+            }
+            Stmt::While(while_stmt) => {
+                collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
+            }
+        }
+    }
+}
+
+fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
+    match expr {
+        Expr::Consume(consume) => {
+            if let Expr::Identifier(name) = consume.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&consume.expr, bindings);
+        }
+        Expr::Assign(assign) => {
+            collect_consumed_bindings_from_expr(&assign.target, bindings);
+            collect_consumed_bindings_from_expr(&assign.value, bindings);
+        }
+        Expr::Binary(binary) => {
+            collect_consumed_bindings_from_expr(&binary.left, bindings);
+            collect_consumed_bindings_from_expr(&binary.right, bindings);
+        }
+        Expr::Unary(unary) => collect_consumed_bindings_from_expr(&unary.expr, bindings),
+        Expr::Call(call) => {
+            collect_consumed_bindings_from_expr(&call.func, bindings);
+            for arg in &call.args {
+                collect_consumed_bindings_from_expr(arg, bindings);
+            }
+        }
+        Expr::FieldAccess(field) => collect_consumed_bindings_from_expr(&field.expr, bindings),
+        Expr::Index(index) => {
+            collect_consumed_bindings_from_expr(&index.expr, bindings);
+            collect_consumed_bindings_from_expr(&index.index, bindings);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
+        Expr::Destroy(destroy) => {
+            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&destroy.expr, bindings);
+        }
+        Expr::ReadRef(_) => {}
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
+        Expr::Assert(assert_expr) => {
+            collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
+        }
+        Expr::Require(require_expr) => {
+            collect_consumed_bindings_from_expr(&require_expr.condition, bindings);
+            if let Some(message) = &require_expr.message {
+                collect_consumed_bindings_from_expr(message, bindings);
+            }
+        }
+        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_consumed_bindings_from_expr(item, bindings);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_consumed_bindings_from_expr(&if_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.then_branch, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.else_branch, bindings);
+        }
+        Expr::Cast(cast) => collect_consumed_bindings_from_expr(&cast.expr, bindings),
+        Expr::Range(range) => {
+            collect_consumed_bindings_from_expr(&range.start, bindings);
+            collect_consumed_bindings_from_expr(&range.end, bindings);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
+            for arm in &match_expr.arms {
+                collect_consumed_bindings_from_expr(&arm.value, bindings);
+            }
+        }
+        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
+    }
 }
 
 fn const_usize_operand(operand: &IrOperand) -> Option<usize> {

@@ -9,7 +9,7 @@ not be collapsed into one generic "collections are supported" claim.
 
 | Feature | Schema/ABI | IR construction | Runtime verifier helper | Production status |
 |---|---:|---:|---:|---|
-| `Vec<u8>` | Yes | Targeted | Targeted create/mutate verification | Supported for documented witness and cell-data paths |
+| `Vec<u8>` | Yes | Targeted | Targeted create/update-output verification | Supported for documented witness and cell-data paths |
 | `String` | Yes | Targeted | Byte-vector verification | Supported as UTF-8 bytes at the schema boundary |
 | `Vec<Address>` | Yes | Targeted | Fixed-element vector verification | Supported where metadata marks a Molecule dynamic field |
 | `Vec<Hash>` | Yes | Targeted | Fixed-element vector verification | Supported where metadata marks a Molecule dynamic field |
@@ -48,7 +48,7 @@ evidence:
 
 - `molecule_schema_manifest` entry
 - dynamic field declaration where applicable
-- generated create or mutate verifier marker
+- generated create or update-output verifier marker
 - constraints or production-gate evidence for the entrypoint that uses it
 
 Unsupported generic collections must not silently compile into a weaker runtime
@@ -64,8 +64,8 @@ Use dynamic vectors for data that is still a single cell field, such as signer
 lists, proposal payload bytes, NFT attributes, or launch distributions.
 
 Do not model ownership of multiple independent linear cells as a generic vector
-or map. Use explicit action parameters and explicit `consume`, `transfer`,
-`destroy`, or `mutate` operations until the language gains a verifier-backed
+or map. Use explicit action parameters, named output bindings, and explicit
+`consume`, `transfer`, or `destroy` operations until the language gains a verifier-backed
 collection ownership primitive.
 
 The missing verifier pieces are explicit cell consumption, typed collection

@@ -2,10 +2,10 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use std::collections::{HashMap, HashSet};
 
-pub const LIFECYCLE_STATE_FIELD_NAME: &str = "state";
+pub const FLOW_STATE_FIELD_NAME: &str = "state";
 
 #[derive(Debug, Clone)]
-struct StateMachineSpec {
+struct FlowSpec {
     states: Vec<String>,
     state_field_name: String,
     state_field_span: Option<Span>,
@@ -13,18 +13,18 @@ struct StateMachineSpec {
 
 #[derive(Debug, Clone, Default)]
 struct ActionStateContext {
-    variable_state_machine_types: HashMap<String, String>,
-    consumed_state_machine_types: HashSet<String>,
+    variable_flow_types: HashMap<String, String>,
+    consumed_flow_types: HashSet<String>,
     integer_aliases: HashMap<String, u64>,
 }
 
-/// Validate declared state-machine transitions and statically check
-/// state-machine-aware creates that can be decided from source.
+/// Validate declared flow transitions and statically check
+/// flow-aware creates that can be decided from source.
 pub fn check(module: &Module) -> Result<()> {
     let mut specs = HashMap::new();
 
     for item in &module.items {
-        let Item::StateMachine(machine) = item else {
+        let Item::Flow(machine) = item else {
             continue;
         };
         let mut states = Vec::new();
@@ -41,7 +41,7 @@ pub fn check(module: &Module) -> Result<()> {
         }
         specs.insert(
             machine.target.base.clone(),
-            StateMachineSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
+            FlowSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
         );
     }
 
@@ -62,13 +62,13 @@ pub fn check(module: &Module) -> Result<()> {
     Ok(())
 }
 
-fn action_state_context(specs: &HashMap<String, StateMachineSpec>, action: &ActionDef) -> ActionStateContext {
+fn action_state_context(specs: &HashMap<String, FlowSpec>, action: &ActionDef) -> ActionStateContext {
     let mut context = ActionStateContext::default();
 
     for param in &action.params {
         if let Type::Named(ty) = &param.ty {
             if specs.contains_key(ty) {
-                context.variable_state_machine_types.insert(param.name.clone(), ty.clone());
+                context.variable_flow_types.insert(param.name.clone(), ty.clone());
             }
         }
     }
@@ -77,7 +77,7 @@ fn action_state_context(specs: &HashMap<String, StateMachineSpec>, action: &Acti
     context
 }
 
-fn collect_state_context_from_stmts(specs: &HashMap<String, StateMachineSpec>, context: &mut ActionStateContext, stmts: &[Stmt]) {
+fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, stmts: &[Stmt]) {
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => {
@@ -85,11 +85,11 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, StateMachineSpec>, c
                     if let Some(value) = integer_literal(&let_stmt.value) {
                         context.integer_aliases.insert(name.clone(), value);
                     }
-                    if let Some(ty) = state_machine_expr_type(specs, context, &let_stmt.value) {
-                        context.variable_state_machine_types.insert(name.clone(), ty);
+                    if let Some(ty) = flow_expr_type(specs, context, &let_stmt.value) {
+                        context.variable_flow_types.insert(name.clone(), ty);
                     } else if let Some(Type::Named(ty)) = &let_stmt.ty {
                         if specs.contains_key(ty) {
-                            context.variable_state_machine_types.insert(name.clone(), ty.clone());
+                            context.variable_flow_types.insert(name.clone(), ty.clone());
                         }
                     }
                 }
@@ -116,12 +116,12 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, StateMachineSpec>, c
     }
 }
 
-fn collect_state_context_from_expr(specs: &HashMap<String, StateMachineSpec>, context: &mut ActionStateContext, expr: &Expr) {
+fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, expr: &Expr) {
     match expr {
         Expr::Consume(consume) => {
             if let Expr::Identifier(name) = consume.expr.as_ref() {
-                if let Some(ty) = context.variable_state_machine_types.get(name) {
-                    context.consumed_state_machine_types.insert(ty.clone());
+                if let Some(ty) = context.variable_flow_types.get(name) {
+                    context.consumed_flow_types.insert(ty.clone());
                 }
             }
             collect_state_context_from_expr(specs, context, &consume.expr);
@@ -202,23 +202,23 @@ fn collect_state_context_from_expr(specs: &HashMap<String, StateMachineSpec>, co
     }
 }
 
-fn state_machine_expr_type(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, expr: &Expr) -> Option<String> {
+fn flow_expr_type(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Identifier(name) => context.variable_state_machine_types.get(name).cloned(),
+        Expr::Identifier(name) => context.variable_flow_types.get(name).cloned(),
         Expr::Create(create) if specs.contains_key(&create.ty) => Some(create.ty.clone()),
-        Expr::Cast(cast) => state_machine_expr_type(specs, context, &cast.expr),
+        Expr::Cast(cast) => flow_expr_type(specs, context, &cast.expr),
         _ => None,
     }
 }
 
-fn validate_stmt_list(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, stmts: &[Stmt]) -> Result<()> {
+fn validate_stmt_list(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, stmts: &[Stmt]) -> Result<()> {
     for stmt in stmts {
         validate_state_transition_stmt(specs, context, stmt)?;
     }
     Ok(())
 }
 
-fn validate_state_transition_stmt(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, stmt: &Stmt) -> Result<()> {
+fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, stmt: &Stmt) -> Result<()> {
     match stmt {
         Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
         Stmt::Expr(expr) => validate_state_transition_expr(specs, context, expr),
@@ -243,7 +243,7 @@ fn validate_state_transition_stmt(specs: &HashMap<String, StateMachineSpec>, con
     }
 }
 
-fn validate_state_transition_expr(specs: &HashMap<String, StateMachineSpec>, context: &ActionStateContext, expr: &Expr) -> Result<()> {
+fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, expr: &Expr) -> Result<()> {
     match expr {
         Expr::Create(create) => {
             validate_state_transition_create(specs, context, create)?;
@@ -330,7 +330,7 @@ fn validate_state_transition_expr(specs: &HashMap<String, StateMachineSpec>, con
 }
 
 fn validate_state_transition_create(
-    specs: &HashMap<String, StateMachineSpec>,
+    specs: &HashMap<String, FlowSpec>,
     context: &ActionStateContext,
     create: &CreateExpr,
 ) -> Result<()> {
@@ -346,8 +346,8 @@ fn validate_state_transition_create(
         return Err(CompileError::new(format!("create of flow type '{}' must set its state field", create.ty), create.span));
     };
 
-    let updates_existing = context.consumed_state_machine_types.contains(&create.ty);
-    let Some(state_index) = static_state_machine_state_value(state_expr, context, &create.ty, &spec.states) else {
+    let updates_existing = context.consumed_flow_types.contains(&create.ty);
+    let Some(state_index) = static_flow_state_value(state_expr, context, &create.ty, &spec.states) else {
         if !updates_existing {
             return Err(CompileError::new(
                 format!("initial create of flow type '{}' must use a statically known declared state", create.ty),
@@ -359,7 +359,7 @@ fn validate_state_transition_create(
 
     if state_index as usize >= spec.states.len() {
         return Err(CompileError::new(
-            format!("state-machine state index {} is out of range for '{}' with {} states", state_index, create.ty, spec.states.len()),
+            format!("flow state index {} is out of range for '{}' with {} states", state_index, create.ty, spec.states.len()),
             create.span,
         ));
     }
@@ -382,7 +382,7 @@ fn static_integer_value(expr: &Expr, context: &ActionStateContext) -> Option<u64
     }
 }
 
-fn static_state_machine_state_value(expr: &Expr, context: &ActionStateContext, _type_name: &str, states: &[String]) -> Option<u64> {
+fn static_flow_state_value(expr: &Expr, context: &ActionStateContext, _type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
         Expr::Identifier(name) => {
             let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {

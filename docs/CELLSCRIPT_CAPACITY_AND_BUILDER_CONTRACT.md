@@ -18,7 +18,7 @@ For CKB artifacts, `constraints.ckb.capacity_evidence_contract` includes:
 - measured occupied capacity, when supplied by acceptance/builder tooling
 - measured tx size, when supplied by acceptance/builder tooling
 
-State-changing actions that create or mutate outputs require builder evidence.
+State-changing actions that create or update outputs require builder evidence.
 
 ## Measurement Helper
 

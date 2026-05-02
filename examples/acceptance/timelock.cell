@@ -60,7 +60,8 @@ action create_absolute_lock(
     owner: Address,
     unlock_height: u64,
     current_height: u64,
-) -> TimeLock {
+) -> TimeLock
+where
     assert(
         unlock_height > current_height + MIN_LOCK_PERIOD,
         "Unlock height too close"
@@ -78,7 +79,6 @@ action create_absolute_lock(
     };
     
     lock
-}
 
 #[effect(Creating)]
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
@@ -86,7 +86,8 @@ action create_relative_lock(
     owner: Address,
     lock_period: u64,
     current_height: u64,
-) -> TimeLock {
+) -> TimeLock
+where
     assert(lock_period >= MIN_LOCK_PERIOD, "Lock period too short");
     assert(lock_period <= MAX_LOCK_PERIOD, "Lock period too long");
     
@@ -98,7 +99,6 @@ action create_relative_lock(
     };
     
     lock
-}
 
 #[effect(Creating)]
 #[scheduler_hint(sequential, estimated_cycles = 5000)]
@@ -106,7 +106,8 @@ action lock_asset(
     time_lock: &TimeLock,
     asset_type: AssetType,
     amount: u64,
-) -> LockedAsset {
+) -> LockedAsset
+where
     assert(amount > 0, "Amount must be positive");
     
     let locked = create LockedAsset {
@@ -116,7 +117,6 @@ action lock_asset(
     };
     
     locked
-}
 
 #[effect(Creating)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
@@ -124,7 +124,8 @@ action request_release(
     time_lock: &TimeLock,
     requester: Address,
     current_height: u64,
-) -> ReleaseRequest {
+) -> ReleaseRequest
+where
     assert(can_unlock(time_lock, current_height), "Cannot unlock yet");
     
     let request = create ReleaseRequest {
@@ -135,7 +136,6 @@ action request_release(
     };
     
     request
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(sequential, estimated_cycles = 4000)]
@@ -145,7 +145,8 @@ action execute_release(
     request: ReleaseRequest,
     executor: Address,
     current_height: u64,
-) -> ReleaseRecord {
+) -> ReleaseRecord
+where
     assert(time_lock.owner == executor, "Not the owner");
     
     assert(can_unlock(&time_lock, current_height), "Cannot unlock yet");
@@ -171,7 +172,6 @@ action execute_release(
     };
     
     record
-}
 
 #[effect(Creating)]
 #[scheduler_hint(parallel, estimated_cycles = 3000)]
@@ -180,7 +180,8 @@ action request_emergency_release(
     requester: Address,
     reason: String,
     current_height: u64,
-) -> EmergencyRelease {
+) -> EmergencyRelease
+where
     assert(time_lock.owner == requester, "Not the owner");
     
     assert(!can_unlock(time_lock, current_height), "Already unlockable");
@@ -195,7 +196,6 @@ action request_emergency_release(
     };
     
     emergency
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
@@ -205,8 +205,7 @@ action approve_emergency_release(
     approver: Address,
     required_approvals: u8,
 )
-    replace emergency_before -> emergency_after
-{
+where
     for existing in &emergency_before.approvers {
         assert(*existing != approver, "Already approved");
     }
@@ -217,7 +216,6 @@ action approve_emergency_release(
     require emergency_after.approvers.len() == emergency_before.approvers.len() + 1
     require emergency_after.state == emergency_before.state
     
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(sequential, estimated_cycles = 5000)]
@@ -228,7 +226,8 @@ action execute_emergency_release(
     executor: Address,
     required_approvals: u8,
     current_height: u64,
-) -> ReleaseRecord {
+) -> ReleaseRecord
+where
     assert(time_lock.owner == executor, "Not the owner");
     
     assert(
@@ -256,7 +255,6 @@ action execute_emergency_release(
     };
     
     record
-}
 
 #[effect(Mutating)]
 #[scheduler_hint(parallel, estimated_cycles = 2000)]
@@ -267,8 +265,7 @@ action extend_lock(
     owner: Address,
     current_height: u64,
 )
-    replace time_lock_before -> time_lock_after
-{
+where
     assert(time_lock_before.owner == owner, "Not the owner");
     
     assert(!can_unlock(&time_lock_before, current_height), "Already unlocked");
@@ -282,7 +279,6 @@ action extend_lock(
     require time_lock_after.lock_type == time_lock_before.lock_type
     require time_lock_after.unlock_height == new_unlock_height
     require time_lock_after.created_at == time_lock_before.created_at
-}
 
 #[effect(Creating)]
 #[scheduler_hint(sequential, estimated_cycles = 15000)]
@@ -290,7 +286,8 @@ action batch_create_locks(
     owners: [Address; 4],
     unlock_heights: [u64; 4],
     current_height: u64,
-) -> (TimeLock, TimeLock, TimeLock, TimeLock) {
+) -> (TimeLock, TimeLock, TimeLock, TimeLock)
+where
     assert(unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
     assert(unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
     assert(unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close");
@@ -329,7 +326,6 @@ action batch_create_locks(
     };
 
     (lock0, lock1, lock2, lock3)
-}
 
 
 fn can_unlock(time_lock: &TimeLock, current_height: u64) -> bool {

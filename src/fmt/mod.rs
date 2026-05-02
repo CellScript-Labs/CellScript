@@ -74,7 +74,7 @@ impl Formatter {
             Item::Shared(shared) => self.format_type_def("shared", &shared.name, &shared.fields, Some(&shared.capabilities)),
             Item::Receipt(receipt) => self.format_receipt_def(receipt),
             Item::Struct(struct_def) => self.format_type_def("struct", &struct_def.name, &struct_def.fields, None),
-            Item::StateMachine(machine) => self.format_state_machine(machine),
+            Item::Flow(machine) => self.format_flow(machine),
             Item::Const(constant) => {
                 self.push_line(&format!(
                     "const {}: {} = {}",
@@ -132,7 +132,7 @@ impl Formatter {
         }
     }
 
-    fn format_state_machine(&mut self, machine: &StateMachineDef) -> Result<()> {
+    fn format_flow(&mut self, machine: &FlowDef) -> Result<()> {
         let header = if let Some(name) = &machine.name {
             format!("flow {} for {}.{} {{", name, machine.target.base, machine.target.field)
         } else {
@@ -211,32 +211,27 @@ impl Formatter {
         } else if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
-        for replacement in &action.replacements {
-            signature.push_str(&format!(" replace {} -> {}", replacement.input, replacement.output));
-        }
+        self.push_line(&signature);
+        self.indent_level += 1;
         for state_edge in &action.state_edges {
-            let edge = if let Some(path) = &state_edge.path {
-                if let Some(to_path) = &state_edge.to_path {
-                    format!(
-                        "move {}.{} {} -> {}.{} {}",
-                        path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to
-                    )
-                } else {
-                    format!("move {}.{} {} -> {}", path.base, path.field, state_edge.from, state_edge.to)
-                }
-            } else {
-                format!("move {} -> {}", state_edge.from, state_edge.to)
-            };
-            signature.push(' ');
-            signature.push_str(&edge);
+            let path = &state_edge.path;
+            let to_path = &state_edge.to_path;
+            let edge = format!(
+                "move {}.{}: {} -> {}.{}: {}",
+                path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to
+            );
+            self.push_line(&edge);
         }
-        self.push_line(&format!("{} {{", signature));
+        self.indent_level -= 1;
+        if action.body.is_empty() {
+            return Ok(());
+        }
+        self.push_line("where");
         self.indent_level += 1;
         for stmt in &action.body {
             self.format_stmt(stmt);
         }
         self.indent_level -= 1;
-        self.push_line("}");
         Ok(())
     }
 
@@ -610,17 +605,17 @@ mod tests {
         let source = r#"
 module demo
 
-action add(x: u64, y: u64) -> u64 {
+action add(x: u64, y: u64) -> u64
+where
     let z = x + y
     return z
-}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {"));
+        assert!(formatted.contains("action add(x: u64, y: u64) -> u64\nwhere"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
     }
@@ -635,9 +630,9 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(amount: u64, symbol: [u8; 8]) -> Token
+where
     create Token { amount: amount, symbol: symbol }
-}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -653,10 +648,10 @@ module demo
 
 const LIMIT: u64 = 10;
 
-action check(x: u64) -> bool {
+action check(x: u64) -> bool
+where
     assert_invariant(x < LIMIT, "too large");
     require x > 0, "zero"
-}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();

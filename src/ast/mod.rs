@@ -13,7 +13,7 @@ pub enum Item {
     Shared(SharedDef),
     Receipt(ReceiptDef),
     Struct(StructDef),
-    StateMachine(StateMachineDef),
+    Flow(FlowDef),
     Const(ConstDef),
     Enum(EnumDef),
     Action(ActionDef),
@@ -112,7 +112,7 @@ pub struct StateTransition {
 }
 
 #[derive(Debug, Clone)]
-pub struct StateMachineDef {
+pub struct FlowDef {
     pub name: Option<String>,
     pub target: StateFieldPath,
     pub transitions: Vec<StateTransition>,
@@ -139,7 +139,6 @@ pub struct ActionDef {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub outputs: Vec<ActionOutput>,
-    pub replacements: Vec<ActionReplacement>,
     pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
     pub effect: EffectClass,
@@ -157,16 +156,9 @@ pub struct ActionOutput {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActionReplacement {
-    pub input: String,
-    pub output: String,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
 pub struct ActionStateEdge {
-    pub path: Option<StateFieldPath>,
-    pub to_path: Option<StateFieldPath>,
+    pub path: StateFieldPath,
+    pub to_path: StateFieldPath,
     pub from: String,
     pub to: String,
     pub span: Span,

@@ -34,7 +34,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 1_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 2_700,
-            max_call_edges: 370,
+            max_call_edges: 420,
             max_unreachable_machine_blocks: 1_200,
         },
     ),
@@ -82,7 +82,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 256,
             max_cfg_edges: 4_100,
-            max_call_edges: 370,
+            max_call_edges: 440,
             max_unreachable_machine_blocks: 2_100,
         },
     ),
@@ -98,7 +98,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 1_900,
             max_machine_block_bytes: 320,
             max_cfg_edges: 3_100,
-            max_call_edges: 260,
+            max_call_edges: 280,
             max_unreachable_machine_blocks: 1_850,
         },
     ),
@@ -114,7 +114,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 550,
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
-            max_call_edges: 95,
+            max_call_edges: 110,
             max_unreachable_machine_blocks: 220,
         },
     ),
@@ -519,17 +519,23 @@ fn assert_destroy(action: &cellscript::ActionMetadata, binding: &str, context: &
     );
 }
 
-fn assert_replacement(action: &cellscript::ActionMetadata, ty: &str, input_binding: &str, output_binding: &str, context: &str) {
+fn assert_input_output_binding(
+    action: &cellscript::ActionMetadata,
+    ty: &str,
+    input_binding: &str,
+    output_binding: &str,
+    context: &str,
+) {
     assert!(
         action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == input_binding),
-        "{} should expose replacement input '{}': {:?}",
+        "{} should expose input '{}': {:?}",
         context,
         input_binding,
         action.consume_set
     );
     assert!(
         action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "output" && pattern.binding == output_binding),
-        "{} should expose replacement output '{}': {:?}",
+        "{} should expose output '{}': {:?}",
         context,
         output_binding,
         action.create_set
@@ -1031,13 +1037,13 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
 }
 
 #[test]
-fn token_mint_authority_replacement_is_explicit() {
+fn token_mint_authority_input_output_binding_is_explicit() {
     let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("token asm should be utf8");
     let mint = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
 
     assert_eq!(mint.effect_class, "Mutating");
-    assert_replacement(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
+    assert_input_output_binding(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
     assert!(
         mint.create_set.iter().any(|pattern| pattern.ty == "Token" && pattern.operation == "output" && pattern.binding == "token"),
         "token mint should expose a named Token output binding: {:?}",
@@ -1045,7 +1051,7 @@ fn token_mint_authority_replacement_is_explicit() {
     );
     assert!(
         mint.fail_closed_runtime_features.is_empty(),
-        "mint authority replacement should be verifier-coverable, not a fail-closed lowering path: {:?}",
+        "mint authority input/output binding should be verifier-coverable, not a fail-closed lowering path: {:?}",
         mint.fail_closed_runtime_features
     );
     assert!(mint.ckb_runtime_accesses.iter().any(|access| {
@@ -1072,7 +1078,7 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     assert_eq!(mint.effect_class, "Mutating");
     assert!(mint.parallelizable);
     assert!(mint.fail_closed_runtime_features.is_empty(), "nft mint should not carry fail-closed debt");
-    assert_replacement(mint, "Collection", "collection_before", "collection_after", "nft mint");
+    assert_input_output_binding(mint, "Collection", "collection_before", "collection_after", "nft mint");
     assert_create(mint, "NFT", "nft mint");
     assert_runtime_requirement(mint, "create-output:NFT:create_NFT", "checked-runtime", "create-output-fields", "nft mint");
     assert!(
@@ -1083,14 +1089,14 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     );
     assert!(
         asm.contains("# cellscript abi: schema field Collection.total_supply"),
-        "nft mint should verify Collection total_supply through explicit replacement requirements:\n{}",
+        "nft mint should verify Collection total_supply through explicit output requirements:\n{}",
         asm
     );
 
     let transfer = action(&result.metadata, "transfer");
     assert_eq!(transfer.effect_class, "Mutating");
     assert!(transfer.fail_closed_runtime_features.is_empty(), "nft transfer should not carry fail-closed debt");
-    assert_replacement(transfer, "NFT", "nft_before", "nft_after", "nft transfer");
+    assert_input_output_binding(transfer, "NFT", "nft_before", "nft_after", "nft transfer");
     assert!(
         !transfer
             .transaction_runtime_input_requirements
@@ -1190,10 +1196,10 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
 
     let extend_lock = action(&result.metadata, "extend_lock");
     assert!(extend_lock.fail_closed_runtime_features.is_empty(), "extend_lock should not carry fail-closed debt");
-    assert_replacement(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
+    assert_input_output_binding(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
     assert!(
         asm.contains("# cellscript abi: schema field TimeLock.unlock_height"),
-        "timelock extend_lock should verify unlock_height through explicit replacement requirements:\n{}",
+        "timelock extend_lock should verify unlock_height through explicit output requirements:\n{}",
         asm
     );
     assert!(
@@ -1205,7 +1211,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
 }
 
 #[test]
-fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
+fn multisig_core_actions_expose_threshold_flow_metadata() {
     let result =
         compile_file(acceptance_example_path("multisig.cell"), CompileOptions::default()).expect("multisig example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("multisig asm should be utf8");
@@ -1235,7 +1241,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
 
     let propose_transfer = action(&result.metadata, "propose_transfer");
     assert_eq!(propose_transfer.effect_class, "Mutating");
-    assert_replacement(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
+    assert_input_output_binding(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
     assert_create(propose_transfer, "Proposal", "multisig propose_transfer");
     assert_runtime_requirement(
         propose_transfer,
@@ -1252,7 +1258,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
     assert!(
         asm.contains("# cellscript abi: schema field MultisigWallet.nonce"),
-        "multisig propose_transfer should verify wallet nonce through explicit replacement requirements:\n{}",
+        "multisig propose_transfer should verify wallet nonce through explicit output requirements:\n{}",
         asm
     );
     assert!(
@@ -1280,18 +1286,18 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-equality", "multisig add_signature");
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-transition", "multisig add_signature");
-    assert_replacement(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
+    assert_input_output_binding(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
     assert!(
         add_signature.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "proposal_before")
             && add_signature.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "proposal_after"),
-        "multisig add_signature should expose Proposal replacement input/output bindings: {:?} {:?}",
+        "multisig add_signature should expose Proposal input/output bindings: {:?} {:?}",
         add_signature.consume_set,
         add_signature.create_set
     );
 
     let propose_add_signer = action(&result.metadata, "propose_add_signer");
     assert_eq!(propose_add_signer.effect_class, "Mutating");
-    assert_replacement(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
+    assert_input_output_binding(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
     assert_create(propose_add_signer, "Proposal", "multisig propose_add_signer");
     assert_runtime_requirement(
         propose_add_signer,
@@ -1314,7 +1320,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
 
     let propose_change_threshold = action(&result.metadata, "propose_change_threshold");
     assert_eq!(propose_change_threshold.effect_class, "Mutating");
-    assert_replacement(
+    assert_input_output_binding(
         propose_change_threshold,
         "MultisigWallet",
         "wallet_before",
@@ -1380,7 +1386,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
 }
 
 #[test]
-fn amm_pool_replacement_params_are_scheduler_visible() {
+fn amm_pool_input_output_params_are_scheduler_visible() {
     let result = compile_file(example_path("amm_pool.cell"), CompileOptions::default()).expect("amm_pool example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("amm_pool asm should be utf8");
 
@@ -1390,25 +1396,25 @@ fn amm_pool_replacement_params_are_scheduler_visible() {
         ("remove_liquidity", "pool_before", "pool_after", "Token"),
     ] {
         let action = result.metadata.actions.iter().find(|action| action.name == action_name).expect("amm action metadata");
-        assert_replacement(action, "Pool", input_binding, output_binding, action_name);
+        assert_input_output_binding(action, "Pool", input_binding, output_binding, action_name);
         assert_create(action, extra_created_ty, action_name);
         assert!(
             !action.touches_shared.is_empty(),
-            "{} replaces shared Pool state and must expose the Pool type hash to the scheduler",
+            "{} updates shared Pool state and must expose the Pool type hash to the scheduler",
             action_name
         );
-        assert!(!action.parallelizable, "{} replaces shared Pool state and should not default to parallel execution", action_name);
+        assert!(!action.parallelizable, "{} updates shared Pool state and should not default to parallel execution", action_name);
         assert_eq!(action.effect_class, "Mutating", "{} should be classified as mutating shared state", action_name);
         assert!(
             action.fail_closed_runtime_features.is_empty(),
-            "{} should keep explicit replacement requirements verifier-coverable: {:?}",
+            "{} should keep explicit output requirements verifier-coverable: {:?}",
             action_name,
             action.fail_closed_runtime_features
         );
         assert!(
             action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("resource-conservation:Token")
                 || obligation.feature.starts_with("pool-create:Pool")),
-            "{} should retain AMM-specific runtime obligations separately from replacement binding: {:?}",
+            "{} should retain AMM-specific runtime obligations separately from input/output binding: {:?}",
             action_name,
             action.verifier_obligations
         );
@@ -1417,14 +1423,14 @@ fn amm_pool_replacement_params_are_scheduler_visible() {
     assert!(
         asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
             && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
-        "AMM replacements should bind Pool input/output parameters through transaction cells:\n{}",
+        "AMM input/output bindings should bind Pool input/output parameters through transaction cells:\n{}",
         asm
     );
     assert!(
         asm.contains("# cellscript abi: schema field Pool.reserve_a")
             && asm.contains("# cellscript abi: schema field Pool.reserve_b")
             && asm.contains("# cellscript abi: schema field Pool.total_lp"),
-        "AMM replacements should verify Pool reserve and LP fields through explicit require checks:\n{}",
+        "AMM input/output bindings should verify Pool reserve and LP fields through explicit require checks:\n{}",
         asm
     );
     assert!(

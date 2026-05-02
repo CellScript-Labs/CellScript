@@ -26,15 +26,15 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 3 | `cell-load-failed` | Cell data or field loading failed or returned an unusable result. | Check that the expected input, output, or dep cell exists and is reachable by the generated script. |
 | 4 | `exact-size-mismatch` | Loaded bytes did not match the exact fixed-size schema requirement. | Check fixed-width schema fields and ensure the builder encodes the exact Molecule byte length. |
 | 5 | `assertion-failed` | A source-level assert or invariant check evaluated to false. | Inspect the action invariant or assert expression and the transaction values that feed it. |
-| 7 | `lifecycle-transition-mismatch` | A state-machine transition did not match the declared transition rule. | Compare consumed and produced state fields with the declared state-machine transitions. |
-| 8 | `lifecycle-new-state-invalid` | A created or replacement state value was outside the declared state range. | Check created output state values and declared flow states. |
-| 9 | `lifecycle-old-state-invalid` | A consumed state value was outside the declared state range. | Check consumed input state values and declared flow states. |
+| 7 | `flow-transition-mismatch` | A flow transition did not match the declared transition rule. | Compare consumed and produced state fields with the declared flow transitions. |
+| 8 | `flow-new-state-invalid` | A created or proposed output state value was outside the declared state range. | Check created output state values and declared flow states. |
+| 9 | `flow-old-state-invalid` | A consumed state value was outside the declared state range. | Check consumed input state values and declared flow states. |
 | 10 | `entry-witness-magic-mismatch` | Entry witness bytes did not start with the CellScript witness ABI magic. | Encode entry witnesses with `cellc entry-witness` or the documented `CSARGv1\0` wire format. |
-| 11 | `type-hash-preservation-mismatch` | A replacement output did not preserve the consumed input type hash. | Check the replacement output type script and builder output ordering. |
-| 12 | `lock-hash-preservation-mismatch` | A replacement output did not preserve the consumed input lock hash. | Check the replacement output lock script and builder output ordering. |
-| 13 | `field-preservation-mismatch` | An output field required to be preserved differs from its input field. | Check replacement output fields that should preserve lock/type/data identity. |
-| 14 | `mutate-transition-mismatch` | A replacement output failed its declared field transition check. | Check the field delta against the documented transition formula. |
-| 15 | `data-preservation-mismatch` | Replacement output data outside transition ranges differs from the input data. | Check that non-transition output data bytes are copied from the consumed input. |
+| 11 | `type-hash-preservation-mismatch` | A proposed output did not preserve the consumed input type hash. | Check the proposed output type script and builder output ordering. |
+| 12 | `lock-hash-preservation-mismatch` | A proposed output did not preserve the consumed input lock hash. | Check the proposed output lock script and builder output ordering. |
+| 13 | `field-preservation-mismatch` | An output field required to be preserved differs from its input field. | Check proposed output fields that should preserve lock/type/data identity. |
+| 14 | `mutate-transition-mismatch` | A proposed output failed its declared field transition check. | Check the field delta against the documented transition formula. |
+| 15 | `data-preservation-mismatch` | Proposed output data outside transition ranges differs from the input data. | Check that non-transition output data bytes are copied from the consumed input. |
 | 16 | `dynamic-field-bounds-invalid` | A Molecule dynamic field offset or length failed bounds validation. | Validate Molecule table offsets, field count, and dynamic field lengths. |
 | 17 | `type-hash-mismatch` | A loaded cell type hash did not match the expected CellScript type identity. | Check type script hash/hash_type/args and the expected CellScript type identity. |
 | 18 | `fixed-byte-comparison-unresolved` | A fixed-byte verifier comparison could not resolve its trusted source bytes. | Use schema-backed parameters or fixed-byte values that the verifier can address. |

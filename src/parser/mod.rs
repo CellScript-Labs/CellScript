@@ -73,6 +73,7 @@ impl<'a> Parser<'a> {
             TokenKind::Enum => Some("enum".to_string()),
             TokenKind::Action => Some("action".to_string()),
             TokenKind::Lock => Some("lock".to_string()),
+            TokenKind::Where => Some("where".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
             TokenKind::Transfer | TokenKind::TransferKw => Some("transfer".to_string()),
@@ -226,12 +227,6 @@ impl<'a> Parser<'a> {
                     }
                     attrs.type_id = Some(TypeIdentity { value, span });
                 }
-                "lifecycle" => {
-                    return Err(CompileError::new(
-                        "legacy #[lifecycle(...)] has been removed; declare an explicit state field and use flow plus action move clauses",
-                        self.current().span,
-                    ));
-                }
                 "effect" => {
                     let mut has_mutating = false;
                     let mut has_creating = false;
@@ -300,9 +295,7 @@ impl<'a> Parser<'a> {
                     attrs.scheduler_hint = Some(SchedulerHint { parallelizable, estimated_cycles });
                 }
                 _ => {
-                    while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        self.advance();
-                    }
+                    return Err(CompileError::new(format!("unknown attribute '{}'", attr_name), self.current().span));
                 }
             }
 
@@ -351,7 +344,7 @@ impl<'a> Parser<'a> {
             TokenKind::Struct => Ok(Item::Struct(self.parse_struct(attrs.type_id)?)),
             TokenKind::Identifier(name) if name == "flow" => {
                 self.reject_type_id_attr(&attrs)?;
-                Ok(Item::StateMachine(self.parse_flow()?))
+                Ok(Item::Flow(self.parse_flow()?))
             }
             TokenKind::Const => {
                 self.reject_type_id_attr(&attrs)?;
@@ -526,13 +519,6 @@ impl<'a> Parser<'a> {
             None
         };
 
-        if self.check(&TokenKind::LBracket) {
-            return Err(CompileError::new(
-                "legacy receipt [lifecycle(...)] syntax has been removed; declare an explicit state field and use flow plus action move clauses",
-                self.current().span,
-            ));
-        }
-
         let capabilities = merge_capabilities(attr_capabilities, self.parse_capabilities()?);
         self.skip_newlines();
         let default_hash_type = self.parse_default_hash_type_decl()?;
@@ -573,7 +559,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_flow(&mut self) -> Result<StateMachineDef> {
+    fn parse_flow(&mut self) -> Result<FlowDef> {
         let start_span = self.current().span;
         let keyword = self.parse_name()?;
         debug_assert_eq!(keyword, "flow");
@@ -632,12 +618,7 @@ impl<'a> Parser<'a> {
         self.consume_optional_semi();
 
         let end_span = self.current().span;
-        Ok(StateMachineDef {
-            name,
-            target,
-            transitions,
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        })
+        Ok(FlowDef { name, target, transitions, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
     fn parse_state_field_path(&mut self) -> Result<StateFieldPath> {
@@ -925,8 +906,8 @@ impl<'a> Parser<'a> {
             (None, Vec::new())
         };
 
-        let (replacements, state_edges) = self.parse_action_clauses()?;
-        let body = self.parse_block()?;
+        let state_edges = self.parse_action_clauses()?;
+        let body = self.parse_action_where_block()?;
 
         let end_span = self.current().span;
         let effect_declared = effect.is_some();
@@ -936,7 +917,6 @@ impl<'a> Parser<'a> {
             params,
             return_type,
             outputs,
-            replacements,
             state_edges,
             body,
             effect: effect.unwrap_or(EffectClass::Pure),
@@ -991,59 +971,63 @@ impl<'a> Parser<'a> {
         Ok(ActionOutput { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
-    fn parse_action_clauses(&mut self) -> Result<(Vec<ActionReplacement>, Vec<ActionStateEdge>)> {
-        let mut replacements = Vec::new();
+    fn parse_action_clauses(&mut self) -> Result<Vec<ActionStateEdge>> {
         let mut state_edges = Vec::new();
 
         loop {
             self.skip_newlines();
             match &self.current().kind {
-                TokenKind::Identifier(name) if name == "replace" => {
-                    replacements.extend(self.parse_action_replacements()?);
-                }
                 TokenKind::Identifier(name) if name == "move" => {
                     state_edges.extend(self.parse_action_state_edges()?);
-                }
-                TokenKind::Identifier(name) if name == "moves" => {
-                    return Err(CompileError::new("state transition clauses use `move`, not `moves`", self.current().span));
                 }
                 _ => break,
             }
         }
 
-        Ok((replacements, state_edges))
+        Ok(state_edges)
     }
 
-    fn parse_action_replacements(&mut self) -> Result<Vec<ActionReplacement>> {
-        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace") {
+    fn parse_action_where_block(&mut self) -> Result<Vec<Stmt>> {
+        if !self.check(&TokenKind::Where) {
             return Ok(Vec::new());
         }
 
-        let mut replacements = Vec::new();
-        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "replace") {
-            self.advance();
-            loop {
-                let start_span = self.current().span;
-                let input = self.parse_name()?;
-                self.expect(TokenKind::Arrow)?;
-                let output = self.parse_name()?;
-                let end_span = self.current().span;
-                replacements.push(ActionReplacement {
-                    input,
-                    output,
-                    span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-                });
+        self.advance();
+        self.skip_newlines();
 
-                if self.check(&TokenKind::Comma) {
-                    self.advance();
-                    continue;
-                }
-                break;
-            }
+        let mut stmts = Vec::new();
+        while !self.check(&TokenKind::Eof) && !self.action_where_block_is_done() {
+            stmts.push(self.parse_stmt()?);
             self.skip_newlines();
         }
 
-        Ok(replacements)
+        Ok(stmts)
+    }
+
+    fn action_where_block_is_done(&self) -> bool {
+        if self.current().span.column != 1 {
+            return false;
+        }
+
+        matches!(
+            &self.current().kind,
+            TokenKind::Pound
+                | TokenKind::Module
+                | TokenKind::Use
+                | TokenKind::Resource
+                | TokenKind::Shared
+                | TokenKind::Receipt
+                | TokenKind::Struct
+                | TokenKind::Const
+                | TokenKind::Enum
+                | TokenKind::Action
+                | TokenKind::Fn
+                | TokenKind::Lock
+        ) || matches!(
+            &self.current().kind,
+            TokenKind::Identifier(name)
+                if matches!(name.as_str(), "flow" | "with_default_hash_type" | "with_capacity_floor")
+        )
     }
 
     fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
@@ -1057,25 +1041,45 @@ impl<'a> Parser<'a> {
             loop {
                 let start_span = self.current().span;
                 let first = self.parse_name_path()?;
-                let (path, from) = if self.check(&TokenKind::Dot) {
-                    self.advance();
-                    let field = self.parse_name()?;
-                    let path_span = Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column);
-                    (Some(StateFieldPath { base: first, field, span: path_span }), self.parse_name_path()?)
-                } else {
-                    (None, first)
-                };
+                if !self.check(&TokenKind::Dot) {
+                    return Err(CompileError::new(
+                        "state move must use an explicit input field path: move input.state: From -> output.state: To",
+                        start_span,
+                    ));
+                }
+                self.advance();
+                let field = self.parse_name()?;
+                let path_span = Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column);
+                let path = StateFieldPath { base: first, field, span: path_span };
+                if !self.check(&TokenKind::Colon) {
+                    return Err(CompileError::new(
+                        "state move must put ':' before the source state: move input.state: From -> output.state: To",
+                        self.current().span,
+                    ));
+                }
+                self.advance();
+                let from = self.parse_name_path()?;
                 self.expect(TokenKind::Arrow)?;
                 let to_start_span = self.current().span;
                 let to_first = self.parse_name_path()?;
-                let (to_path, to) = if self.check(&TokenKind::Dot) {
-                    self.advance();
-                    let field = self.parse_name()?;
-                    let path_span = Span::new(to_start_span.start, self.current().span.end, to_start_span.line, to_start_span.column);
-                    (Some(StateFieldPath { base: to_first, field, span: path_span }), self.parse_name_path()?)
-                } else {
-                    (None, to_first)
-                };
+                if !self.check(&TokenKind::Dot) {
+                    return Err(CompileError::new(
+                        "state move must use an explicit output field path: move input.state: From -> output.state: To",
+                        to_start_span,
+                    ));
+                }
+                self.advance();
+                let to_field = self.parse_name()?;
+                let to_path_span = Span::new(to_start_span.start, self.current().span.end, to_start_span.line, to_start_span.column);
+                let to_path = StateFieldPath { base: to_first, field: to_field, span: to_path_span };
+                if !self.check(&TokenKind::Colon) {
+                    return Err(CompileError::new(
+                        "state move must put ':' before the target state: move input.state: From -> output.state: To",
+                        self.current().span,
+                    ));
+                }
+                self.advance();
+                let to = self.parse_name_path()?;
                 let end_span = self.current().span;
                 edges.push(ActionStateEdge {
                     path,
@@ -1176,7 +1180,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T replace before -> after` for replacement Cell state",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T` plus `move` and `require` constraints for Cell state updates",
                 self.current().span,
             ));
         }
@@ -2055,7 +2059,10 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
             self.expect(TokenKind::FatArrow)?;
             self.skip_newlines();
-            let value = self.parse_branch_expr()?;
+            if !self.check(&TokenKind::LBrace) {
+                return Err(CompileError::new("match arms must use '{}' proof blocks", self.current().span));
+            }
+            let value = Expr::Block(self.parse_block()?);
             let arm_span = self.current().span;
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
@@ -2167,9 +2174,9 @@ resource Token has store {
 module test
 
 #[type_id("cellscript::action:v1")]
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -2197,9 +2204,9 @@ resource Vault<T> has store {
         let input = r#"
 module test
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount, symbol: b"TEST" }
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2217,29 +2224,39 @@ flow OfferFlow for Offer.state {
 }
 
 	action accept(input: Offer) -> output: Offer
-	    replace input -> output
-	    move input.state Live -> output.state Filled
-{
+	    move input.state: Live -> output.state: Filled
+	where
     require output.state == OfferState::Filled
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
-        assert!(matches!(&module.items[0], Item::StateMachine(machine) if machine.name.as_deref() == Some("OfferFlow")));
+        assert!(matches!(&module.items[0], Item::Flow(machine) if machine.name.as_deref() == Some("OfferFlow")));
         let Item::Action(action) = &module.items[1] else {
             panic!("expected action");
         };
-        assert_eq!(action.replacements.len(), 1);
-        assert_eq!(action.replacements[0].input, "input");
-        assert_eq!(action.replacements[0].output, "output");
         assert_eq!(action.params[0].source, ParamSource::Default);
         assert_eq!(action.outputs.len(), 1);
         assert_eq!(action.outputs[0].name, "output");
         assert_eq!(action.state_edges.len(), 1);
-        assert_eq!(action.state_edges[0].path.as_ref().map(|path| path.base.as_str()), Some("input"));
-        assert_eq!(action.state_edges[0].to_path.as_ref().map(|path| path.base.as_str()), Some("output"));
+        assert_eq!(action.state_edges[0].path.base, "input");
+        assert_eq!(action.state_edges[0].to_path.base, "output");
         assert_eq!(action.state_edges[0].from, "Live");
         assert_eq!(action.state_edges[0].to, "Filled");
+    }
+
+    #[test]
+    fn test_rejects_move_clause_without_state_colons() {
+        let input = r#"
+module test
+
+action accept(input: Offer) -> output: Offer
+    move input.state Live -> output.state Filled
+where
+    require output.state == OfferState::Filled
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("state move must put ':' before the source state"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -2247,10 +2264,10 @@ flow OfferFlow for Offer.state {
         let input = r#"
 module test
 
-action grant(read config: Config, token: Token) -> grant: Grant {
+action grant(read config: Config, token: Token) -> grant: Grant
+where
     consume token
     create grant = Grant { admin: config.admin }
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2271,9 +2288,9 @@ action grant(read config: Config, token: Token) -> grant: Grant {
         let input = r#"
 module test
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(amount: u64, symbol: [u8; 8]) -> Token
+where
     create Token { amount, symbol }
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2285,10 +2302,10 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         let input = r#"
 module test
 
-action test(x: u64, y: u64) -> u64 {
+action test(x: u64, y: u64) -> u64
+where
     let z = x + y * 2
     return z
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2321,9 +2338,9 @@ use cellscript::fungible_token::{Token, MintAuthority}
         let input = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return launch(Token)
-}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -2335,14 +2352,14 @@ action bad() -> u64 {
         let input = r#"
 module test
 
-action test() -> (u64, u64) {
+action test() -> (u64, u64)
+where
     let value = foo(
         1,
         2
     )
 
     (value, 3)
-}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -2364,5 +2381,27 @@ action test() -> (u64, u64) {
             }
             other => panic!("expected tuple return expr, found {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_rejects_unbraced_match_arms() {
+        let input = r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action test(flag: Flag) -> u64
+where
+    match flag {
+        On => 1,
+        Off => 0,
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("match arms must use"), "unexpected error: {}", err.message);
     }
 }

@@ -18,7 +18,7 @@ struct FunctionSignature {
 }
 
 #[derive(Debug, Clone)]
-struct StateMachineSpec {
+struct FlowSpec {
     type_name: String,
     field_name: String,
     field_enum_type: Option<String>,
@@ -283,9 +283,9 @@ pub struct TypeChecker<'a> {
     cell_type_kinds: HashMap<String, CellTypeKind>,
     type_capabilities: HashMap<String, HashSet<Capability>>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
-    lifecycle_states: HashMap<String, Vec<String>>,
-    lifecycle_state_fields: HashMap<String, String>,
-    state_machines: HashMap<String, StateMachineSpec>,
+    flow_states: HashMap<String, Vec<String>>,
+    flow_state_fields: HashMap<String, String>,
+    flows: HashMap<String, FlowSpec>,
     resolver: Option<&'a ModuleResolver>,
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
@@ -380,9 +380,9 @@ impl<'a> TypeChecker<'a> {
             cell_type_kinds: HashMap::new(),
             type_capabilities: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
-            lifecycle_states: HashMap::new(),
-            lifecycle_state_fields: HashMap::new(),
-            state_machines: HashMap::new(),
+            flow_states: HashMap::new(),
+            flow_state_fields: HashMap::new(),
+            flows: HashMap::new(),
             resolver: None,
             current_module: None,
             current_callable: None,
@@ -495,14 +495,14 @@ impl<'a> TypeChecker<'a> {
                         },
                     );
                 }
-                Item::StateMachine(_) => {}
+                Item::Flow(_) => {}
                 Item::Use(_) => {}
             }
         }
 
         self.register_imported_type_ids(&mut seen_type_ids)?;
-        self.register_state_machines(module)?;
-        self.validate_state_machine_action_edges(module)?;
+        self.register_flows(module)?;
+        self.validate_flow_action_edges(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
@@ -528,10 +528,10 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
-    fn register_state_machines(&mut self, module: &Module) -> Result<()> {
+    fn register_flows(&mut self, module: &Module) -> Result<()> {
         let mut seen_targets = HashSet::new();
         for item in &module.items {
-            let Item::StateMachine(machine) = item else {
+            let Item::Flow(machine) = item else {
                 continue;
             };
             if machine.transitions.is_empty() {
@@ -543,7 +543,7 @@ impl<'a> TypeChecker<'a> {
             if !seen_targets.insert(target_key.clone()) {
                 return Err(CompileError::new(format!("duplicate flow for '{}'", target_key), machine.target.span));
             }
-            if self.lifecycle_states.contains_key(&type_name) {
+            if self.flow_states.contains_key(&type_name) {
                 return Err(CompileError::new(
                     format!(
                         "type '{}' already has flow policy; this release supports one flow-backed state field per Cell type",
@@ -566,18 +566,18 @@ impl<'a> TypeChecker<'a> {
                 CompileError::new(format!("flow target field '{}.{}' is not defined", type_name, field_name), machine.target.span)
             })?;
 
-            let (states, field_enum_type) = self.state_machine_states(machine, field_ty)?;
+            let (states, field_enum_type) = self.flow_states_for_decl(machine, field_ty)?;
             let mut seen_transitions = HashSet::new();
             let mut normalized_transitions = Vec::new();
             for transition in &machine.transitions {
-                let from = self.canonical_state_name_for_machine(
+                let from = self.canonical_state_name_for_flow(
                     &type_name,
                     field_enum_type.as_deref(),
                     &states,
                     &transition.from,
                     transition.span,
                 )?;
-                let to = self.canonical_state_name_for_machine(
+                let to = self.canonical_state_name_for_flow(
                     &type_name,
                     field_enum_type.as_deref(),
                     &states,
@@ -610,18 +610,18 @@ impl<'a> TypeChecker<'a> {
                 normalized_transitions.push(StateTransition { from, to, action: transition.action.clone(), span: transition.span });
             }
 
-            self.lifecycle_states.insert(type_name.clone(), states.clone());
-            self.lifecycle_state_fields.insert(type_name.clone(), field_name.clone());
-            self.state_machines.insert(
+            self.flow_states.insert(type_name.clone(), states.clone());
+            self.flow_state_fields.insert(type_name.clone(), field_name.clone());
+            self.flows.insert(
                 type_name.clone(),
-                StateMachineSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
+                FlowSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
             );
         }
 
         Ok(())
     }
 
-    fn validate_state_machine_action_edges(&self, module: &Module) -> Result<()> {
+    fn validate_flow_action_edges(&self, module: &Module) -> Result<()> {
         let actions = module
             .items
             .iter()
@@ -631,7 +631,7 @@ impl<'a> TypeChecker<'a> {
             })
             .collect::<HashMap<_, _>>();
 
-        for spec in self.state_machines.values() {
+        for spec in self.flows.values() {
             for transition in &spec.transitions {
                 let Some(action_name) = &transition.action else {
                     continue;
@@ -639,209 +639,50 @@ impl<'a> TypeChecker<'a> {
                 let Some(action) = actions.get(action_name.as_str()).copied() else {
                     continue;
                 };
-                let has_explicit_binding = action.state_edges.iter().any(|state_edge| {
-                    state_edge.path.as_ref().is_some_and(|path| {
-                        path.field == spec.field_name
-                            && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
-                            && self
-                                .canonical_state_name_for_machine(
-                                    &spec.type_name,
-                                    spec.field_enum_type.as_deref(),
-                                    &spec.states,
-                                    &state_edge.from,
-                                    state_edge.span,
-                                )
-                                .ok()
-                                .is_some_and(|from| from == transition.from)
-                            && self
-                                .canonical_state_name_for_machine(
-                                    &spec.type_name,
-                                    spec.field_enum_type.as_deref(),
-                                    &spec.states,
-                                    &state_edge.to,
-                                    state_edge.span,
-                                )
-                                .ok()
-                                .is_some_and(|to| to == transition.to)
-                    })
+                let has_exact_move = action.state_edges.iter().any(|state_edge| {
+                    let from_path = &state_edge.path;
+                    let to_path = &state_edge.to_path;
+                    from_path.field == spec.field_name
+                        && to_path.field == spec.field_name
+                        && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
+                        && action_param_output_named_type(action, &to_path.base).is_some_and(|ty| ty == spec.type_name)
+                        && self
+                            .canonical_state_name_for_flow(
+                                &spec.type_name,
+                                spec.field_enum_type.as_deref(),
+                                &spec.states,
+                                &state_edge.from,
+                                state_edge.span,
+                            )
+                            .ok()
+                            .is_some_and(|from| from == transition.from)
+                        && self
+                            .canonical_state_name_for_flow(
+                                &spec.type_name,
+                                spec.field_enum_type.as_deref(),
+                                &spec.states,
+                                &state_edge.to,
+                                state_edge.span,
+                            )
+                            .ok()
+                            .is_some_and(|to| to == transition.to)
                 });
-                let has_explicit_output_binding = action.state_edges.iter().any(|state_edge| {
-                    state_edge.path.as_ref().zip(state_edge.to_path.as_ref()).is_some_and(|(from_path, to_path)| {
-                        from_path.field == spec.field_name
-                            && to_path.field == spec.field_name
-                            && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
-                            && action_param_output_named_type(action, &to_path.base).is_some_and(|ty| ty == spec.type_name)
-                            && action
-                                .replacements
-                                .iter()
-                                .any(|replacement| replacement.input == from_path.base && replacement.output == to_path.base)
-                            && self
-                                .canonical_state_name_for_machine(
-                                    &spec.type_name,
-                                    spec.field_enum_type.as_deref(),
-                                    &spec.states,
-                                    &state_edge.from,
-                                    state_edge.span,
-                                )
-                                .ok()
-                                .is_some_and(|from| from == transition.from)
-                            && self
-                                .canonical_state_name_for_machine(
-                                    &spec.type_name,
-                                    spec.field_enum_type.as_deref(),
-                                    &spec.states,
-                                    &state_edge.to,
-                                    state_edge.span,
-                                )
-                                .ok()
-                                .is_some_and(|to| to == transition.to)
-                    })
-                });
-                let has_mismatched_explicit_binding = !has_explicit_binding
-                    && action.state_edges.iter().any(|state_edge| {
-                        state_edge.path.as_ref().is_some_and(|path| {
-                            path.field == spec.field_name
-                                && action_param_owned_named_type(action, &path.base).is_some_and(|ty| ty == spec.type_name)
-                        })
-                    });
-                if has_mismatched_explicit_binding {
+                if !has_exact_move {
                     return Err(CompileError::new(
                         format!(
-                            "state transition action '{}' is bound to '{}.{} {} -> {}' but its explicit move clause uses a different edge",
+                            "state transition action '{}' is bound to '{}.{} {} -> {}' and must declare the exact field-to-field move",
                             action.name, spec.type_name, spec.field_name, transition.from, transition.to
                         ),
                         transition.span,
                     ));
                 }
-                if !has_explicit_binding {
-                    let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
-                    if consumed.len() != 1 {
-                        return Err(CompileError::new(
-                            format!(
-                                "state transition action '{}' for '{}.{}' must consume exactly one '{}' input or declare an explicit move binding",
-                                action.name, spec.type_name, spec.field_name, spec.type_name
-                            ),
-                            transition.span,
-                        ));
-                    }
-                }
-                if !has_explicit_output_binding {
-                    self.validate_action_creates_single_state_output(action, &spec.type_name, transition.span)?;
-                }
             }
         }
 
         Ok(())
     }
 
-    fn validate_action_creates_single_state_output(&self, action: &ActionDef, type_name: &str, span: Span) -> Result<()> {
-        let create_count = action_created_type_counts(action).get(type_name).copied().unwrap_or(0);
-        if create_count != 1 {
-            return Err(CompileError::new(
-                format!(
-                    "state transition action '{}' for '{}' must create exactly one replacement output, found {}",
-                    action.name, type_name, create_count
-                ),
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_action_replacements(&self, action: &ActionDef) -> Result<()> {
-        let mut inputs = HashSet::new();
-        let mut outputs = HashSet::new();
-        for replacement in &action.replacements {
-            if !inputs.insert(replacement.input.clone()) {
-                return Err(CompileError::new(
-                    format!("replacement input '{}' is used more than once", replacement.input),
-                    replacement.span,
-                ));
-            }
-            if !outputs.insert(replacement.output.clone()) {
-                return Err(CompileError::new(
-                    format!("replacement output '{}' is used more than once", replacement.output),
-                    replacement.span,
-                ));
-            }
-
-            let Some(input_param) = action.params.iter().find(|param| param.name == replacement.input) else {
-                return Err(CompileError::new(
-                    format!("replacement input '{}' is not an action parameter", replacement.input),
-                    replacement.span,
-                ));
-            };
-            if !matches!(input_param.source, ParamSource::Default | ParamSource::Input)
-                || input_param.is_read_ref
-                || input_param.is_ref
-                || input_param.is_mut
-                || !matches!(input_param.ty, Type::Named(_))
-            {
-                return Err(CompileError::new(
-                    format!(
-                        "replacement input '{}' must be an owned Cell input parameter, written `{}: T` or `input {}: T`",
-                        replacement.input, replacement.input, replacement.input
-                    ),
-                    input_param.span,
-                ));
-            }
-            let Some(input_type) = action_param_owned_named_type(action, &replacement.input) else {
-                return Err(CompileError::new(
-                    format!("replacement input '{}' must name a Cell-backed type", replacement.input),
-                    input_param.span,
-                ));
-            };
-
-            let output_span = action
-                .outputs
-                .iter()
-                .find(|output| output.name == replacement.output)
-                .map(|output| output.span)
-                .or_else(|| action.params.iter().find(|param| param.name == replacement.output).map(|param| param.span));
-            let Some(output_span) = output_span else {
-                return Err(CompileError::new(
-                    format!("replacement output '{}' is not an action output binding", replacement.output),
-                    replacement.span,
-                ));
-            };
-            if action.params.iter().any(|param| param.name == replacement.output && param.source != ParamSource::Output)
-                && !action.outputs.iter().any(|output| output.name == replacement.output)
-            {
-                return Err(CompileError::new(
-                    format!(
-                        "replacement output '{}' must be declared as a named action output or `output {}: {}`",
-                        replacement.output, replacement.output, input_type
-                    ),
-                    output_span,
-                ));
-            }
-            let Some(output_type) = action_param_output_named_type(action, &replacement.output) else {
-                return Err(CompileError::new(
-                    format!("replacement output '{}' must name a Cell-backed output type", replacement.output),
-                    output_span,
-                ));
-            };
-            if input_type != output_type {
-                return Err(CompileError::new(
-                    format!(
-                        "replacement input '{}' has type '{}', but output '{}' has type '{}'",
-                        replacement.input, input_type, replacement.output, output_type
-                    ),
-                    replacement.span,
-                ));
-            }
-            if self.resolve_cell_type_kind(input_type).is_none() {
-                return Err(CompileError::new(
-                    format!("replacement type '{}' must be a resource, shared, or receipt Cell type", input_type),
-                    replacement.span,
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn state_machine_states(&self, machine: &StateMachineDef, field_ty: &Type) -> Result<(Vec<String>, Option<String>)> {
+    fn flow_states_for_decl(&self, machine: &FlowDef, field_ty: &Type) -> Result<(Vec<String>, Option<String>)> {
         if let Type::Named(enum_name) = field_ty {
             if let Some(variants) = self.resolve_enum_variants(enum_name) {
                 if variants.iter().any(|variant| self.enum_variant_has_payload(enum_name, variant)) {
@@ -854,14 +695,14 @@ impl<'a> TypeChecker<'a> {
                     ));
                 }
                 for transition in &machine.transitions {
-                    self.canonical_state_name_for_machine(
+                    self.canonical_state_name_for_flow(
                         &machine.target.base,
                         Some(enum_name),
                         &variants,
                         &transition.from,
                         transition.span,
                     )?;
-                    self.canonical_state_name_for_machine(
+                    self.canonical_state_name_for_flow(
                         &machine.target.base,
                         Some(enum_name),
                         &variants,
@@ -898,7 +739,7 @@ impl<'a> TypeChecker<'a> {
         Ok((states, None))
     }
 
-    fn canonical_state_name_for_machine(
+    fn canonical_state_name_for_flow(
         &self,
         type_name: &str,
         enum_name: Option<&str>,
@@ -927,7 +768,7 @@ impl<'a> TypeChecker<'a> {
             Item::Shared(s) => self.check_shared(s),
             Item::Receipt(r) => self.check_receipt(r),
             Item::Struct(s) => self.check_struct(s),
-            Item::StateMachine(_) => Ok(()),
+            Item::Flow(_) => Ok(()),
             Item::Const(c) => self.check_const(c),
             Item::Enum(e) => self.check_enum(e),
             Item::Action(a) => self.check_action(a),
@@ -1025,9 +866,9 @@ impl<'a> TypeChecker<'a> {
 
             self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings)?;
             self.bind_action_outputs(&mut env, action)?;
-            self.validate_action_replacements(action)?;
             self.validate_action_state_edges(action, &env)?;
             self.validate_action_create_targets(action)?;
+            self.validate_action_branch_obligations(action)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -1091,6 +932,198 @@ impl<'a> TypeChecker<'a> {
     fn validate_action_create_targets(&self, action: &ActionDef) -> Result<()> {
         let outputs = action_output_binding_names(action);
         self.validate_create_targets_in_stmts(&action.body, &outputs)
+    }
+
+    fn validate_action_branch_obligations(&self, action: &ActionDef) -> Result<()> {
+        let outputs = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
+        if outputs.is_empty() {
+            return Ok(());
+        }
+
+        self.validate_branch_obligations_in_stmts(&action.body, &outputs, HashSet::new())?;
+        Ok(())
+    }
+
+    fn validate_branch_obligations_in_stmts(
+        &self,
+        stmts: &[Stmt],
+        outputs: &HashSet<String>,
+        mut guaranteed: HashSet<String>,
+    ) -> Result<HashSet<String>> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => {
+                    guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
+                }
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                    guaranteed = self.validate_branch_obligations_in_expr(expr, outputs, guaranteed)?;
+                }
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed.clone())?;
+                    let then_guaranteed =
+                        self.validate_branch_obligations_in_stmts(&if_stmt.then_branch, outputs, guaranteed.clone())?;
+                    let else_guaranteed = if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_branch_obligations_in_stmts(else_branch, outputs, guaranteed.clone())?
+                    } else {
+                        guaranteed.clone()
+                    };
+                    self.reject_asymmetric_branch_constraints(
+                        &guaranteed,
+                        &[then_guaranteed.clone(), else_guaranteed.clone()],
+                        if_stmt.span,
+                    )?;
+                    guaranteed = then_guaranteed.intersection(&else_guaranteed).cloned().collect();
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_branch_obligations_in_expr(&for_stmt.iterable, outputs, guaranteed.clone())?;
+                    self.validate_branch_obligations_in_stmts(&for_stmt.body, outputs, guaranteed.clone())?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_branch_obligations_in_expr(&while_stmt.condition, outputs, guaranteed.clone())?;
+                    self.validate_branch_obligations_in_stmts(&while_stmt.body, outputs, guaranteed.clone())?;
+                }
+            }
+        }
+
+        Ok(guaranteed)
+    }
+
+    fn validate_branch_obligations_in_expr(
+        &self,
+        expr: &Expr,
+        outputs: &HashSet<String>,
+        mut guaranteed: HashSet<String>,
+    ) -> Result<HashSet<String>> {
+        match expr {
+            Expr::Require(require_expr) => {
+                collect_required_output_fields(&require_expr.condition, outputs, &mut guaranteed);
+                self.validate_branch_obligations_in_expr(&require_expr.condition, outputs, guaranteed.clone())?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_branch_obligations_in_expr(message, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::If(if_expr) => {
+                self.validate_branch_obligations_in_expr(&if_expr.condition, outputs, guaranteed.clone())?;
+                let then_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.then_branch, outputs, guaranteed.clone())?;
+                let else_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.else_branch, outputs, guaranteed.clone())?;
+                self.reject_asymmetric_branch_constraints(
+                    &guaranteed,
+                    &[then_guaranteed.clone(), else_guaranteed.clone()],
+                    if_expr.span,
+                )?;
+                Ok(then_guaranteed.intersection(&else_guaranteed).cloned().collect())
+            }
+            Expr::Match(match_expr) => {
+                self.validate_branch_obligations_in_expr(&match_expr.expr, outputs, guaranteed.clone())?;
+                let mut arm_sets = Vec::with_capacity(match_expr.arms.len());
+                for arm in &match_expr.arms {
+                    arm_sets.push(self.validate_branch_obligations_in_expr(&arm.value, outputs, guaranteed.clone())?);
+                }
+                self.reject_asymmetric_branch_constraints(&guaranteed, &arm_sets, match_expr.span)?;
+                let mut iter = arm_sets.into_iter();
+                let Some(first) = iter.next() else {
+                    return Ok(guaranteed);
+                };
+                Ok(iter.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect()))
+            }
+            Expr::Block(stmts) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
+            Expr::Assign(assign) => {
+                self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)
+            }
+            Expr::Binary(binary) => {
+                self.validate_branch_obligations_in_expr(&binary.left, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&binary.right, outputs, guaranteed)
+            }
+            Expr::Unary(unary) => self.validate_branch_obligations_in_expr(&unary.expr, outputs, guaranteed),
+            Expr::Call(call) => {
+                self.validate_branch_obligations_in_expr(&call.func, outputs, guaranteed.clone())?;
+                for arg in &call.args {
+                    self.validate_branch_obligations_in_expr(arg, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::FieldAccess(field) => self.validate_branch_obligations_in_expr(&field.expr, outputs, guaranteed),
+            Expr::Index(index) => {
+                self.validate_branch_obligations_in_expr(&index.expr, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&index.index, outputs, guaranteed)
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Consume(consume) => self.validate_branch_obligations_in_expr(&consume.expr, outputs, guaranteed),
+            Expr::Transfer(transfer) => {
+                self.validate_branch_obligations_in_expr(&transfer.expr, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&transfer.to, outputs, guaranteed)
+            }
+            Expr::Destroy(destroy) => self.validate_branch_obligations_in_expr(&destroy.expr, outputs, guaranteed),
+            Expr::Claim(claim) => self.validate_branch_obligations_in_expr(&claim.receipt, outputs, guaranteed),
+            Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
+            Expr::Assert(assert_expr) => {
+                self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
+            }
+            Expr::Tuple(elems) | Expr::Array(elems) => {
+                for elem in elems {
+                    self.validate_branch_obligations_in_expr(elem, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Cast(cast) => self.validate_branch_obligations_in_expr(&cast.expr, outputs, guaranteed),
+            Expr::Range(range) => {
+                self.validate_branch_obligations_in_expr(&range.start, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&range.end, outputs, guaranteed)
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {
+                Ok(guaranteed)
+            }
+        }
+    }
+
+    fn reject_asymmetric_branch_constraints(&self, base: &HashSet<String>, branches: &[HashSet<String>], span: Span) -> Result<()> {
+        if branches.len() < 2 {
+            return Ok(());
+        }
+
+        let mut union = HashSet::new();
+        for branch in branches {
+            for field in branch {
+                if !base.contains(field) {
+                    union.insert(field.clone());
+                }
+            }
+        }
+
+        let mut asymmetric = union
+            .into_iter()
+            .filter(|field| {
+                branches.iter().any(|branch| branch.contains(field)) && branches.iter().any(|branch| !branch.contains(field))
+            })
+            .collect::<Vec<_>>();
+        asymmetric.sort();
+
+        if let Some(field) = asymmetric.into_iter().next() {
+            return Err(CompileError::new(
+                format!("incomplete branch constraints: field '{}' is constrained in one branch but not all branches", field),
+                span,
+            ));
+        }
+
+        Ok(())
     }
 
     fn validate_create_targets_in_stmts(&self, stmts: &[Stmt], outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
@@ -1217,224 +1250,122 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_action_state_edges(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
-        let consumed_bindings = action_consumed_bindings(action);
-        let created_type_counts = action_created_type_counts(action);
         let output_bindings = action_output_binding_names(action);
-        let replacements = action_replacement_output_by_input(action);
+        let mut lineage_inputs = HashMap::new();
+        let mut lineage_outputs = HashMap::new();
+        for state_edge in &action.state_edges {
+            let from_path = &state_edge.path;
+            let to_path = &state_edge.to_path;
+            if let Some(previous_output) = lineage_inputs.insert(from_path.base.clone(), to_path.base.clone()) {
+                if previous_output != to_path.base {
+                    return Err(CompileError::new(
+                        format!(
+                            "state move binding '{}' points to both '{}' and '{}'; split/merge lineage is not supported",
+                            from_path.base, previous_output, to_path.base
+                        ),
+                        state_edge.span,
+                    ));
+                }
+            }
+            if let Some(previous_input) = lineage_outputs.insert(to_path.base.clone(), from_path.base.clone()) {
+                if previous_input != from_path.base {
+                    return Err(CompileError::new(
+                        format!(
+                            "state move output '{}' is reached from both '{}' and '{}'; split/merge lineage is not supported",
+                            to_path.base, previous_input, from_path.base
+                        ),
+                        state_edge.span,
+                    ));
+                }
+            }
+        }
 
         for state_edge in &action.state_edges {
-            let (type_name, field_name, field_enum_type) = if let Some(path) = &state_edge.path {
-                let ty = env
-                    .lookup(&path.base)
-                    .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
-                let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
-                    return Err(CompileError::new(
-                        format!("state move binding '{}' must name an action input parameter", path.base),
-                        path.span,
-                    ));
-                };
-                if !matches!(param.source, ParamSource::Default | ParamSource::Input)
-                    || param.is_read_ref
-                    || !matches!(param.ty, Type::Named(_))
-                {
-                    return Err(CompileError::new(
-                        format!(
-                            "state move binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, or read_ref parameter",
-                            path.base
-                        ),
-                        path.span,
-                    ));
-                }
-                let type_name = Self::base_type_name(ty)
-                    .ok_or_else(|| {
-                        CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span)
-                    })?
-                    .to_string();
-                if let Some(to_path) = &state_edge.to_path {
-                    if replacements.get(&path.base).is_none_or(|output| output != &to_path.base) {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move from '{}.{}' to '{}.{}' requires an explicit `replace {} -> {}` relationship",
-                                path.base, path.field, to_path.base, to_path.field, path.base, to_path.base
-                            ),
-                            state_edge.span,
-                        ));
-                    }
-                    let Some(output_binding) = output_bindings.get(&to_path.base) else {
-                        return Err(CompileError::new(
-                            format!("state move output binding '{}' must be an explicit output parameter", to_path.base),
-                            to_path.span,
-                        ));
-                    };
-                    if output_binding.type_name != type_name {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
-                                path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
-                            ),
-                            state_edge.span,
-                        ));
-                    }
-                    let spec = self
-                        .state_machines
-                        .get(&type_name)
-                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
-                    if spec.field_name != path.field {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move field '{}.{}' does not match declared flow field '{}.{}'",
-                                path.base, path.field, type_name, spec.field_name
-                            ),
-                            path.span,
-                        ));
-                    }
-                    if spec.field_name != to_path.field {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move output field '{}.{}' does not match declared flow field '{}.{}'",
-                                to_path.base, to_path.field, type_name, spec.field_name
-                            ),
-                            to_path.span,
-                        ));
-                    }
-                    (type_name, path.field.clone(), spec.field_enum_type.clone())
-                } else {
-                    if output_bindings.values().any(|binding| binding.type_name == type_name) {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move for '{}.{}' has an output parameter candidate; write move {}.{} {} -> output.field {} to avoid guessing",
-                                type_name, path.field, path.base, path.field, state_edge.from, state_edge.to
-                            ),
-                            state_edge.span,
-                        ));
-                    }
-                    if !consumed_bindings.contains(&path.base) {
-                        return Err(CompileError::new(
-                            format!("state move binding '{}' must be consumed by action '{}'", path.base, action.name),
-                            path.span,
-                        ));
-                    }
-                    let create_count = created_type_counts.get(&type_name).copied().unwrap_or(0);
-                    if create_count != 1 {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
-                                type_name, path.field, type_name, create_count
-                            ),
-                            state_edge.span,
-                        ));
-                    }
-                    let spec = self
-                        .state_machines
-                        .get(&type_name)
-                        .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
-                    if spec.field_name != path.field {
-                        return Err(CompileError::new(
-                            format!(
-                                "state move field '{}.{}' does not match declared flow field '{}.{}'",
-                                path.base, path.field, type_name, spec.field_name
-                            ),
-                            path.span,
-                        ));
-                    }
-                    (type_name, path.field.clone(), spec.field_enum_type.clone())
-                }
-            } else {
-                if !output_bindings.is_empty() {
-                    return Err(CompileError::new(
-                        "shorthand state move is ambiguous with output parameters; write move input.state From -> output.state To",
-                        state_edge.span,
-                    ));
-                }
-                let mut matches = self
-                    .state_machines
-                    .values()
-                    .filter(|spec| {
-                        spec.transitions.iter().any(|transition| {
-                            transition.action.as_deref() == Some(action.name.as_str())
-                                && self
-                                    .canonical_state_name_for_machine(
-                                        &spec.type_name,
-                                        spec.field_enum_type.as_deref(),
-                                        &spec.states,
-                                        &state_edge.from,
-                                        state_edge.span,
-                                    )
-                                    .ok()
-                                    .is_some_and(|from| {
-                                        self.canonical_state_name_for_machine(
-                                            &spec.type_name,
-                                            spec.field_enum_type.as_deref(),
-                                            &spec.states,
-                                            &state_edge.to,
-                                            state_edge.span,
-                                        )
-                                        .ok()
-                                        .is_some_and(|to| transition.from == from && transition.to == to)
-                                    })
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if matches.len() != 1 {
-                    return Err(CompileError::new(
-                        "shorthand state move is ambiguous; write move input.state From -> To or bind the edge with 'by action_name'",
-                        state_edge.span,
-                    ));
-                }
-                let spec = matches.pop().expect("exactly one flow");
-                let consumed = action_consumed_bindings_for_type(action, &spec.type_name);
-                if consumed.len() != 1 {
-                    return Err(CompileError::new(
-                        format!(
-                            "shorthand state move for '{}.{}' must consume exactly one '{}' input; write move input.state From -> To to disambiguate",
-                            spec.type_name, spec.field_name, spec.type_name
-                        ),
-                        state_edge.span,
-                    ));
-                }
-                let create_count = created_type_counts.get(&spec.type_name).copied().unwrap_or(0);
-                if create_count != 1 {
-                    return Err(CompileError::new(
-                        format!(
-                            "shorthand state move for '{}.{}' must create exactly one replacement output of '{}', found {}",
-                            spec.type_name, spec.field_name, spec.type_name, create_count
-                        ),
-                        state_edge.span,
-                    ));
-                }
-                (spec.type_name.clone(), spec.field_name.clone(), spec.field_enum_type.clone())
+            let path = &state_edge.path;
+            let to_path = &state_edge.to_path;
+            let ty = env
+                .lookup(&path.base)
+                .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
+            let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
+                return Err(CompileError::new(
+                    format!("state move binding '{}' must name an action input parameter", path.base),
+                    path.span,
+                ));
             };
+            if !matches!(param.source, ParamSource::Default | ParamSource::Input)
+                || param.is_read_ref
+                || !matches!(param.ty, Type::Named(_))
+            {
+                return Err(CompileError::new(
+                    format!(
+                        "state move binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, output, or read parameter",
+                        path.base
+                    ),
+                    path.span,
+                ));
+            }
+            let type_name = Self::base_type_name(ty)
+                .ok_or_else(|| CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span))?
+                .to_string();
+            let Some(output_binding) = output_bindings.get(&to_path.base) else {
+                return Err(CompileError::new(
+                    format!("state move output binding '{}' must be an explicit output parameter", to_path.base),
+                    to_path.span,
+                ));
+            };
+            if output_binding.type_name != type_name {
+                return Err(CompileError::new(
+                    format!(
+                        "state move input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
+                        path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
+                    ),
+                    state_edge.span,
+                ));
+            }
+            let spec = self
+                .flows
+                .get(&type_name)
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
+            if spec.field_name != path.field {
+                return Err(CompileError::new(
+                    format!(
+                        "state move field '{}.{}' does not match declared flow field '{}.{}'",
+                        path.base, path.field, type_name, spec.field_name
+                    ),
+                    path.span,
+                ));
+            }
+            if spec.field_name != to_path.field {
+                return Err(CompileError::new(
+                    format!(
+                        "state move output field '{}.{}' does not match declared flow field '{}.{}'",
+                        to_path.base, to_path.field, type_name, spec.field_name
+                    ),
+                    to_path.span,
+                ));
+            }
 
             let states = self
-                .lifecycle_states
+                .flow_states
                 .get(&type_name)
                 .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), state_edge.span))?;
-            let from = self.canonical_state_name_for_machine(
+            let from = self.canonical_state_name_for_flow(
                 &type_name,
-                field_enum_type.as_deref(),
+                spec.field_enum_type.as_deref(),
                 states,
                 &state_edge.from,
                 state_edge.span,
             )?;
-            let to = self.canonical_state_name_for_machine(
+            let to = self.canonical_state_name_for_flow(
                 &type_name,
-                field_enum_type.as_deref(),
+                spec.field_enum_type.as_deref(),
                 states,
                 &state_edge.to,
                 state_edge.span,
             )?;
-            let Some(spec) = self.state_machines.get(&type_name) else {
-                return Err(CompileError::new(format!("type '{}' has no declared flow", type_name), state_edge.span));
-            };
-            if spec.field_name != field_name {
-                return Err(CompileError::new(
-                    format!("flow for '{}' is bound to field '{}'", type_name, spec.field_name),
-                    state_edge.span,
-                ));
-            }
             if !spec.transitions.iter().any(|transition| transition.from == from && transition.to == to) {
                 return Err(CompileError::new(
-                    format!("state transition '{}.{} {} -> {}' is not declared", type_name, field_name, from, to),
+                    format!("state transition '{}.{} {} -> {}' is not declared", type_name, spec.field_name, from, to),
                     state_edge.span,
                 ));
             }
@@ -1835,7 +1766,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "`&mut` Cell parameters have been removed from the public DSL; use `action(before: T) -> after: T replace before -> after` in {} '{}'",
+                    "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `move` and `require` constraints in {} '{}'",
                     callable_kind, callable_name
                 ),
                 param.span,
@@ -1861,7 +1792,7 @@ impl<'a> TypeChecker<'a> {
             if self.reference_target_is_cell_backed_aggregate(inner) {
                 return Err(CompileError::new(
                     format!(
-                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or named action outputs with `replace before -> after` instead",
+                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or named action outputs instead",
                         param.name,
                         callable_kind,
                         callable_name,
@@ -1878,7 +1809,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "action" && matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
+                    "{} '{}' parameter '{}' cannot use mutable reference type {}; use signature-direction outputs for Cell updates",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1909,7 +1840,7 @@ impl<'a> TypeChecker<'a> {
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `action(before: T) -> after: T replace before -> after`",
+                    "parameter '{}' is a read-only reference; Cell state updates must be modeled with `action(before: T) -> after: T` plus `move` and `require` constraints",
                     param.name
                 ),
                 param.span,
@@ -1918,7 +1849,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' uses removed `&mut` Cell syntax; use `action(before: T) -> after: T replace before -> after`",
+                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(before: T) -> after: T` plus `move` and `require` constraints",
                     param.name
                 ),
                 param.span,
@@ -1927,7 +1858,7 @@ impl<'a> TypeChecker<'a> {
         if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(before: {}) -> after: {} replace before -> after`) or consume/create sugar",
+                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(before: {}) -> after: {}`) or consume/create sugar",
                     param.name,
                     type_repr(&param.ty),
                     type_repr(&param.ty)
@@ -2187,7 +2118,7 @@ impl<'a> TypeChecker<'a> {
                     Ok(constant.ty)
                 } else if let Some(ty) = self.enum_variant_expr_type(name, expr_span(expr))? {
                     Ok(ty)
-                } else if let Some(ty) = self.lifecycle_state_expr_type(name, expr_span(expr))? {
+                } else if let Some(ty) = self.flow_state_expr_type(name, expr_span(expr))? {
                     Ok(ty)
                 } else if let Some((prefix, _)) = name.split_once("::") {
                     Ok(Type::Named(prefix.to_string()))
@@ -2593,12 +2524,11 @@ impl<'a> TypeChecker<'a> {
             let Some(expected_ty) = expected_fields.get(field_name) else {
                 return Err(CompileError::new(format!("unknown field '{}' in {} for '{}'", field_name, context, type_name), span));
             };
-            let actual_ty =
-                if let Some(lifecycle_ty) = self.lifecycle_state_initializer_type(type_name, field_name, value, expected_ty)? {
-                    lifecycle_ty
-                } else {
-                    self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
-                };
+            let actual_ty = if let Some(flow_ty) = self.flow_state_initializer_type(type_name, field_name, value, expected_ty)? {
+                flow_ty
+            } else {
+                self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
+            };
             if !self.initializer_types_equal(&actual_ty, expected_ty) {
                 return Err(CompileError::new(
                     format!(
@@ -2614,9 +2544,9 @@ impl<'a> TypeChecker<'a> {
             .keys()
             .filter(|field_name| !seen.contains(*field_name))
             .filter(|field_name| {
-                !(self.resolve_lifecycle_states(type_name).is_some()
-                    && !self.state_machines.contains_key(type_name)
-                    && self.lifecycle_state_fields.get(type_name).is_some_and(|state_field| state_field == field_name.as_str()))
+                !(self.resolve_flow_states(type_name).is_some()
+                    && !self.flows.contains_key(type_name)
+                    && self.flow_state_fields.get(type_name).is_some_and(|state_field| state_field == field_name.as_str()))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2630,14 +2560,14 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
-    fn lifecycle_state_initializer_type(
+    fn flow_state_initializer_type(
         &self,
         type_name: &str,
         field_name: &str,
         value: &Expr,
         expected_ty: &Type,
     ) -> Result<Option<Type>> {
-        if self.lifecycle_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
+        if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return Ok(None);
         }
         let Expr::Identifier(state_name) = value else {
@@ -2647,28 +2577,25 @@ impl<'a> TypeChecker<'a> {
             if self.enum_variant_expr_type(state_name, expr_span(value))?.is_some_and(|ty| self.types_equal(&ty, expected_ty)) {
                 return Ok(Some(expected_ty.clone()));
             }
-            let Some(states) = self.resolve_lifecycle_states(type_name) else {
+            let Some(states) = self.resolve_flow_states(type_name) else {
                 return Ok(None);
             };
-            if self.canonical_state_name_for_machine(type_name, Some(enum_name), &states, state_name, expr_span(value)).is_ok() {
+            if self.canonical_state_name_for_flow(type_name, Some(enum_name), &states, state_name, expr_span(value)).is_ok() {
                 return Ok(Some(expected_ty.clone()));
             }
         } else if !is_state_storage_type(expected_ty) {
             return Ok(None);
         }
         let Some((qualified_type, qualified_state)) = state_name.rsplit_once("::") else {
-            return Ok(self.lifecycle_state_index(type_name, state_name).map(|_| expected_ty.clone()));
+            return Ok(self.flow_state_index(type_name, state_name).map(|_| expected_ty.clone()));
         };
         if qualified_type == type_name {
-            if self.lifecycle_state_index(type_name, state_name).is_some() {
+            if self.flow_state_index(type_name, state_name).is_some() {
                 return Ok(Some(expected_ty.clone()));
             }
-            return Err(CompileError::new(
-                format!("unknown state-machine state '{}::{}'", qualified_type, qualified_state),
-                expr_span(value),
-            ));
+            return Err(CompileError::new(format!("unknown flow state '{}::{}'", qualified_type, qualified_state), expr_span(value)));
         }
-        if self.resolve_lifecycle_states(qualified_type).is_some() {
+        if self.resolve_flow_states(qualified_type).is_some() {
             return Err(CompileError::new(
                 format!(
                     "flow field '{}.{}' cannot be initialized with '{}::{}'",
@@ -2680,24 +2607,24 @@ impl<'a> TypeChecker<'a> {
         Ok(None)
     }
 
-    fn lifecycle_state_expr_type(&self, name: &str, span: Span) -> Result<Option<Type>> {
+    fn flow_state_expr_type(&self, name: &str, span: Span) -> Result<Option<Type>> {
         let Some((type_name, state_name)) = name.rsplit_once("::") else {
             return Ok(None);
         };
-        let Some(states) = self.resolve_lifecycle_states(type_name) else {
+        let Some(states) = self.resolve_flow_states(type_name) else {
             return Ok(None);
         };
         if states.iter().any(|state| state == state_name) {
-            if let Some(spec) = self.state_machines.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
+            if let Some(spec) = self.flows.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
                 return Ok(Some(Type::Named(spec.clone())));
             }
             return Ok(Some(Type::U64));
         }
-        Err(CompileError::new(format!("unknown state-machine state '{}::{}'", type_name, state_name), span))
+        Err(CompileError::new(format!("unknown flow state '{}::{}'", type_name, state_name), span))
     }
 
-    fn lifecycle_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
-        let states = self.resolve_lifecycle_states(type_name)?;
+    fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.resolve_flow_states(type_name)?;
         if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
             if qualified_type != type_name {
                 return None;
@@ -3138,7 +3065,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "local binding cannot store mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
+                    "local binding cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
                     type_repr(ty)
                 ),
                 span,
@@ -3194,7 +3121,7 @@ impl<'a> TypeChecker<'a> {
                 if !root_is_mut_ref && self.is_linear_type(&root_ty) {
                     return Err(CompileError::new(
                         format!(
-                            "assignment target rooted at linear/resource value '{}' is not supported; use explicit replacement parameters or consume/create sugar for ownership transitions",
+                            "assignment target rooted at linear/resource value '{}' is not supported; use explicit input/output parameters or consume/create sugar for ownership transitions",
                             root
                         ),
                         assign.span,
@@ -3230,7 +3157,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "assignment cannot store mutable reference type {}; `&mut` Cell parameters have been removed from the public DSL",
+                    "assignment cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
                     type_repr(ty)
                 ),
                 span,
@@ -3343,9 +3270,9 @@ impl<'a> TypeChecker<'a> {
             .map(|fields| fields.into_iter().collect())
     }
 
-    fn resolve_lifecycle_states(&self, type_name: &str) -> Option<Vec<String>> {
+    fn resolve_flow_states(&self, type_name: &str) -> Option<Vec<String>> {
         let base_name = type_name.split('<').next().unwrap_or(type_name);
-        if let Some(states) = self.lifecycle_states.get(base_name) {
+        if let Some(states) = self.flow_states.get(base_name) {
             return Some(states.clone());
         }
         None
@@ -3780,7 +3707,7 @@ impl<'a> TypeChecker<'a> {
                     if participates_in_mutable_alias || prior_participated {
                         return Err(CompileError::new(
                             format!(
-                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; mutable Cell reference parameters have been removed from the public DSL",
+                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; use signature-direction outputs for Cell updates",
                                 callee_name, root
                             ),
                             span,
@@ -4137,6 +4064,138 @@ fn expr_span(expr: &Expr) -> Span {
     }
 }
 
+fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+    if let Some(field) = output_field_constraint(expr, outputs) {
+        fields.insert(field);
+    }
+
+    match expr {
+        Expr::Assign(assign) => {
+            collect_required_output_fields(&assign.target, outputs, fields);
+            collect_required_output_fields(&assign.value, outputs, fields);
+        }
+        Expr::Binary(binary) => {
+            collect_required_output_fields(&binary.left, outputs, fields);
+            collect_required_output_fields(&binary.right, outputs, fields);
+        }
+        Expr::Unary(unary) => collect_required_output_fields(&unary.expr, outputs, fields),
+        Expr::Call(call) => {
+            collect_required_output_fields(&call.func, outputs, fields);
+            for arg in &call.args {
+                collect_required_output_fields(arg, outputs, fields);
+            }
+        }
+        Expr::FieldAccess(field) => collect_required_output_fields(&field.expr, outputs, fields),
+        Expr::Index(index) => {
+            collect_required_output_fields(&index.expr, outputs, fields);
+            collect_required_output_fields(&index.index, outputs, fields);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+            if let Some(lock) = &create.lock {
+                collect_required_output_fields(lock, outputs, fields);
+            }
+        }
+        Expr::Consume(consume) => collect_required_output_fields(&consume.expr, outputs, fields),
+        Expr::Transfer(transfer) => {
+            collect_required_output_fields(&transfer.expr, outputs, fields);
+            collect_required_output_fields(&transfer.to, outputs, fields);
+        }
+        Expr::Destroy(destroy) => collect_required_output_fields(&destroy.expr, outputs, fields),
+        Expr::Claim(claim) => collect_required_output_fields(&claim.receipt, outputs, fields),
+        Expr::Settle(settle) => collect_required_output_fields(&settle.expr, outputs, fields),
+        Expr::Assert(assert_expr) => {
+            collect_required_output_fields(&assert_expr.condition, outputs, fields);
+            collect_required_output_fields(&assert_expr.message, outputs, fields);
+        }
+        Expr::Require(require_expr) => {
+            collect_required_output_fields(&require_expr.condition, outputs, fields);
+            if let Some(message) = &require_expr.message {
+                collect_required_output_fields(message, outputs, fields);
+            }
+        }
+        Expr::Block(stmts) => {
+            for stmt in stmts {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+        Expr::Tuple(elems) | Expr::Array(elems) => {
+            for elem in elems {
+                collect_required_output_fields(elem, outputs, fields);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_required_output_fields(&if_expr.condition, outputs, fields);
+            collect_required_output_fields(&if_expr.then_branch, outputs, fields);
+            collect_required_output_fields(&if_expr.else_branch, outputs, fields);
+        }
+        Expr::Cast(cast) => collect_required_output_fields(&cast.expr, outputs, fields),
+        Expr::Range(range) => {
+            collect_required_output_fields(&range.start, outputs, fields);
+            collect_required_output_fields(&range.end, outputs, fields);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_required_output_fields(&match_expr.expr, outputs, fields);
+            for arm in &match_expr.arms {
+                collect_required_output_fields(&arm.value, outputs, fields);
+            }
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+    }
+}
+
+fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
+        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_required_output_fields(expr, outputs, fields),
+        Stmt::Return(None) => {}
+        Stmt::If(if_stmt) => {
+            collect_required_output_fields(&if_stmt.condition, outputs, fields);
+            for stmt in &if_stmt.then_branch {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+            if let Some(else_branch) = &if_stmt.else_branch {
+                for stmt in else_branch {
+                    collect_required_output_fields_from_stmt(stmt, outputs, fields);
+                }
+            }
+        }
+        Stmt::For(for_stmt) => {
+            collect_required_output_fields(&for_stmt.iterable, outputs, fields);
+            for stmt in &for_stmt.body {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+        Stmt::While(while_stmt) => {
+            collect_required_output_fields(&while_stmt.condition, outputs, fields);
+            for stmt in &while_stmt.body {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+    }
+}
+
+fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<String> {
+    let Expr::FieldAccess(field) = expr else {
+        return None;
+    };
+    let Expr::Identifier(base) = field.expr.as_ref() else {
+        return None;
+    };
+    if outputs.contains(base) {
+        Some(format!("{}.{}", base, field.field))
+    } else {
+        None
+    }
+}
+
 fn forbidden_consensus_call_name(expr: &Expr) -> Option<&'static str> {
     match expr {
         Expr::Identifier(name) => forbidden_consensus_terminal(name),
@@ -4188,7 +4247,7 @@ fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
         Item::Shared(def) => Some((&def.name, def.span)),
         Item::Receipt(def) => Some((&def.name, def.span)),
         Item::Struct(def) => Some((&def.name, def.span)),
-        Item::StateMachine(def) => def.name.as_deref().map(|name| (name, def.span)),
+        Item::Flow(def) => def.name.as_deref().map(|name| (name, def.span)),
         Item::Enum(def) => Some((&def.name, def.span)),
         Item::Const(def) => Some((&def.name, def.span)),
         Item::Action(def) => Some((&def.name, def.span)),
@@ -4255,26 +4314,48 @@ fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutp
 
 fn action_core_evidence_binding_names(action: &ActionDef) -> HashSet<String> {
     let mut bindings = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
-    for replacement in &action.replacements {
-        bindings.insert(replacement.input.clone());
+    for input in action_inferred_lineage_bindings(action).keys() {
+        bindings.insert(input.clone());
     }
     bindings
 }
 
-fn action_replacement_output_by_input(action: &ActionDef) -> HashMap<String, String> {
-    action.replacements.iter().map(|replacement| (replacement.input.clone(), replacement.output.clone())).collect()
-}
+fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    for state_edge in &action.state_edges {
+        bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
+    }
 
-fn action_consumed_bindings_for_type(action: &ActionDef, type_name: &str) -> Vec<String> {
     let consumed = action_consumed_bindings(action);
-    action
-        .params
-        .iter()
-        .filter(|param| consumed.contains(&param.name))
-        .filter_map(|param| action_param_owned_named_type(action, &param.name).map(|ty| (param.name.clone(), ty)))
-        .filter(|(_, ty)| *ty == type_name)
-        .map(|(name, _)| name)
-        .collect()
+    let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, binding) in action_output_binding_names(action) {
+        if bindings.values().any(|bound_output| bound_output == &name) {
+            continue;
+        }
+        outputs_by_type.entry(binding.type_name).or_default().push(name);
+    }
+
+    let mut inputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for param in &action.params {
+        if consumed.contains(&param.name) || bindings.contains_key(&param.name) {
+            continue;
+        }
+        let Some(type_name) = action_param_owned_named_type(action, &param.name) else {
+            continue;
+        };
+        inputs_by_type.entry(type_name.to_string()).or_default().push(param.name.clone());
+    }
+
+    for (type_name, inputs) in inputs_by_type {
+        let Some(outputs) = outputs_by_type.get(&type_name) else {
+            continue;
+        };
+        if inputs.len() == 1 && outputs.len() == 1 {
+            bindings.insert(inputs[0].clone(), outputs[0].clone());
+        }
+    }
+
+    bindings
 }
 
 fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
@@ -4386,117 +4467,6 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
             for arm in &match_expr.arms {
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
-            }
-        }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
-    }
-}
-
-fn action_created_type_counts(action: &ActionDef) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    collect_created_type_counts_from_stmts(&action.body, &mut counts);
-    counts
-}
-
-fn collect_created_type_counts_from_stmts(stmts: &[Stmt], counts: &mut HashMap<String, usize>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Let(let_stmt) => collect_created_type_counts_from_expr(&let_stmt.value, counts),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_created_type_counts_from_expr(expr, counts),
-            Stmt::Return(None) => {}
-            Stmt::If(if_stmt) => {
-                collect_created_type_counts_from_expr(&if_stmt.condition, counts);
-                collect_created_type_counts_from_stmts(&if_stmt.then_branch, counts);
-                if let Some(else_branch) = &if_stmt.else_branch {
-                    collect_created_type_counts_from_stmts(else_branch, counts);
-                }
-            }
-            Stmt::For(for_stmt) => {
-                collect_created_type_counts_from_expr(&for_stmt.iterable, counts);
-                collect_created_type_counts_from_stmts(&for_stmt.body, counts);
-            }
-            Stmt::While(while_stmt) => {
-                collect_created_type_counts_from_expr(&while_stmt.condition, counts);
-                collect_created_type_counts_from_stmts(&while_stmt.body, counts);
-            }
-        }
-    }
-}
-
-fn collect_created_type_counts_from_expr(expr: &Expr, counts: &mut HashMap<String, usize>) {
-    match expr {
-        Expr::Create(create) => {
-            *counts.entry(create.ty.clone()).or_insert(0) += 1;
-            for (_, value) in &create.fields {
-                collect_created_type_counts_from_expr(value, counts);
-            }
-            if let Some(lock) = &create.lock {
-                collect_created_type_counts_from_expr(lock, counts);
-            }
-        }
-        Expr::Assign(assign) => {
-            collect_created_type_counts_from_expr(&assign.target, counts);
-            collect_created_type_counts_from_expr(&assign.value, counts);
-        }
-        Expr::Binary(binary) => {
-            collect_created_type_counts_from_expr(&binary.left, counts);
-            collect_created_type_counts_from_expr(&binary.right, counts);
-        }
-        Expr::Unary(unary) => collect_created_type_counts_from_expr(&unary.expr, counts),
-        Expr::Call(call) => {
-            collect_created_type_counts_from_expr(&call.func, counts);
-            for arg in &call.args {
-                collect_created_type_counts_from_expr(arg, counts);
-            }
-        }
-        Expr::FieldAccess(field) => collect_created_type_counts_from_expr(&field.expr, counts),
-        Expr::Index(index) => {
-            collect_created_type_counts_from_expr(&index.expr, counts);
-            collect_created_type_counts_from_expr(&index.index, counts);
-        }
-        Expr::Consume(consume) => collect_created_type_counts_from_expr(&consume.expr, counts),
-        Expr::Transfer(transfer) => {
-            collect_created_type_counts_from_expr(&transfer.expr, counts);
-            collect_created_type_counts_from_expr(&transfer.to, counts);
-        }
-        Expr::Destroy(destroy) => collect_created_type_counts_from_expr(&destroy.expr, counts),
-        Expr::Claim(claim) => collect_created_type_counts_from_expr(&claim.receipt, counts),
-        Expr::Settle(settle) => collect_created_type_counts_from_expr(&settle.expr, counts),
-        Expr::Assert(assert_expr) => {
-            collect_created_type_counts_from_expr(&assert_expr.condition, counts);
-            collect_created_type_counts_from_expr(&assert_expr.message, counts);
-        }
-        Expr::Require(require_expr) => {
-            collect_created_type_counts_from_expr(&require_expr.condition, counts);
-            if let Some(message) = &require_expr.message {
-                collect_created_type_counts_from_expr(message, counts);
-            }
-        }
-        Expr::Block(stmts) => collect_created_type_counts_from_stmts(stmts, counts),
-        Expr::Tuple(items) | Expr::Array(items) => {
-            for item in items {
-                collect_created_type_counts_from_expr(item, counts);
-            }
-        }
-        Expr::If(if_expr) => {
-            collect_created_type_counts_from_expr(&if_expr.condition, counts);
-            collect_created_type_counts_from_expr(&if_expr.then_branch, counts);
-            collect_created_type_counts_from_expr(&if_expr.else_branch, counts);
-        }
-        Expr::Cast(cast) => collect_created_type_counts_from_expr(&cast.expr, counts),
-        Expr::Range(range) => {
-            collect_created_type_counts_from_expr(&range.start, counts);
-            collect_created_type_counts_from_expr(&range.end, counts);
-        }
-        Expr::StructInit(init) => {
-            for (_, value) in &init.fields {
-                collect_created_type_counts_from_expr(value, counts);
-            }
-        }
-        Expr::Match(match_expr) => {
-            collect_created_type_counts_from_expr(&match_expr.expr, counts);
-            for arm in &match_expr.arms {
-                collect_created_type_counts_from_expr(&arm.value, counts);
             }
         }
         Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
@@ -4647,9 +4617,9 @@ module app
 use cellscript::left::TokenA
 use cellscript::right::TokenB
 
-action main(a: TokenA) -> u64 {
+action main(a: TokenA) -> u64
+where
     return a.amount
-}
 "#,
         );
 

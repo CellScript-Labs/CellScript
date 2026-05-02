@@ -12,12 +12,11 @@ resource MintAuthority has store {
     minted: u64
 }
 
-// `replace` binds the consumed authority input to the proposed authority output.
-// The verifier checks the relationship explicitly; this is not account-style
+// The signature names the consumed authority input and proposed authority output.
+// `require` guards prove the relationship explicitly; this is not account-style
 // in-place storage.
 action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-    replace auth_before -> auth_after
-{
+where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
@@ -27,22 +26,22 @@ action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after
         amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
-}
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> Token
+where
     consume token
     create Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 
-action merge(a: Token, b: Token, to: Address) -> Token {
+action merge(a: Token, b: Token, to: Address) -> Token
+where
     assert(a.symbol == b.symbol, "symbol mismatch")
     let total = a.amount + b.amount
     consume a
@@ -52,4 +51,3 @@ action merge(a: Token, b: Token, to: Address) -> Token {
         amount: total,
         symbol: a.symbol
     } with_lock(to)
-}

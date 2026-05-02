@@ -124,14 +124,14 @@ Future work:
 
 - declarative capacity requirements where the compiler can check them;
 - declarative since/header/timepoint assumptions for timelock-like protocols;
-- explicit continuity policy for `replaces before with after` Cell replacement, including type id,
+- explicit continuity policy for signature-directed input/output Cell updates, including type id,
   lock, data schema, and capacity continuity;
 - clearer builder obligations in action builder plans.
 
 Source documents:
 
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Mutate and replacement outputs](../docs/CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
+- [Output bindings](../docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
 - [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ### Documentation And Developer Experience Track

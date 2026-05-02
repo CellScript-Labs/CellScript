@@ -60,8 +60,7 @@ action mint(
     to: Address,
     metadata_hash: Hash,
 ) -> NFT
-    replace collection_before -> collection_after
-{
+where
     assert(collection_before.total_supply < collection_before.max_supply, "Max supply reached");
     
     let token_id = collection_before.total_supply + 1;
@@ -81,24 +80,22 @@ action mint(
     };
     
     nft
-}
 
 action transfer(nft_before: NFT, output nft_after: NFT, to: Address)
-    replace nft_before -> nft_after
-{
+where
     assert(nft_before.owner != to, "Cannot transfer to self");
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == to
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
-}
 
 action create_listing(
     nft: &NFT,
     price: u64,
     current_time: u64,
-) -> Listing {
+) -> Listing
+where
     assert(price > 0, "Price must be positive");
     
     let listing = create Listing {
@@ -110,12 +107,11 @@ action create_listing(
     };
     
     listing
-}
 
-action cancel_listing(listing: Listing) {
+action cancel_listing(listing: Listing)
+where
     
     destroy listing;
-}
 
 action buy_from_listing(
     nft_before: NFT,
@@ -125,8 +121,7 @@ action buy_from_listing(
     seller: Address,
     payment: u64,
 ) -> (RoyaltyPayment, RoyaltyPayment)
-    replace nft_before -> nft_after
-{
+where
     assert(payment >= listing.price, "Insufficient payment");
     
     let royalty_amount = (payment * nft_before.royalty_bps as u64) / 10000;
@@ -152,14 +147,14 @@ action buy_from_listing(
     };
     
     (royalty_payment, seller_payment)
-}
 
 action create_offer(
     token_id: u64,
     buyer: Address,
     price: u64,
     expires_at: u64,
-) -> Offer {
+) -> Offer
+where
     assert(price > 0, "Price must be positive");
     assert(expires_at > 0, "Expiration must be in the future");
     
@@ -172,7 +167,6 @@ action create_offer(
     };
     
     offer
-}
 
 action accept_offer(
     nft_before: NFT,
@@ -183,8 +177,7 @@ action accept_offer(
     price: u64,
     current_time: u64,
 ) -> (RoyaltyPayment, RoyaltyPayment)
-    replace nft_before -> nft_after
-{
+where
     assert(current_time < offer.expires_at, "Offer expired");
     
     
@@ -211,11 +204,10 @@ action accept_offer(
     };
     
     (royalty_payment, seller_payment)
-}
 
-action burn(nft: NFT) {
+action burn(nft: NFT)
+where
     destroy nft;
-}
 
 action batch_mint(
     collection_before: Collection,
@@ -223,8 +215,7 @@ action batch_mint(
     recipients: [Address; 4],
     metadata_hashes: [Hash; 4],
 ) -> (NFT, NFT, NFT, NFT)
-    replace collection_before -> collection_after
-{
+where
     assert(
         collection_before.total_supply + 4 <= collection_before.max_supply,
         "Max supply would be exceeded"
@@ -271,7 +262,6 @@ action batch_mint(
     };
 
     (nft0, nft1, nft2, nft3)
-}
 
 
 lock nft_ownership(protected nft: NFT, witness claimed_owner: Address) -> bool {

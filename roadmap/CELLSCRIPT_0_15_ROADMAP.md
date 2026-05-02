@@ -180,7 +180,7 @@ AST / stdlib macro
 - coverage
 - input/output relation checks
 - group cardinality
-- identity lifecycle policy
+- identity policy
 - preserved script/data/capacity fields
 - witness fields and decoded proof payloads
 - on-chain checked obligations
@@ -226,7 +226,7 @@ builder_assumption: none
 
 **Problem**
 
-`Create`, `Consume`, `Transfer`, `Destroy`, `ReadRef`, `Claim`, and `Settle` sit at the same AST level. `create/consume/read_ref/mutate` are kernel-level. `transfer/claim/settle/shared/pool` are protocol-level.
+`Create`, `Consume`, `Transfer`, `Destroy`, `Read`, `Claim`, and `Settle` sit at the same AST level. `create/consume/read parameters/read_ref<T>()` are kernel-level. `transfer/claim/settle/shared/pool` are protocol-level.
 
 **Change**
 
@@ -238,8 +238,8 @@ output<T>
 cell_dep<T>
 create_output
 consume_input
-replace_input_with_output
-read_ref
+input_output_binding
+read_cell_dep
 assert_data
 assert_lock
 assert_type
@@ -278,15 +278,15 @@ Protocol macros must lower through scoped invariants and ProofPlan, not protocol
 - strict CKB mode has no compiler-core lowering path for `transfer`, `claim`, `settle`, or `shared`
 - stdlib macros expand into inspectable ProofPlan obligations
 - codegen consumes ProofPlan, not protocol-name recognizers
-- old syntax either lowers through compatibility macros or fails with a precise migration diagnostic
+- non-canonical syntax fails with a precise diagnostic that names the required proof obligation
 
 ---
 
-### 5. Add First-Class Cell Identity and TYPE_ID Lifecycle
+### 5. Add First-Class Cell Identity and TYPE_ID Policy
 
 **Problem**
 
-v0.14 validates CKB TYPE_ID metadata plans and transaction-shape facts. v0.15 promotes identity into a first-class primitive policy across create, replace, and destroy flows. CKB TYPE_ID remains one supported identity backend, with verifier rules derived from first input, output index, and group cardinality.
+v0.14 validates CKB TYPE_ID metadata plans and transaction-shape facts. v0.15 promotes identity into a first-class primitive policy across create, update-output, and destroy flows. CKB TYPE_ID remains one supported identity backend, with verifier rules derived from first input, output index, and group cardinality.
 
 **Change**
 
@@ -300,11 +300,11 @@ identity script_args
 identity singleton_type
 ```
 
-Add lifecycle forms:
+Add identity policy forms:
 
 ```text
 create_unique<T>(identity = ckb_type_id)
-replace_unique<T>(identity = ckb_type_id)
+update_unique<T>(identity = ckb_type_id)
 destroy_unique<T>(identity = ckb_type_id)
 preserve_identity(input, output)
 assert_identity_absent(identity, scope)
@@ -323,7 +323,7 @@ assert_identity_absent(identity, scope)
 - CKB TYPE_ID creation is runtime-checked or rejected in strict mode
 - TYPE_ID continuation proves identity preservation, not only type-script preservation
 - group cardinality follows CKB TYPE_ID rules
-- tests cover create, replace, destroy, duplicate output, and unrelated same-type output
+- tests cover create, update-output, destroy, duplicate output, and unrelated same-type output
 
 ---
 
@@ -342,7 +342,7 @@ destroy_unique(cell, identity = type_id)
 destroy_instance(cell, identity_field = id)
 burn_amount(cell, field = amount)
 destroy_singleton_type(cell)
-forbid_replacement(cell, match = script_hash + identity)
+forbid_output_successor(cell, match = script_hash + identity)
 ```
 
 **Code Areas**
@@ -459,11 +459,9 @@ lock owner_lock(owner: LockHash) -> bool {
 }
 
 #[entry(type)]
-action verify_transition(state_before: State, state_after: output State)
-    replaces state_before with state_after
-{
+action verify_transition(state_before: State) -> state_after: State
+where
     ...
-}
 ```
 
 or add first-class item kinds:
@@ -520,7 +518,7 @@ ckb_type_id_args
 
 - no public metadata field named `type_hash` refers to a source type-name hash
 - CKB script hashes are always derived from packed `Script`
-- migration diagnostics point old consumers to the new field names
+- diagnostics point metadata consumers to the canonical field names
 
 ---
 
@@ -538,18 +536,18 @@ Replace protocol capabilities with effect capabilities:
 store
 create
 consume
-replace
+update_output
 burn
 relock
 retarget_type
-read_ref
+read_cell_dep
 ```
 
-Map old capabilities only in compatibility mode:
+Rejected protocol capability spellings:
 
 ```text
-transfer -> replace + relock
-destroy  -> consume + burn | consume + assert_absence
+transfer
+destroy
 ```
 
 **Code Areas**
@@ -599,7 +597,7 @@ assert_data_version<T>(version)
 - schema-backed cell transitions declare preserve or migrate behavior
 - migration requires explicit old/new layout binding
 - metadata includes data layout hash, version, and migration policy
-- strict mode rejects schema-backed replacement with no layout policy
+- strict mode rejects schema-backed update outputs with no layout policy
 
 ---
 
@@ -638,21 +636,22 @@ claim_proof(
 
 ---
 
-### 14. Make Replacement Cardinality Explicit
+### 14. Make Update Cardinality Explicit
 
 **Problem**
 
-One-to-one replacement is explicit in 0.13 through `replaces before with after`,
-but split, merge, and rebalance transactions still need a first-class way to
+One-to-one updates are explicit in 0.13 through signature-directed
+`action(before: T) -> after: T` topology and `move`/`require` constraints, but
+split, merge, and rebalance transactions still need a first-class way to
 declare cardinality and pairing policy. Those shapes should not fall back to
 compiler guessing or scattered consume/create reconstruction.
 
 **Change**
 
-Add explicit multi-cell replacement forms:
+Add explicit multi-cell update/cardinality forms:
 
 ```text
-replace_one(input, output)
+update_one(input, output)
 split_one_to_many(input, outputs)
 merge_many_to_one(inputs, output)
 rebalance(inputs, outputs, invariant)
@@ -660,14 +659,14 @@ rebalance(inputs, outputs, invariant)
 
 **Code Areas**
 
-- replacement analysis
-- replacement pattern metadata
+- update cardinality analysis
+- update pattern metadata
 - codegen source selection
 - metadata obligations
 
 **Acceptance**
 
-- one-to-one replacement keeps current `replaces before with after` behavior
+- one-to-one updates keep current signature-directed behavior
 - split/merge requires explicit invariant
 - compiler diagnostics name the exact missing pairing or cardinality rule
 
@@ -729,7 +728,7 @@ Keep the core language limited to cell access and proof obligations. Implement s
 ```text
 shared.read
 shared.locked_update
-shared.versioned_replace
+shared.versioned_update
 shared.queue_claim
 ```
 
@@ -741,14 +740,13 @@ shared.queue_claim
 
 ---
 
-### 17. Compatibility and Migration
+### 17. Canonical Syntax Cutover
 
 **Change**
 
-Add a migration mode:
+Keep one canonical primitive surface:
 
 ```text
---primitive-compat=0.14
 --primitive-strict=0.15
 ```
 
@@ -760,9 +758,9 @@ CS0151 destroy requires an explicit destruction policy
 CS0152 Address cannot be used as LockHash
 CS0153 CKB entry role must be explicit
 CS0154 claim proof bindings must be explicit
-CS0155 type_id lifecycle must be explicit
+CS0155 type_id identity policy must be explicit
 CS0156 protocol capabilities are not allowed in strict mode
-CS0157 schema-backed replacement requires a layout policy
+CS0157 schema-backed update output requires a layout policy
 CS0158 invariant trigger and scope must be explicit
 CS0159 lock_group + transaction scope requires explicit coverage acknowledgement
 CS0160 builder assumption is not on-chain checked
@@ -770,9 +768,8 @@ CS0160 builder assumption is not on-chain checked
 
 **Acceptance**
 
-- bundled examples compile in compatibility mode first
-- strict mode migration PR changes examples to v0.15 syntax
-- diagnostics include old syntax, new syntax, and affected proof obligation
+- bundled examples compile only in canonical strict mode
+- diagnostics include the rejected syntax, canonical syntax, and affected proof obligation
 
 ---
 
@@ -788,9 +785,9 @@ v0.15 cannot ship until:
 - `cellc explain-proof` exposes trigger/scope/reads/coverage/on-chain status
 - every CKB artifact has an explicit entry role
 - `Address`, `LockScript`, and `LockHash` are distinct in type checking and metadata
-- TYPE_ID lifecycle is covered by ProofPlan and runtime codegen
-- bare `destroy` is removed or compatibility-gated
+- TYPE_ID identity policy is covered by ProofPlan and runtime codegen
+- bare `destroy` is removed or expressed through an explicit destruction policy
 - resource capabilities use kernel effect names in strict mode
-- schema-backed replacement declares preserve or migrate layout policy
+- schema-backed update output declares preserve or migrate layout policy
 - ProofPlan coverage is checked in tests
-- examples pass in both compatibility and strict migration tracks
+- examples pass in the canonical strict track

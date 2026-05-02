@@ -50,11 +50,11 @@ Compile-time safety guarantees:
 
 ```cellscript
 consume token                                       // consume Cell input, reclaim capacity
-create Token { amount: 100 } with_lock(recipient)   // create Cell output
+create token = Token { amount: 100 } with_lock(recipient) // constrain named Cell output
 transfer token to recipient                         // atomic consume + create
 destroy token                                       // destroy (requires destroy capability)
-read_ref OracleData                                 // non-consuming read from CellDep
-mutate pool { reserve_a: pool.reserve_a + delta }   // atomic in-place update
+read oracle: OracleData                             // non-consuming read from CellDep
+require pool_after.reserve_a == pool.reserve_a + delta // explicit output constraint
 ```
 
 ### 2.3 Entry Witness ABI (CSARGv1)
@@ -118,19 +118,19 @@ reports are future/evidence-gated release material.
 
 ```cellscript
 // Delegate verification: Lock Script spawns a child verifier
-action verify_with_delegate(proof: Proof) {
+action verify_with_delegate(proof: Proof)
+where
     let result = spawn("secp256k1_verifier", args: [proof.pubkey, proof.signature])
     assert(result == 0, "verification failed")
-}
 
 // Pipe-based multi-step verification chain
-action multi_step_verify(data: VerifyData) {
+action multi_step_verify(data: VerifyData)
+where
     let (read_fd, write_fd) = pipe()
     spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
     let result = wait()
     assert(result == 0, "hash check failed")
-}
 ```
 
 - Maps to CKB VM v2 Spawn syscalls (2601–2606)
@@ -141,11 +141,11 @@ action multi_step_verify(data: VerifyData) {
 ### 4.2 Structured WitnessArgs & Source Views (P0)
 
 ```cellscript
-lock standard_lock {
+lock standard_lock(lock_args args: OwnerArgs, witness sig: Signature) -> bool {
     let sig = witness::lock<Signature>(source: source::group_input(0))
     let proof = witness::input_type<ProofData>(source: source::group_input(0))
 
-    let pubkey_hash = env::lock_args()
+    let pubkey_hash = args.pubkey_hash
     assert(
         secp256k1_verify(pubkey_hash, sig, env::tx_hash()),
         "signature verification failed"
@@ -163,13 +163,15 @@ lock standard_lock {
 - `outputs[i]` ↔ `outputs_data[i]` binding obligations
 - Source conformance fixtures for global and group views
 - TYPE_ID metadata validation MVP: output index, first-input args source, group cardinality, duplicate/missing-plan rejection
-- Explicit boundary: no v0.15 identity lifecycle redesign in v0.14
+- Explicit boundary: no v0.15 identity-policy redesign in v0.14
 
 ### 4.4 Script Reference & HashType Strictness (P1)
 
 - CKB script reference metadata: `code_hash`, `hash_type`, `args`, dep source, resolved profile
 - CKB profile rejects unsupported or profile-incompatible hash types
-- Every script reference used by spawn, lock/type metadata, or `read_ref` must link to a CellDep/DepGroup path
+- Every script reference used by spawn, lock/type metadata, action-boundary
+  `read` parameters, or expression-level `read_ref<T>()` must link to a
+  CellDep/DepGroup path
 - Audit output includes a script reference table
 
 ### 4.5 Declarative Capacity Syntax (P1)
@@ -181,21 +183,21 @@ resource Token has store, transfer, destroy {
     symbol: [u8; 8]
 }
 
-action transfer_with_fee(token: Token, fee: u64) {
+action transfer_with_fee(token: Token, fee: u64) -> next_token: Token
+where
     let freed = consume token
     assert(freed >= occupied_capacity(Token) + fee, "insufficient")
-    create Token { amount: token.amount } with_lock(recipient)
-}
+    create next_token = Token { amount: token.amount } with_lock(recipient)
 ```
 
 ### 4.6 Declarative Time Constraints (P1)
 
 ```cellscript
-action claim_after_ckb_timeout(htlc: HtlcReceipt) {
+action claim_after_ckb_timeout(htlc: HtlcReceipt)
+where
     require_maturity(blocks: 100)               // CKB block-number lock
     require_time(after: Timestamp(1714000000))  // CKB timestamp since
     claim htlc
-}
 ```
 
 ### 4.7 Conditional hash_blake2b() Support (P1)
@@ -279,7 +281,7 @@ ProofPlan records:
 - trigger / scope / reads / coverage
 - input/output relation checks
 - group cardinality
-- identity lifecycle policy
+- identity policy
 - on-chain checked obligations
 - builder assumptions
 - codegen coverage status
@@ -306,7 +308,7 @@ They become stdlib proof macros that expand into:
 v0.15 promotes identity and script semantics beyond the v0.14 metadata MVP:
 
 - First-class cell identity policies: `ckb_type_id`, field identity, script args, singleton type
-- TYPE_ID lifecycle across create / replace / destroy
+- TYPE_ID identity policy across create / update-output / destroy
 - Explicit destruction policies: `destroy_unique`, `destroy_instance`, `burn_amount`, `destroy_singleton_type`
 - Address type split: `Address`, `LockScript`, `LockHash`, `TypeScript`, `TypeHash`, `ScriptHash`
 - Public metadata rename: `dsl_type_fingerprint` vs `ckb_type_script_hash`
@@ -471,8 +473,8 @@ dates, quarters, week counts, and effort estimates.
 | Lock Script | `lock { ... }` block | v0.12 |
 | Type Script | implicit via `action` | v0.12 |
 | CellInput (consume) | `consume expr` | v0.12 |
-| CellOutput (create) | `create T { ... } with_lock(addr)` | v0.12 |
-| CellDep (read) | `read_ref T` | v0.12 |
+| CellOutput (create) | `create output = T { ... } with_lock(addr)` | v0.12 |
+| CellDep (read) | `read param: T` | v0.13 |
 | Witness | Entry Witness ABI (CSARGv1) | v0.12 |
 | OutPoint | Implicit via `consume` (input) / `create` (output) | v0.12 |
 | Capacity (Shannon) | `occupied_capacity(T)` + freed capacity | v0.12 |
@@ -490,7 +492,7 @@ dates, quarters, week counts, and effort estimates.
 | Type invariant | `trigger: type_group`, group-scoped invariants | v0.15 |
 | ProofPlan | `cellc explain-proof` trigger/scope/reads/coverage report | v0.15 |
 | Builder assumption | `builder_assumption(...)` marked as not on-chain checked | v0.15 |
-| TypeID lifecycle | `identity ckb_type_id`, `preserve_identity`, `destroy_unique` | v0.15 |
+| TypeID identity policy | `identity ckb_type_id`, `preserve_identity`, `destroy_unique` | v0.15 |
 | Formal semantics | operational semantics spec + conformance fixtures | v0.16 |
 | Proof soundness | ProofPlan-to-code coverage checker | v0.16 |
 | Standard compatibility | CKB standard script fixture suites | v0.16 |

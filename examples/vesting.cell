@@ -34,7 +34,8 @@ action create_vesting_config(
     cliff_period: u64,
     total_period: u64,
     revocable: bool
-) -> VestingConfig {
+) -> VestingConfig
+where
     assert(cliff_period < total_period, "cliff >= total")
     
     create VestingConfig {
@@ -44,13 +45,13 @@ action create_vesting_config(
         total_vesting_period: total_period,
         revocable
     } with_lock(admin)
-}
 
 action grant_vesting(
     read config: VestingConfig,
     tokens: Token,
     beneficiary: Address
-) -> VestingGrant {
+) -> VestingGrant
+where
     assert(tokens.symbol == config.token_symbol, "wrong token")
     assert(tokens.amount > 0, "zero grant")
     
@@ -68,9 +69,9 @@ action grant_vesting(
         end_timepoint: now + config.total_vesting_period,
         token_symbol: config.token_symbol
     } with_lock(beneficiary)
-}
 
-action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
+action claim_vested(grant: VestingGrant) -> (Token, VestingGrant)
+where
     let now = env::current_timepoint()
     
     assert(now >= grant.cliff_timepoint, "cliff not reached")
@@ -108,7 +109,6 @@ action claim_vested(grant: VestingGrant) -> (Token, VestingGrant) {
     } with_lock(grant.beneficiary)
     
     (tokens, updated_grant)
-}
 
 // `claimed_admin` is still an entry witness argument. The equality check below
 // is factored through `vesting_admin` so the authority predicate is visible as a
@@ -117,7 +117,8 @@ action revoke_grant(
     read config: VestingConfig,
     grant: VestingGrant,
     claimed_admin: Address
-) -> (Token, Token) {
+) -> (Token, Token)
+where
     assert(config.revocable, "not revocable")
     assert(is_vesting_admin(config, claimed_admin), "not admin")
     assert(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
@@ -150,7 +151,6 @@ action revoke_grant(
     } with_lock(claimed_admin)
     
     (employee_tokens, admin_tokens)
-}
 
 fn is_vesting_admin(config: &VestingConfig, claimed_admin: Address) -> bool {
     claimed_admin == config.admin
