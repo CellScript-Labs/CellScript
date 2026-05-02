@@ -43,11 +43,49 @@ outside the LSP scope.
 ### Editor basics
 
 - `.cell` file association
-- TextMate syntax highlighting
+- TextMate syntax highlighting for the current 0.13 action model (`where`
+  proof blocks, `move input.state: A -> output.state: B`, `flow`, named
+  output `create out = T { ... }`, and source qualifiers such as `read`,
+  `protected`, `witness`, and `lock_args`)
 - comment, bracket, auto-close, and folding configuration
-- snippets for resources, shared state, receipts, actions, locks, effects,
-  and `create ... with_lock`
+- snippets for resources, shared state, receipts, flows, action proof blocks,
+  field-to-field state moves, locks, source-qualified parameters, effects,
+  and named output `create ... = ... with_lock`
 - status bar state indicator
+
+## 0.13 Authoring Surface
+
+The extension snippets and grammar follow the signature-direction action
+surface:
+
+```cellscript
+action fill_offer(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    require output.price == input.price
+    require output.seller == input.seller
+```
+
+Use where proof blocks for action proof logic; do not use the old brace-body
+action form.
+
+At action and lock boundaries, source qualifiers are written before the
+parameter name:
+
+```cellscript
+action grant(read config: Config, tokens: Token) -> grant: Grant
+where
+    create grant = Grant { admin: config.admin }
+
+lock owner_only(protected cell: Wallet, witness owner: Address) -> bool {
+    require owner == cell.owner
+}
+```
+
+`create output = T { ... }` constrains a named proposed output Cell. It is
+not runtime allocation. Expression-level `read_ref<T>()` still exists for
+lower-level reference reads, but action-boundary read-only Cell parameters
+should use `read name: T`.
 
 ## Architecture
 

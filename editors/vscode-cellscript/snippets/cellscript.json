@@ -2,16 +2,26 @@
   "Action": {
     "prefix": "action",
     "body": [
-      "action ${1:name}(${2:param}: ${3:u64}) -> ${4:u64} {",
-      "    ${5:return ${2}}",
-      "}"
+      "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}",
+      "where",
+      "    require ${5:${4}.owner == ${2}.owner}"
     ],
-    "description": "Create a CellScript action"
+    "description": "Create a CellScript action with a where proof block"
+  },
+  "State Transition Action": {
+    "prefix": "action-move",
+    "body": [
+      "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}",
+      "    move ${2}.${5:state}: ${6:Created} -> ${4}.${5}: ${7:Live}",
+      "where",
+      "    require ${8:${4}.owner == ${2}.owner}"
+    ],
+    "description": "Create an action with an explicit state move"
   },
   "Lock": {
     "prefix": "lock",
     "body": [
-      "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:arg}: witness ${5:Address}) -> bool {",
+      "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {",
       "    require ${6:${4} == ${2}.owner}",
       "}"
     ],
@@ -21,7 +31,7 @@
     "prefix": "resource",
     "body": [
       "resource ${1:Token} {",
-      "    ${2:amount}: ${3:u64},",
+      "    ${2:amount}: ${3:u64}",
       "}"
     ],
     "description": "Create a CellScript resource"
@@ -30,7 +40,7 @@
     "prefix": "shared",
     "body": [
       "shared ${1:Pool} {",
-      "    ${2:reserve}: ${3:u64},",
+      "    ${2:reserve}: ${3:u64}",
       "}"
     ],
     "description": "Create a CellScript shared state"
@@ -39,7 +49,7 @@
     "prefix": "receipt",
     "body": [
       "receipt ${1:Grant} {",
-      "    ${2:beneficiary}: ${3:Address},",
+      "    ${2:beneficiary}: ${3:Address}",
       "}"
     ],
     "description": "Create a CellScript receipt"
@@ -55,11 +65,41 @@
   "Create With Lock": {
     "prefix": "create",
     "body": [
-      "create ${1:Token} {",
-      "    ${2:amount}: ${3:1}",
-      "} with_lock(${4:owner})"
+      "create ${1:output} = ${2:Token} {",
+      "    ${3:amount}: ${4:1}",
+      "} with_lock(${5:owner})"
     ],
-    "description": "Create a resource with a lock"
+    "description": "Constrain a named output with a lock"
+  },
+  "Move": {
+    "prefix": "move",
+    "body": [
+      "move ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2}: ${5:Live}"
+    ],
+    "description": "Declare a field-to-field state transition"
+  },
+  "Flow": {
+    "prefix": "flow",
+    "body": [
+      "flow ${1:Name} for ${2:Type}.${3:state} {",
+      "    ${4:Created} -> ${5:Live};",
+      "}"
+    ],
+    "description": "Declare valid state edges for a state field"
+  },
+  "Read Parameter": {
+    "prefix": "read",
+    "body": [
+      "read ${1:config}: ${2:Config}"
+    ],
+    "description": "Declare a read-only action parameter"
+  },
+  "Witness Parameter": {
+    "prefix": "witness",
+    "body": [
+      "witness ${1:sig}: ${2:Signature}"
+    ],
+    "description": "Declare a witness-sourced parameter"
   },
   "Require": {
     "prefix": "require",

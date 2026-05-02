@@ -4,6 +4,12 @@
 
 - Updated extension package metadata for the CellScript 0.13 release.
 - Added editor completion coverage for the 0.13 Vec helper surface.
+- Updated TextMate grammar and snippets for the 0.13 action model:
+  signature-direction outputs, `where` proof blocks, colon state moves,
+  `flow`, named output `create out = T { ... }`, and prefix source
+  qualifiers (`read`, `protected`, `witness`, `lock_args`).
+- Tightened extension validation so stale brace-body action snippets and
+  missing 0.13 syntax keywords are release blockers.
 
 ## 0.12.0
 
