@@ -210,6 +210,7 @@ pub struct Param {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamSource {
     Default,
+    Input,
     Output,
     Protected,
     Witness,

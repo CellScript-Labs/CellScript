@@ -330,6 +330,7 @@ fn type_repr(ty: &Type) -> String {
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
         ParamSource::Default => "default",
+        ParamSource::Input => "input",
         ParamSource::Output => "output",
         ParamSource::Protected => "protected",
         ParamSource::Witness => "witness",
@@ -714,7 +715,7 @@ impl<'a> TypeChecker<'a> {
                     replacement.span,
                 ));
             };
-            if input_param.source != ParamSource::Default
+            if !matches!(input_param.source, ParamSource::Default | ParamSource::Input)
                 || input_param.is_read_ref
                 || input_param.is_ref
                 || input_param.is_mut
@@ -1001,7 +1002,10 @@ impl<'a> TypeChecker<'a> {
                         path.span,
                     ));
                 };
-                if param.source != ParamSource::Default || param.is_read_ref || !matches!(param.ty, Type::Named(_)) {
+                if !matches!(param.source, ParamSource::Default | ParamSource::Input)
+                    || param.is_read_ref
+                    || !matches!(param.ty, Type::Named(_))
+                {
                     return Err(CompileError::new(
                         format!(
                             "state move binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, or read_ref parameter",
@@ -1435,6 +1439,40 @@ impl<'a> TypeChecker<'a> {
         if param.source == ParamSource::Default {
             return Ok(());
         }
+        if param.source == ParamSource::Input {
+            if callable_kind != "action" {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot use input source classification; input parameters are action verifier bindings",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
+            if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
+                return Err(CompileError::new(
+                    format!("input action parameter '{}' must use 'name: input T' without mut/ref/read_ref modifiers", param.name),
+                    param.span,
+                ));
+            }
+            let Some(name) = Self::base_type_name(&param.ty) else {
+                return Err(CompileError::new(
+                    format!("input action parameter '{}' must name a Cell-backed resource, shared cell, or receipt type", param.name),
+                    param.span,
+                ));
+            };
+            if self.resolve_cell_type_kind(name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "input action parameter '{}' references non-Cell type {}; input only marks a consumed transaction input Cell",
+                        param.name,
+                        type_repr(&param.ty)
+                    ),
+                    param.span,
+                ));
+            }
+            return Ok(());
+        }
         if param.source == ParamSource::Output {
             if callable_kind != "action" {
                 return Err(CompileError::new(
@@ -1547,7 +1585,7 @@ impl<'a> TypeChecker<'a> {
                     ));
                 }
             }
-            ParamSource::Default | ParamSource::Output => {}
+            ParamSource::Default | ParamSource::Input | ParamSource::Output => {}
         }
         Ok(())
     }
@@ -1556,7 +1594,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "`&mut` Cell parameters have been removed from the public DSL; use `before: T, after: output T` with `replaces before with after` in {} '{}'",
+                    "`&mut` Cell parameters have been removed from the public DSL; use `before: input T, after: output T` with `replaces before with after` in {} '{}'",
                     callable_kind, callable_name
                 ),
                 param.span,
@@ -1582,7 +1620,7 @@ impl<'a> TypeChecker<'a> {
             if self.reference_target_is_cell_backed_aggregate(inner) {
                 return Err(CompileError::new(
                     format!(
-                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or explicit `before: T, after: output T` replacement Cell parameters instead",
+                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or explicit `before: input T, after: output T` replacement Cell parameters instead",
                         param.name,
                         callable_kind,
                         callable_name,
@@ -1630,7 +1668,7 @@ impl<'a> TypeChecker<'a> {
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `before: T, after: output T` with `replaces before with after`",
+                    "parameter '{}' is a read-only reference; replacement Cell state must be modeled as `before: input T, after: output T` with `replaces before with after`",
                     param.name
                 ),
                 param.span,
@@ -1639,7 +1677,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' uses removed `&mut` Cell syntax; use `before: T, after: output T` with `replaces before with after`",
+                    "parameter '{}' uses removed `&mut` Cell syntax; use `before: input T, after: output T` with `replaces before with after`",
                     param.name
                 ),
                 param.span,
@@ -3907,7 +3945,7 @@ fn assignment_root_name(expr: &Expr) -> Option<&str> {
 
 fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
     action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
-        Type::Named(type_name) if param.source == ParamSource::Default && !param.is_read_ref => {
+        Type::Named(type_name) if matches!(param.source, ParamSource::Default | ParamSource::Input) && !param.is_read_ref => {
             Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
         }
         _ => None,

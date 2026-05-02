@@ -607,6 +607,7 @@ impl LspServer {
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("action", "action ${1:name}($2) {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
+            ("input", "input ${1:CellType}"),
             ("output", "output ${1:CellType}"),
             ("replaces", "replaces ${1:before} with ${2:after}"),
             ("moves", "moves ${1:input}.${2:state} ${3:Created} -> ${4:output}.${2:state} ${5:Live}"),
@@ -965,7 +966,9 @@ impl LspServer {
             for param in params {
                 if param.name == symbol {
                     let note = if param.is_mut {
-                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `before: T, after: output T` and `replaces before with after`."
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell replacement state should be modeled with `before: input T, after: output T` and `replaces before with after`."
+                    } else if param.source == ParamSource::Input {
+                        "\n\n`input` marks a consumed transaction input Cell explicitly. Omitting it is equivalent for Cell-backed action parameters."
                     } else if param.source == ParamSource::Output {
                         "\n\n`output` marks a proposed transaction output Cell. Bind it to an input Cell with `replaces before with after` when it is a replacement."
                     } else if param.source == ParamSource::LockArgs {
@@ -2124,6 +2127,7 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "resource"));
         assert!(keywords.iter().any(|k| k.label == "action"));
         assert!(keywords.iter().any(|k| k.label == "flow"));
+        assert!(keywords.iter().any(|k| k.label == "input"));
         assert!(keywords.iter().any(|k| k.label == "output"));
         assert!(keywords.iter().any(|k| k.label == "replaces"));
         assert!(keywords.iter().any(|k| k.label == "moves"));

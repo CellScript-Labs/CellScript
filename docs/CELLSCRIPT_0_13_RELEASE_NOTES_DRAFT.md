@@ -218,7 +218,7 @@ New in 0.13:
   LSP all carry the explicit state field name. A state field may have only one
   flow declaration; CellScript does not merge partial flow declarations.
 - The semantic core for state transitions is now proposed-cell verification:
-  `action(before: T, after: output T) replaces before with after` treats
+  `action(before: input T, after: output T) replaces before with after` treats
   `before` as a transaction input and `after` as a transaction output.
   `consume` plus `create` remains accepted as front-end sugar, but output
   parameters bind deterministically to `Output#N` in output-parameter order.

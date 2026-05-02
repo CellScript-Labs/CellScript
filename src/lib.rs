@@ -11918,6 +11918,7 @@ fn param_metadata(
 fn param_source_metadata(source: ast::ParamSource) -> &'static str {
     match source {
         ast::ParamSource::Default => "default",
+        ast::ParamSource::Input => "input",
         ast::ParamSource::Output => "output",
         ast::ParamSource::Protected => "protected",
         ast::ParamSource::Witness => "witness",
@@ -21128,7 +21129,7 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer, output: output Offer)
+action accept(input: input Offer, output: output Offer)
     replaces input with output
     moves input.state Live -> output.state Filled
 {
@@ -21141,6 +21142,7 @@ action accept(input: Offer, output: output Offer)
 
         assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "input"));
         assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
+        assert!(action.params.iter().any(|param| param.name == "input" && param.source == "input"));
         assert!(action.params.iter().any(|param| param.name == "output" && param.source == "output"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
@@ -21157,6 +21159,37 @@ action accept(input: Offer, output: output Offer)
         );
         assert!(asm.contains("li t3, 0"), "core move should check source state Live=0:\n{}", asm);
         assert!(asm.contains("li t3, 1"), "core move should check target state Filled=1:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_input_source_outside_action_cell_params() {
+        let function_source = r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+fn helper(token: input Token) -> u64 {
+    token.amount
+}
+"#;
+        let function_err = compile(function_source, CompileOptions::default()).unwrap_err();
+        assert!(function_err.message.contains("cannot use input source classification"), "unexpected error: {}", function_err.message);
+
+        let scalar_source = r#"
+module test
+
+action main(amount: input u64) -> u64 {
+    amount
+}
+"#;
+        let scalar_err = compile(scalar_source, CompileOptions::default()).unwrap_err();
+        assert!(
+            scalar_err.message.contains("must name a Cell-backed resource, shared cell, or receipt type"),
+            "unexpected error: {}",
+            scalar_err.message
+        );
     }
 
     #[test]

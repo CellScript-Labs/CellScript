@@ -11,7 +11,7 @@ place. A transaction spends Cells and creates new Cells.
 
 - how linear resources move through an action;
 - why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
-- how `action(before: T, after: output T)` plus `replaces` expresses the verifier core for
+- how `action(before: input T, after: output T)` plus `replaces` expresses the verifier core for
   replacement-style transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
@@ -19,6 +19,8 @@ place. A transaction spends Cells and creates new Cells.
 
 | Effect | Read it as |
 |---|---|
+| `param: input T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
+| `param: output T` | Explicit proposed output Cell parameter. |
 | `consume value` | Spend an input-backed linear value. |
 | `create T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read_ref T` | Read dependency-backed state without consuming it. |
@@ -79,13 +81,13 @@ flow GrantFlow for VestingGrant.state {
 ```
 
 Bind each action to the transition it is allowed to prove. The semantic core is
-an `action(before: T, after: output T)` verifier form: `before` is the consumed
+an `action(before: input T, after: output T)` verifier form: `before` is the consumed
 input Cell view, `after` is the proposed output Cell view, and `moves` names
 both state fields explicitly. The `replaces` clause declares the deterministic
 one-to-one relationship.
 
 ```cellscript
-action unlock_grant(input: VestingGrant, output: output VestingGrant)
+action unlock_grant(input: input VestingGrant, output: output VestingGrant)
     replaces input with output
     moves input.state Granted -> output.state Claimable
 {

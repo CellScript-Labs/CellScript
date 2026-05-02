@@ -172,7 +172,7 @@ transformations:
 - **Declarative flows** — state remains explicit schema data, while
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges, and
-  `action(before: T, after: output T) replaces before with after moves before.field A -> after.field B`
+  `action(before: input T, after: output T) replaces before with after moves before.field A -> after.field B`
   binds proposed transaction cells to the edge it proves. Legacy
   `consume`/`create` actions are front-end sugar over the same verifier
   constraints. Each state field has exactly one flow declaration; split/partial

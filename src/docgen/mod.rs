@@ -919,6 +919,10 @@ fn format_param(param: &Param) -> String {
     rendered.push_str(&param.name);
     rendered.push_str(": ");
     match param.source {
+        ParamSource::Input => {
+            rendered.push_str("input ");
+            rendered.push_str(&format_type(&param.ty));
+        }
         ParamSource::Output => {
             rendered.push_str("output ");
             rendered.push_str(&format_type(&param.ty));

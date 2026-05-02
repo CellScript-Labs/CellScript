@@ -1132,7 +1132,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `before: T, after: output T` with `replaces before with after` for replacement Cell state",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `before: input T, after: output T` with `replaces before with after` for replacement Cell state",
                 self.current().span,
             ));
         }
@@ -1185,6 +1185,7 @@ impl<'a> Parser<'a> {
 
     fn parse_param_source_marker(&mut self) -> ParamSource {
         let source = match &self.current().kind {
+            TokenKind::Identifier(name) if name == "input" => ParamSource::Input,
             TokenKind::Identifier(name) if name == "protected" => ParamSource::Protected,
             TokenKind::Identifier(name) if name == "output" => ParamSource::Output,
             TokenKind::Identifier(name) if name == "witness" => ParamSource::Witness,
@@ -2145,7 +2146,7 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer, output: output Offer)
+action accept(input: input Offer, output: output Offer)
     replaces input with output
     moves input.state Live -> output.state Filled
 {
@@ -2161,6 +2162,8 @@ action accept(input: Offer, output: output Offer)
         assert_eq!(action.replacements.len(), 1);
         assert_eq!(action.replacements[0].input, "input");
         assert_eq!(action.replacements[0].output, "output");
+        assert_eq!(action.params[0].source, ParamSource::Input);
+        assert_eq!(action.params[1].source, ParamSource::Output);
         assert_eq!(action.state_moves.len(), 1);
         assert_eq!(action.state_moves[0].path.as_ref().map(|path| path.base.as_str()), Some("input"));
         assert_eq!(action.state_moves[0].to_path.as_ref().map(|path| path.base.as_str()), Some("output"));
