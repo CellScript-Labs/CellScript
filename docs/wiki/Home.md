@@ -4,7 +4,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-04-27.
+Last updated: 2026-05-02.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -14,9 +14,10 @@ learn what each layer proves, and what it does not prove yet.
 
 ## How to Read This Wiki
 
-If CellScript is new to you, read the tutorials in order. The first three
-chapters are about the language. They explain how a `.cell` file is shaped, how
-resources move, and why effects such as `consume` and `create` are explicit.
+If CellScript is new to you, read the tutorials in order. The first four
+language chapters explain how a `.cell` file is shaped, how resources move, why
+effects such as `consume` and `create` are explicit, and how the 0.13 action
+model expresses input-to-output verification.
 
 After that, the wiki continues outward:
 
@@ -31,6 +32,7 @@ If you already know what you need, jump directly:
 
 - writing source: start with [Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics);
 - understanding Cell movement: read [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects);
+- understanding 0.13 actions: read [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax);
 - copying a known pattern: use [Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes);
 - checking CKB terms: keep [CKB Glossary](https://github.com/tsukifune-kosei/CellScript/wiki/CKB-Glossary) nearby;
 - building a package: use [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow);
@@ -47,18 +49,21 @@ If you already know what you need, jump directly:
    `.cell` file.
 3. [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects):
    understand how values move through a Cell transaction.
-4. [Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes): copy small patterns once the basic
+4. [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax):
+   learn the signature-direction action model, `where`, `move`, named outputs,
+   and source qualifiers.
+5. [Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes): copy small patterns once the basic
    vocabulary is familiar.
-5. [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow):
+6. [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow):
    create a package, build it, check it, and inspect reports.
-6. [CKB Target Profiles](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-05-CKB-Target-Profiles): choose the CKB
+7. [CKB Target Profiles](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-05-CKB-Target-Profiles): choose the CKB
    runtime assumptions before compiling.
-7. [Metadata, Verification, and Production Gates](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates):
+8. [Metadata, Verification, and Production Gates](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates):
    learn what artifact verification proves, and what still needs chain
    evidence.
-8. [LSP and Tooling](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-07-LSP-and-Tooling): use editor feedback and
+9. [LSP and Tooling](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-07-LSP-and-Tooling): use editor feedback and
    command-backed reports.
-9. [Bundled Example Contracts](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts): study
+10. [Bundled Example Contracts](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts): study
    the examples in a useful order.
 
 ## The Core Idea

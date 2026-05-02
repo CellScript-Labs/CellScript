@@ -4298,11 +4298,14 @@ fn action_core_evidence_binding_names(action: &ActionDef) -> HashSet<String> {
 
 fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
+    let consumed = action_consumed_bindings(action);
     for state_edge in &action.state_edges {
+        if consumed.contains(&state_edge.path.base) {
+            continue;
+        }
         bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
     }
 
-    let consumed = action_consumed_bindings(action);
     let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
     for (name, binding) in action_output_binding_names(action) {
         if bindings.values().any(|bound_output| bound_output == &name) {
@@ -4402,12 +4405,30 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
             collect_consumed_bindings_from_expr(&transfer.expr, bindings);
             collect_consumed_bindings_from_expr(&transfer.to, bindings);
         }
-        Expr::Destroy(destroy) => collect_consumed_bindings_from_expr(&destroy.expr, bindings),
-        Expr::Claim(claim) => collect_consumed_bindings_from_expr(&claim.receipt, bindings),
-        Expr::Settle(settle) => collect_consumed_bindings_from_expr(&settle.expr, bindings),
+        Expr::Destroy(destroy) => {
+            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&destroy.expr, bindings);
+        }
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
         Expr::Assert(assert_expr) => {
             collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
             collect_consumed_bindings_from_expr(&assert_expr.message, bindings);

@@ -11,6 +11,7 @@
 
 - [Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics)
 - [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects)
+- [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
 - [Bundled Example Contracts](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts)
 
 ## Packages and Tools

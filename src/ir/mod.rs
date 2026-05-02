@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
+use crate::runtime_errors::CellScriptRuntimeError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -2307,7 +2308,7 @@ impl IrGenerator {
         if self.lowering_lock_entry {
             IrOperand::Const(IrConst::Bool(false))
         } else {
-            IrOperand::Const(IrConst::U64(7))
+            IrOperand::Const(IrConst::U64(CellScriptRuntimeError::AssertionFailed.code()))
         }
     }
 
@@ -4494,11 +4495,14 @@ fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
 
 fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
+    let consumed = action_consumed_bindings(action);
     for state_edge in &action.state_edges {
+        if consumed.contains(&state_edge.path.base) {
+            continue;
+        }
         bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
     }
 
-    let consumed = action_consumed_bindings(action);
     let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
     for (name, type_name) in action_output_binding_types(action) {
         if bindings.values().any(|bound_output| bound_output == &name) {

@@ -7433,10 +7433,16 @@ fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrB
 }
 
 fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str, right_binding: &str) -> bool {
+    let assertion_failed_code = runtime_errors::CellScriptRuntimeError::AssertionFailed.code();
     let assert_fail_blocks = body
         .blocks
         .iter()
-        .filter(|block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(7))))))
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
+            )
+        })
         .map(|block| block.id)
         .collect::<HashSet<_>>();
     let mut type_hash_sources = HashMap::<usize, String>::new();
@@ -8926,6 +8932,7 @@ fn pool_primitive_obligation_detail(primitive: &PoolPrimitiveMetadata) -> String
 }
 
 fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
+    let assertion_failed_code = runtime_errors::CellScriptRuntimeError::AssertionFailed.code();
     body.blocks
         .iter()
         .filter(|block| {
@@ -8933,7 +8940,10 @@ fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
                 return false;
             };
             body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| {
-                matches!(candidate.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(7)))))
+                matches!(
+                    candidate.terminator,
+                    ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
+                )
             })
         })
         .count()
@@ -16566,7 +16576,7 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
-        assert!(asm.contains("li a0, 7"), "assert failure path did not return a non-zero failure code:\n{}", asm);
+        assert!(asm.contains("li a0, 5"), "assert failure path did not return assertion-failed code:\n{}", asm);
         assert!(!asm.contains("assert_invariant"), "assert was not lowered out of source form:\n{}", asm);
     }
 
@@ -22270,7 +22280,7 @@ where
     #[test]
     fn fixed_byte_mutable_state_set_transition_is_checked_under_ckb_profile() {
         let source = r#"
-module test
+	module test
 
 resource NFT has store, destroy {
     token_id: u64
@@ -22315,6 +22325,172 @@ where
             .transaction_runtime_input_requirements
             .iter()
             .any(|requirement| { requirement.feature == "mutable-cell:NFT" && requirement.component == "mutate-field-transition" }));
+    }
+
+    #[test]
+    fn dynamic_named_output_constraints_are_proven_in_where_block() {
+        let source = r#"
+module test
+
+resource Collection has store {
+    name: String,
+    creator: Address,
+    total_supply: u64,
+    max_supply: u64,
+}
+
+action mint(collection_before: Collection) -> collection_after: Collection
+where
+    require collection_after.name == collection_before.name
+    require collection_after.creator == collection_before.creator
+    require collection_after.total_supply == collection_before.total_supply + 1
+    require collection_after.max_supply == collection_before.max_supply
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: output field verification deferred to explicit where constraints"),
+            "dynamic named outputs should be bound in the prelude and proven by where constraints:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: fail closed because the output state is not fully verified"),
+            "signature output constraints should not fail closed before where requirements run:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: dynamic schema field Collection.name index=0 as Molecule vector bytes"),
+            "dynamic where constraint should still emit runtime Molecule field comparison:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# binary Eq over dynamic byte operands") && asm.contains("call __cellscript_memcmp_fixed"),
+            "dynamic String equality must compare field bytes, not pointer addresses:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn ordered_named_output_create_constraints_are_checked_in_body_order() {
+        let source = r#"
+module test
+
+resource NFT has store {
+    token_id: u64,
+    owner: Address,
+    metadata_hash: Hash,
+    royalty_recipient: Address,
+    royalty_bps: u16,
+}
+
+resource Collection has store {
+    creator: Address,
+    total_supply: u64,
+    max_supply: u64,
+}
+
+action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT)
+where
+    let first_token_id = collection_before.total_supply + 1
+    require collection_after.creator == collection_before.creator
+    require collection_after.total_supply == first_token_id
+    require collection_after.max_supply == collection_before.max_supply
+    create nft0 = NFT {
+        token_id: first_token_id,
+        owner: recipients[0],
+        metadata_hash: metadata_hashes[0],
+        royalty_recipient: collection_before.creator,
+        royalty_bps: 250,
+    }
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let body_start = asm.find(".Lbatch_block_0:").expect("batch body label");
+        let prelude = &asm[..body_start];
+        let ordered_create = asm.find("# constrain named output NFT").expect("ordered named output constraint");
+        let ordered_section = &asm[ordered_create..];
+
+        assert!(
+            prelude.contains("# cellscript abi: output field verification deferred to ordered create constraint"),
+            "prelude should bind named outputs but defer explicit create field checks:\n{}",
+            asm
+        );
+        assert!(
+            !prelude.contains("# cellscript abi: verify output bytes field NFT.owner"),
+            "prelude must not compare against recipients[0] before body temporaries are assigned:\n{}",
+            asm
+        );
+        assert!(ordered_create > body_start, "named output create check should stay in body order:\n{}", asm);
+        assert!(
+            ordered_section.contains("# cellscript abi: verify output bytes field NFT.owner")
+                && ordered_section.contains("# cellscript abi: verify output bytes field NFT.metadata_hash"),
+            "ordered create constraint must verify dynamic indexed expected byte fields after body lowering:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
+        let source = r#"
+module test
+
+resource Authority has store {
+    symbol: [u8; 8],
+    minted: u64,
+}
+
+resource Token has store {
+    amount: u64,
+    symbol: [u8; 8],
+}
+
+shared Pool has store {
+    symbol: [u8; 8],
+    reserve: u64,
+}
+
+receipt Receipt has store {
+    pool_id: Hash,
+    amount: u64,
+}
+
+action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt)
+where
+    create auth = Authority { symbol, minted: seed.amount }
+    if recipients[0].1 > 0 {
+        create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
+    }
+    if recipients[1].1 > 0 {
+        create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
+    }
+    consume seed
+    create pool = Pool { symbol, reserve: seed.amount }
+    create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+
+        assert!(
+            asm.contains("LOAD_CELL_DATA reason=create source=Output index=3")
+                && asm.contains("LOAD_CELL_DATA reason=create source=Output index=4"),
+            "distinct anonymous creates after three named outputs must bind Output#3 and Output#4:\n{}",
+            asm
+        );
+        assert_eq!(
+            asm.matches("LOAD_CELL_DATA reason=create source=Output index=3").count(),
+            1,
+            "anonymous creates must not all collapse to the first anonymous output index:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=1 field=5"),
+            "type_hash() of named output `pool` must read the signature-bound Pool output index:\n{}",
+            asm
+        );
     }
 
     #[test]

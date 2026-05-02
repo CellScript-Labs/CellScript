@@ -34,7 +34,7 @@ where
     assert(input.symbol == pool_before.token_a_symbol, "wrong input token")
     let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
     let net_input = input.amount - fee
-    let amount_out = pool_before.reserve_b * net_input / pool_before.reserve_a + net_input
+    let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
     assert(amount_out >= min_output, "slippage exceeded")
     assert(amount_out < pool_before.reserve_b, "insufficient reserves")
     require pool_after.token_a_symbol == pool_before.token_a_symbol
@@ -84,10 +84,10 @@ where
         return 0
     }
     let mut x = n
-    let mut y = x + 1 / 2
+    let mut y = (x + 1) / 2
     while y < x {
         x = y
-        y = x + n / x / 2
+        y = (x + n / x) / 2
     }
     x
 

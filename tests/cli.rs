@@ -1305,7 +1305,8 @@ flow VestingGrant.state {
     Claimable -> FullyClaimed;
 }
 
-action claim_vested(grant: VestingGrant) -> (Token, VestingGrant)
+action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant)
+    move grant.state: Claimable -> updated_grant.state: FullyClaimed
 where
     let now = env::current_timepoint()
 
@@ -1320,12 +1321,12 @@ where
 
     let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
 
-    let tokens = create Token {
+    create tokens = Token {
         amount: claimable,
         owner: grant.beneficiary
     } with_lock(grant.beneficiary)
 
-    let updated_grant = create VestingGrant {
+    create updated_grant = VestingGrant {
         state: new_state,
         beneficiary: grant.beneficiary,
         total_amount: grant.total_amount,
@@ -1333,8 +1334,6 @@ where
         cliff_timepoint: grant.cliff_timepoint,
         end_timepoint: grant.end_timepoint
     } with_lock(grant.beneficiary)
-
-    (tokens, updated_grant)
 "#,
     )
     .unwrap();
@@ -1389,7 +1388,7 @@ where
     );
     assert!(
         checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("create-output:Token:create_Token:create-output-fields=Output:create_Token.fields")
+            summary.contains("create-output:Token:tokens:create-output-fields=Output:tokens.fields")
                 && summary.contains("create-output-field-verifier")
                 && summary.contains("(checked-runtime)")
                 && !summary.contains("blocker=")
@@ -1400,7 +1399,7 @@ where
     );
     assert!(
         checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("create-output:VestingGrant:create_VestingGrant:create-output-lock=Output:create_VestingGrant.lock_hash")
+            summary.contains("create-output:VestingGrant:updated_grant:create-output-lock=Output:updated_grant.lock_hash")
                 && summary.contains("create-output-lock-hash-32[32]")
                 && summary.contains("(checked-runtime)")
                 && !summary.contains("blocker=")

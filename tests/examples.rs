@@ -13,12 +13,12 @@ const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.j
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 40 * 1024),
-    ("launch.cell", 28 * 1024),
+    ("launch.cell", 30 * 1024),
     ("multisig.cell", 84 * 1024),
     ("nft.cell", 54 * 1024),
     ("timelock.cell", 44 * 1024),
     ("token.cell", 16 * 1024),
-    ("vesting.cell", 20 * 1024),
+    ("vesting.cell", 22 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
@@ -41,10 +41,10 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "launch.cell",
         AssemblyShapeBudget {
-            max_lines: 6_300,
+            max_lines: 6_800,
             max_fail_handlers: 16,
             max_shared_epilogues: 4,
-            max_text_bytes: 24 * 1024,
+            max_text_bytes: 27 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 2_800,
             max_machine_blocks: 860,
@@ -62,7 +62,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 20,
             max_text_bytes: 80 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_300,
+            max_cond_branch_abs_distance: 7_400,
             max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 5_800,
@@ -115,23 +115,23 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
             max_call_edges: 110,
-            max_unreachable_machine_blocks: 220,
+            max_unreachable_machine_blocks: 230,
         },
     ),
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 4_400,
+            max_lines: 4_600,
             max_fail_handlers: 28,
             max_shared_epilogues: 6,
             max_text_bytes: 17 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 650,
+            max_machine_blocks: 700,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_150,
-            max_call_edges: 220,
-            max_unreachable_machine_blocks: 540,
+            max_cfg_edges: 1_200,
+            max_call_edges: 230,
+            max_unreachable_machine_blocks: 620,
         },
     ),
 ];

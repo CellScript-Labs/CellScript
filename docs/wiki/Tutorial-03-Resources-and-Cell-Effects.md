@@ -238,5 +238,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes) for small copyable patterns, then move
-on to [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow).
+[Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+for a deeper walkthrough of signature-direction actions, then use
+[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes)
+for small copyable patterns.

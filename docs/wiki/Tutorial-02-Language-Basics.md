@@ -33,7 +33,8 @@ syntax forms you will see in the examples:
 | `use cellscript::path::{A, B}` | Grouped imports from another module. |
 | `resource T has store, transfer, destroy` | Linear Cell-backed assets with explicit capabilities. |
 | `shared T has store` | Shared Cell-backed state such as pools or registries. |
-| `receipt T has store, claim` | Claimable or settlement-style proof Cells. |
+| `receipt T has store` | Settlement-style proof Cells. |
+| `receipt T -> Output` | Claimable receipt Cells with a declared claim output type. |
 | `with_default_hash_type(Data1)` | Default CKB hash type metadata for a persistent declaration. |
 | `flow Name for T.state { A -> B by action; }` | Named state graph for one explicit state field. |
 | `flow T.state { A -> B; }` | Compact state graph when a separate flow name is unnecessary. |
@@ -212,10 +213,19 @@ Use `receipt` for single-use proof Cells. A receipt is useful when one action
 creates a right and another action later consumes that right.
 
 ```cellscript
-receipt VestingGrant has store, claim {
+receipt VestingGrant has store {
     beneficiary: Address
     amount: u64
     unlock_epoch: u64
+}
+```
+
+Use a claim output arrow when a receipt has a direct claim output type:
+
+```cellscript
+receipt ClaimTicket -> Token {
+    amount: u64
+    beneficiary: Address
 }
 ```
 

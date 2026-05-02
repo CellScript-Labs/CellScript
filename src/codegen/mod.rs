@@ -2023,9 +2023,12 @@ impl CodeGenerator {
             for instruction in &block.instructions {
                 match instruction {
                     IrInstruction::Create { dest, pattern } => {
-                        if let Some(output_index) = Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
-                        {
-                            self.operation_output_indices.insert(dest.id, output_index);
+                        if pattern.operation != "create" {
+                            if let Some(output_index) =
+                                Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
+                            {
+                                self.operation_output_indices.insert(dest.id, output_index);
+                            }
                         }
                     }
                     IrInstruction::Transfer { dest, .. } => {
@@ -2310,12 +2313,23 @@ impl CodeGenerator {
             self.generate_read_ref(pattern, index)?;
         }
 
-        // Simulated transfer/claim/settle output summaries are verified from
-        // the entry prelude. Real `create` expressions are verified at the
-        // source instruction so computed field values are already in slots.
+        // Signature-bound outputs are loaded in the entry prelude so `where`
+        // constraints can read them. Explicit `create name = ...` field
+        // checks must stay in body order because their expected expressions may
+        // depend on earlier `let`/index computations.
+        let explicit_output_create_bindings = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| match instruction {
+                IrInstruction::Create { pattern, .. } => Some(pattern.binding.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
         for (index, pattern) in body.create_set.iter().enumerate() {
             if pattern.operation != "create" {
-                self.generate_create(pattern, index)?;
+                let explicit_output_create = explicit_output_create_bindings.contains(pattern.binding.as_str());
+                self.generate_create(pattern, index, !explicit_output_create, explicit_output_create)?;
             }
         }
 
@@ -2465,7 +2479,13 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_create(&mut self, pattern: &CreatePattern, index: usize) -> Result<()> {
+    fn generate_create(
+        &mut self,
+        pattern: &CreatePattern,
+        index: usize,
+        defer_unverifiable_output_fields: bool,
+        defer_all_output_fields: bool,
+    ) -> Result<()> {
         // The verifier cannot create cells inside CKB-VM; it can only verify the
         // transaction output selected by the lowering metadata.
         self.emit(format!("# {} output {}", pattern.operation, pattern.ty));
@@ -2491,10 +2511,14 @@ impl CodeGenerator {
                 self.emit_sp_addi("t0", buffer_offset);
                 self.emit_stack_store("t0", var_id * 8);
                 self.operation_output_indices.insert(var_id, index);
-                if pattern.fields.is_empty() {
+                if defer_all_output_fields {
+                    self.emit("# cellscript abi: output field verification deferred to ordered create constraint");
+                } else if pattern.fields.is_empty() {
                     self.emit_state_transition_check(pattern, size_offset, buffer_offset);
                 } else if self.can_verify_create_output_fields(pattern) {
                     self.emit_create_output_checks_at(pattern, size_offset, buffer_offset);
+                } else if defer_unverifiable_output_fields && self.create_output_fields_cover_type(pattern) {
+                    self.emit("# cellscript abi: output field verification deferred to explicit where constraints");
                 } else {
                     self.emit("# cellscript abi: output field verification incomplete for this named output");
                     self.emit("# cellscript abi: fail closed because the output state is not fully verified");
@@ -3058,6 +3082,7 @@ impl CodeGenerator {
                 self.consume_type_names.insert(param.binding.id, type_name.to_string());
             }
             self.consume_binding_ids.insert(pattern.binding.clone(), param.binding.id);
+            self.schema_pointer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_size_offsets.insert(param.binding.id, next_cell_slot);
             self.cell_buffer_offsets.insert(param.binding.id, next_cell_slot + 8);
             self.consume_order.push(param.binding.id);
@@ -3074,6 +3099,7 @@ impl CodeGenerator {
                         self.consume_type_names.insert(var.id, type_name.to_string());
                     }
                     self.consume_binding_ids.insert(var.name.clone(), var.id);
+                    self.schema_pointer_size_offsets.insert(var.id, next_cell_slot);
                     self.cell_buffer_size_offsets.insert(var.id, next_cell_slot);
                     self.cell_buffer_offsets.insert(var.id, next_cell_slot + 8);
                     self.consume_order.push(var.id);
@@ -3101,7 +3127,8 @@ impl CodeGenerator {
         }
 
         let mut create_dest_outputs = HashMap::new();
-        let mut create_index = 0usize;
+        let mut next_create_output_index =
+            body.create_set.iter().position(|pattern| pattern.operation == "create").unwrap_or(body.create_set.len());
         for block in &body.blocks {
             for instruction in &block.instructions {
                 match instruction {
@@ -3124,9 +3151,17 @@ impl CodeGenerator {
                             next_cell_slot += 8;
                         }
                     }
-                    IrInstruction::Create { dest, .. } => {
-                        create_dest_outputs.insert(dest.id, create_index);
-                        create_index += 1;
+                    IrInstruction::Create { dest, pattern } => {
+                        let output_index = if pattern.operation == "create" {
+                            let output_index = next_create_output_index;
+                            next_create_output_index += 1;
+                            Some(output_index)
+                        } else {
+                            Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
+                        };
+                        if let Some(output_index) = output_index {
+                            create_dest_outputs.insert(dest.id, output_index);
+                        }
                     }
                     IrInstruction::TypeHash { dest, operand: IrOperand::Var(var) } => {
                         if let Some(output_index) = create_dest_outputs.get(&var.id).copied() {
@@ -5629,15 +5664,11 @@ impl CodeGenerator {
         if pattern.fields.is_empty() {
             return false;
         }
-        let Some(layouts) = self.type_layouts.get(&pattern.ty) else {
-            return false;
-        };
-        let covered_fields = pattern.fields.iter().map(|(field, _)| field.as_str()).collect::<BTreeSet<_>>();
-        if !layouts.keys().all(|field| covered_fields.contains(field.as_str())) {
+        if !self.create_output_fields_cover_type(pattern) {
             return false;
         }
         pattern.fields.iter().all(|(field, value)| {
-            layouts.get(field).is_some_and(|layout| {
+            self.type_layouts.get(&pattern.ty).and_then(|layouts| layouts.get(field)).is_some_and(|layout| {
                 if let Some(width) = layout_fixed_byte_width(layout) {
                     self.is_prelude_available_fixed_value(value, width)
                 } else {
@@ -5645,6 +5676,14 @@ impl CodeGenerator {
                 }
             })
         })
+    }
+
+    fn create_output_fields_cover_type(&self, pattern: &CreatePattern) -> bool {
+        let Some(layouts) = self.type_layouts.get(&pattern.ty) else {
+            return false;
+        };
+        let covered_fields = pattern.fields.iter().map(|(field, _)| field.as_str()).collect::<BTreeSet<_>>();
+        layouts.keys().all(|field| covered_fields.contains(field.as_str()))
     }
 
     fn can_verify_dynamic_create_output_field_value(&self, value: &IrOperand, layout: &SchemaFieldLayout) -> bool {
@@ -6529,6 +6568,9 @@ impl CodeGenerator {
     }
 
     fn emit_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> Result<()> {
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && self.emit_dynamic_byte_comparison(dest, op, left, right) {
+            return Ok(());
+        }
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
             && (operand_fixed_byte_width(left).is_some() || operand_fixed_byte_width(right).is_some())
         {
@@ -6597,6 +6639,49 @@ impl CodeGenerator {
 
         self.emit_stack_store("t0", dest.id * 8);
         Ok(())
+    }
+
+    fn emit_dynamic_byte_comparison(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> bool {
+        let (IrOperand::Var(left_var), IrOperand::Var(right_var)) = (left, right) else {
+            return false;
+        };
+        let Some(left_len_offset) = self.dynamic_value_size_offsets.get(&left_var.id).copied() else {
+            return false;
+        };
+        let Some(right_len_offset) = self.dynamic_value_size_offsets.get(&right_var.id).copied() else {
+            return false;
+        };
+
+        let equal_value = if matches!(op, BinaryOp::Eq) { 1 } else { 0 };
+        let mismatch_value = if matches!(op, BinaryOp::Eq) { 0 } else { 1 };
+        let len_equal_label = self.fresh_label("dynamic_bytes_len_equal");
+        let bytes_equal_label = self.fresh_label("dynamic_bytes_equal");
+        let done_label = self.fresh_label("dynamic_bytes_cmp_done");
+
+        self.emit(format!("# binary {:?} over dynamic byte operands", op));
+        self.emit_stack_load("t0", left_len_offset);
+        self.emit_stack_load("t1", right_len_offset);
+        self.emit("sub t2, t0, t1");
+        self.emit(format!("beqz t2, {}", len_equal_label));
+        self.emit(format!("li t0, {}", mismatch_value));
+        self.emit_stack_store("t0", dest.id * 8);
+        self.emit(format!("j {}", done_label));
+
+        self.emit_label(&len_equal_label);
+        self.emit_stack_load("a0", left_var.id * 8);
+        self.emit_stack_load("a1", right_var.id * 8);
+        self.emit_stack_load("a2", left_len_offset);
+        self.emit("call __cellscript_memcmp_fixed");
+        self.emit(format!("beqz a0, {}", bytes_equal_label));
+        self.emit(format!("li t0, {}", mismatch_value));
+        self.emit_stack_store("t0", dest.id * 8);
+        self.emit(format!("j {}", done_label));
+
+        self.emit_label(&bytes_equal_label);
+        self.emit(format!("li t0, {}", equal_value));
+        self.emit_stack_store("t0", dest.id * 8);
+        self.emit_label(&done_label);
+        true
     }
 
     fn emit_unary(&mut self, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
@@ -8548,13 +8633,44 @@ impl CodeGenerator {
             if pattern.lock.is_some() {
                 self.emit("#   with_lock <expr>");
             }
+            if let Some(var_id) = self.output_param_ids.get(&pattern.binding).copied() {
+                let Some(size_offset) = self.cell_buffer_size_offsets.get(&var_id).copied() else {
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                };
+                let Some(buffer_offset) = self.cell_buffer_offsets.get(&var_id).copied() else {
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                };
+                if pattern.fields.is_empty() {
+                    self.emit_state_transition_check(pattern, size_offset, buffer_offset);
+                } else if self.can_verify_create_output_fields(pattern) {
+                    self.emit_create_output_checks_at(pattern, size_offset, buffer_offset);
+                } else {
+                    self.emit("# cellscript abi: ordered named output field verification incomplete");
+                    self.emit("# cellscript abi: fail closed because the output state is not fully verified");
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                    return Ok(());
+                }
+                if let Some(lock) = &pattern.lock {
+                    if !(self.can_verify_output_lock(pattern) && self.emit_output_lock_hash_check(output_index, lock)) {
+                        self.emit("# cellscript abi: output lock verification incomplete for this named output");
+                        self.emit("# cellscript abi: fail closed because the output lock is not fully verified");
+                        self.emit_fail(CellScriptRuntimeError::EntryWitnessMagicMismatch);
+                        return Ok(());
+                    }
+                }
+            } else {
+                self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                return Ok(());
+            }
             self.emit(format!("li t0, {}", output_index));
             self.emit_stack_store("t0", dest.id * 8);
             self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
             return Ok(());
         }
 
-        self.generate_create(pattern, output_index)?;
+        self.generate_create(pattern, output_index, false, false)?;
         self.emit(format!("# create {}", pattern.ty));
         for (field, value) in &pattern.fields {
             match value {
@@ -11175,6 +11291,40 @@ mod tests {
         };
 
         assert_eq!(generator.consumed_var_for_state_transition("Offer", &[state_edge]), Some(2));
+    }
+
+    #[test]
+    fn consumed_schema_params_use_loaded_cell_size_for_field_checks() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        let binding = IrVar { id: 0, name: "auth".to_string(), ty: IrType::Named("MintAuthority".to_string()) };
+        let params = vec![IrParam {
+            name: "auth".to_string(),
+            ty: binding.ty.clone(),
+            is_mut: false,
+            is_ref: false,
+            is_read_ref: false,
+            source: ParamSource::Default,
+            binding: binding.clone(),
+        }];
+        let body = IrBody {
+            consume_set: vec![CellPattern {
+                operation: "input".to_string(),
+                type_hash: None,
+                binding: "auth".to_string(),
+                fields: Vec::new(),
+            }],
+            read_refs: Vec::new(),
+            create_set: Vec::new(),
+            mutate_set: Vec::new(),
+            write_intents: Vec::new(),
+            blocks: Vec::new(),
+        };
+
+        generator.prepare_function_layout(&body, &params);
+
+        let loaded_size_offset =
+            generator.cell_buffer_size_offsets.get(&binding.id).copied().expect("consumed input should have size slot");
+        assert_eq!(generator.schema_pointer_size_offsets.get(&binding.id), Some(&loaded_size_offset));
     }
 
     #[test]
