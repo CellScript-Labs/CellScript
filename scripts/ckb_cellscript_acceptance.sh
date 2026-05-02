@@ -1032,22 +1032,22 @@ action swap_a_for_b(pool_before: Pool, pool_after: output Pool, input: Token, mi
     let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
     let net_input = input.amount - fee
 
-    let output = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
+    let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
 
-    assert_invariant(output >= min_output, "slippage exceeded")
-    assert_invariant(output < pool_before.reserve_b, "insufficient reserves")
+    assert_invariant(amount_out >= min_output, "slippage exceeded")
+    assert_invariant(amount_out < pool_before.reserve_b, "insufficient reserves")
 
     consume input
 
     require pool_after.token_a_symbol == pool_before.token_a_symbol
     require pool_after.token_b_symbol == pool_before.token_b_symbol
     require pool_after.reserve_a == pool_before.reserve_a + input.amount
-    require pool_after.reserve_b == pool_before.reserve_b - output
+    require pool_after.reserve_b == pool_before.reserve_b - amount_out
     require pool_after.total_lp == pool_before.total_lp
     require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
     create Token {
-        amount: output,
+        amount: amount_out,
         symbol: pool_before.token_b_symbol
     } with_lock(to)
 }
