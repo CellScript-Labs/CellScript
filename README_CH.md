@@ -287,6 +287,7 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [线性所有权](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 - [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
 - [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [标准库](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
 - [CKB hashing workflow 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
 - [Collections matrix 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
@@ -375,7 +376,7 @@ stack-spill 布局、witness byte bounds、CKB cycle/capacity 估算。
 
 | 模块 | 作用 |
 |---|---|
-| **Stdlib**（`stdlib/`） | 降低到 ckb-vm syscall 和小型运行时 helper 的内置函数：`syscall_load_tx_hash`、`syscall_load_script_hash`、`syscall_load_cell`、`syscall_load_header`、cycle/time helper 和 math helper。模块注入，不单独链接。 |
+| **Stdlib**（`stdlib/`） | 降低到显式 verifier effect 的内置函数和 compiler-recognized patterns：`std::lifecycle::transfer`、`std::receipt::claim`、`std::lifecycle::settle` 等 lifecycle helpers，`std::cell::preserve_type`、`std::cell::preserve_lock`、`std::cell::preserve_capacity` 等 cell metadata helpers，以及 ckb-vm syscall/runtime helpers。模块注入，不单独链接。 |
 | **Collections**（`stdlib/collections.rs`） | bounded stack-backed `Vec<T: FixedWidth>` helpers，用于 verifier-local value：`new`、`with_capacity`、`capacity`、`push`、`extend_from_slice`、`len`、`is_empty`、indexing、`first`、`last`、`contains`、`set`、`remove`、`pop`、`insert`、`reverse`、`truncate`、`swap`、`clear`。Cell-backed collection ownership 仍不支持。 |
 
 ### 工具面

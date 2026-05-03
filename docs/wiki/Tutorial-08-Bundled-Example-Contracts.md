@@ -197,10 +197,7 @@ cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-pr
 For release-facing CKB evidence, run the CellScript acceptance gate:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh production
-./scripts/ckb_cellscript_acceptance.sh --production
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+./scripts/cellscript_ckb_release_gate.sh full
 ```
 
 Do not use compile-only or bounded diagnostic runs as production release

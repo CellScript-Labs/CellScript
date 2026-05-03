@@ -29,8 +29,10 @@ resource Token has store, transfer, destroy {
 ```
 
 The compiler tracks `Token` as a linear value. An action that receives a token
-must consume, return, destroy, or pass it through an explicit stdlib lifecycle
-pattern such as transfer, claim, or settle.
+must consume, return, destroy, validate a named successor output, or pass it
+through an explicit stdlib lifecycle pattern such as
+`std::lifecycle::transfer`, `std::receipt::claim`, or
+`std::lifecycle::settle`.
 
 ## Recipe: Mint A New Output Cell
 
@@ -98,10 +100,10 @@ lock bad_owner_check(protected wallet: Wallet, witness signer: Address) -> bool 
 }
 ```
 
-Prefer names such as `claimed_owner` or `provided_owner` until the language has
-explicit script-args and sighash verification primitives.
+Prefer names such as `claimed_owner` or `provided_owner` until the value is
+actually produced by an explicit signature verification primitive.
 
-## Recipe: Reserve Script Args For Future Binding
+## Recipe: Use Script Args Without Hiding Signatures
 
 The intended shape for real signature authorization is explicit:
 
@@ -168,10 +170,7 @@ This is a compiler/package gate. Use it before asking for deeper CKB evidence.
 Use this only from the CellScript repository root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh production
-./scripts/ckb_cellscript_acceptance.sh --production
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+./scripts/cellscript_ckb_release_gate.sh full
 ```
 
 This is the boundary where compiler evidence becomes builder-backed local CKB

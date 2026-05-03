@@ -173,7 +173,9 @@ resource Token has store, transfer, destroy {
 
 Resources are linear values. When an action receives one, the action must say
 where it goes: consume it, validate a proposed output, return it, destroy it,
-or use an explicit stdlib lifecycle pattern for transfer, claim, or settle.
+or use an explicit stdlib lifecycle pattern such as
+`std::lifecycle::transfer`, `std::receipt::claim`, or
+`std::lifecycle::settle`.
 
 Persistent declarations can also declare the default CKB script hash type used
 for their type identity metadata:
@@ -335,7 +337,8 @@ lock misleading(protected wallet: Wallet, witness signer: Address) -> bool {
 ```
 
 Real CKB authorization needs explicit binding to script args, transaction digest
-scope, witness layout, and signature verification. The intended future shape is
+scope, witness layout, and signature verification. `lock_args` provides the
+script-args binding today; the signature verification primitive remains
 deliberately explicit:
 
 ```cellscript

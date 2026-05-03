@@ -614,7 +614,8 @@ preserved field is explicit.
 
 ## Lifecycle Verbs
 
-Cell-backed inputs must have a clear fate. 0.13 keeps lifecycle verbs visible:
+Cell-backed inputs must have a clear fate. 0.13 keeps core lifecycle verbs
+visible:
 
 | Verb | Use it when |
 |---|---|
@@ -686,6 +687,10 @@ full control over the output shape. The `claim` expression keyword has been
 removed from core; receipt redemption now uses `consume` + `create` directly or
 the explicit `std::receipt::claim` pattern when the receipt declares an output
 type.
+
+Higher-level transfer, claim, and settlement ergonomics live in stdlib patterns,
+not in compiler-core expression verbs. Review their expansion as explicit
+`consume` plus named output constraints.
 
 ## `require` Is The Atomic Proof Constraint
 
@@ -982,8 +987,8 @@ When writing 0.13-style actions, use this checklist:
 - Use `require` for authorization, field preservation, accounting, and
   conservation checks.
 - Use `create name = T { ... }` for named output constraints.
-- Use `consume` or `destroy` to classify input
-  consumption.
+- Use `consume`, `destroy`, or explicit stdlib lifecycle patterns to classify
+  input consumption.
 - Do not use `&mut` for action-boundary Cell mutation.
 - Do not rely on enum order as a transition graph; declare a `flow`.
 - Do not hide state fields. State is data.
@@ -1000,7 +1005,7 @@ Move binds an action to one edge.
 Where scopes the proof.
 Require states verifier constraints.
 Create constrains proposed outputs.
-Lifecycle verbs classify consumed inputs.
+Core lifecycle verbs and stdlib lifecycle patterns classify consumed inputs.
 ```
 
 Or, even shorter:

@@ -157,10 +157,7 @@ to chain evidence. Run the CKB acceptance gate from the CellScript repository
 root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh production
-./scripts/ckb_cellscript_acceptance.sh --production
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+./scripts/cellscript_ckb_release_gate.sh full
 ```
 
 For pre-push checks, the quick gate runs the compiler/tooling suite and

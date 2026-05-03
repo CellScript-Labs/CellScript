@@ -43,9 +43,10 @@ where
     destroy token
 ```
 
-The `Token` cannot simply disappear. It must be consumed, returned, transferred,
-claimed, settled, or destroyed. Silent loss is rejected because silent loss would
-make Cell movement unclear.
+The `Token` cannot simply disappear. It must be consumed, returned, destroyed,
+validated as a named successor output, or handled by an explicit stdlib
+lifecycle pattern. Silent loss is rejected because silent loss would make Cell
+movement unclear.
 
 ## Flows Use Explicit State Fields
 
