@@ -1124,9 +1124,9 @@ where
         let obligation = crate::VerifierObligationMetadata {
             scope: "action:claim_vested".to_string(),
             category: "transaction-invariant".to_string(),
-            feature: "claim-conditions:VestingGrant".to_string(),
-            status: "runtime-required".to_string(),
-            detail: "Source claim predicates are present as timepoint-check=checked-runtime, state-not-fully-claimed=checked-runtime, positive-claimable=checked-runtime, claim-witness-format=checked-runtime, claim-authorization-domain=checked-runtime; signature verification remains runtime-required".to_string(),
+            feature: "resource-conservation:Token".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "field equality=checked-runtime, field transition=checked-runtime".to_string(),
         };
 
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
@@ -1165,19 +1165,16 @@ where
             transaction_invariant_checked_subconditions: transaction_invariant_checked_subcondition_docs(&[obligation]),
             transaction_runtime_input_requirements: vec![TransactionRuntimeInputRequirementMetadata {
                 scope: "action:claim_vested".to_string(),
-                feature: "claim-conditions:VestingGrant".to_string(),
-                status: "runtime-required".to_string(),
-                component: "claim-witness-signature".to_string(),
-                source: "Witness".to_string(),
-                binding: "VestingGrant".to_string(),
-                field: Some("signature".to_string()),
-                abi: "claim-witness-signature-65".to_string(),
-                byte_len: Some(65),
-                blocker: Some(
-                    "claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"
-                        .to_string(),
-                ),
-                blocker_class: Some("witness-verification-gap".to_string()),
+                feature: "consume-input:VestingGrant:grant".to_string(),
+                status: "checked-runtime".to_string(),
+                component: "consume-input-data".to_string(),
+                source: "Input".to_string(),
+                binding: "grant".to_string(),
+                field: Some("data".to_string()),
+                abi: "consume-load-cell-input".to_string(),
+                byte_len: None,
+                blocker: None,
+                blocker_class: None,
             }],
             pool_primitives: Vec::new(),
             pool_runtime_input_requirements: Vec::new(),
@@ -1188,18 +1185,10 @@ where
         assert!(docs.contains("### Transaction Runtime Input Requirements"));
         assert!(docs
             .contains("| Scope | Feature | Status | Component | Source | Binding | Field | ABI | Bytes | Blocker | Blocker Class |"));
-        assert!(docs.contains("`claim-conditions:VestingGrant`"));
-        assert!(docs.contains("`runtime-required`"));
-        assert!(docs.contains(
-            "claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"
-        ));
-        assert!(docs.contains("witness-verification-gap"));
-        assert!(docs.contains("timepoint-check"));
-        assert!(docs.contains("state-not-fully-claimed"));
-        assert!(docs.contains("positive-claimable"));
-        assert!(docs.contains("claim-witness-format"));
-        assert!(docs.contains("claim-authorization-domain"));
-        assert!(docs.contains("`claim-witness-signature-65`"));
-        assert!(docs.contains("signature verification remains runtime-required"));
+        assert!(docs.contains("`resource-conservation:Token`"));
+        assert!(docs.contains("`checked-runtime`"));
+        assert!(docs.contains("field equality"));
+        assert!(docs.contains("field transition"));
+        assert!(docs.contains("`consume-load-cell-input`"));
     }
 }

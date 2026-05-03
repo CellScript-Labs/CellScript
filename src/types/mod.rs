@@ -49,7 +49,6 @@ pub struct TypeEnv {
 pub enum LinearState {
     Available,
     Consumed,
-    Transferred,
     Destroyed,
 }
 
@@ -125,10 +124,6 @@ impl TypeEnv {
 
     pub fn consume(&mut self, name: &str) -> Result<()> {
         self.set_linear_state(name, LinearState::Consumed)
-    }
-
-    pub fn transfer(&mut self, name: &str) -> Result<()> {
-        self.set_linear_state(name, LinearState::Transferred)
     }
 
     pub fn destroy(&mut self, name: &str) -> Result<()> {
@@ -1060,13 +1055,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(guaranteed)
             }
             Expr::Consume(consume) => self.validate_branch_obligations_in_expr(&consume.expr, outputs, guaranteed),
-            Expr::Transfer(transfer) => {
-                self.validate_branch_obligations_in_expr(&transfer.expr, outputs, guaranteed.clone())?;
-                self.validate_branch_obligations_in_expr(&transfer.to, outputs, guaranteed)
-            }
             Expr::Destroy(destroy) => self.validate_branch_obligations_in_expr(&destroy.expr, outputs, guaranteed),
-            Expr::Claim(claim) => self.validate_branch_obligations_in_expr(&claim.receipt, outputs, guaranteed),
-            Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
             Expr::Assert(assert_expr) => {
                 self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
@@ -1088,7 +1077,24 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(guaranteed)
             }
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::StdlibCall(_) => Ok(guaranteed),
+            Expr::RequireBlock(require_block) => {
+                let mut current = guaranteed;
+                for expr in &require_block.expressions {
+                    current = self.validate_branch_obligations_in_expr(expr, outputs, current)?;
+                }
+                Ok(current)
+            }
+            Expr::Preserve(preserve) => {
+                for field in &preserve.fields {
+                    guaranteed.insert(field.clone());
+                }
                 Ok(guaranteed)
             }
         }
@@ -1200,13 +1206,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_create_targets_in_expr(&index.index, outputs)?;
             }
             Expr::Consume(consume) => self.validate_create_targets_in_expr(&consume.expr, outputs)?,
-            Expr::Transfer(transfer) => {
-                self.validate_create_targets_in_expr(&transfer.expr, outputs)?;
-                self.validate_create_targets_in_expr(&transfer.to, outputs)?;
-            }
             Expr::Destroy(destroy) => self.validate_create_targets_in_expr(&destroy.expr, outputs)?,
-            Expr::Claim(claim) => self.validate_create_targets_in_expr(&claim.receipt, outputs)?,
-            Expr::Settle(settle) => self.validate_create_targets_in_expr(&settle.expr, outputs)?,
             Expr::Assert(assert_expr) => {
                 self.validate_create_targets_in_expr(&assert_expr.condition, outputs)?;
                 self.validate_create_targets_in_expr(&assert_expr.message, outputs)?;
@@ -1244,7 +1244,19 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(&arm.value, outputs)?;
                 }
             }
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::StdlibCall(_) => {}
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.validate_create_targets_in_expr(expr, outputs)?;
+                }
+            }
+            Expr::Preserve(_) => {}
         }
         Ok(())
     }
@@ -2243,16 +2255,6 @@ impl<'a> TypeChecker<'a> {
                 env.consume(&name)?;
                 Ok(Type::U64)
             }
-            Expr::Transfer(transfer) => {
-                let (expr_ty, name) = self.require_named_linear_cell_operand(env, &transfer.expr, "transfer", transfer.span)?;
-                let to_ty = self.infer_expr(env, &transfer.to)?;
-                if !Self::is_address_like_type(&to_ty) {
-                    return Err(CompileError::new("transfer destination must be address-like", transfer.span));
-                }
-                self.require_capability(&expr_ty, Capability::Transfer, "transfer", transfer.span)?;
-                env.transfer(&name)?;
-                Ok(expr_ty)
-            }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
                 self.require_capability(&destroy_ty, Capability::Destroy, "destroy", destroy.span)?;
@@ -2262,19 +2264,6 @@ impl<'a> TypeChecker<'a> {
             Expr::ReadRef(read_ref) => {
                 self.require_read_ref_target_cell_backed(&read_ref.ty, read_ref.span)?;
                 Ok(Type::Ref(Box::new(Type::Named(read_ref.ty.clone()))))
-            }
-            Expr::Claim(claim) => {
-                let (receipt_ty, name) = self.require_named_linear_cell_operand(env, &claim.receipt, "claim", claim.span)?;
-                if !self.is_receipt_type(&receipt_ty) {
-                    return Err(CompileError::new("claim requires a receipt value", claim.span));
-                }
-                env.consume(&name)?;
-                Ok(self.resolve_receipt_claim_output(&receipt_ty).unwrap_or(Type::U64))
-            }
-            Expr::Settle(settle) => {
-                let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
-                env.consume(&name)?;
-                Ok(settle_ty)
             }
             Expr::Assert(assert_expr) => {
                 let cond_ty = self.infer_expr(env, &assert_expr.condition)?;
@@ -2375,6 +2364,57 @@ impl<'a> TypeChecker<'a> {
                 env.merge_match_linear_states(&arm_envs, match_expr.span)?;
                 arm_ty.ok_or_else(|| CompileError::new("match expression must contain at least one arm", match_expr.span))
             }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    let ty = self.infer_expr(env, expr)?;
+                    if !self.is_bool_type(&ty) {
+                        return Err(CompileError::new("require block expressions must be boolean", expr_span(expr)).with_code("E1004"));
+                    }
+                }
+                Ok(Type::Unit)
+            }
+            Expr::Preserve(preserve) => {
+                let output_ty = env.lookup(&preserve.output_name).cloned();
+                let input_ty = env.lookup(&preserve.input_name).cloned();
+                if output_ty.is_none() {
+                    return Err(CompileError::new(
+                        format!("preserve: undefined output binding '{}'", preserve.output_name),
+                        preserve.span,
+                    ));
+                }
+                if input_ty.is_none() {
+                    return Err(CompileError::new(
+                        format!("preserve: undefined input binding '{}'", preserve.input_name),
+                        preserve.span,
+                    ));
+                }
+                if preserve.fields.is_empty() {
+                    return Err(CompileError::new("preserve block must list at least one field", preserve.span));
+                }
+                // Validate that each field exists on both the output and input types
+                for field in &preserve.fields {
+                    if let Some(ref ty) = output_ty {
+                        if self.lookup_field_type(ty, field, preserve.span).is_err() {
+                            return Err(CompileError::new(
+                                format!("field '{}' does not exist on output type '{:?}'", field, ty),
+                                preserve.span,
+                            )
+                            .with_code("E1002"));
+                        }
+                    }
+                    if let Some(ref ty) = input_ty {
+                        if self.lookup_field_type(ty, field, preserve.span).is_err() {
+                            return Err(CompileError::new(
+                                format!("field '{}' does not exist on input type '{:?}'", field, ty),
+                                preserve.span,
+                            )
+                            .with_code("E1003"));
+                        }
+                    }
+                }
+                Ok(Type::Bool)
+            }
+            Expr::StdlibCall(_) => Ok(Type::Bool),
         }
     }
 
@@ -2684,9 +2724,11 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_expr_allowed_in_current_callable(&self, expr: &Expr) -> Result<()> {
-        if matches!(expr, Expr::Require(_)) && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock)) {
+        if matches!(expr, Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_))
+            && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock))
+        {
             return Err(CompileError::new(
-                "require is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside pure functions",
+                "require/preserve is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside pure functions",
                 expr_span(expr),
             ));
         }
@@ -2694,11 +2736,8 @@ impl<'a> TypeChecker<'a> {
         let operation = match expr {
             Expr::Create(_) => Some("create"),
             Expr::Consume(_) => Some("consume"),
-            Expr::Transfer(_) => Some("transfer"),
             Expr::Destroy(_) => Some("destroy"),
             Expr::ReadRef(_) => Some("read_ref"),
-            Expr::Claim(_) => Some("claim"),
-            Expr::Settle(_) => Some("settle"),
             _ => None,
         };
 
@@ -2945,7 +2984,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Cast(cast) => self.mark_expr_as_moved(env, &cast.expr),
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
-            Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) => Ok(()),
+            Expr::Preserve(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
             Expr::Require(require_expr) => {
                 self.mark_expr_as_moved(env, &require_expr.condition)?;
@@ -3899,18 +3938,6 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn resolve_receipt_claim_output(&self, ty: &Type) -> Option<Type> {
-        let type_name = Self::base_type_name(ty)?;
-        if let Some(output) = self.receipt_claim_outputs.get(type_name) {
-            return output.clone();
-        }
-        let (resolver, module) = (self.resolver?, self.current_module.as_ref()?);
-        match resolver.resolve_type(module, type_name)? {
-            TypeDef::Receipt(receipt) => receipt.claim_output,
-            TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
-        }
-    }
-
     fn validate_receipt_claim_output(&self, output: &Type, span: Span) -> Result<()> {
         let Some(type_name) = Self::base_type_name(output) else {
             return Err(CompileError::new("receipt claim output must be a cell-backed resource or shared type", span));
@@ -3977,10 +4004,6 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn is_receipt_type(&self, ty: &Type) -> bool {
-        Self::base_type_name(ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some_and(|kind| kind == CellTypeKind::Receipt)
-    }
-
     fn is_linear_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Array(inner, _) => self.is_linear_type(inner),
@@ -4005,14 +4028,6 @@ impl<'a> TypeChecker<'a> {
     fn is_bool_type(&self, ty: &Type) -> bool {
         matches!(ty, Type::Bool)
     }
-
-    fn is_address_like_type(ty: &Type) -> bool {
-        match ty {
-            Type::Address => true,
-            Type::Ref(inner) | Type::MutRef(inner) => Self::is_address_like_type(inner),
-            _ => false,
-        }
-    }
 }
 
 fn stmt_span(stmt: &Stmt) -> Span {
@@ -4029,7 +4044,9 @@ fn stmt_span(stmt: &Stmt) -> Span {
 
 fn expr_span(expr: &Expr) -> Span {
     match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => Span::default(),
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::StdlibCall(_) => {
+            Span::default()
+        }
         Expr::Assign(assign) => assign.span,
         Expr::Binary(binary) => binary.span,
         Expr::Unary(unary) => unary.span,
@@ -4038,11 +4055,8 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Index(index) => index.span,
         Expr::Create(create) => create.span,
         Expr::Consume(consume) => consume.span,
-        Expr::Transfer(transfer) => transfer.span,
         Expr::Destroy(destroy) => destroy.span,
         Expr::ReadRef(read_ref) => read_ref.span,
-        Expr::Claim(claim) => claim.span,
-        Expr::Settle(settle) => settle.span,
         Expr::Assert(assert_expr) => assert_expr.span,
         Expr::Require(require_expr) => require_expr.span,
         Expr::Block(stmts) => stmts.last().map(stmt_span).unwrap_or_default(),
@@ -4052,6 +4066,8 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Range(range) => range.span,
         Expr::StructInit(init) => init.span,
         Expr::Match(match_expr) => match_expr.span,
+        Expr::RequireBlock(require_block) => require_block.span,
+        Expr::Preserve(preserve) => preserve.span,
     }
 }
 
@@ -4090,13 +4106,7 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
             }
         }
         Expr::Consume(consume) => collect_required_output_fields(&consume.expr, outputs, fields),
-        Expr::Transfer(transfer) => {
-            collect_required_output_fields(&transfer.expr, outputs, fields);
-            collect_required_output_fields(&transfer.to, outputs, fields);
-        }
         Expr::Destroy(destroy) => collect_required_output_fields(&destroy.expr, outputs, fields),
-        Expr::Claim(claim) => collect_required_output_fields(&claim.receipt, outputs, fields),
-        Expr::Settle(settle) => collect_required_output_fields(&settle.expr, outputs, fields),
         Expr::Assert(assert_expr) => {
             collect_required_output_fields(&assert_expr.condition, outputs, fields);
             collect_required_output_fields(&assert_expr.message, outputs, fields);
@@ -4138,7 +4148,25 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 collect_required_output_fields(&arm.value, outputs, fields);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => {}
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_required_output_fields(expr, outputs, fields);
+            }
+        }
+        Expr::Preserve(preserve) => {
+            for field in &preserve.fields {
+                if outputs.contains(field) {
+                    fields.insert(field.clone());
+                }
+            }
+        }
     }
 }
 
@@ -4404,30 +4432,11 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(lock, bindings);
             }
         }
-        Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
-            collect_consumed_bindings_from_expr(&transfer.to, bindings);
-        }
         Expr::Destroy(destroy) => {
             if let Expr::Identifier(name) = destroy.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
-        }
-        Expr::Claim(claim) => {
-            if let Expr::Identifier(name) = claim.receipt.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
-        }
-        Expr::Settle(settle) => {
-            if let Expr::Identifier(name) = settle.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&settle.expr, bindings);
         }
         Expr::Assert(assert_expr) => {
             collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
@@ -4466,7 +4475,19 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => {}
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_consumed_bindings_from_expr(expr, bindings);
+            }
+        }
+        Expr::Preserve(_) => {}
     }
 }
 

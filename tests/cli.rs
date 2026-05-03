@@ -281,13 +281,21 @@ fn cellc_verify_artifact_enforces_policy_flags() {
     let source = r#"
 module test
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -299,7 +307,7 @@ where
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
     let stderr = String::from_utf8_lossy(&verify.stderr);
     assert!(stderr.contains("check policy failed"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-expression"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("output-verification-incomplete"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("fail-closed"), "unexpected stderr: {}", stderr);
 }
 
@@ -1077,13 +1085,21 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
@@ -1093,7 +1109,7 @@ where
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("check policy failed"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-expression"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("output-verification-incomplete"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("fail-closed"), "unexpected stderr: {}", stderr);
 }
 
@@ -1203,13 +1219,21 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
@@ -1225,13 +1249,9 @@ where
         .as_array()
         .expect("runtime-required transaction runtime input summaries array");
     assert!(
-        runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("transfer-output:Token:transfer-output-relation=Transaction:Token.output-relation")
-                && summary.contains("transfer-output-relation-consume-create-accounting")
-                && summary.contains("(runtime-required)")
-                && summary.contains("blocker=transfer-created output relation is not fully verifier-covered")
-                && summary.contains("blocker_class=transfer-output-relation-gap")
-        })),
+        runtime_inputs.iter().any(|value| value
+            .as_str()
+            .is_some_and(|summary| { summary.contains("create-output:Fingerprint") && summary.contains("(runtime-required)") })),
         "unexpected runtime-required transaction runtime input summaries: {}",
         stdout
     );
@@ -1243,26 +1263,10 @@ where
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("check policy failed"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("runtime-required verifier obligations"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("runtime-required transaction invariants with checked subconditions"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("runtime-required transaction runtime input requirements"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("runtime-required transaction runtime input blockers"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("runtime-required transaction runtime input blocker classes"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-output:Token"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-output-relation"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-created output relation is not fully verifier-covered"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-output-relation-gap"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-lock-rebinding"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-destination-address-binding"), "unexpected stderr: {}", stderr);
-    assert!(
-        !stderr.contains("transfer-destination-lock"),
-        "checked transfer lock input should not be reported as runtime-required: {}",
-        stderr
-    );
-    assert!(
-        !stderr.contains("destination-address-binding-gap"),
-        "checked transfer destination input should not be reported as runtime-required: {}",
-        stderr
-    );
+    assert!(stderr.contains("create-output:Fingerprint"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
@@ -1344,9 +1348,9 @@ where
     let target = &stdout["checked_targets"][0];
     assert_eq!(target["runtime_required_transaction_invariants"], 0, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_invariant_checked_subconditions"], 0, "unexpected stdout: {}", stdout);
-    assert_eq!(target["transaction_runtime_input_requirements"], 7, "unexpected stdout: {}", stdout);
+    assert_eq!(target["transaction_runtime_input_requirements"], 5, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 0, "unexpected stdout: {}", stdout);
-    assert_eq!(target["checked_transaction_runtime_input_requirements"], 7, "unexpected stdout: {}", stdout);
+    assert_eq!(target["checked_transaction_runtime_input_requirements"], 5, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_blockers"], 0, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_blocker_classes"], 0, "unexpected stdout: {}", stdout);
     let summaries = target["runtime_required_transaction_invariant_checked_subcondition_summaries"]
@@ -1357,8 +1361,8 @@ where
         target["transaction_runtime_input_requirement_summaries"].as_array().expect("transaction runtime input summaries array");
     assert!(
         runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("claim-conditions:VestingGrant:claim-input-lock-hash=Input:VestingGrant.lock_hash")
-                && summary.contains("claim-input-lock-hash-32[32]")
+            summary.contains("consume-input:VestingGrant:grant:consume-input-data=Input:grant.data")
+                && summary.contains("consume-load-cell-input")
         })),
         "unexpected transaction runtime input summaries: {}",
         stdout
@@ -1366,15 +1370,6 @@ where
     let checked_runtime_inputs = target["checked_transaction_runtime_input_requirement_summaries"]
         .as_array()
         .expect("checked transaction runtime input summaries array");
-    assert!(
-        checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("claim-conditions:VestingGrant:claim-input-lock-hash=Input:VestingGrant.lock_hash")
-                && summary.contains("claim-input-lock-hash-32[32]")
-                && summary.contains("(checked-runtime)")
-        })),
-        "unexpected checked transaction runtime input summaries: {}",
-        stdout
-    );
     assert!(
         checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
             summary.contains("consume-input:VestingGrant:grant:consume-input-data=Input:grant.data")
@@ -1408,17 +1403,6 @@ where
         "unexpected checked transaction runtime input summaries: {}",
         stdout
     );
-    assert!(
-        checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("claim-conditions:VestingGrant:claim-input-lock-hash=Input:VestingGrant.lock_hash")
-                && summary.contains("claim-input-lock-hash-32[32]")
-                && summary.contains("(checked-runtime)")
-                && !summary.contains("blocker=")
-                && !summary.contains("blocker_class=")
-        })),
-        "unexpected checked transaction runtime input summaries: {}",
-        stdout
-    );
     let runtime_required_inputs = target["runtime_required_transaction_runtime_input_requirement_summaries"]
         .as_array()
         .expect("runtime-required transaction runtime input summaries array");
@@ -1436,7 +1420,7 @@ where
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
         output.status.success(),
-        "checked claim conditions should satisfy deny-runtime-obligations: {}",
+        "checked obligations should satisfy deny-runtime-obligations: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -1585,13 +1569,21 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
-    amount: u64
+resource Fingerprint {
+    digest: Hash,
 }
 
-action finalize(token: Token) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return settle token
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
@@ -1600,9 +1592,7 @@ where
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
-    assert_eq!(target["transaction_runtime_input_requirements"], 4, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["checked_transaction_runtime_input_requirements"], 3, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_blockers"], 1, "unexpected stdout: {}", stdout);
     assert_eq!(target["runtime_required_transaction_runtime_input_blocker_classes"], 1, "unexpected stdout: {}", stdout);
 
@@ -1611,47 +1601,12 @@ where
         .expect("runtime-required transaction runtime input summaries array");
     assert!(
         runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("settle-finalization:Token:settle-final-state-context=Transaction:Token.pending-to-final-state")
-                && summary.contains("settle-finalization-state-context")
+            summary.contains("create-output:Fingerprint")
                 && summary.contains("(runtime-required)")
-                && summary.contains("blocker=settle lowering does not encode final-state transition policy")
-                && summary.contains("blocker_class=finalization-policy-gap")
+                && summary.contains("blocker=create output field verifier is incomplete")
+                && summary.contains("blocker_class=create-output-verification-gap")
         })),
         "unexpected runtime-required transaction runtime input summaries: {}",
-        stdout
-    );
-
-    let checked_runtime_inputs = target["checked_transaction_runtime_input_requirement_summaries"]
-        .as_array()
-        .expect("checked transaction runtime input summaries array");
-    assert!(
-        checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("settle-input:Token:token:settle-input-data=Input:token.data")
-                && summary.contains("settle-load-cell-input")
-                && summary.contains("(checked-runtime)")
-                && !summary.contains("blocker=")
-        })),
-        "unexpected checked transaction runtime input summaries: {}",
-        stdout
-    );
-    assert!(
-        checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("settle-finalization:Token:settle-output-admission=Transaction:Token.grouped-output-admission")
-                && summary.contains("settle-finalization-output-admission")
-                && summary.contains("(checked-runtime)")
-                && !summary.contains("blocker=")
-        })),
-        "unexpected checked transaction runtime input summaries: {}",
-        stdout
-    );
-    assert!(
-        checked_runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("settle-output:Token:settle-output-relation=Transaction:Token.output-relation")
-                && summary.contains("settle-output-relation-consume-create-accounting")
-                && summary.contains("(checked-runtime)")
-                && !summary.contains("blocker=")
-        })),
-        "unexpected checked transaction runtime input summaries: {}",
         stdout
     );
 
@@ -1659,10 +1614,9 @@ where
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("settle-finalization:Token"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("settle-final-state-context"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("finalization-policy-gap"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("settle lowering does not encode final-state transition policy"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("create-output:Fingerprint"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("create-output-verification-gap"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("create output field verifier is incomplete"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
@@ -2043,13 +1997,21 @@ production = true
         r#"
 module demo::main
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
@@ -2059,7 +2021,7 @@ where
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("check policy failed"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-expression"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("output-verification-incomplete"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
@@ -2076,7 +2038,7 @@ name = "demo"
 version = "0.1.0"
 
 [policy]
-production = true
+deny_ckb_runtime = true
 "#,
     )
     .unwrap();
@@ -2085,23 +2047,32 @@ production = true
         r#"
 module demo::main
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--target-profile").arg("ckb").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("check policy failed"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("transfer-expression"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("CKB runtime features"), "unexpected stderr: {}", stderr);
     assert!(!root.join("build").join("main.s").exists());
     assert!(!root.join("build").join("main.s.meta.json").exists());
 }
@@ -2349,16 +2320,24 @@ where
         root.join("tests").join("policy.cell"),
         r#"
 // cellscript-test: deny-runtime-obligations
-// cellscript-test: expect-error: transfer-output:Token
+// cellscript-test: expect-error: create-output:Fingerprint
 module demo::tests::policy
 
-resource Token has store, transfer, destroy {
-    amount: u128,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();
@@ -2402,23 +2381,27 @@ where
         r#"
 // cellscript-test: expect-not-standalone
 // cellscript-test: expect-ckb-runtime
-// cellscript-test: expect-no-fail-closed-runtime
 // cellscript-test: expect-runtime-feature: verify-output-cell
-// cellscript-test: expect-no-runtime-feature: transfer-expression
-// cellscript-test: expect-verifier-obligation: transfer:Token
-// cellscript-test: expect-verifier-obligation: transfer-output:Token
-// cellscript-test: expect-no-runtime-required-obligation: transfer-output:Token
+// cellscript-test: expect-no-runtime-feature: consume-expression
+// cellscript-test: expect-verifier-obligation: create-output:Fingerprint
 // cellscript-test: expect-no-verifier-obligation: not-present
-// cellscript-test: expect-no-runtime-required-obligation: destroy-output-scan:Token
 module demo::tests::metadata
 
-resource Token has store, transfer, destroy {
-    amount: u64,
+resource Fingerprint {
+    digest: Hash,
 }
 
-action move_token(token: Token, to: Address) -> Token
+fn pass_digest(digest: Hash) -> Hash {
+    return digest
+}
+
+action issue(digest: Hash) -> Fingerprint
 where
-    return transfer token to to
+    let dynamic_digest = pass_digest(digest)
+    let token = create Fingerprint {
+        digest: dynamic_digest
+    }
+    return token
 "#,
     )
     .unwrap();

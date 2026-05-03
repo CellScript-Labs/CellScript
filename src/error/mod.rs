@@ -30,11 +30,17 @@ pub struct CompileError {
     pub message: String,
     pub span: Span,
     pub file: Option<Utf8PathBuf>,
+    pub code: Option<String>,
 }
 
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self { message: message.into(), span, file: None }
+        Self { message: message.into(), span, file: None, code: None }
+    }
+
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = Some(code.into());
+        self
     }
 
     pub fn without_span(message: impl Into<String>) -> Self {
@@ -49,7 +55,13 @@ impl CompileError {
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(ref file) = self.file {
+        if let Some(ref code) = self.code {
+            if let Some(ref file) = self.file {
+                write!(f, "{}:{}: [{}] {}", file, self.span.line, code, self.message)
+            } else {
+                write!(f, "line {}: [{}] {}", self.span.line, code, self.message)
+            }
+        } else if let Some(ref file) = self.file {
             write!(f, "{}:{}: {}", file, self.span.line, self.message)
         } else {
             write!(f, "line {}: {}", self.span.line, self.message)

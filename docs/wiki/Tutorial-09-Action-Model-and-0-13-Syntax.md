@@ -23,9 +23,7 @@ This tutorial explains the syntax introduced and tightened in the 0.13 surface:
 - singular state edges with colons: `move old.state: A -> new.state: B`;
 - prefix source qualifiers: `read`, `protected`, `witness`, and `lock_args`;
 - named output constraints: `create out = T { ... }`;
-- explicit lifecycle verbs: `consume`, `destroy`, `claim`, `settle`, and
-  `transfer`;
-- the removal of `replace` / `replaces` from the core action surface.
+- explicit lifecycle verbs: `consume` and `destroy`.
 
 The goal is not just prettier syntax. The goal is a source file that an auditor
 can scan and understand as a CKB transaction shape.
@@ -36,26 +34,8 @@ On CKB, there is no global mutable contract object. A transaction consumes input
 Cells and creates output Cells. Scripts verify whether that proposed change is
 valid.
 
-In older drafts, it was easy for examples to drift toward object-update
-language:
-
-```cellscript
-action fill_offer(before: Offer, after: output Offer)
-    replaces before with after
-{
-    require after.price == before.price
-}
-```
-
-The intent was good, but the syntax had two problems:
-
-1. `output` lived in the parameter list even though it described the right side
-   of the transaction.
-2. `replaces` sounded like an extra verifier primitive, but most of its meaning
-   was already covered by the action signature, state edge, and explicit
-   `require` checks.
-
-0.13 moves the transaction direction into the signature:
+In earlier drafts, action outputs were sometimes expressed as object-update
+language. 0.13 moves the transaction direction into the signature:
 
 ```cellscript
 action fill_offer(before: Offer) -> after: Offer
@@ -480,14 +460,8 @@ where
     } with_lock(to)
 ```
 
-Notice what is not present:
-
-```cellscript
-replace pool -> next_pool
-```
-
-That keyword was removed from the core surface. The continuity is now expressed
-by explicit constraints:
+Notice what is not present: any implicit field preservation.
+Continuity is expressed by explicit constraints:
 
 ```cellscript
 require next_pool.reserve_a == pool.reserve_a + token_in.amount
@@ -497,24 +471,14 @@ require next_pool.reserve_b == pool.reserve_b - amount_out
 This is more verbose, but it is also more auditable. The source says exactly
 which fields are preserved and which fields change.
 
-## Why `replace` Was Removed
+## Audit Visibility
 
-`replace` sounded useful, but it was ambiguous.
+Any verb that hides its own decomposition into consume + create + require
+is not part of core. Core keeps only `consume` and `destroy` as input-fate
+verbs. Every higher-level pattern must expand into these primitives with
+visible constraints.
 
-It could mean:
-
-- this output is the logical successor of this input;
-- all fields are preserved except the state field;
-- type identity is preserved;
-- lock identity is preserved;
-- capacity is preserved;
-- a migration happened;
-- a graph edge should be drawn in metadata.
-
-Those are different claims. Some are verifier constraints, some are audit
-labels, and some are transaction-builder concerns.
-
-0.13 uses sharper primitives:
+0.13 uses sharp primitives:
 
 | Syntax | Responsibility |
 |---|---|
@@ -522,7 +486,7 @@ labels, and some are transaction-builder concerns.
 | `move input.state: A -> output.state: B` | State edge. |
 | `require output.field == input.field` | Field preservation or accounting proof. |
 | `create output = T { ... }` | Proposed output data and lock constraint. |
-| `consume` / `destroy` / `claim` / `settle` | Consumption intent. |
+| `consume` / `destroy` | Consumption intent. |
 
 If a continuity property matters, write it as a `require`.
 
@@ -554,8 +518,8 @@ where
 
 The `read config: VestingConfig` parameter is read-only evidence. It is not
 consumed. The `tokens: Token` parameter is a Cell-backed action input and must
-be consumed, transferred, destroyed, settled, claimed, or tied to an output
-successor through proof constraints.
+be consumed or destroyed, or tied to an output successor through
+proof constraints.
 
 Common source qualifiers:
 
@@ -656,9 +620,6 @@ Cell-backed inputs must have a clear fate. 0.13 keeps lifecycle verbs visible:
 |---|---|
 | `consume x` | The input is spent as ordinary protocol material. |
 | `destroy x` | The object terminates, and the type has `destroy`. |
-| `transfer x to owner` | The same data moves under a different lock or owner. |
-| `claim x` | A receipt with a declared claim output is redeemed. |
-| `settle x` | A receipt/order/obligation is finalized. |
 
 Example: ordinary consumption in a pool seed action:
 
@@ -702,23 +663,27 @@ where
     destroy token
 ```
 
-Example: claim output syntax:
+Example: receipt consumption with explicit output constraints:
 
 ```cellscript
-receipt VestingReceipt -> Token {
+receipt VestingReceipt {
     amount: u64
     beneficiary: Address
     symbol: [u8; 8]
 }
 
-action redeem(receipt: VestingReceipt) -> Token
+action redeem(receipt: VestingReceipt) -> token: Token
 where
-    return claim receipt
+    consume receipt
+    create token = Token {
+        amount: receipt.amount,
+        symbol: receipt.symbol
+    } with_lock(receipt.beneficiary)
 ```
 
-`claim` is for receipt redemption paths. If your receipt is just ordinary proof
-material consumed by a custom protocol action, use `consume` and explicit output
-constraints instead.
+Receipts consumed with `consume` and explicit `create` output constraints give
+full control over the output shape. The `claim` expression keyword has been
+removed from core; receipt redemption now uses `consume` + `create` directly.
 
 ## `require` Is The Atomic Proof Constraint
 
@@ -901,25 +866,6 @@ action mint(auth: MintAuthority, to: Address, amount: u64)
     -> (next_auth: MintAuthority, token: Token)
 ```
 
-### `replace` / `replaces` Is Removed
-
-Old:
-
-```cellscript
-action fill(input: Offer, output: output Offer)
-    replaces input with output
-```
-
-New:
-
-```cellscript
-action fill(input: Offer) -> output: Offer
-where
-    require output.seller == input.seller
-```
-
-If continuity matters, write the actual continuity constraints.
-
 ### `moves` Became `move`
 
 Old:
@@ -1034,10 +980,9 @@ When writing 0.13-style actions, use this checklist:
 - Use `require` for authorization, field preservation, accounting, and
   conservation checks.
 - Use `create name = T { ... }` for named output constraints.
-- Use `consume`, `destroy`, `claim`, `settle`, or `transfer` to classify input
+- Use `consume` or `destroy` to classify input
   consumption.
-- Do not use `replace` / `replaces`.
-- Do not use `&mut` for action-boundary Cell replacement.
+- Do not use `&mut` for action-boundary Cell mutation.
 - Do not rely on enum order as a transition graph; declare a `flow`.
 - Do not hide state fields. State is data.
 

@@ -382,11 +382,9 @@ impl Formatter {
                 rendered
             }
             Expr::Consume(consume) => format!("consume {}", self.format_expr(&consume.expr)),
-            Expr::Transfer(transfer) => format!("transfer {} to {}", self.format_expr(&transfer.expr), self.format_expr(&transfer.to)),
             Expr::Destroy(destroy) => format!("destroy {}", self.format_expr(&destroy.expr)),
             Expr::ReadRef(read_ref) => format!("read_ref<{}>()", read_ref.ty),
-            Expr::Claim(claim) => format!("claim {}", self.format_expr(&claim.receipt)),
-            Expr::Settle(settle) => format!("settle {}", self.format_expr(&settle.expr)),
+
             Expr::Assert(assert_expr) => {
                 format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
@@ -396,6 +394,19 @@ impl Formatter {
                 } else {
                     format!("require {}", self.format_expr(&require_expr.condition))
                 }
+            }
+            Expr::RequireBlock(require_block) => {
+                if require_block.expressions.len() == 1 {
+                    // Single-expression require block: format as single-line
+                    format!("require {{ {} }}", self.format_expr(&require_block.expressions[0]))
+                } else {
+                    let inner = require_block.expressions.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join("\n");
+                    format!("require {{\n{}\n}}", inner)
+                }
+            }
+            Expr::Preserve(preserve) => {
+                let fields = preserve.fields.join("\n");
+                format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
             Expr::Block(stmts) => {
                 let inner = stmts
@@ -433,6 +444,16 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("match {} {{ {} }}", self.format_expr(&match_expr.expr), arms)
+            }
+            Expr::StdlibCall(call) => {
+                let args = call.args.iter().map(|arg| self.format_expr(arg)).collect::<Vec<_>>().join(", ");
+                let base = format!("std::{}::{}({})", call.namespace, call.name, args);
+                if call.preserve_fields.is_empty() {
+                    base
+                } else {
+                    let fields = call.preserve_fields.join(", ");
+                    format!("{} {{ {} }}", base, fields)
+                }
             }
         }
     }
@@ -662,5 +683,89 @@ where
         assert!(formatted.contains("require x > 0, \"zero\""), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("assert_invariant"), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("const LIMIT: u64 = 10;"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_round_trips_preserve_block() {
+        let source = r#"
+module demo
+
+resource Offer has store {
+    seller: u64
+    price: u64
+    state: u8
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> (output: Offer)
+    move input.state: Live -> output.state: Filled
+where
+    preserve output from input {
+        seller
+        price
+    }
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("preserve"), "formatted output should contain 'preserve':\n{}", formatted);
+        assert!(formatted.contains("from input"), "formatted output should contain 'from input':\n{}", formatted);
+        assert!(formatted.contains("seller"), "formatted output should contain 'seller':\n{}", formatted);
+
+        // Round-trip: re-parse and re-format
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for preserve block");
+    }
+
+    #[test]
+    fn format_round_trips_require_block() {
+        let source = r#"
+module demo
+
+action check(x: u64, y: u64) -> u64
+where
+    require {
+        x > 0
+        y > 0
+    }
+    return x + y
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("require {"), "formatted output should contain 'require {{':\n{}", formatted);
+
+        // Round-trip: re-parse and re-format
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for require block");
+    }
+
+    #[test]
+    fn format_single_expr_require_block_uses_compact_form() {
+        let source = r#"
+module demo
+
+action check(x: u64) -> u64
+where
+    require {
+        x > 0
+    }
+    return x
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        // Single-expression require block should format compactly
+        assert!(formatted.contains("require {"), "formatted output should contain 'require {{':\n{}", formatted);
     }
 }

@@ -48,11 +48,8 @@ pub enum TraceEvent {
     Bind { name: String, value: SimValue },
     Create { ty: String, fields: Vec<(String, String)> },
     Consume { description: String },
-    Transfer { description: String, to: String },
     Destroy { description: String },
     ReadRef { ty: String },
-    Claim { description: String },
-    Settle { description: String },
     Call { name: String, args: Vec<String> },
     Return { value: SimValue },
     Branch { condition: SimValue, taken: bool },
@@ -70,11 +67,8 @@ impl std::fmt::Display for TraceEvent {
                 write!(f, " }}")
             }
             TraceEvent::Consume { description } => write!(f, "  consume {}", description),
-            TraceEvent::Transfer { description, to } => write!(f, "  transfer {} to {}", description, to),
             TraceEvent::Destroy { description } => write!(f, "  destroy {}", description),
             TraceEvent::ReadRef { ty } => write!(f, "  read_ref<{}>()", ty),
-            TraceEvent::Claim { description } => write!(f, "  claim {}", description),
-            TraceEvent::Settle { description } => write!(f, "  settle {}", description),
             TraceEvent::Call { name, args } => write!(f, "  call {}({})", name, args.join(", ")),
             TraceEvent::Return { value } => write!(f, "  return {}", value),
             TraceEvent::Branch { condition, taken } => write!(f, "  if {} -> {}", condition, if *taken { "then" } else { "else" }),
@@ -336,13 +330,6 @@ impl SimulateInterpreter {
                 self.trace.push(TraceEvent::Consume { description: desc.clone() });
                 Ok(SimValue::Simulated { ty: "consumed".to_string(), description: desc })
             }
-            Expr::Transfer(transfer) => {
-                self.has_cell_ops = true;
-                let value = self.eval_expr(&transfer.expr)?;
-                let to = self.eval_expr(&transfer.to)?;
-                self.trace.push(TraceEvent::Transfer { description: value.to_string(), to: to.to_string() });
-                Ok(SimValue::Simulated { ty: "transferred".to_string(), description: "transfer".to_string() })
-            }
             Expr::Destroy(destroy) => {
                 self.has_cell_ops = true;
                 let value = self.eval_expr(&destroy.expr)?;
@@ -353,18 +340,6 @@ impl SimulateInterpreter {
                 self.has_cell_ops = true;
                 self.trace.push(TraceEvent::ReadRef { ty: read_ref.ty.clone() });
                 Ok(SimValue::Simulated { ty: read_ref.ty.clone(), description: "read_ref cell dep".to_string() })
-            }
-            Expr::Claim(claim) => {
-                self.has_cell_ops = true;
-                let value = self.eval_expr(&claim.receipt)?;
-                self.trace.push(TraceEvent::Claim { description: value.to_string() });
-                Ok(SimValue::Simulated { ty: "claimed".to_string(), description: "claim".to_string() })
-            }
-            Expr::Settle(settle) => {
-                self.has_cell_ops = true;
-                let value = self.eval_expr(&settle.expr)?;
-                self.trace.push(TraceEvent::Settle { description: value.to_string() });
-                Ok(SimValue::Simulated { ty: "settled".to_string(), description: "settle".to_string() })
             }
             Expr::Assert(assert) => {
                 let cond = self.eval_expr(&assert.condition)?;
@@ -434,6 +409,28 @@ impl SimulateInterpreter {
                     self.env.insert(name.clone(), value.clone());
                 }
                 Ok(value)
+            }
+            Expr::RequireBlock(require_block) => {
+                let mut result = Ok(SimValue::Bool(true));
+                for expr in &require_block.expressions {
+                    result = self.eval_expr(expr);
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                result
+            }
+            Expr::Preserve(preserve) => {
+                self.trace.push(TraceEvent::Assert {
+                    condition: SimValue::Bool(true),
+                    message: format!("preserve {} from {}", preserve.output_name, preserve.input_name),
+                });
+                Ok(SimValue::Bool(true))
+            }
+            Expr::StdlibCall(call) => {
+                let qualified = format!("std::{}::{}", call.namespace, call.name);
+                self.trace.push(TraceEvent::Assert { condition: SimValue::Bool(true), message: format!("stdlib: {}", qualified) });
+                Ok(SimValue::Bool(true))
             }
         }
     }

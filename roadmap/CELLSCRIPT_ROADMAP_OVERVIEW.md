@@ -39,10 +39,10 @@ CellScript models Cells with three type classes:
 |-----------|-------------|-------------|
 | `resource` | Consumed Cell (CellInput) | `has store, transfer, destroy` |
 | `shared` | Reference Cell (CellDep) | read-only, no consumption |
-| `receipt` | Proof / witness artifact | one-time claim |
+| `receipt` | Proof / witness artifact | consumed via `consume` |
 
 Compile-time safety guarantees:
-- **Double-spend prevention**: Linear state tracking (`Available → Consumed / Transferred / Destroyed`) — the compiler rejects any code path that uses a Cell after consumption.
+- **Double-spend prevention**: Linear state tracking (`Available → Consumed / Destroyed`) — the compiler rejects any code path that uses a Cell after consumption.
 - **Branch consistency**: Both sides of an `if-else` must leave every resource in the same state.
 - **Capability gating**: Only resources declaring `has destroy` can be destroyed; the compiler enforces this statically.
 
@@ -51,7 +51,6 @@ Compile-time safety guarantees:
 ```cellscript
 consume token                                       // consume Cell input, reclaim capacity
 create token = Token { amount: 100 } with_lock(recipient) // constrain named Cell output
-transfer token to recipient                         // atomic consume + create
 destroy token                                       // destroy (requires destroy capability)
 read oracle: OracleData                             // non-consuming read from CellDep
 require pool_after.reserve_a == pool.reserve_a + delta // explicit output constraint
@@ -193,11 +192,12 @@ where
 ### 4.6 Declarative Time Constraints (P1)
 
 ```cellscript
-action claim_after_ckb_timeout(htlc: HtlcReceipt)
+action claim_after_ckb_timeout(htlc: HtlcReceipt) -> recovered: Token
 where
     require_maturity(blocks: 100)               // CKB block-number lock
     require_time(after: Timestamp(1714000000))  // CKB timestamp since
-    claim htlc
+    consume htlc
+    create recovered = Token { amount: htlc.amount } with_lock(htlc.beneficiary)
 ```
 
 ### 4.7 Conditional hash_blake2b() Support (P1)
@@ -290,9 +290,9 @@ ProofPlan records:
 
 Protocol verbs move out of compiler-core recognizers:
 
-- `transfer`
-- `claim`
-- `settle`
+- `transfer` (stdlib: consume + create with lock mapping)
+- `claim` (stdlib: receipt consume + output create)
+- `settle` (stdlib: receipt finalize + state transition)
 - `shared`
 - pool/AMM flows
 

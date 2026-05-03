@@ -154,13 +154,7 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
             collect_state_context_from_expr(specs, context, &index.expr);
             collect_state_context_from_expr(specs, context, &index.index);
         }
-        Expr::Transfer(transfer) => {
-            collect_state_context_from_expr(specs, context, &transfer.expr);
-            collect_state_context_from_expr(specs, context, &transfer.to);
-        }
         Expr::Destroy(destroy) => collect_state_context_from_expr(specs, context, &destroy.expr),
-        Expr::Claim(claim) => collect_state_context_from_expr(specs, context, &claim.receipt),
-        Expr::Settle(settle) => collect_state_context_from_expr(specs, context, &settle.expr),
         Expr::Assert(assert_expr) => {
             collect_state_context_from_expr(specs, context, &assert_expr.condition);
             collect_state_context_from_expr(specs, context, &assert_expr.message);
@@ -171,6 +165,12 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
                 collect_state_context_from_expr(specs, context, message);
             }
         }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_state_context_from_expr(specs, context, expr);
+            }
+        }
+        Expr::Preserve(_) => {}
         Expr::Block(stmts) => collect_state_context_from_stmts(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
@@ -198,7 +198,13 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
                 collect_state_context_from_expr(specs, context, &arm.value);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => {}
     }
 }
 
@@ -277,13 +283,7 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             validate_state_transition_expr(specs, context, &index.index)
         }
         Expr::Consume(consume) => validate_state_transition_expr(specs, context, &consume.expr),
-        Expr::Transfer(transfer) => {
-            validate_state_transition_expr(specs, context, &transfer.expr)?;
-            validate_state_transition_expr(specs, context, &transfer.to)
-        }
         Expr::Destroy(destroy) => validate_state_transition_expr(specs, context, &destroy.expr),
-        Expr::Claim(claim) => validate_state_transition_expr(specs, context, &claim.receipt),
-        Expr::Settle(settle) => validate_state_transition_expr(specs, context, &settle.expr),
         Expr::Assert(assert_expr) => {
             validate_state_transition_expr(specs, context, &assert_expr.condition)?;
             validate_state_transition_expr(specs, context, &assert_expr.message)
@@ -295,6 +295,13 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             }
             Ok(())
         }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                validate_state_transition_expr(specs, context, expr)?;
+            }
+            Ok(())
+        }
+        Expr::Preserve(_) => Ok(()),
         Expr::Block(stmts) => validate_stmt_list(specs, context, stmts),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
@@ -325,7 +332,13 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             }
             Ok(())
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => Ok(()),
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => Ok(()),
     }
 }
 

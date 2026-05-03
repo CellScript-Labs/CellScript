@@ -623,6 +623,8 @@ impl LspServer {
             ("transfer", "transfer ${1:expr} to ${2:addr}"),
             ("assert", "assert ${1:condition}"),
             ("require", "require ${1:condition}"),
+            ("require_block", "require {\n    ${1:condition}\n}"),
+            ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
             ("protected", "protected ${1:cell}: ${2:CellType}"),
             ("witness", "witness ${1:arg}: ${2:Address}"),
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),

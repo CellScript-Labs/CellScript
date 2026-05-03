@@ -3,46 +3,45 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    Module,     // module
-    Use,        // use
-    Resource,   // resource
-    Shared,     // shared
-    Receipt,    // receipt
-    Struct,     // struct
-    Const,      // const
-    Enum,       // enum
-    Action,     // action
-    Fn,         // fn
-    Lock,       // lock
-    Where,      // where
-    Has,        // has
-    Store,      // store
-    Transfer,   // transfer
-    Destroy,    // destroy
-    If,         // if
-    Else,       // else
-    For,        // for
-    In,         // in
-    While,      // while
-    Match,      // match
-    Return,     // return
-    Let,        // let
-    Mut,        // mut
-    Ref,        // ref
-    Consume,    // consume
-    Create,     // create
-    ReadRef,    // read_ref
-    TransferKw, // transfer (keyword)
-    DestroyKw,  // destroy (keyword)
-    Claim,      // claim
-    Settle,     // settle
-    Launch,     // launch
-    Assert,     // assert / assert_invariant
-    Require,    // require
-    True,       // true
-    False,      // false
-    Self_,      // self
-    Env,        // env
+    Module,    // module
+    Use,       // use
+    Resource,  // resource
+    Shared,    // shared
+    Receipt,   // receipt
+    Struct,    // struct
+    Const,     // const
+    Enum,      // enum
+    Action,    // action
+    Fn,        // fn
+    Lock,      // lock
+    Where,     // where
+    Has,       // has
+    Store,     // store
+    Transfer,  // transfer
+    Destroy,   // destroy
+    If,        // if
+    Else,      // else
+    For,       // for
+    In,        // in
+    While,     // while
+    Match,     // match
+    Return,    // return
+    Let,       // let
+    Mut,       // mut
+    Ref,       // ref
+    Consume,   // consume
+    Create,    // create
+    ReadRef,   // read_ref
+    DestroyKw, // destroy (keyword)
+    Launch,    // launch
+    Assert,    // assert / assert_invariant
+    Require,   // require
+    Preserve,  // preserve
+    True,      // true
+    False,     // false
+    Self_,     // self
+    Env,       // env
+    Std,       // std
 
     Identifier(String),
     Integer(u64),
@@ -133,17 +132,16 @@ impl fmt::Display for TokenKind {
             TokenKind::Consume => write!(f, "'consume'"),
             TokenKind::Create => write!(f, "'create'"),
             TokenKind::ReadRef => write!(f, "'read_ref'"),
-            TokenKind::TransferKw => write!(f, "'transfer'"),
             TokenKind::DestroyKw => write!(f, "'destroy'"),
-            TokenKind::Claim => write!(f, "'claim'"),
-            TokenKind::Settle => write!(f, "'settle'"),
             TokenKind::Launch => write!(f, "'launch'"),
             TokenKind::Assert => write!(f, "'assert'"),
             TokenKind::Require => write!(f, "'require'"),
+            TokenKind::Preserve => write!(f, "'preserve'"),
             TokenKind::True => write!(f, "'true'"),
             TokenKind::False => write!(f, "'false'"),
             TokenKind::Self_ => write!(f, "'self'"),
             TokenKind::Env => write!(f, "'env'"),
+            TokenKind::Std => write!(f, "'std'"),
             TokenKind::Identifier(s) => write!(f, "identifier '{}'", s),
             TokenKind::Integer(n) => write!(f, "integer {}", n),
             TokenKind::HexLiteral(s) => write!(f, "hex literal {}", s),
@@ -233,7 +231,7 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "where" => TokenKind::Where,
         "has" => TokenKind::Has,
         "store" => TokenKind::Store,
-        "transfer" => TokenKind::TransferKw,
+        "transfer" => TokenKind::Transfer,
         "destroy" => TokenKind::DestroyKw,
         "if" => TokenKind::If,
         "else" => TokenKind::Else,
@@ -248,15 +246,15 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "consume" => TokenKind::Consume,
         "create" => TokenKind::Create,
         "read_ref" => TokenKind::ReadRef,
-        "claim" => TokenKind::Claim,
-        "settle" => TokenKind::Settle,
         "launch" => TokenKind::Launch,
         "assert" | "assert_invariant" => TokenKind::Assert,
         "require" => TokenKind::Require,
+        "preserve" => TokenKind::Preserve,
         "true" => TokenKind::True,
         "false" => TokenKind::False,
         "self" => TokenKind::Self_,
         "env" => TokenKind::Env,
+        "std" => TokenKind::Std,
         "u8" => TokenKind::U8,
         "u16" => TokenKind::U16,
         "u32" => TokenKind::U32,

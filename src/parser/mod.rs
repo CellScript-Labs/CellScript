@@ -76,15 +76,15 @@ impl<'a> Parser<'a> {
             TokenKind::Where => Some("where".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
-            TokenKind::Transfer | TokenKind::TransferKw => Some("transfer".to_string()),
+            TokenKind::Transfer => Some("transfer".to_string()),
             TokenKind::Destroy | TokenKind::DestroyKw => Some("destroy".to_string()),
-            TokenKind::Claim => Some("claim".to_string()),
-            TokenKind::Settle => Some("settle".to_string()),
             TokenKind::Launch => Some("launch".to_string()),
             TokenKind::Assert => Some("assert".to_string()),
+            TokenKind::Preserve => Some("preserve".to_string()),
             TokenKind::Address => Some("Address".to_string()),
             TokenKind::Hash => Some("Hash".to_string()),
             TokenKind::Env => Some("env".to_string()),
+            TokenKind::Std => Some("std".to_string()),
             TokenKind::Self_ => Some("self".to_string()),
             _ => None,
         }
@@ -185,7 +185,7 @@ impl<'a> Parser<'a> {
                                 caps.push(Capability::Store);
                                 self.advance();
                             }
-                            TokenKind::Transfer | TokenKind::TransferKw => {
+                            TokenKind::Transfer => {
                                 caps.push(Capability::Transfer);
                                 self.advance();
                             }
@@ -713,7 +713,7 @@ impl<'a> Parser<'a> {
                         caps.push(Capability::Store);
                         self.advance();
                     }
-                    TokenKind::Transfer | TokenKind::TransferKw => {
+                    TokenKind::Transfer => {
                         caps.push(Capability::Transfer);
                         self.advance();
                     }
@@ -1714,12 +1714,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Create => self.parse_create(),
             TokenKind::Consume => self.parse_consume(),
-            TokenKind::TransferKw => self.parse_transfer(),
+            TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
-            TokenKind::Claim => self.parse_claim(),
-            TokenKind::Settle => self.parse_settle(),
             TokenKind::Launch => Err(CompileError::new(
-                "launch is reserved for a post-v1 transaction builder and is not part of the executable language core; use explicit create/transfer/claim/settle operations",
+                "launch is reserved for a post-v1 transaction builder and is not part of the executable language core; use explicit create/consume/destroy operations",
                 self.current().span,
             )),
             TokenKind::ReadRef => self.parse_read_ref_expr(),
@@ -1727,6 +1725,7 @@ impl<'a> Parser<'a> {
             TokenKind::Match => self.parse_match_expr(),
             TokenKind::Assert => self.parse_assert(),
             TokenKind::Require => self.parse_require(),
+            TokenKind::Std => self.parse_stdlib_call(),
             _ if self.ident_like_name().is_some() => {
                 let name = self.parse_name_path()?;
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
@@ -1913,51 +1912,6 @@ impl<'a> Parser<'a> {
         Ok(Expr::ReadRef(ReadRefExpr { ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) }))
     }
 
-    fn parse_transfer(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::TransferKw)?;
-
-        let expr = self.parse_expr()?;
-        let marker = self.parse_name_path()?;
-        if marker != "to" {
-            return Err(CompileError::new("expected 'to' in transfer expression", self.current().span));
-        }
-        let to = self.parse_expr()?;
-
-        let end_span = self.current().span;
-        Ok(Expr::Transfer(TransferExpr {
-            expr: Box::new(expr),
-            to: Box::new(to),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
-    fn parse_claim(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Claim)?;
-
-        let receipt = self.parse_expr()?;
-
-        let end_span = self.current().span;
-        Ok(Expr::Claim(ClaimExpr {
-            receipt: Box::new(receipt),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
-    fn parse_settle(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Settle)?;
-
-        let expr = self.parse_expr()?;
-
-        let end_span = self.current().span;
-        Ok(Expr::Settle(SettleExpr {
-            expr: Box::new(expr),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
     fn parse_assert(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Assert)?;
@@ -1983,6 +1937,49 @@ impl<'a> Parser<'a> {
     fn parse_require(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Require)?;
+
+        // Anonymous require block: require { expr\n expr\n }
+        if self.check(&TokenKind::LBrace) {
+            self.advance();
+            self.skip_newlines();
+            let mut expressions = Vec::new();
+            while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                let expr = self.parse_expr()?;
+                // Validate: only pure boolean expressions allowed
+                match &expr {
+                    Expr::Consume(_) | Expr::Create(_) | Expr::Destroy(_) => {
+                        return Err(CompileError::new(
+                            "require block contains statement — only pure boolean expressions are allowed",
+                            expr.span(),
+                        )
+                        .with_code("E1005"));
+                    }
+                    Expr::If(_) | Expr::Match(_) => {
+                        return Err(CompileError::new(
+                            "require block contains control flow — only pure boolean expressions are allowed",
+                            expr.span(),
+                        )
+                        .with_code("E1006"));
+                    }
+                    _ => {}
+                }
+                expressions.push(expr);
+                self.consume_optional_semi();
+                self.skip_newlines();
+            }
+            if expressions.is_empty() {
+                return Err(CompileError::new("require block is empty — at least one boolean expression is required", start_span)
+                    .with_code("E1001"));
+            }
+            let end_span = self.current().span;
+            self.expect(TokenKind::RBrace)?;
+            return Ok(Expr::RequireBlock(RequireBlockExpr {
+                expressions,
+                span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+            }));
+        }
+
+        // Standard require: require condition[, message]
         let condition = self.parse_expr()?;
         let message = if self.check(&TokenKind::Comma) {
             self.advance();
@@ -1995,6 +1992,114 @@ impl<'a> Parser<'a> {
         Ok(Expr::Require(RequireExpr {
             condition: Box::new(condition),
             message,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    /// Parse `preserve output_name from input_name { field1, field2, ... }`
+    fn parse_preserve(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Preserve)?;
+
+        let output_name = self.parse_name()?;
+
+        // Expect "from"
+        let from_marker = self.ident_like_name().unwrap_or_default();
+        if from_marker != "from" {
+            return Err(CompileError::new("expected 'from' in preserve expression", self.current().span));
+        }
+        self.advance(); // consume "from"
+
+        let input_name = self.parse_name()?;
+
+        // Require a field block — bare `preserve output from input` is not allowed
+        if !self.check(&TokenKind::LBrace) {
+            return Err(CompileError::new(
+                "bare 'preserve' requires a field block — use 'preserve output from input { field1, field2 }'",
+                self.current().span,
+            )
+            .with_code("E1009"));
+        }
+        self.advance(); // consume {
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            // Reject wildcard
+            if self.check(&TokenKind::Star) {
+                return Err(CompileError::new("preserve wildcard '*' is not allowed — use explicit whitelist", self.current().span)
+                    .with_code("E1007"));
+            }
+            // Reject 'except' keyword used as blacklist
+            if self.ident_like_name().as_deref() == Some("except") {
+                return Err(CompileError::new("preserve except is not allowed — use explicit whitelist", self.current().span)
+                    .with_code("E1008"));
+            }
+            let field_name = self.parse_name()?;
+            fields.push(field_name);
+            self.consume_optional_semi();
+            self.skip_newlines();
+        }
+
+        if fields.is_empty() {
+            return Err(
+                CompileError::new("preserve block is empty — at least one field name is required", start_span).with_code("E1001")
+            );
+        }
+
+        let end_span = self.current().span;
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(Expr::Preserve(PreserveExpr {
+            output_name,
+            input_name,
+            fields,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    /// Parse `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`
+    fn parse_stdlib_call(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Std)?;
+
+        // Expect ::
+        self.expect(TokenKind::ColonColon)?;
+
+        // Parse namespace name
+        let namespace = self.parse_name()?;
+
+        // Expect ::
+        self.expect(TokenKind::ColonColon)?;
+
+        // Parse function name
+        let name = self.parse_name()?;
+
+        // Parse argument list
+        let args = self.parse_args()?;
+
+        // Optional preserve-style field block for lifecycle patterns
+        let preserve_fields = if self.check(&TokenKind::LBrace) {
+            self.advance();
+            self.skip_newlines();
+            let mut fields = Vec::new();
+            while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                fields.push(self.parse_name()?);
+                self.consume_optional_semi();
+                self.skip_newlines();
+            }
+            self.expect(TokenKind::RBrace)?;
+            fields
+        } else {
+            vec![]
+        };
+
+        let end_span = self.current().span;
+        Ok(Expr::StdlibCall(StdlibCallExpr {
+            namespace,
+            name,
+            args,
+            preserve_fields,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -2453,5 +2558,219 @@ where
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("match arms must use"), "unexpected error: {}", err.message);
+    }
+
+    // === 0.13.1 preserve sugar and anonymous require block tests ===
+
+    #[test]
+    fn test_parse_preserve_block() {
+        let input = r#"
+module test
+
+resource Offer has store {
+    seller: [u8; 20]
+    price: u64
+    payment_symbol: [u8; 8]
+}
+
+action fill(input: Offer) -> (output: Offer)
+    move input.state: Live -> output.state: Filled
+where
+    preserve output from input {
+        seller
+        price
+        payment_symbol
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let action = match &module.items[1] {
+            Item::Action(action) => action,
+            other => panic!("expected action, found {:?}", other),
+        };
+        // Find the preserve statement in the action body
+        let found_preserve = action.body.iter().any(|stmt| matches!(stmt, Stmt::Expr(Expr::Preserve(_))));
+        assert!(found_preserve, "expected preserve expression in action body");
+    }
+
+    #[test]
+    fn test_parse_require_block() {
+        let input = r#"
+module test
+
+action test(x: u64, y: u64) -> u64
+where
+    require {
+        x > 0
+        y > 0
+    }
+    return x + y
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let action = match &module.items[0] {
+            Item::Action(action) => action,
+            other => panic!("expected action, found {:?}", other),
+        };
+        let found_require_block = action.body.iter().any(|stmt| matches!(stmt, Stmt::Expr(Expr::RequireBlock(_))));
+        assert!(found_require_block, "expected require block expression in action body");
+    }
+
+    #[test]
+    fn test_parse_preserve_single_field() {
+        let input = r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action test(input: Token) -> (output: Token)
+where
+    preserve output from input {
+        amount
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let action = match &module.items[1] {
+            Item::Action(action) => action,
+            other => panic!("expected action, found {:?}", other),
+        };
+        let preserve = action
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Stmt::Expr(Expr::Preserve(p)) => Some(p.clone()),
+                _ => None,
+            })
+            .expect("expected preserve expression");
+        assert_eq!(preserve.output_name, "output");
+        assert_eq!(preserve.input_name, "input");
+        assert_eq!(preserve.fields, vec!["amount".to_string()]);
+    }
+
+    #[test]
+    fn test_reject_empty_preserve_block() {
+        let input = r#"
+module test
+
+action test(input: u64) -> (output: u64)
+where
+    preserve output from input {
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("preserve block is empty"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1001"));
+    }
+
+    #[test]
+    fn test_reject_empty_require_block() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    require {
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("require block is empty"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1001"));
+    }
+
+    #[test]
+    fn test_reject_preserve_wildcard() {
+        let input = r#"
+module test
+
+action test(input: u64) -> (output: u64)
+where
+    preserve output from input {
+        *
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("wildcard"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1007"));
+    }
+
+    #[test]
+    fn test_reject_preserve_except() {
+        let input = r#"
+module test
+
+action test(input: u64) -> (output: u64)
+where
+    preserve output from input {
+        except
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("except"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1008"));
+    }
+
+    #[test]
+    fn test_reject_bare_preserve() {
+        let input = r#"
+module test
+
+action test(input: u64) -> (output: u64)
+where
+    preserve output from input
+    return 0
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("bare"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1009"));
+    }
+
+    #[test]
+    fn test_reject_require_block_with_consume() {
+        let input = r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action test(input: Token) -> u64
+where
+    require {
+        consume input
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("statement"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1005"));
+    }
+
+    #[test]
+    fn test_reject_require_block_with_control_flow() {
+        let input = r#"
+module test
+
+action test(x: u64) -> u64
+where
+    require {
+        if x > 0 {
+            true
+        } else {
+            false
+        }
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("control flow"), "unexpected error: {}", err.message);
+        assert_eq!(err.code.as_deref(), Some("E1006"));
     }
 }

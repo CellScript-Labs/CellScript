@@ -24,10 +24,7 @@ place. A transaction spends Cells and creates new Cells.
 | `consume value` | Spend an input-backed linear value. |
 | `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read param: T` | Read dependency-backed state without consuming it. |
-| `transfer value to` | Move a value to a new lock or owner. |
 | `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
-| `claim receipt` | Consume a receipt and materialize the claim path. |
-| `settle receipt` | Finalize a receipt-backed process. |
 
 The effects are deliberately visible. They make the source read like a
 transaction plan instead of a hidden storage mutation. The core verifier form

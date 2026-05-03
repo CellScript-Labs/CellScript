@@ -107,5 +107,63 @@
       "require ${1:condition}"
     ],
     "description": "Fail the current script if a condition is false"
+  },
+  "Require Block": {
+    "prefix": "require-block",
+    "body": [
+      "require {",
+      "    ${1:condition}",
+      "}"
+    ],
+    "description": "Group multiple require conditions in an anonymous block"
+  },
+  "Preserve": {
+    "prefix": "preserve",
+    "body": [
+      "preserve ${1:output} from ${2:input} {",
+      "    ${3:field}",
+      "}"
+    ],
+    "description": "Preserve fields from input to output with require equality sugar"
+  },
+  "Stdlib Same Lock": {
+    "prefix": "std-cell-same-lock",
+    "body": [
+      "std::cell::same_lock(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.lock_hash == input.lock_hash"
+  },
+  "Stdlib Same Type": {
+    "prefix": "std-cell-same-type",
+    "body": [
+      "std::cell::same_type(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.type_hash == input.type_hash"
+  },
+  "Stdlib Transfer": {
+    "prefix": "std-lifecycle-transfer",
+    "body": [
+      "std::lifecycle::transfer(${1:input}, ${2:output}, ${3:to}) {",
+      "    ${4:field1}",
+      "    ${5:field2}",
+      "}"
+    ],
+    "description": "Consume input, require type_hash preservation, and preserve listed fields"
+  },
+  "Stdlib Claim": {
+    "prefix": "std-receipt-claim",
+    "body": [
+      "std::receipt::claim(${1:receipt}, ${2:output}) {",
+      "    ${3:field1}",
+      "}"
+    ],
+    "description": "Consume receipt with optional field preservation to output"
+  },
+  "Stdlib Conserved": {
+    "prefix": "std-accounting-conserved",
+    "body": [
+      "std::accounting::conserved(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.amount == input.amount"
   }
 }

@@ -2021,38 +2021,13 @@ impl CodeGenerator {
 
         for block in &body.blocks {
             for instruction in &block.instructions {
-                match instruction {
-                    IrInstruction::Create { dest, pattern } => {
-                        if pattern.operation != "create" {
-                            if let Some(output_index) =
-                                Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
-                            {
-                                self.operation_output_indices.insert(dest.id, output_index);
-                            }
+                if let IrInstruction::Create { dest, pattern } = instruction {
+                    if pattern.operation != "create" {
+                        if let Some(output_index) = Self::create_output_index(body, &pattern.operation, &pattern.binding, &pattern.ty)
+                        {
+                            self.operation_output_indices.insert(dest.id, output_index);
                         }
                     }
-                    IrInstruction::Transfer { dest, .. } => {
-                        if let Some(type_name) = named_type_name(&dest.ty) {
-                            if let Some(output_index) = Self::create_output_index(body, "transfer", &dest.name, type_name) {
-                                self.record_verified_operation_output(body, output_index, dest, "transfer");
-                            }
-                        }
-                    }
-                    IrInstruction::Claim { dest, .. } => {
-                        if let Some(type_name) = named_type_name(&dest.ty) {
-                            if let Some(output_index) = Self::create_output_index(body, "claim", &dest.name, type_name) {
-                                self.record_verified_operation_output(body, output_index, dest, "claim");
-                            }
-                        }
-                    }
-                    IrInstruction::Settle { dest, .. } => {
-                        if let Some(type_name) = named_type_name(&dest.ty) {
-                            if let Some(output_index) = Self::create_output_index(body, "settle", &dest.name, type_name) {
-                                self.record_verified_operation_output(body, output_index, dest, "settle");
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
         }
@@ -2232,24 +2207,6 @@ impl CodeGenerator {
                 self.verified_collection_construction_vectors.insert(*var_id);
             }
         }
-    }
-
-    fn record_verified_operation_output(&mut self, body: &IrBody, output_index: usize, dest: &IrVar, operation: &str) {
-        self.operation_output_indices.insert(dest.id, output_index);
-        if body
-            .create_set
-            .get(output_index)
-            .is_some_and(|pattern| self.operation_output_pattern_is_verified(pattern, operation, &dest.ty))
-        {
-            self.verified_operation_outputs.insert(dest.id);
-        }
-    }
-
-    fn operation_output_pattern_is_verified(&self, pattern: &CreatePattern, operation: &str, dest_ty: &IrType) -> bool {
-        pattern.operation == operation
-            && named_type_name(dest_ty).is_some_and(|type_name| type_name == pattern.ty.as_str())
-            && self.can_verify_create_output_fields(pattern)
-            && self.can_verify_output_lock(pattern)
     }
 
     fn prelude_scalar_immediate(&self, operand: &IrOperand) -> Option<u64> {
@@ -2718,17 +2675,8 @@ impl CodeGenerator {
             IrInstruction::Create { dest, pattern } => {
                 self.emit_create(dest, pattern)?;
             }
-            IrInstruction::Transfer { dest, operand, to } => {
-                self.emit_transfer(dest, operand, to)?;
-            }
             IrInstruction::Destroy { operand } => {
                 self.emit_destroy(operand)?;
-            }
-            IrInstruction::Claim { dest, receipt } => {
-                self.emit_claim(dest, receipt)?;
-            }
-            IrInstruction::Settle { dest, operand } => {
-                self.emit_settle(dest, operand)?;
             }
         }
         Ok(())
@@ -6340,7 +6288,6 @@ impl CodeGenerator {
             | IrInstruction::Length { dest, .. }
             | IrInstruction::TypeHash { dest, .. }
             | IrInstruction::Create { dest, .. }
-            | IrInstruction::Claim { dest, .. }
             | IrInstruction::ReadRef { dest, .. } => self.record_var(dest, max_var_id),
             IrInstruction::CollectionNew { dest, capacity, .. } => {
                 self.record_var(dest, max_var_id);
@@ -6373,15 +6320,6 @@ impl CodeGenerator {
                 }
             }
             IrInstruction::Consume { operand } | IrInstruction::Destroy { operand } => self.record_operand(operand, max_var_id),
-            IrInstruction::Settle { dest, operand } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id)
-            }
-            IrInstruction::Transfer { dest, operand, to } => {
-                self.record_var(dest, max_var_id);
-                self.record_operand(operand, max_var_id);
-                self.record_operand(to, max_var_id);
-            }
             IrInstruction::CollectionPush { collection, value } => {
                 self.record_operand(collection, max_var_id);
                 self.record_operand(value, max_var_id);
@@ -6452,7 +6390,6 @@ impl CodeGenerator {
             | IrInstruction::Length { dest, .. }
             | IrInstruction::TypeHash { dest, .. }
             | IrInstruction::Create { dest, .. }
-            | IrInstruction::Claim { dest, .. }
             | IrInstruction::ReadRef { dest, .. }
             | IrInstruction::CollectionCapacity { dest, .. }
             | IrInstruction::CollectionContains { dest, .. }
@@ -6461,9 +6398,7 @@ impl CodeGenerator {
             | IrInstruction::CollectionNew { dest, .. }
             | IrInstruction::Move { dest, .. }
             | IrInstruction::Tuple { dest, .. }
-            | IrInstruction::Binary { dest, .. }
-            | IrInstruction::Settle { dest, .. }
-            | IrInstruction::Transfer { dest, .. } => record(dest),
+            | IrInstruction::Binary { dest, .. } => record(dest),
             IrInstruction::Call { dest, .. } => {
                 if let Some(dest) = dest {
                     record(dest);
@@ -8690,27 +8625,6 @@ impl CodeGenerator {
     }
 
     /// transfer
-    fn emit_transfer(&mut self, dest: &IrVar, operand: &IrOperand, to: &IrOperand) -> Result<()> {
-        self.emit("# transfer");
-        self.emit_operand_comment("asset", operand);
-        self.emit_operand_comment("to", to);
-        if self.emit_verified_operation_output_handle(dest, "transfer") {
-            return Ok(());
-        }
-        // Runtime fallback: use operation_output_indices to emit an output handle
-        // even if the output is not fully verified by the prelude.
-        if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
-            return Ok(());
-        }
-        self.emit("# cellscript abi: fail closed because transfer output relation is unknown");
-        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
-        Ok(())
-    }
-
     /// destroy
     fn emit_destroy(&mut self, operand: &IrOperand) -> Result<()> {
         self.emit("# destroy");
@@ -8753,58 +8667,6 @@ impl CodeGenerator {
             IrType::Ref(inner) | IrType::MutRef(inner) => Self::static_length_from_type(inner),
             _ => None,
         }
-    }
-
-    /// claim
-    fn emit_claim(&mut self, dest: &IrVar, receipt: &IrOperand) -> Result<()> {
-        self.emit("# claim");
-        self.emit_operand_comment("receipt", receipt);
-        if self.emit_verified_operation_output_handle(dest, "claim") {
-            return Ok(());
-        }
-        // Runtime fallback: use operation_output_indices to emit an output handle.
-        if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: claim output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
-            return Ok(());
-        }
-        self.emit("# cellscript abi: fail closed because claim output relation is unknown");
-        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
-        Ok(())
-    }
-
-    /// settle
-    fn emit_settle(&mut self, dest: &IrVar, operand: &IrOperand) -> Result<()> {
-        self.emit("# settle");
-        self.emit_operand_comment("value", operand);
-        if self.emit_verified_operation_output_handle(dest, "settle") {
-            return Ok(());
-        }
-        // Runtime fallback: use operation_output_indices to emit an output handle.
-        if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: settle output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
-            return Ok(());
-        }
-        self.emit("# cellscript abi: fail closed because settle output relation is unknown");
-        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
-        Ok(())
-    }
-
-    fn emit_verified_operation_output_handle(&mut self, dest: &IrVar, operation: &str) -> bool {
-        if !self.verified_operation_outputs.contains(&dest.id) {
-            return false;
-        }
-        let output_index = self.operation_output_indices.get(&dest.id).copied().unwrap_or(self.next_virtual_output);
-        self.emit(format!("# cellscript abi: {} output relation verified by prelude Output#{}", operation, output_index));
-        self.emit(format!("li t0, {}", output_index));
-        self.emit_stack_store("t0", dest.id * 8);
-        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
-        true
     }
 
     fn generate_runtime_support(&mut self) {
@@ -9077,11 +8939,7 @@ fn named_type_name(ty: &IrType) -> Option<&str> {
 
 fn consumed_operand_var(instruction: &IrInstruction) -> Option<&IrVar> {
     let operand = match instruction {
-        IrInstruction::Consume { operand }
-        | IrInstruction::Transfer { operand, .. }
-        | IrInstruction::Destroy { operand }
-        | IrInstruction::Settle { operand, .. } => operand,
-        IrInstruction::Claim { receipt, .. } => receipt,
+        IrInstruction::Consume { operand } | IrInstruction::Destroy { operand } => operand,
         _ => return None,
     };
     match operand {

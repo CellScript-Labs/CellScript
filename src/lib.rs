@@ -68,7 +68,6 @@ pub const CKB_BLANK_HASH: [u8; 32] = [
 const METADATA_MUTATE_CELL_BUFFER_SIZE: usize = 512;
 const CLAIM_SIGNER_PUBKEY_HASH_FIELDS: [&str; 5] =
     ["signer_pubkey_hash", "claim_pubkey_hash", "owner_pubkey_hash", "beneficiary_pubkey_hash", "pubkey_hash"];
-const CLAIM_AUTH_LOCK_HASH_FIELDS: [&str; 5] = ["beneficiary", "owner", "recipient", "authority", "admin"];
 const CKB_TYPE_ID_CODE_HASH: [u8; 32] =
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'T', b'Y', b'P', b'E', b'_', b'I', b'D'];
 const CKB_TYPE_ID_ABI: &str = "ckb-type-id-v1";
@@ -676,27 +675,9 @@ fn validate_target_profile_metadata(metadata: &CompileMetadata, artifact_format:
     Ok(())
 }
 
-fn target_profile_artifact_policy_violations(metadata: &CompileMetadata, profile: TargetProfile) -> Vec<String> {
+fn target_profile_artifact_policy_violations(_metadata: &CompileMetadata, profile: TargetProfile) -> Vec<String> {
     match profile {
-        TargetProfile::Ckb => {
-            // CKB is the only artifact profile; keep these checks focused on CKB-specific unsupported features.
-            let mut violations = Vec::new();
-
-            let unsupported_claim_features = metadata
-                .runtime
-                .ckb_runtime_features
-                .iter()
-                .filter(|feature| matches!(feature.as_str(), "load-claim-ecdsa-signature-hash" | "verify-claim-secp256k1-signature"))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !unsupported_claim_features.is_empty() {
-                violations.push(format!(
-                    "Claim helper syscall features not supported in CKB profile: {}",
-                    unsupported_claim_features.join(", ")
-                ));
-            }
-            violations
-        }
+        TargetProfile::Ckb => Vec::new(),
     }
 }
 
@@ -3765,10 +3746,7 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         | ir::IrInstruction::Index { dest, arr: operand, .. }
         | ir::IrInstruction::Length { dest, operand }
         | ir::IrInstruction::TypeHash { dest, operand }
-        | ir::IrInstruction::Move { dest, src: operand }
-        | ir::IrInstruction::Transfer { dest, operand, .. }
-        | ir::IrInstruction::Claim { dest, receipt: operand }
-        | ir::IrInstruction::Settle { dest, operand } => {
+        | ir::IrInstruction::Move { dest, src: operand } => {
             collect_ir_type_named_types(&dest.ty, used_types);
             collect_operand_named_types(operand, used_types);
         }
@@ -4713,52 +4691,16 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
     let mut checks = Vec::new();
     for block in &body.blocks {
         for instruction in &block.instructions {
-            match instruction {
-                ir::IrInstruction::Transfer { operand, .. } => {
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        checks.push(StaticResourceOperationCheck {
-                            feature: format!("transfer:{}", type_name),
-                            detail: format!(
-                                "Type checker verified '{}' declares transfer capability and the source value is linearly consumed; runtime output/lock verification remains a separate lowering obligation",
-                                type_name
-                            ),
-                        });
-                    }
+            if let ir::IrInstruction::Destroy { operand } = instruction {
+                if let Some(type_name) = operand_named_type_name(operand) {
+                    checks.push(StaticResourceOperationCheck {
+                        feature: format!("destroy:{}", type_name),
+                        detail: format!(
+                            "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of successor outputs remains a runtime/protocol obligation",
+                            type_name
+                        ),
+                    });
                 }
-                ir::IrInstruction::Destroy { operand } => {
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        checks.push(StaticResourceOperationCheck {
-                            feature: format!("destroy:{}", type_name),
-                            detail: format!(
-                                "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of successor outputs remains a runtime/protocol obligation",
-                                type_name
-                            ),
-                        });
-                    }
-                }
-                ir::IrInstruction::Claim { receipt, .. } => {
-                    if let Some(type_name) = operand_named_type_name(receipt) {
-                        checks.push(StaticResourceOperationCheck {
-                            feature: format!("claim:{}", type_name),
-                            detail: format!(
-                                "Type checker verified '{}' is a receipt value and the receipt is linearly consumed; witness/time-lock claim conditions remain runtime/protocol obligations",
-                                type_name
-                            ),
-                        });
-                    }
-                }
-                ir::IrInstruction::Settle { operand, .. } => {
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        checks.push(StaticResourceOperationCheck {
-                            feature: format!("settle:{}", type_name),
-                            detail: format!(
-                                "Type checker verified '{}' is a cell-backed linear value and settle consumes it; finalization invariants remain runtime/protocol obligations",
-                                type_name
-                            ),
-                        });
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -4770,15 +4712,14 @@ fn body_transaction_resource_obligations(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
+    _flow_states: &HashMap<String, Vec<String>>,
+    _flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<TransactionResourceObligation> {
     let param_schema_vars = schema_pointer_var_ids(body, params);
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
     let mut checks = Vec::new();
-    let mut output_index = 0usize;
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
@@ -4791,41 +4732,6 @@ fn body_transaction_resource_obligations(
                     if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
                         checks.push(check);
                     }
-                    output_index += 1;
-                }
-                ir::IrInstruction::Transfer { operand, .. } => {
-                    if let Some(check) = operation_input_data_obligation(body, "transfer", operand) {
-                        checks.push(check);
-                    }
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        let output_relation_checked =
-                            transfer_output_relation_is_checked(body, type_layouts, &availability, output_index, &type_name);
-                        let lock_rebinding_checked = transfer_lock_rebinding_is_checked(body, &availability, &type_name);
-                        let output_relation_detail =
-                            if output_relation_checked { "; transfer-output-relation=checked-runtime" } else { "" };
-                        let lock_rebinding_detail = if lock_rebinding_checked {
-                            "; transfer-lock-rebinding=checked-runtime; transfer-destination-address-binding=checked-runtime"
-                        } else {
-                            ""
-                        };
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("transfer-output:{}", type_name),
-                            status: if output_relation_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: if output_relation_checked {
-                                format!(
-                                    "Compiler-emitted runtime verifier checks the consumed '{}' cell data is preserved in the transfer-created output and that the output lock is rebound to the transfer destination{}{}",
-                                    type_name, output_relation_detail, lock_rebinding_detail
-                                )
-                            } else {
-                                format!(
-                                    "Runtime verifier must prove the consumed '{}' cell data is preserved in exactly the intended output and that the output lock is rebound to the transfer destination{}{}",
-                                    type_name, output_relation_detail, lock_rebinding_detail
-                                )
-                            },
-                        });
-                    }
-                    output_index += 1;
                 }
                 ir::IrInstruction::Destroy { operand } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
@@ -4849,107 +4755,12 @@ fn body_transaction_resource_obligations(
                         });
                     }
                 }
-                ir::IrInstruction::Claim { dest, receipt } => {
-                    if let Some(check) = operation_input_data_obligation(body, "claim", receipt) {
-                        checks.push(check);
-                    }
-                    if let Some(type_name) = operand_named_type_name(receipt) {
-                        let conditions_checked =
-                            claim_conditions_are_checked(name, body, type_layouts, cell_type_kinds, "claim", receipt, &type_name);
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("claim-conditions:{}", type_name),
-                            status: if conditions_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: transaction_claim_condition_detail(
-                                body,
-                                type_layouts,
-                                cell_type_kinds,
-                                name,
-                                "claim",
-                                receipt,
-                                &type_name,
-                                conditions_checked,
-                            ),
-                        });
-                    }
-                    if let Some(type_name) = named_type_name(&dest.ty) {
-                        checks.push(transaction_output_obligation(
-                            body,
-                            type_layouts,
-                            &availability,
-                            "claim",
-                            &dest.name,
-                            type_name,
-                            format!(
-                                "Compiler-emitted runtime verifier checks the claim-created '{}' output fields that are statically bound to the consumed receipt; claim-output-relation=checked-runtime; witness/time-lock claim conditions remain separate runtime obligations",
-                                type_name
-                            ),
-                            format!(
-                                "Runtime verifier must prove claim creates the declared '{}' output cell and binds its fields to the consumed receipt semantics; claim-output-relation=runtime-required",
-                                type_name
-                            ),
-                        ));
-                    }
-                    output_index += 1;
-                }
-                ir::IrInstruction::Settle { dest, operand } => {
-                    if let Some(check) = operation_input_data_obligation(body, "settle", operand) {
-                        checks.push(check);
-                    }
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        let finalization_checked = settle_finalization_is_checked(
-                            body,
-                            type_layouts,
-                            &availability,
-                            flow_states,
-                            flow_state_fields,
-                            output_index,
-                            &type_name,
-                        );
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("settle-finalization:{}", type_name),
-                            status: if finalization_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: transaction_condition_detail(
-                                body,
-                                type_layouts,
-                                &availability,
-                                flow_states,
-                                flow_state_fields,
-                                "settle",
-                                operand,
-                                &type_name,
-                                finalization_checked,
-                            ),
-                        });
-                    }
-                    if let Some(type_name) = named_type_name(&dest.ty) {
-                        checks.push(transaction_output_obligation(
-                            body,
-                            type_layouts,
-                            &availability,
-                            "settle",
-                            &dest.name,
-                            type_name,
-                            format!(
-                                "Compiler-emitted runtime verifier checks the settle-created '{}' output fields that are statically bound to the consumed value; settle-output-relation=checked-runtime; finalization invariants remain separate runtime obligations",
-                                type_name
-                            ),
-                            format!(
-                                "Runtime verifier must prove settle creates the finalized '{}' output cell and binds verifier-covered fields to the consumed value semantics; settle-output-relation=runtime-required",
-                                type_name
-                            ),
-                        ));
-                    }
-                    output_index += 1;
-                }
                 _ => {}
             }
         }
     }
     checks.extend(read_ref_cell_dep_data_obligations(body));
     checks.extend(body_resource_conservation_obligations(name, body, type_layouts, &availability, params, cell_type_kinds));
-    checks.extend(body_receipt_claim_flow_obligations(name, body, type_layouts, cell_type_kinds));
     checks
 }
 
@@ -5564,193 +5375,19 @@ fn metadata_u64_source_collect_amount_split_subtrahends(
     }
 }
 
-fn body_receipt_claim_flow_obligations(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-) -> Vec<TransactionResourceObligation> {
-    let mut obligations = Vec::new();
-    let source_invariant_count = body_assert_invariant_count(body);
-    for block in &body.blocks {
-        for instruction in &block.instructions {
-            let ir::IrInstruction::Consume { operand } = instruction else {
-                continue;
-            };
-            let Some(type_name) = operand_named_type_name(operand) else {
-                continue;
-            };
-            if cell_type_kinds.get(type_name.as_str()) != Some(&ir::IrTypeKind::Receipt) {
-                continue;
-            }
-            let checked_guards = receipt_claim_flow_checked_condition_guards(name, &type_name, source_invariant_count, body);
-            if checked_guards.is_empty() {
-                continue;
-            }
-            let binding = operand_var_name(operand).unwrap_or(type_name.as_str());
-            let input_summary = transaction_condition_input_summary(body, type_layouts, "consume", binding, &type_name);
-            let witness_domain_detail = if body.consume_set.iter().any(|pattern| {
-                pattern.operation == "consume"
-                    && pattern.binding == binding
-                    && is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts)
-            }) {
-                let mut detail = ", claim-witness-format=checked-runtime, claim-authorization-domain=checked-runtime".to_string();
-                if body.consume_set.iter().any(|pattern| {
-                    pattern.operation == "consume"
-                        && pattern.binding == binding
-                        && is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts)
-                }) {
-                    detail.push_str(", claim-witness-signature=checked-runtime, claim-signer-key-binding=checked-runtime");
-                }
-                detail
-            } else if body.consume_set.iter().any(|pattern| {
-                pattern.operation == "consume"
-                    && pattern.binding == binding
-                    && is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts)
-            }) {
-                ", claim-input-lock-hash=checked-runtime, claim-lock-hash-field-binding=checked-runtime".to_string()
-            } else if revoke_admin_authorization_is_checked(name, &type_name, body, type_layouts) {
-                ", revoke-admin-config-binding=checked-runtime, revoke-admin-output-lock=checked-runtime".to_string()
-            } else {
-                String::new()
-            };
-            let conditions_checked =
-                claim_conditions_are_checked(name, body, type_layouts, cell_type_kinds, "consume", operand, &type_name);
-            obligations.push(TransactionResourceObligation {
-                category: "transaction-invariant",
-                feature: format!("claim-conditions:{}", type_name),
-                status: if conditions_checked { "checked-runtime" } else { "runtime-required" },
-                detail: format!(
-                    "Source claim predicates are present in the fail-closed CFG as {}{}; runtime inputs: {}",
-                    checked_guards.iter().map(|guard| format!("{}=checked-runtime", guard)).collect::<Vec<_>>().join(", "),
-                    witness_domain_detail,
-                    input_summary
-                ),
-            });
-        }
-    }
-    obligations
-}
-
-fn claim_conditions_are_checked(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-) -> bool {
-    if !claim_source_predicates_are_checked(name, type_name, body) {
-        return false;
-    }
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    body.consume_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && (is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || revoke_admin_authorization_is_checked(name, type_name, body, type_layouts))
-    })
-}
-
-fn revoke_admin_authorization_is_checked(name: &str, type_name: &str, body: &ir::IrBody, type_layouts: &MetadataTypeLayouts) -> bool {
-    if name != "revoke_grant" || type_name != "VestingGrant" {
-        return false;
-    }
-    let Some(config_fields) = type_layouts.get("VestingConfig") else {
-        return false;
-    };
-    let Some(admin_layout) = config_fields.get("admin") else {
-        return false;
-    };
-    if metadata_layout_fixed_byte_width(admin_layout) != Some(32) {
-        return false;
-    }
-    body.read_refs.iter().any(|pattern| pattern.operation == "read_ref" && pattern.binding == "config")
-        && body_assert_invariant_count(body) >= 3
-}
-
-fn claim_body_has_source_predicates(body: &ir::IrBody) -> bool {
-    body_assert_invariant_count(body) > 0 || body_uses_current_timepoint(body)
-}
-
-fn claim_source_predicates_are_checked(name: &str, type_name: &str, body: &ir::IrBody) -> bool {
-    if !claim_body_has_source_predicates(body) {
-        return true;
-    }
-    let source_invariant_count = body_assert_invariant_count(body);
-    let uses_timepoint = body_uses_current_timepoint(body);
-    let checked_guards = receipt_claim_flow_checked_condition_guards(name, type_name, source_invariant_count, body);
-    if checked_guards.is_empty() {
-        return false;
-    }
-    if uses_timepoint && !checked_guards.contains(&"timepoint-check") {
-        return false;
-    }
-    if source_invariant_count > checked_guards.len() {
-        return false;
-    }
-    true
-}
-
-fn receipt_claim_flow_checked_condition_guards(
-    name: &str,
-    type_name: &str,
-    source_invariant_count: usize,
-    body: &ir::IrBody,
-) -> Vec<&'static str> {
-    if name == "claim_vested" && type_name == "VestingGrant" && source_invariant_count >= 3 && body_uses_current_timepoint(body) {
-        return vec!["timepoint-check", "state-not-fully-claimed", "positive-claimable"];
-    }
-    // General case: any receipt claim that uses current_timepoint and has
-    // assert_invariant conditions gets timepoint-check=checked-runtime,
-    // because the codegen emits a real LOAD_HEADER_BY_FIELD + slt comparison.
-    if body_uses_current_timepoint(body) && source_invariant_count > 0 {
-        let mut guards = vec!["timepoint-check"];
-        // Additional source invariants beyond the timepoint check are
-        // also checked-runtime when the codegen emits them as Branch conditions.
-        guards.extend(std::iter::repeat_n("source-invariant", source_invariant_count.saturating_sub(1)));
-        return guards;
-    }
-    Vec::new()
-}
-
-fn body_uses_current_timepoint(body: &ir::IrBody) -> bool {
-    body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
-        matches!(
-            instruction,
-            ir::IrInstruction::Call {
-                func,
-                args,
-                ..
-            } if matches!(func.as_str(), "__env_current_timepoint") && args.is_empty()
-        )
-    })
-}
-
 fn operation_input_feature(feature: &str) -> Option<(&'static str, &str)> {
     if let Some(binding) = feature.strip_prefix("consume-input:") {
         Some(("consume", binding))
-    } else if let Some(binding) = feature.strip_prefix("transfer-input:") {
-        Some(("transfer", binding))
     } else if let Some(binding) = feature.strip_prefix("destroy-input:") {
         Some(("destroy", binding))
-    } else if let Some(binding) = feature.strip_prefix("claim-input:") {
-        Some(("claim", binding))
     } else {
-        feature.strip_prefix("settle-input:").map(|binding| ("settle", binding))
+        None
     }
 }
 
 fn transaction_runtime_input_requirements_from_obligations(
     obligations: &[VerifierObligationMetadata],
 ) -> Vec<TransactionRuntimeInputRequirementMetadata> {
-    let checked_transaction_invariants = obligations
-        .iter()
-        .filter(|obligation| obligation.category == "transaction-invariant" && obligation.status == "checked-runtime")
-        .map(|obligation| format!("{}:{}", obligation.scope, obligation.feature))
-        .collect::<BTreeSet<_>>();
     let mut requirements = Vec::new();
     for obligation in obligations {
         if let Some(binding) = mutable_state_obligation_binding(obligation) {
@@ -5792,93 +5429,23 @@ fn transaction_runtime_input_requirements_from_obligations(
 
         let include_checked_destroy_scan =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-output-scan:");
-        let include_checked_transfer_output =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("transfer-output:");
-        let include_checked_claim_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("claim-output:");
-        let include_checked_settle_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("settle-output:");
         let include_checked_operation_input =
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
         let include_checked_create_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("create-output:");
         let include_checked_resource_conservation =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("resource-conservation:");
-        let include_checked_claim_conditions =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("claim-conditions:");
-        let include_checked_settle_finalization =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("settle-finalization:");
         if obligation.category != "transaction-invariant"
             || (obligation.status != "runtime-required"
                 && !include_checked_destroy_scan
-                && !include_checked_transfer_output
-                && !include_checked_claim_output
-                && !include_checked_settle_output
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
-                && !include_checked_resource_conservation
-                && !include_checked_claim_conditions
-                && !include_checked_settle_finalization)
+                && !include_checked_resource_conservation)
         {
             continue;
         }
-        if let Some(binding) = obligation.feature.strip_prefix("transfer-output:") {
-            let transfer_output_relation_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "transfer-output-relation") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            let transfer_lock_status = if transaction_obligation_has_checked_subcondition(obligation, "transfer-lock-rebinding") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let transfer_destination_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "transfer-destination-address-binding") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-output-relation",
-                transfer_output_relation_status,
-                (transfer_output_relation_status == "runtime-required")
-                    .then_some("transfer-created output relation is not fully verifier-covered"),
-                (transfer_output_relation_status == "runtime-required").then_some("transfer-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "transfer-output-relation-consume-create-accounting",
-                None,
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-destination-lock",
-                transfer_lock_status,
-                (transfer_lock_status == "runtime-required")
-                    .then_some("transfer lock rebinding is not lowered into transfer create_set lock checks"),
-                (transfer_lock_status == "runtime-required").then_some("lock-rebinding-lowering-gap"),
-                "Output",
-                binding,
-                Some("lock_hash"),
-                "transfer-destination-lock-hash-32",
-                Some(32),
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-destination-address",
-                transfer_destination_status,
-                (transfer_destination_status == "runtime-required")
-                    .then_some("destination address ABI is typed but not bound to an output lock hash by transfer lowering"),
-                (transfer_destination_status == "runtime-required").then_some("destination-address-binding-gap"),
-                "Param",
-                binding,
-                Some("destination"),
-                "transfer-destination-address-32",
-                Some(32),
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("destroy-output-scan:") {
+        if let Some(binding) = obligation.feature.strip_prefix("destroy-output-scan:") {
             let absence_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-output-absence") {
                 "checked-runtime"
             } else {
@@ -5912,32 +5479,6 @@ fn transaction_runtime_input_requirements_from_obligations(
                 binding,
                 Some("outputs"),
                 "destroy-output-scan-transaction-boundary",
-                None,
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("claim-output:") {
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "claim-output-relation",
-                obligation.status.as_str(),
-                (obligation.status == "runtime-required").then_some("claim-created output relation is not fully verifier-covered"),
-                (obligation.status == "runtime-required").then_some("claim-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "claim-output-relation-consume-create-accounting",
-                None,
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("settle-output:") {
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-output-relation",
-                obligation.status.as_str(),
-                (obligation.status == "runtime-required").then_some("settle-created output relation is not fully verifier-covered"),
-                (obligation.status == "runtime-required").then_some("settle-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "settle-output-relation-consume-create-accounting",
                 None,
             ));
         } else if let Some((operation, binding)) = operation_input_feature(obligation.feature.as_str()) {
@@ -6016,157 +5557,6 @@ fn transaction_runtime_input_requirements_from_obligations(
                 "cell-backed-collection-linear-ownership-model",
                 None,
             ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("claim-conditions:") {
-            let claim_time_status = if transaction_obligation_has_checked_subcondition(obligation, "timepoint-check") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let claim_authorization_domain_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "claim-authorization-domain") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            let claim_signature_status = if transaction_obligation_has_checked_subcondition(obligation, "claim-witness-signature") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            if transaction_obligation_has_checked_subcondition(obligation, "claim-input-lock-hash") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-input-lock-hash",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "Input",
-                    binding,
-                    Some("lock_hash"),
-                    "claim-input-lock-hash-32",
-                    Some(32),
-                ));
-            } else if transaction_obligation_has_checked_subcondition(obligation, "revoke-admin-config-binding") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "revoke-admin-config-binding",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "CellDep",
-                    binding,
-                    Some("config.admin"),
-                    "revoke-admin-config-admin-32",
-                    Some(32),
-                ));
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "revoke-admin-output-lock",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "Output",
-                    binding,
-                    Some("lock_hash"),
-                    "revoke-admin-output-lock-hash-32",
-                    Some(32),
-                ));
-            } else {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-witness-signature",
-                    claim_signature_status,
-                    (claim_signature_status == "runtime-required")
-                        .then_some("claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"),
-                    (claim_signature_status == "runtime-required").then_some("witness-verification-gap"),
-                    "Witness",
-                    binding,
-                    Some("signature"),
-                    "claim-witness-signature-65",
-                    Some(65),
-                ));
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-authorization-domain",
-                    claim_authorization_domain_status,
-                    (claim_authorization_domain_status == "runtime-required")
-                        .then_some("claim lowering does not encode authorization-domain separation"),
-                    (claim_authorization_domain_status == "runtime-required").then_some("authorization-domain-separation-gap"),
-                    "Witness",
-                    binding,
-                    Some("authorization-domain"),
-                    "claim-witness-authorization-domain",
-                    None,
-                ));
-            }
-            if obligation.status == "runtime-required"
-                || transaction_obligation_has_checked_subcondition(obligation, "timepoint-check")
-            {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-time-context",
-                    claim_time_status,
-                    (claim_time_status == "runtime-required")
-                        .then_some("claim lowering has no checked source timepoint predicate for this receipt"),
-                    (claim_time_status == "runtime-required").then_some("time-context-predicate-gap"),
-                    "Header",
-                    binding,
-                    Some("timepoint"),
-                    "claim-time-timepoint-u64",
-                    Some(8),
-                ));
-            }
-            if obligation.detail.contains("source-predicate=runtime-required") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-source-predicate",
-                    "runtime-required",
-                    Some("claim source-level predicates are not fully verifier-covered"),
-                    Some("claim-source-predicate-gap"),
-                    "Transaction",
-                    binding,
-                    Some("source-predicate"),
-                    "claim-source-predicate-cfg",
-                    None,
-                ));
-            }
-        } else if let Some(binding) = obligation.feature.strip_prefix("settle-finalization:") {
-            let settle_final_state_status = if transaction_obligation_has_checked_subcondition(obligation, "settle-final-state") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let settle_output_status =
-                if checked_transaction_invariants.contains(&format!("{}:settle-output:{}", obligation.scope, binding)) {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-final-state-context",
-                settle_final_state_status,
-                (settle_final_state_status == "runtime-required")
-                    .then_some("settle lowering does not encode final-state transition policy"),
-                (settle_final_state_status == "runtime-required").then_some("finalization-policy-gap"),
-                "Transaction",
-                binding,
-                Some("pending-to-final-state"),
-                "settle-finalization-state-context",
-                None,
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-output-admission",
-                settle_output_status,
-                (settle_output_status == "runtime-required").then_some("settle-created output relation is not fully verifier-covered"),
-                (settle_output_status == "runtime-required").then_some("settle-output-admission-gap"),
-                "Transaction",
-                binding,
-                Some("grouped-output-admission"),
-                "settle-finalization-output-admission",
-                None,
-            ));
         } else if let Some(binding) = obligation.feature.strip_prefix("resource-conservation:") {
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
@@ -6233,311 +5623,8 @@ fn transaction_runtime_input_requirement(
     }
 }
 
-fn transaction_condition_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-    checked: bool,
-) -> String {
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    let input_summary = transaction_condition_input_summary(body, type_layouts, operation, binding, type_name);
-    match (operation, checked) {
-        ("settle", true) => format!(
-            "Compiler-emitted runtime verifier proves '{}' flow final-state invariants and admits the settle-created output{}; settle-output-admission=checked-runtime; runtime inputs: {}",
-            type_name,
-            settle_final_state_detail(body, type_layouts, availability, flow_states, flow_state_fields, type_name),
-            input_summary
-        ),
-        ("settle", false) => format!(
-            "Runtime verifier must prove '{}' finalization invariants and reject invalid pending-to-final state transitions{}; runtime inputs: {}",
-            type_name,
-            settle_final_state_detail(body, type_layouts, availability, flow_states, flow_state_fields, type_name),
-            input_summary
-        ),
-        _ => format!("Runtime verifier must prove '{}' transaction conditions; runtime inputs: {}", type_name, input_summary),
-    }
-}
-
-fn transaction_claim_condition_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    name: &str,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-    checked: bool,
-) -> String {
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    let input_summary = transaction_condition_input_summary(body, type_layouts, operation, binding, type_name);
-    let witness_detail = claim_witness_authorization_domain_detail(body, type_layouts, operation, binding, type_name);
-    if checked {
-        let signer_field = metadata_claim_signer_pubkey_hash_field(type_name, type_layouts);
-        let lock_hash_field = metadata_claim_auth_lock_hash_field(type_name, type_layouts);
-        let mut checked_parts = Vec::new();
-        if signer_field.is_some() {
-            checked_parts.extend([
-                "claim-witness-format=checked-runtime".to_string(),
-                "claim-authorization-domain=checked-runtime".to_string(),
-                "claim-witness-signature=checked-runtime".to_string(),
-                "claim-signer-key-binding=checked-runtime".to_string(),
-            ]);
-        } else if lock_hash_field.is_some() {
-            checked_parts.extend([
-                "claim-input-lock-hash=checked-runtime".to_string(),
-                "claim-lock-hash-field-binding=checked-runtime".to_string(),
-            ]);
-        }
-        let source_invariant_count = body_assert_invariant_count(body);
-        let checked_guards = receipt_claim_flow_checked_condition_guards(name, type_name, source_invariant_count, body);
-        for guard in &checked_guards {
-            checked_parts.push(format!("{}=checked-runtime", guard));
-        }
-        if let Some(signer_field) = signer_field {
-            return format!(
-                "Compiler-emitted runtime verifier checks '{}' claim witness format, authorization-domain separation, secp256k1 signature verification, and signer-key binding via '{}.{}'; {}; claimed output relation is tracked by claim-output obligations; runtime inputs: {}",
-                type_name,
-                type_name,
-                signer_field,
-                checked_parts.join("; "),
-                input_summary
-            );
-        }
-        if let Some(lock_hash_field) = lock_hash_field {
-            return format!(
-                "Compiler-emitted runtime verifier checks '{}' claim authorization by binding Input lock_hash to '{}.{}'; {}; claimed output relation is tracked by claim-output obligations; runtime inputs: {}",
-                type_name,
-                type_name,
-                lock_hash_field,
-                checked_parts.join("; "),
-                input_summary
-            );
-        }
-    }
-    format!(
-        "Runtime verifier must bind '{}' claim conditions to witness/signature/time context and verify the claimed output relation{}{}{}; runtime inputs: {}",
-        type_name,
-        claim_unchecked_source_predicate_detail(name, type_name, body),
-        claim_runtime_gap_detail(name, body, type_layouts, cell_type_kinds, operation, binding),
-        witness_detail,
-        input_summary
-    )
-}
-
-fn claim_runtime_gap_detail(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    operation: &str,
-    binding: &str,
-) -> &'static str {
-    if body.consume_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && (is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts))
-    }) || revoke_admin_authorization_is_checked(name, "VestingGrant", body, type_layouts)
-    {
-        ""
-    } else {
-        "; claim witness binding is not verifier-covered"
-    }
-}
-
-fn claim_unchecked_source_predicate_detail(name: &str, type_name: &str, body: &ir::IrBody) -> &'static str {
-    if claim_body_has_source_predicates(body) && !claim_source_predicates_are_checked(name, type_name, body) {
-        "; source-predicate=runtime-required"
-    } else {
-        ""
-    }
-}
-
-fn settle_final_state_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
-    type_name: &str,
-) -> String {
-    if settle_final_state_is_checked(body, type_layouts, availability, flow_states, flow_state_fields, type_name) {
-        "; settle-final-state=checked-runtime; settle-state-policy=flow-final-state".to_string()
-    } else {
-        String::new()
-    }
-}
-
-fn claim_witness_authorization_domain_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-) -> String {
-    if !body.consume_set.iter().any(|pattern| pattern.operation == operation && pattern.binding == binding) {
-        return String::new();
-    }
-    if metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_none()
-        && metadata_claim_auth_lock_hash_field(type_name, type_layouts).is_some()
-    {
-        return "; claim-input-lock-hash=checked-runtime; claim-lock-hash-field-binding=checked-runtime".to_string();
-    }
-    let mut detail = "; claim-witness-format=checked-runtime; claim-authorization-domain=checked-runtime".to_string();
-    if metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some() {
-        detail.push_str("; claim-witness-signature=checked-runtime; claim-signer-key-binding=checked-runtime");
-    }
-    detail
-}
-
-fn transaction_condition_input_summary(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-) -> String {
-    let Some((input_index, _)) =
-        body.consume_set.iter().enumerate().find(|(_, pattern)| pattern.operation == operation && pattern.binding == binding)
-    else {
-        return "unresolved consumed input binding".to_string();
-    };
-    let mut field_requirements = type_layouts
-        .get(type_name)
-        .map(|fields| {
-            fields
-                .iter()
-                .filter_map(|(field, layout)| {
-                    let (abi, width) = transaction_field_requirement_abi(layout)?;
-                    Some((layout.offset, format!("Input#{}:{}.{}={}[{}]", input_index, binding, field, abi, width)))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    field_requirements.sort_by_key(|(offset, requirement)| (*offset, requirement.clone()));
-
-    if field_requirements.is_empty() {
-        format!("Input#{}:{}=input-cell[untyped]", input_index, binding)
-    } else {
-        field_requirements.into_iter().map(|(_, requirement)| requirement).collect::<Vec<_>>().join(", ")
-    }
-}
-
-fn transaction_field_requirement_abi(layout: &MetadataFieldLayout) -> Option<(String, usize)> {
-    if let Some(width) = metadata_layout_fixed_scalar_width(layout) {
-        let scalar = match width {
-            1 => "u8",
-            2 => "u16",
-            4 => "u32",
-            8 => "u64",
-            16 => "u128",
-            _ => return None,
-        };
-        return Some((format!("input-cell-field-{}", scalar), width));
-    }
-    metadata_layout_fixed_byte_width(layout).map(|width| (format!("input-cell-field-bytes-{}", width), width))
-}
-
-fn transaction_output_obligation(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-    checked_detail: String,
-    runtime_detail: String,
-) -> TransactionResourceObligation {
-    let output_covered = body.create_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && pattern.ty == type_name
-            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
-    });
-    TransactionResourceObligation {
-        category: "transaction-invariant",
-        feature: format!("{}-output:{}", operation, type_name),
-        status: if output_covered { "checked-runtime" } else { "runtime-required" },
-        detail: if output_covered { checked_detail } else { runtime_detail },
-    }
-}
-
-fn transfer_lock_rebinding_is_checked(body: &ir::IrBody, availability: &MetadataPreludeAvailability, type_name: &str) -> bool {
-    body.create_set.iter().any(|pattern| {
-        pattern.operation == "transfer"
-            && pattern.ty == type_name
-            && pattern.lock.as_ref().is_some_and(|_| metadata_can_verify_output_lock(pattern, availability))
-    })
-}
-
-fn transfer_output_relation_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    output_index: usize,
-    type_name: &str,
-) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
-        pattern.operation == "transfer"
-            && pattern.ty == type_name
-            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
-            && metadata_can_verify_output_lock(pattern, availability)
-    })
-}
-
 fn destroy_group_output_absence_scan_is_checked(body: &ir::IrBody, _type_name: &str, binding: &str) -> bool {
     body.consume_set.iter().any(|pattern| pattern.operation == "destroy" && pattern.binding == binding && pattern.type_hash.is_some())
-}
-
-fn settle_final_state_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
-    type_name: &str,
-) -> bool {
-    body.create_set.iter().any(|pattern| {
-        pattern.operation == "settle"
-            && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, flow_states, flow_state_fields)
-    })
-}
-
-fn settle_finalization_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
-    output_index: usize,
-    type_name: &str,
-) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
-        pattern.operation == "settle"
-            && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, flow_states, flow_state_fields)
-    })
-}
-
-fn metadata_can_verify_settle_final_state(
-    pattern: &ir::CreatePattern,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    flow_states: &HashMap<String, Vec<String>>,
-    flow_state_fields: &HashMap<String, String>,
-) -> bool {
-    flow_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
-        && type_layouts.get(&pattern.ty).is_some_and(|layouts| {
-            let state_field = flow_state_fields.get(&pattern.ty).map_or(flow::FLOW_STATE_FIELD_NAME, String::as_str);
-            layouts.get(state_field).and_then(metadata_layout_fixed_scalar_width).is_some()
-        })
-        && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
 
 fn body_mutable_cell_state_obligations(
@@ -9091,11 +8178,7 @@ fn body_consumed_named_types(body: &ir::IrBody) -> BTreeSet<String> {
     for block in &body.blocks {
         for instruction in &block.instructions {
             let operand = match instruction {
-                ir::IrInstruction::Consume { operand }
-                | ir::IrInstruction::Transfer { operand, .. }
-                | ir::IrInstruction::Destroy { operand }
-                | ir::IrInstruction::Settle { operand, .. } => Some(operand),
-                ir::IrInstruction::Claim { receipt, .. } => Some(receipt),
+                ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand } => Some(operand),
                 _ => None,
             };
             if let Some(ir::IrOperand::Var(var)) = operand {
@@ -9209,7 +8292,6 @@ fn body_fail_closed_runtime_features(
     {
         features.insert("output-lock-verification-incomplete".to_string());
     }
-    let mut output_index = 0usize;
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
@@ -9412,52 +8494,11 @@ fn body_fail_closed_runtime_features(
                         features.insert("non-cell-consume".to_string());
                     }
                 }
-                ir::IrInstruction::Create { .. } => {
-                    output_index += 1;
-                }
-                ir::IrInstruction::Transfer { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "transfer",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
-                        features.insert("transfer-expression".to_string());
-                    }
-                    output_index += 1;
-                }
+                ir::IrInstruction::Create { .. } => {}
                 ir::IrInstruction::Destroy { operand } => {
                     if !is_executable_destroy(operand) {
                         features.insert("destroy-expression".to_string());
                     }
-                }
-                ir::IrInstruction::Claim { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "claim",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
-                        features.insert("claim-expression".to_string());
-                    }
-                    output_index += 1;
-                }
-                ir::IrInstruction::Settle { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "settle",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
-                        features.insert("settle-expression".to_string());
-                    }
-                    output_index += 1;
                 }
                 _ => {}
             }
@@ -9469,22 +8510,6 @@ fn body_fail_closed_runtime_features(
         }
     }
     features.into_iter().collect()
-}
-
-fn metadata_output_operation_is_verifier_covered(
-    body: &ir::IrBody,
-    output_index: usize,
-    operation: &str,
-    dest: &ir::IrVar,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
-        pattern.operation == operation
-            && named_type_name(&dest.ty).is_some_and(|type_name| type_name == pattern.ty.as_str())
-            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
-            && metadata_can_verify_output_lock(pattern, availability)
-    })
 }
 
 #[derive(Debug, Default)]
@@ -10787,21 +9812,6 @@ fn is_claim_witness_signature_verification_check_target(
     metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some()
 }
 
-fn is_claim_input_lock_hash_binding_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if pattern.operation != "consume" || !name.starts_with("claim") {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_auth_lock_hash_field(type_name, type_layouts).is_some()
-}
-
 fn cell_pattern_receipt_type_name<'a>(
     pattern: &ir::CellPattern,
     cell_type_kinds: &'a HashMap<String, ir::IrTypeKind>,
@@ -10817,14 +9827,6 @@ fn metadata_claim_signer_pubkey_hash_field<'a>(type_name: &str, type_layouts: &'
     CLAIM_SIGNER_PUBKEY_HASH_FIELDS.iter().find_map(|field| {
         let layout = fields.get(*field)?;
         (metadata_layout_fixed_byte_width(layout) == Some(20)).then_some(*field)
-    })
-}
-
-fn metadata_claim_auth_lock_hash_field<'a>(type_name: &str, type_layouts: &'a MetadataTypeLayouts) -> Option<&'a str> {
-    let fields = type_layouts.get(type_name)?;
-    CLAIM_AUTH_LOCK_HASH_FIELDS.iter().find_map(|field| {
-        let layout = fields.get(*field)?;
-        (metadata_layout_fixed_byte_width(layout) == Some(32)).then_some(*field)
     })
 }
 
@@ -10848,11 +9850,7 @@ fn schema_pointer_var_ids(body: &ir::IrBody, params: &[ir::IrParam]) -> BTreeSet
 
 fn consumed_schema_var_id(instruction: &ir::IrInstruction) -> Option<usize> {
     let operand = match instruction {
-        ir::IrInstruction::Consume { operand }
-        | ir::IrInstruction::Transfer { operand, .. }
-        | ir::IrInstruction::Destroy { operand }
-        | ir::IrInstruction::Settle { operand, .. } => operand,
-        ir::IrInstruction::Claim { receipt, .. } => receipt,
+        ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand } => operand,
         _ => return None,
     };
     match operand {
@@ -13560,45 +12558,6 @@ where
     return 0
 "#;
 
-    const TRANSFER_NON_NAMED_CELL_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer {
-    amount: u64,
-}
-
-action bad(owner: Address) -> Token
-where
-    return transfer create Token { amount: 1 } to owner
-"#;
-
-    const LINEAR_LET_MOVE_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer {
-    amount: u64,
-}
-
-action move_alias(token: Token, owner: Address) -> Token
-where
-    let moved = token
-    return transfer moved to owner
-"#;
-
-    const LINEAR_LET_COPY_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer, destroy {
-    amount: u64,
-}
-
-action duplicate(token: Token, owner: Address)
-where
-    let copied = token
-    transfer token to owner
-    destroy copied
-"#;
-
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
 module test
 
@@ -15708,65 +14667,6 @@ lock guard() -> bool {
 }
 "#;
 
-    const TRANSFER_CLAIM_SETTLE_PROGRAM: &str = r#"
-module test
-
-resource Token has store, transfer, destroy {
-    amount: u64,
-}
-
-receipt VestingReceipt -> Token {
-    amount: u64,
-}
-
-action move_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
-
-action redeem(receipt: VestingReceipt) -> Token
-where
-    return claim receipt
-
-action finalize(token: Token) -> Token
-where
-    return settle token
-"#;
-
-    const SETTLE_FLOW_FINAL_STATE_PROGRAM: &str = r#"
-module test
-
-receipt Settlement has store {
-    state: u8,
-    amount: u64,
-}
-
-flow Settlement.state {
-    Pending -> Settled;
-}
-
-action finalize(settlement: Settlement) -> Settlement
-where
-    return settle settlement
-"#;
-
-    const CLAIM_SIGNER_PUBKEY_HASH_PROGRAM: &str = r#"
-module test
-
-resource Token has store {
-    amount: u64,
-    signer_pubkey_hash: [u8; 20],
-}
-
-receipt SignedReceipt -> Token {
-    amount: u64,
-    signer_pubkey_hash: [u8; 20],
-}
-
-action redeem_signed(receipt: SignedReceipt) -> Token
-where
-    return claim receipt
-"#;
-
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
 module test
 
@@ -15805,18 +14705,6 @@ where
     } with_lock(Address::zero())
 "#;
 
-    const MISSING_TRANSFER_CAPABILITY_PROGRAM: &str = r#"
-module test
-
-resource Token has store {
-    amount: u64,
-}
-
-action move_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
-"#;
-
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
 module test
 
@@ -15827,58 +14715,6 @@ resource Token has store {
 action burn(token: Token)
 where
     destroy token
-"#;
-
-    const CLAIM_NON_RECEIPT_PROGRAM: &str = r#"
-module test
-
-resource Token has store {
-    amount: u64,
-}
-
-action redeem(token: Token) -> u64
-where
-    return claim token
-"#;
-
-    const CLAIM_OUTPUT_NON_CELL_PROGRAM: &str = r#"
-module test
-
-receipt VestingReceipt -> u64 {
-    amount: u64,
-}
-
-action redeem(receipt: VestingReceipt) -> u64
-where
-    return claim receipt
-"#;
-
-    const CLAIM_OUTPUT_RECEIPT_PROGRAM: &str = r#"
-module test
-
-receipt OtherReceipt {
-    amount: u64,
-}
-
-receipt VestingReceipt -> OtherReceipt {
-    amount: u64,
-}
-
-action redeem(receipt: VestingReceipt) -> OtherReceipt
-where
-    return claim receipt
-"#;
-
-    const SETTLE_NON_CELL_PROGRAM: &str = r#"
-module test
-
-struct Snapshot {
-    amount: u64,
-}
-
-action finalize(snapshot: Snapshot) -> Snapshot
-where
-    return settle snapshot
 "#;
 
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
@@ -16620,7 +15456,7 @@ where
 
         let function_require_err = compile(FUNCTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            function_require_err.message.contains("require is verifier-boundary syntax"),
+            function_require_err.message.contains("require/preserve is verifier-boundary syntax"),
             "unexpected error: {}",
             function_require_err.message
         );
@@ -16906,21 +15742,6 @@ where
             "unexpected error: {}",
             non_named_consume.message
         );
-
-        let non_named_transfer = compile(TRANSFER_NON_NAMED_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            non_named_transfer.message.contains("transfer requires a named cell-backed value"),
-            "unexpected error: {}",
-            non_named_transfer.message
-        );
-    }
-
-    #[test]
-    fn compile_transfers_linear_values_through_let_bindings() {
-        compile(LINEAR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-
-        let copied = compile(LINEAR_LET_COPY_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(copied.message.contains("resource 'token' already Consumed"), "unexpected error: {}", copied.message);
     }
 
     #[test]
@@ -21874,143 +20695,6 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
-    fn settle_flow_final_state_field_is_checked_runtime() {
-        let result = compile(SETTLE_FLOW_FINAL_STATE_PROGRAM, CompileOptions::default()).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
-        assert!(
-            asm.contains("# cellscript abi: settle final-state Settlement.state final_state=1 state_count=2"),
-            "settle did not emit the flow final-state verifier check:\n{}",
-            asm
-        );
-
-        let finalize = result.metadata.actions.iter().find(|action| action.name == "finalize").expect("finalize metadata");
-        let settle_finalization = finalize
-            .verifier_obligations
-            .iter()
-            .find(|obligation| obligation.feature == "settle-finalization:Settlement")
-            .expect("settle finalization obligation");
-        assert_eq!(
-            settle_finalization.status, "checked-runtime",
-            "fully verifier-covered flow settle finalization should be checked: {}",
-            settle_finalization.detail
-        );
-        assert!(
-            settle_finalization.detail.contains("settle-final-state=checked-runtime")
-                && settle_finalization.detail.contains("settle-state-policy=flow-final-state")
-                && settle_finalization.detail.contains("settle-output-admission=checked-runtime"),
-            "settle finalization should expose checked flow final-state and output admission policy: {}",
-            settle_finalization.detail
-        );
-        assert!(finalize.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "settle-finalization:Settlement"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "settle-final-state-context"
-                && requirement.source == "Transaction"
-                && requirement.field.as_deref() == Some("pending-to-final-state")
-                && requirement.abi == "settle-finalization-state-context"
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }));
-        assert!(finalize.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "settle-finalization:Settlement"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "settle-output-admission"
-                && requirement.source == "Transaction"
-                && requirement.field.as_deref() == Some("grouped-output-admission")
-                && requirement.abi == "settle-finalization-output-admission"
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }));
-    }
-
-    #[test]
-    fn compile_rejects_claim_signature_helpers_under_ckb_profile() {
-        let err = compile(
-            CLAIM_SIGNER_PUBKEY_HASH_PROGRAM,
-            CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-        )
-        .unwrap_err();
-
-        assert!(err.message.contains("target profile policy failed for 'ckb'"), "unexpected error: {}", err.message);
-        assert!(
-            err.message.contains("Claim helper syscall features not supported in CKB profile"),
-            "unexpected error: {}",
-            err.message
-        );
-        assert!(err.message.contains("load-claim-ecdsa-signature-hash"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("verify-claim-secp256k1-signature"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn ir_summary_captures_transfer_and_claim_consumes() {
-        let tokens = lexer::lex(TRANSFER_CLAIM_SETTLE_PROGRAM).unwrap();
-        let module = parser::parse(&tokens).unwrap();
-        let ir = ir::generate(&module).unwrap();
-
-        let transfer_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "move_token" => Some(action),
-                _ => None,
-            })
-            .expect("move_token action");
-        assert_eq!(transfer_action.body.consume_set.len(), 1);
-        assert_eq!(transfer_action.body.create_set.len(), 1);
-        assert_eq!(transfer_action.body.consume_set[0].binding, "token");
-        assert_eq!(transfer_action.body.consume_set[0].operation, "transfer");
-        assert_eq!(transfer_action.body.create_set[0].ty, "Token");
-        assert_eq!(transfer_action.body.create_set[0].operation, "transfer");
-        assert_eq!(transfer_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(transfer_action.body.create_set[0].fields[0].0, "amount");
-        assert!(
-            transfer_action.body.create_set[0].lock.is_some(),
-            "transfer-created output should carry the destination lock operand"
-        );
-        assert_eq!(transfer_action.body.write_intents.len(), 1);
-        assert_eq!(transfer_action.body.write_intents[0].operation, "transfer");
-        assert_eq!(transfer_action.body.write_intents[0].ty, "Token");
-
-        let claim_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "redeem" => Some(action),
-                _ => None,
-            })
-            .expect("redeem action");
-        assert_eq!(claim_action.body.consume_set.len(), 1);
-        assert_eq!(claim_action.body.consume_set[0].binding, "receipt");
-        assert_eq!(claim_action.body.consume_set[0].operation, "claim");
-        assert_eq!(claim_action.body.create_set.len(), 1);
-        assert_eq!(claim_action.body.create_set[0].ty, "Token");
-        assert_eq!(claim_action.body.create_set[0].operation, "claim");
-        assert_eq!(claim_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(claim_action.body.create_set[0].fields[0].0, "amount");
-        assert_eq!(claim_action.body.write_intents.len(), 1);
-        assert_eq!(claim_action.body.write_intents[0].operation, "claim");
-
-        let settle_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "finalize" => Some(action),
-                _ => None,
-            })
-            .expect("finalize action");
-        assert_eq!(settle_action.body.consume_set.len(), 1);
-        assert_eq!(settle_action.body.consume_set[0].binding, "token");
-        assert_eq!(settle_action.body.consume_set[0].operation, "settle");
-        assert_eq!(settle_action.body.create_set.len(), 1);
-        assert_eq!(settle_action.body.create_set[0].ty, "Token");
-        assert_eq!(settle_action.body.create_set[0].operation, "settle");
-        assert_eq!(settle_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(settle_action.body.create_set[0].fields[0].0, "amount");
-        assert_eq!(settle_action.body.write_intents.len(), 1);
-        assert_eq!(settle_action.body.write_intents[0].operation, "settle");
-    }
-
-    #[test]
     fn create_output_verifier_accepts_fixed_byte_params_and_consts() {
         let result = compile(FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -22075,43 +20759,9 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
-    fn compile_rejects_transfer_without_transfer_capability() {
-        let err = compile(MISSING_TRANSFER_CAPABILITY_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("does not declare 'transfer' capability"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
     fn compile_rejects_destroy_without_destroy_capability() {
         let err = compile(MISSING_DESTROY_CAPABILITY_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("does not declare 'destroy' capability"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_claim_on_non_receipt_values() {
-        let err = compile(CLAIM_NON_RECEIPT_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("claim requires a receipt value"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_non_cell_receipt_claim_outputs() {
-        let err = compile(CLAIM_OUTPUT_NON_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("receipt claim output must be a cell-backed resource or shared type"),
-            "unexpected error: {}",
-            err.message
-        );
-    }
-
-    #[test]
-    fn compile_rejects_receipt_to_receipt_claim_outputs() {
-        let err = compile(CLAIM_OUTPUT_RECEIPT_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("receipt claim output must not be another receipt"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_settle_on_non_cell_values() {
-        let err = compile(SETTLE_NON_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("settle requires a cell-backed linear value"), "unexpected error: {}", err.message);
     }
 
     #[test]

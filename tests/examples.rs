@@ -959,49 +959,6 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
         }),
         "claim_vested should expose the runtime-checked state transition obligation"
     );
-    let claim_conditions = claim_vested
-        .verifier_obligations
-        .iter()
-        .find(|obligation| {
-            obligation.category == "transaction-invariant"
-                && obligation.feature == "claim-conditions:VestingGrant"
-                && obligation.status == "checked-runtime"
-        })
-        .expect("claim_vested should expose receipt claim condition obligation");
-    assert!(
-        claim_conditions.detail.contains("timepoint-check=checked-runtime")
-            && claim_conditions.detail.contains("state-not-fully-claimed=checked-runtime")
-            && claim_conditions.detail.contains("positive-claimable=checked-runtime")
-            && claim_conditions.detail.contains("claim-input-lock-hash=checked-runtime")
-            && claim_conditions.detail.contains("claim-lock-hash-field-binding=checked-runtime"),
-        "claim_vested should surface checked source predicates and CKB-compatible lock authorization: {}",
-        claim_conditions.detail
-    );
-    assert!(
-        claim_conditions.detail.contains("Input#0:grant.cliff_timepoint=input-cell-field-u64[8]")
-            && claim_conditions.detail.contains("Input#0:grant.state=input-cell-field-u8[1]")
-            && claim_conditions.detail.contains("Input#0:grant.beneficiary=input-cell-field-bytes-32[32]"),
-        "claim_vested should expose field-aware receipt inputs for remaining runtime authorization: {}",
-        claim_conditions.detail
-    );
-    assert!(
-        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "claim-conditions:VestingGrant"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "claim-input-lock-hash"
-                && requirement.source == "Input"
-                && requirement.field.as_deref() == Some("lock_hash")
-                && requirement.abi == "claim-input-lock-hash-32"
-                && requirement.byte_len == Some(32)
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }),
-        "claim_vested should expose structured input lock-hash authorization requirements: {:?}",
-        claim_vested.transaction_runtime_input_requirements
-    );
-    // Time context is now checked via consume-input and current_timepoint() comparison,
-    // not via a separate claim-time-context requirement.
-    // The timepoint check is part of the claim-conditions verifier obligation.
     assert!(
         claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "consume-input:VestingGrant:grant"
@@ -1016,16 +973,34 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
         claim_vested.transaction_runtime_input_requirements
     );
     assert!(
-        result.metadata.runtime.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.scope == "action:claim_vested"
-                && requirement.feature == "claim-conditions:VestingGrant"
+        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-output:Token:tokens"
                 && requirement.status == "checked-runtime"
-                && requirement.component == "claim-input-lock-hash"
+                && requirement.component == "create-output-lock"
+                && requirement.source == "Output"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "create-output-lock-hash-32"
+                && requirement.byte_len == Some(32)
                 && requirement.blocker.is_none()
                 && requirement.blocker_class.is_none()
         }),
-        "module runtime metadata should aggregate checked claim lock-hash authorization runtime input requirements: {:?}",
-        result.metadata.runtime.transaction_runtime_input_requirements
+        "claim_vested should expose structured create-output lock-hash requirements: {:?}",
+        claim_vested.transaction_runtime_input_requirements
+    );
+    assert!(
+        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-output:VestingGrant:updated_grant"
+                && requirement.status == "checked-runtime"
+                && requirement.component == "create-output-lock"
+                && requirement.source == "Output"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "create-output-lock-hash-32"
+                && requirement.byte_len == Some(32)
+                && requirement.blocker.is_none()
+                && requirement.blocker_class.is_none()
+        }),
+        "claim_vested should expose structured create-output VestingGrant lock-hash requirements: {:?}",
+        claim_vested.transaction_runtime_input_requirements
     );
 
     let revoke_grant = result.metadata.actions.iter().find(|action| action.name == "revoke_grant").expect("revoke_grant metadata");

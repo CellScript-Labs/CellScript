@@ -211,9 +211,6 @@ Consumed inputs must reach an explicit lifecycle or output-binding role.
 |---|---|
 | `consume x` | ordinary protocol consumption or value transformation |
 | `destroy x` | terminal resource destruction |
-| `claim x` | receipt/capability claim |
-| `settle x` | order, obligation, or settlement completion |
-| `transfer x to addr` | same data, new lock |
 | `move x.state: A -> y.state: B` | state successor relation |
 
 Do not infer destruction from silence:
@@ -241,8 +238,9 @@ lowering, formatter, LSP, examples, docs, and tests:
 - source qualifiers are prefix forms: `read`, `witness`, `protected`,
   `lock_args`;
 - `create name = T { ... }` is the canonical named-output constraint;
-- `consume`, `destroy`, `claim`, `settle`, and `transfer` remain explicit
-  lifecycle verbs;
+- `consume` and `destroy` remain explicit lifecycle verbs;
+  `claim`, `settle`, and `transfer` expression keywords have been removed from
+  core (see syntax governance document);
 - ordinary `fn` parameters have no cell source semantics;
 - action-boundary `&mut` is not part of the public cell transformation model;
 - continuity is expressed by `require` constraints and state `move`, not by a
@@ -254,7 +252,6 @@ These forms should not be kept as compatibility surface:
 
 | Rejected form | Reason |
 |---|---|
-| `replace old -> new` / `replaces old with new` | redundant with signature direction, state `move`, and explicit `require` constraints |
 | plural `moves` | inconsistent with other imperative verifier clauses; current surface uses singular `move` |
 | `move old.state Live -> new.state Filled` | state values need `:` for readability and parser clarity |
 | action body braces as canonical action proof scope | `where` better separates transition declarations from proof obligations |
@@ -270,7 +267,7 @@ These are reasonable, but should be separate implementation tracks rather than
 
 | Item | Rationale |
 |---|---|
-| `transfer token { ... } with_lock(to)` | ergonomic field-patch sugar, but risks looking like object mutation |
+| `transfer token { ... } with_lock(to)` | removed; use `consume` + `create` with explicit field mapping instead |
 | `create_each` | useful batch-create sugar; needs static expansion and output obligation checks |
 | multi-field `move` sugar | useful only after single-edge proof obligations are fully stable |
 | short `move input.state: A -> B` | requires deterministic successor inference in multi-output actions |
