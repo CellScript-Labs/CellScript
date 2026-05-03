@@ -65,8 +65,8 @@ lists, proposal payload bytes, NFT attributes, or launch distributions.
 
 Do not model ownership of multiple independent linear cells as a generic vector
 or map. Use explicit action parameters, named output bindings, and explicit
-`consume`, `transfer`, or `destroy` operations until the language gains a verifier-backed
-collection ownership primitive.
+`consume`/`destroy` operations or compiler-recognized stdlib lifecycle patterns
+until the language gains a verifier-backed collection ownership primitive.
 
 The missing verifier pieces are explicit cell consumption, typed collection
 destructuring, and membership proofs tied to Molecule schema manifests. Until

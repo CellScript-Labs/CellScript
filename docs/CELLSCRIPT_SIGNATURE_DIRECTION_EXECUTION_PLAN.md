@@ -372,7 +372,7 @@ action claim_vested(grant: VestingGrant)
     -> (tokens: Token, next_grant: VestingGrant)
     move grant.state: Claimable -> next_grant.state: FullyClaimed
 where
-    claim grant
+    consume grant
 
     create tokens = Token {
         amount: next_grant.claimed_amount - grant.claimed_amount,

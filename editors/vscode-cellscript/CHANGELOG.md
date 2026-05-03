@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.2
+
+- Updated extension package metadata for the CellScript 0.13.2 release.
+- Added release-blocking validation for stdlib lifecycle and cell metadata
+  snippets: `std::lifecycle::transfer`, `std::receipt::claim`,
+  `std::lifecycle::settle`, `std::cell::same_lock`,
+  `std::cell::preserve_lock`, and `std::cell::preserve_capacity`.
+- Highlight `std::...` namespaces as builtin support namespaces.
+
 ## 0.13.0
 
 - Updated extension package metadata for the CellScript 0.13 release.

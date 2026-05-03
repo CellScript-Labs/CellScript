@@ -709,7 +709,10 @@ canonical desugaring rules
 Stable tooling release.
 ```
 
-0.13.2 should focus on diagnostics, audit expansion, coverage checks, and developer tooling.
+0.13.2 extends that tooling work with the completed syntax-governance hardening:
+stdlib lifecycle patterns expand to explicit consume/create/output constraints,
+cell metadata helpers lower to canonical verifier checks, and editor tooling
+surfaces those helpers directly.
 
 ---
 
@@ -766,5 +769,5 @@ Audit mode can always expand everything.
 ✅ cargo fmt/check/clippy/test pass cleanly
 ✅ CompileError supports structured error codes via .with_code()
 ✅ Syntax governance document published (docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md)
-⬜ Examples updated to demonstrate 0.13.1 syntax
+✅ Examples updated to demonstrate 0.13.1 syntax and 0.13.2 stdlib lifecycle/cell metadata patterns
 ```

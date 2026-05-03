@@ -125,7 +125,7 @@ where
 
 #### 2. Structured CKB WitnessArgs and Source Views 🔴
 
-**Problem**: CellScript has entry witness bytes and claim witness loading, but CKB's standard `WitnessArgs { lock, input_type, output_type }` structure is still not a first-class DSL concept. CKB lock/type scripts also rely on precise Source selection (`Input`, `Output`, `CellDep`, `HeaderDep`, and group-scoped variants). Today this is mostly implicit in lowering.
+**Problem**: CellScript has entry witness bytes, but CKB's standard `WitnessArgs { lock, input_type, output_type }` structure is still not a first-class DSL concept. CKB lock/type scripts also rely on precise Source selection (`Input`, `Output`, `CellDep`, `HeaderDep`, and group-scoped variants). Today this is mostly implicit in lowering.
 
 **Why It Matters**:
 - Standard lock scripts read signatures from `WitnessArgs.lock`.
@@ -289,7 +289,7 @@ where
     require_maturity(blocks: 100)          // CKB: block-number delta
     require_time(after: Timestamp(target)) // CKB: absolute timestamp since
     require_epoch(relative: EpochFraction(10, 0, 1)) // CKB-only epoch since
-    claim htlc
+    consume htlc
 ```
 
 **Profile-gated Compilation**:
@@ -394,7 +394,7 @@ where
 **Problem**: v0.13 intentionally prioritizes verifier correctness and explicit CKB semantics over syntax sugar. Several useful ergonomic features are good candidates for v0.14 design, but they are not v0.13 correctness blockers.
 
 **Deferred from the 0.13 syntax audit**:
-- `transfer token { ... } with_lock(to)` sugar for consume+create transfer cases where most fields are preserved.
+- Optional source-level `transfer token { ... } with_lock(to)` sugar remains deferred. v0.13.2 already provides compiler-recognized stdlib lifecycle patterns such as `std::lifecycle::transfer`, which expand to explicit `consume` + named output constraints.
 - `create_each` or bounded batch-create sugar that compiles to statically auditable repeated `create` operations.
 - Named tuple returns such as `-> (royalty: Payment, seller: Payment)` for readability without changing ABI layout.
 - Multi-field `move` sugar for compactly declaring several field transitions while preserving explicit guards.
@@ -466,7 +466,7 @@ done
 | On-chain WASM execution | RISC-V remains the on-chain target. WASM is for browser simulation only. |
 | Breaking changes to existing DSL syntax | All new features are additive. Existing `.cell` files must compile without modification. |
 | Primitive kernel reset | v0.15 owns protocol-macro lowering, ProofPlan unification, and core primitive redesign. |
-| Moving `transfer` / `claim` / `settle` / `shared` out of the compiler core | v0.14 may improve metadata and strict-mode checks, but does not change the primitive surface. |
+| Reintroducing compiler-core `transfer` / `claim` / `settle` verbs | v0.13.2 removed these from the executable core; v0.14 may add source sugar only when it expands to auditable stdlib/core effects. |
 | `Address` / `LockScript` / `LockHash` type-system split | v0.14 records precise CKB script references; v0.15 owns semantic type separation. |
 | Destruction-policy redesign | Bare `destroy` behavior is not redefined in v0.14; explicit destruction policies are v0.15 scope. |
 | Formal verification | Future milestone (v0.16+). v0.14 focuses on bounded verifier composition, not proof. |

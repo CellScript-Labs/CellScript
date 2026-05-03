@@ -33,7 +33,7 @@ if (pkg.name !== "cellscript-vscode") {
   throw new Error(`unexpected package name: ${pkg.name}`);
 }
 
-if (pkg.version !== "0.13.0") {
+if (pkg.version !== "0.13.2") {
   throw new Error(`unexpected extension version: ${pkg.version}`);
 }
 
@@ -113,7 +113,13 @@ for (const snippet of [
   "create ${1:output} =",
   "protected ${2:cell}:",
   "witness ${4:arg}:",
-  "read ${1:config}:"
+  "read ${1:config}:",
+  "std::cell::same_lock",
+  "std::cell::preserve_lock",
+  "std::cell::preserve_capacity",
+  "std::lifecycle::transfer",
+  "std::receipt::claim",
+  "std::lifecycle::settle"
 ]) {
   if (!snippetsSource.includes(snippet)) {
     throw new Error(`snippets are missing current 0.13 syntax: ${snippet}`);

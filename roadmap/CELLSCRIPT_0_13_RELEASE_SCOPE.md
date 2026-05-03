@@ -1,6 +1,6 @@
 # CellScript 0.13 Release Scope
 
-**Updated**: 2026-04-27
+**Updated**: 2026-05-03
 
 0.13 is a closed implementation-scope release track. The code has been merged to
 `main`; this document explains what 0.13 includes, what it intentionally leaves
@@ -14,8 +14,8 @@ For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 
 1. add executable stack-backed `Vec<T>` helper support for fixed-width values;
 2. improve the source surface without changing core CKB semantics;
-3. make lock-boundary data sources visible with `protected`, `witness`, and
-   `require`;
+3. make verifier-boundary data sources visible with `protected`, `witness`,
+   `lock_args`, and pure `require` constraints;
 4. keep CKB production evidence strict enough to support release claims for the
    bundled suite.
 
@@ -27,8 +27,8 @@ For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 | Contextual `Vec<T>` literals | Done | `[]` and `[x, y]` work only when the expected type is `Vec<T>`; empty `[]` lowers through the existing `Vec::new()` path. |
 | Field shorthand | Done | `field` lowers as `field: field` for create and struct literals. |
 | Example canonicalization | Done | Business, language, and acceptance examples are split by audience. |
-| Lock classification syntax | Done | `protected`, `witness`, and lock-only `require` are implemented and documented. |
-| `lock_args` | Reserved | Parser spelling exists; type checking rejects it until typed script-args binding is implemented. |
+| Lock classification syntax | Done | `protected`, `witness`, fixed-width `lock_args`, and pure verifier-boundary `require` constraints are implemented and documented. |
+| `lock_args` | Done | Fixed-width lock parameters are decoded from the executing script's `Script.args`; explicit signature verification is still deferred. |
 | Explicit sighash verification | Deferred | Requires digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class signer values | Deferred | Must wait for explicit verification primitives. |
 | Generic maps / cell-backed collections | Out of scope | Remain fail-closed until ownership semantics are executable. |
@@ -118,8 +118,10 @@ Meaning:
 - `protected T` is a typed view of one selected input Cell in the current script
   group whose spend is guarded by the lock invocation;
 - `witness T` is decoded transaction witness data;
-- `require` fails current script validation when false;
-- `require` is lock-only and should not be used for action invariants.
+- `lock_args T` is typed data decoded from the executing lock script's
+  `Script.args`;
+- `require` fails current script validation when false and is allowed only as
+  pure verifier-boundary constraint syntax, not as a lifecycle/effect block.
 
 Important boundary:
 
@@ -130,11 +132,10 @@ Important boundary:
 
 Deferred authorization roadmap:
 
-1. typed `lock_args` binding;
-2. explicit sighash verification primitive;
-3. metadata/report obligations for signature verification;
-4. first-class verified signer values;
-5. optional `protects T { self ... }` sugar only after binding semantics are exact.
+1. explicit sighash verification primitive;
+2. metadata/report obligations for signature verification;
+3. first-class verified signer values;
+4. optional `protects T { self ... }` sugar only after binding semantics are exact.
 
 Detailed design:
 
@@ -189,7 +190,6 @@ Detailed docs:
 - first-class signer or witness-sighash authorization syntax;
 - hidden signer derivation from `Address`, witness data, or parameter names;
 - hidden sighash defaults;
-- typed `lock_args` binding;
 - `protects T { self ... }` sugar;
 - full generic `HashMap<K, V>` or `HashSet<T>`;
 - `Vec<Cell<T>>` or other cell-backed generic ownership collections;

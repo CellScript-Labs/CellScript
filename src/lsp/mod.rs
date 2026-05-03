@@ -624,6 +624,13 @@ impl LspServer {
             ("require", "require ${1:condition}"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
+            ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
+            ("std::cell::preserve_lock", "std::cell::preserve_lock(${1:output}, ${2:input})"),
+            ("std::cell::preserve_type", "std::cell::preserve_type(${1:output}, ${2:input})"),
+            ("std::cell::preserve_capacity", "std::cell::preserve_capacity(${1:output}, ${2:input})"),
+            ("std::lifecycle::transfer", "std::lifecycle::transfer(${1:input}, ${2:output}, ${3:to}) {\n    ${4:field}\n}"),
+            ("std::receipt::claim", "std::receipt::claim(${1:receipt}, ${2:output}, ${3:lock}) {\n    ${4:field}\n}"),
+            ("std::lifecycle::settle", "std::lifecycle::settle(${1:input}, ${2:output}, ${3:lock}) {\n    ${4:field}\n}"),
             ("protected", "protected ${1:cell}: ${2:CellType}"),
             ("witness", "witness ${1:arg}: ${2:Address}"),
             ("lock_args", "lock_args ${1:args}: ${2:OwnerArgs}"),
@@ -2179,6 +2186,11 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(!keywords.iter().any(|k| k.label == "transfer"));
+        assert!(keywords.iter().any(|k| k.label == "std::cell::same_lock"));
+        assert!(keywords.iter().any(|k| k.label == "std::cell::preserve_capacity"));
+        assert!(keywords.iter().any(|k| k.label == "std::lifecycle::transfer"));
+        assert!(keywords.iter().any(|k| k.label == "std::receipt::claim"));
+        assert!(keywords.iter().any(|k| k.label == "std::lifecycle::settle"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
     }

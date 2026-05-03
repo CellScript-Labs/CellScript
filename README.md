@@ -45,10 +45,12 @@ scripts force authors to work close to the wire format:
 - preserve linear asset semantics by convention rather than by the compiler
 
 CellScript raises that programming model to explicit language constructs:
-`resource`, `shared`, `receipt`, `action`, `lock`, `consume`, `create`,
-`read`, `transfer`, `destroy`, `claim`, and `settle`. These constructs are
-not metaphors — they lower directly to the Cell transaction shape that the
-target chain already executes.
+`resource`, `shared`, `receipt`, `action`, `lock`, source qualifiers such as
+`read`, `protected`, `witness`, and `lock_args`, and Cell effects such as
+`consume`, `create`, and `destroy`. Higher-level lifecycle patterns such as
+`std::lifecycle::transfer`, `std::receipt::claim`, and
+`std::lifecycle::settle` expand into those explicit effects instead of living
+as compiler-core verbs.
 
 ## Current Status
 
@@ -161,7 +163,9 @@ transformations:
 
 - **Cell-native resources** — `resource` values are linear. They cannot be
   copied, silently dropped, or hidden inside ordinary values. Every resource
-  must be consumed, transferred, returned, claimed, settled, or destroyed.
+  must reach an explicit lifecycle or output-binding role: for example
+  `consume`, `destroy`, a declared successor output, or a compiler-recognized
+  stdlib lifecycle pattern that expands to `consume` plus output constraints.
 - **Explicit shared state** — `shared` marks contention-sensitive protocol
   state (pools, registries, configuration Cells). Reads and writes stay
   visible to metadata and tooling.
@@ -254,11 +258,11 @@ where
     } with_lock(to)
 ```
 
-The compiler treats `consume`, `create`, `transfer`, `destroy`, `claim`,
-`settle`, action-boundary `read` parameters, and expression-level
-`read_ref<T>()` as **Cell effects**, not ordinary function calls. Those effects
-are reflected in metadata so CKB admission policy,
-schema decoding, and artifact verification can audit the generated script.
+The compiler treats `consume`, `create`, `destroy`, action-boundary source
+parameters, expression-level `read_ref<T>()`, and compiler-recognized stdlib
+lifecycle patterns as **Cell effects**, not ordinary opaque function calls.
+Those effects are reflected in metadata so CKB admission policy, schema
+decoding, and artifact verification can audit the generated script.
 
 **Complete fungible-token example:**
 
@@ -416,8 +420,8 @@ action `move` clauses, and all statement/expression forms.
 
 **3. Semantic analysis** (`types/` + state-transition checks)
 - *Type checking* — enforces linear resource semantics: every
-  `resource`/`receipt` value must be consumed, transferred, destroyed, claimed,
-  or settled before the action body exits. Also validates shared-state
+  `resource`/`receipt` value must reach an explicit lifecycle or
+  output-binding role before the action body exits. Also validates shared-state
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
 - *State transition checking* — validates explicit state fields,
@@ -430,8 +434,8 @@ action `move` clauses, and all statement/expression forms.
 - *`ir/`* — lowers the typed AST into a flat, RISC-V-oriented intermediate
   representation (`IrAction`, `IrLock`, `IrPureFn`, `IrTypeDef`) with explicit
   Cell-effect instructions (`IrConsume`, `IrCreate`, `IrReadRef`,
-  `IrTransfer`, `IrDestroy`, `IrClaim`, `IrSettle`), witness/layout slot
-  assignments, and verifier obligations.
+  `IrDestroy`), cell-metadata equality checks, witness/layout slot assignments,
+  and verifier obligations.
 - *`optimize/`* — syntax-local constant folding and dead-branch pruning when
   `-O1+` is set. Intentionally conservative to preserve resource semantics.
 
@@ -560,7 +564,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.13.0"
+version = "0.13.2"
 entry = "src/main.cell"
 source_roots = ["src"]
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.2 - 2026-05-03
+
+- Complete syntax-governance layering for lifecycle semantics by keeping
+  `claim`, `settle`, and `transfer` out of the executable core expression
+  surface and implementing the corresponding stdlib patterns explicitly.
+- Implement `std::cell::same_lock`, `std::cell::preserve_lock`, and
+  `std::cell::preserve_capacity` through canonical cell metadata verifier
+  checks.
+- Make `std::lifecycle::transfer`, `std::receipt::claim`, and
+  `std::lifecycle::settle` expand to consumed inputs, locked named outputs,
+  and complete output field preservation.
+- Harden preserve and require sugar so preserved fields are type-equivalent
+  to their canonical require expansion and anonymous require blocks remain
+  pure boolean verifier constraints.
+- Remove the remaining compiler-level claim witness/signature special cases
+  and reserve the old claim-signature runtime error code.
+- Add example and editor-tooling coverage for the stdlib lifecycle and cell
+  metadata helper surface.
+
 ## 0.13.0 - 2026-04-30
 
 - Complete the internal RISC-V ELF assembler branch surface used by current

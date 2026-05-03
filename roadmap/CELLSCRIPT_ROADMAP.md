@@ -49,14 +49,14 @@ Detailed status:
 The next security-sensitive track should make CKB authorization literal before
 it becomes ergonomic.
 
-Planned order:
+Fixed-width `lock_args` binding to the executing script args landed in the
+0.13 line. Remaining planned order:
 
-1. typed `lock_args` binding to the executing script args;
-2. explicit sighash verification primitive with digest mode, script group scope,
+1. explicit sighash verification primitive with digest mode, script group scope,
    witness layout, and replay assumptions;
-3. stable metadata and report fields for signature verification obligations;
-4. first-class verified signer values only after explicit primitives are proven;
-5. optional `protects T { self ... }` sugar only after protected-input
+2. stable metadata and report fields for signature verification obligations;
+3. first-class verified signer values only after explicit primitives are proven;
+4. optional `protects T { self ... }` sugar only after protected-input
    selection and lock-group aggregation semantics are exact.
 
 Non-goals:

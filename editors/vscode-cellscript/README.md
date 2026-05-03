@@ -50,7 +50,8 @@ outside the LSP scope.
 - comment, bracket, auto-close, and folding configuration
 - snippets for resources, shared state, receipts, flows, action proof blocks,
   field-to-field state moves, locks, source-qualified parameters, effects,
-  and named output `create ... = ... with_lock`
+  named output `create ... = ... with_lock`, anonymous `require` blocks,
+  `preserve` blocks, and stdlib lifecycle/cell metadata helpers
 - status bar state indicator
 
 ## 0.13 Authoring Surface

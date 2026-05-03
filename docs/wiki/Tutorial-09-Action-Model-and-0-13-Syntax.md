@@ -683,7 +683,9 @@ where
 
 Receipts consumed with `consume` and explicit `create` output constraints give
 full control over the output shape. The `claim` expression keyword has been
-removed from core; receipt redemption now uses `consume` + `create` directly.
+removed from core; receipt redemption now uses `consume` + `create` directly or
+the explicit `std::receipt::claim` pattern when the receipt declares an output
+type.
 
 ## `require` Is The Atomic Proof Constraint
 
