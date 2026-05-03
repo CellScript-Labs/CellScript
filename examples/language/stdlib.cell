@@ -1,0 +1,37 @@
+module cellscript::language::stdlib
+
+resource Coin has store, transfer, destroy {
+    amount: u64,
+}
+
+receipt Voucher has destroy {
+    amount: u64,
+    holder: Address,
+}
+
+// Constraint patterns — expand to require constraints
+
+action coin_preserve_type(coin_before: Coin) -> coin_after: Coin
+where
+    std::cell::preserve_type(coin_after, coin_before)
+
+action coin_conserved(coin_before: Coin) -> coin_after: Coin
+where
+    std::accounting::conserved(coin_after, coin_before)
+
+// Lifecycle patterns — consume + constraints
+
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+    create next_coin = Coin { amount: coin.amount } with_lock(to)
+
+action claim_voucher(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin) { amount }
+    create coin = Coin { amount: voucher.amount } with_lock(voucher.holder)
+
+action settle_voucher(voucher: Voucher) -> coin: Coin
+where
+    std::lifecycle::settle(voucher, coin) { amount }
+    create coin = Coin { amount: voucher.amount } with_lock(voucher.holder)

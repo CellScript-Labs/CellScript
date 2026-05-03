@@ -499,6 +499,56 @@ fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() 
     assert!(!elf.artifact_bytes.is_empty(), "order book ELF artifact should be non-empty");
 }
 
+#[test]
+fn stdlib_language_example_compiles_with_all_patterns() {
+    let result = compile_file(language_example_path("stdlib.cell"), CompileOptions::default()).expect("stdlib example should compile");
+    assert!(!result.artifact_bytes.is_empty(), "stdlib artifact should be non-empty");
+
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_type"),
+        "stdlib example should expose coin_preserve_type action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_conserved"),
+        "stdlib example should expose coin_conserved action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "transfer_coin"),
+        "stdlib example should expose transfer_coin action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "claim_voucher"),
+        "stdlib example should expose claim_voucher action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "settle_voucher"),
+        "stdlib example should expose settle_voucher action"
+    );
+
+    let transfer_coin = result.metadata.actions.iter().find(|action| action.name == "transfer_coin").expect("transfer_coin action");
+    assert_eq!(transfer_coin.effect_class, "Mutating");
+    assert!(
+        transfer_coin.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "coin"),
+        "transfer_coin should consume the input coin: {:?}",
+        transfer_coin.consume_set
+    );
+
+    let claim_voucher = result.metadata.actions.iter().find(|action| action.name == "claim_voucher").expect("claim_voucher action");
+    assert_eq!(claim_voucher.effect_class, "Mutating");
+    assert!(
+        claim_voucher.consume_set.iter().any(|pattern| pattern.binding == "voucher"),
+        "claim_voucher should consume the input voucher: {:?}",
+        claim_voucher.consume_set
+    );
+
+    let elf = compile_file(
+        language_example_path("stdlib.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("stdlib example should compile to ELF through the internal assembler");
+    assert!(!elf.artifact_bytes.is_empty(), "stdlib ELF artifact should be non-empty");
+}
+
 fn assert_create(action: &cellscript::ActionMetadata, ty: &str, context: &str) {
     assert!(
         action.create_set.iter().any(|pattern| pattern.ty == ty && matches!(pattern.operation.as_str(), "create" | "output")),

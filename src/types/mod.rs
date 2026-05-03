@@ -2414,7 +2414,20 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(Type::Bool)
             }
-            Expr::StdlibCall(_) => Ok(Type::Bool),
+            Expr::StdlibCall(call) => {
+                let qualified = format!("std::{}::{}", call.namespace, call.name);
+                match qualified.as_str() {
+                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                        if !call.args.is_empty() {
+                            if let Expr::Identifier(name) = &call.args[0] {
+                                env.consume(name)?;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(Type::Bool)
+            }
         }
     }
 
@@ -2738,6 +2751,13 @@ impl<'a> TypeChecker<'a> {
             Expr::Consume(_) => Some("consume"),
             Expr::Destroy(_) => Some("destroy"),
             Expr::ReadRef(_) => Some("read_ref"),
+            Expr::StdlibCall(call) => {
+                let qualified = format!("std::{}::{}", call.namespace, call.name);
+                match qualified.as_str() {
+                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => Some("consume"),
+                    _ => None,
+                }
+            }
             _ => None,
         };
 
@@ -4475,13 +4495,20 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
-        | Expr::ReadRef(_)
-        | Expr::StdlibCall(_) => {}
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::StdlibCall(call) => {
+            let qualified = format!("std::{}::{}", call.namespace, call.name);
+            match qualified.as_str() {
+                "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                    if !call.args.is_empty() {
+                        if let Expr::Identifier(name) = &call.args[0] {
+                            bindings.insert(name.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         Expr::RequireBlock(require_block) => {
             for expr in &require_block.expressions {
                 collect_consumed_bindings_from_expr(expr, bindings);
