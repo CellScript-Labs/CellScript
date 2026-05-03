@@ -1,0 +1,36 @@
+# Matrix metadata for scripts/cellscript_syntax_combo_audit.py.
+# The first runner version keeps generation deterministic and small, while this
+# file records the axes that must stay covered as the generator grows.
+
+[mode.quick]
+budget = 64
+description = "Local smoke: deterministic generated cases plus regression seeds."
+
+[mode.ci]
+budget = 1000
+description = "PR gate: pairwise generated cases plus regression seeds."
+
+[mode.deep]
+budget = 5000
+description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
+
+[axes]
+entry_kind = ["fn", "action", "lock"]
+binding_source = ["ordinary", "cell_input", "named_output", "read", "protected", "witness", "lock_args", "read_ref"]
+cell_kind = ["resource", "receipt", "receipt_output", "shared", "struct"]
+lifecycle = ["none", "consume", "destroy", "stdlib_transfer", "stdlib_claim", "stdlib_settle"]
+proof_syntax = ["require", "require_block", "assert", "branch_require", "helper_fn"]
+continuity = ["explicit_require", "preserve", "same_type", "same_lock", "preserve_lock", "preserve_capacity", "conserved"]
+control_flow = ["straight_line", "if", "nested_if", "match", "loop", "block_tail"]
+data_shape = ["u64", "bool", "u32", "u128", "fixed_bytes", "tuple", "enum", "fixed_struct", "dynamic_field"]
+collection = ["none", "vec_literal", "vec_helper", "unsupported_map", "cell_backed_attempt"]
+profile = ["default", "ckb", "production"]
+backend = ["parse", "fmt", "check", "metadata", "asm", "elf", "ckb_acceptance_subset"]
+
+[required_oracles]
+parse = true
+formatter_roundtrip = true
+type_effect = true
+ir_metadata = true
+codegen_assembly = true
+compact_report = true

@@ -451,8 +451,8 @@ impl Formatter {
                 if call.preserve_fields.is_empty() {
                     base
                 } else {
-                    let fields = call.preserve_fields.join(", ");
-                    format!("{} {{ {} }}", base, fields)
+                    let fields = call.preserve_fields.join("\n");
+                    format!("{} {{\n{}\n}}", base, fields)
                 }
             }
         }
@@ -767,5 +767,37 @@ where
 
         // Single-expression require block should format compactly
         assert!(formatted.contains("require {"), "formatted output should contain 'require {{':\n{}", formatted);
+    }
+
+    #[test]
+    fn format_round_trips_stdlib_lifecycle_field_block() {
+        let source = r#"
+module demo
+
+resource Coin has store, transfer {
+    amount: u64
+    nonce: u64
+}
+
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) {
+        amount
+        nonce
+    }
+"#;
+
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).expect("formatted stdlib lifecycle block should parse");
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for stdlib lifecycle block");
+        assert!(
+            !formatted.contains("amount, nonce"),
+            "stdlib field blocks use newline-separated field names, not comma-separated lists:\n{}",
+            formatted
+        );
     }
 }

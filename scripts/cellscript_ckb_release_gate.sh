@@ -38,6 +38,7 @@ check_trailing_whitespace() {
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
         "docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md"
+        "docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md"
         "docs/wiki/Home.md"
         "docs/wiki/Tutorial-05-CKB-Target-Profiles.md"
         "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
@@ -46,12 +47,17 @@ check_trailing_whitespace() {
         "editors/vscode-cellscript/package.json"
         "editors/vscode-cellscript/scripts/validate.mjs"
         "scripts/cellscript_ckb_release_gate.sh"
+        "scripts/cellscript_syntax_combo_audit.sh"
+        "scripts/cellscript_syntax_combo_audit.py"
         "scripts/ckb_cellscript_acceptance.sh"
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "src/lib.rs"
         "src/lsp/mod.rs"
         "src/package/mod.rs"
+        "tests/syntax_combo/matrix.toml"
+        "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell"
+        "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "tests/cli.rs"
         "tests/examples.rs"
     )
@@ -66,8 +72,7 @@ check_ckb_release_docs() {
     local release_doc="docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
     local required=(
         "CKB Release Evidence Gate"
-        "./scripts/ckb_cellscript_acceptance.sh --production"
-        "scripts/validate_ckb_cellscript_production_evidence.py"
+        "./scripts/cellscript_ckb_release_gate.sh full"
         "strict original bundled-example coverage"
         "builder-backed action runs"
         "occupied-capacity evidence"
@@ -118,6 +123,9 @@ run_common_gate() {
     run python3 scripts/validate_cellscript_tooling_release.py
     run bash -n scripts/ckb_cellscript_acceptance.sh
     run bash -n scripts/cellscript_ckb_release_gate.sh
+    run bash -n scripts/cellscript_syntax_combo_audit.sh
+    run python3 -m py_compile scripts/cellscript_syntax_combo_audit.py
+    run ./scripts/cellscript_syntax_combo_audit.sh quick
     run npm --prefix editors/vscode-cellscript run validate
     run git diff --check
     check_trailing_whitespace

@@ -1,0 +1,24 @@
+// audit: phase=reject_compile
+// audit: contains=require block
+// audit: contains=verifier-boundary syntax
+module cellscript::audit::seed_require_block_lifecycle
+
+resource Coin has store, transfer, destroy {
+    amount: u64,
+    nonce: u64,
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64,
+    nonce: u64,
+    holder: Address,
+}
+
+action bad(voucher: Voucher) -> coin: Coin
+where
+    require {
+        std::receipt::claim(voucher, coin, voucher.holder) {
+            amount
+            nonce
+        }
+    }
