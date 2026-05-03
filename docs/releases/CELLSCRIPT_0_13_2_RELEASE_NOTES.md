@@ -20,7 +20,8 @@ implementation work plus the 0.13.1 and 0.13.2 hardening passes:
   obligations;
 - syntax-combination audit gates for parser, formatter, type checking,
   lowering, metadata, and codegen combinations;
-- builder-backed local CKB production evidence for the bundled suite.
+- builder-backed local CKB production evidence for the bundled suite, including
+  strict stateful scenario/action coverage.
 
 The release does not claim hidden signer authority, hidden sighash defaults,
 full generic maps, Cell-backed collection ownership, or declarative capacity /
@@ -46,7 +47,8 @@ Tooling compatibility expectations:
 - package manifests use version `0.13.2`;
 - the VS Code extension version is `0.13.2`;
 - metadata schema version is `30`;
-- CKB production claims require `./scripts/cellscript_ckb_release_gate.sh full`.
+- CKB production claims require `./scripts/cellscript_ckb_release_gate.sh full`,
+  which now runs stateful local CKB scenarios as part of the full gate.
 
 ## Collections Scope
 
@@ -213,7 +215,8 @@ The full gate is the release-facing command. It expands to:
 - VS Code extension validation and local VSIX packaging dry-run;
 - syntax-combination quick and CI audits;
 - documentation-boundary checks for release scope and production evidence;
-- builder-backed local CKB production acceptance.
+- builder-backed local CKB production acceptance;
+- stateful local CKB business-flow and action-branch acceptance.
 
 Useful component commands are:
 
@@ -230,20 +233,44 @@ CKB-facing repository gates:
 ```bash
 ./scripts/cellscript_ckb_release_gate.sh
 ./scripts/cellscript_ckb_release_gate.sh production
-./scripts/ckb_cellscript_acceptance.sh --production
+./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
+./scripts/cellscript_ckb_stateful_scenarios.sh
 ```
 
 The default `cellscript_ckb_release_gate.sh` mode is the quick gate. It includes
 the quick syntax-combination audit plus compile-only production acceptance and
 is useful before push. The `production`/`full` mode also runs the broader
-syntax-combination CI matrix before the full local CKB acceptance script, and is
-the release-facing gate.
+syntax-combination CI matrix before the full local CKB acceptance script, then
+runs stateful business-flow/action coverage. It is the release-facing gate.
 
 The release evidence standard is strict about ordering: syntax-combination CI
 is a preflight before builder-backed CKB acceptance. A passing CKB acceptance
 run does not replace a failed syntax-combination audit, because CKB evidence
 proves selected concrete transactions while the syntax-combination audit proves
 that dangerous compiler pipeline combinations are not silently accepted.
+
+### Stateful CKB Business-Flow Evidence
+
+New at the 0.13.2 release cutoff:
+
+- the full release gate invokes production CKB acceptance with
+  `--stateful-scenarios`;
+- seven end-to-end scenarios commit live outputs from one action into later
+  actions, covering token, NFT listing sale, timelock release, launch-to-token
+  minting, AMM pool lifecycle, vesting revoke, and multisig execution flows;
+- stateful action-branch scenarios cover every production acceptance action not
+  already covered by those end-to-end flows;
+- the stateful report must cover 43/43 production acceptance actions with no
+  missing action IDs or missing action artifacts;
+- every stateful step must have dry-run evidence, committed transaction
+  evidence, consumed-input liveness checks, output liveness checks, measured
+  cycles, consensus-serialized transaction size, occupied-capacity evidence, and
+  no under-capacity outputs.
+
+The current release gate expectation is 27 stateful scenarios, 46 committed
+stateful steps, 7 end-to-end business scenarios, and 20 stateful action-branch
+scenarios. If any new production action is added later, the stateful coverage
+gate must fail until that action is covered.
 
 ## Syntax Governance And Standard Library
 

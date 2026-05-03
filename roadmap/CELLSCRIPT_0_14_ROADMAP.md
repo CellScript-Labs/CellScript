@@ -2,7 +2,9 @@
 
 **Status**: Draft (Pending Team Review)
 **Scope**: CKB Semantic Completeness, Source/Witness Ergonomics, and Bounded Verifier Composition
-**Dependencies**: v0.13 released (bounded value-vector helpers, zero-cost abstractions, CLI ergonomics)
+**Dependencies**: v0.13.2 released (explicit action model, bounded value-vector
+helpers, stdlib syntax governance, syntax-combination audit, and full
+builder-backed/stateful CKB release evidence)
 
 ---
 
@@ -13,10 +15,10 @@
 CellScript's evolution follows a deliberate maturity curve:
 
 - **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, output preservation checks, low-level time helpers, dep cell reads).
-- **v0.13** — Performance and expressiveness: bounded value-vector helpers, zero-cost abstractions (deserialization specialization, inlining, DCE, const propagation), CLI ergonomics.
+- **v0.13** — Stable explicit verifier surface: signature-direction action model, bounded value-vector helpers, stdlib lifecycle/Cell metadata patterns, syntax-combination gates, and builder-backed plus stateful CKB release evidence.
 - **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and WASM simulation backend.
 
-v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, and Spawn/IPC. It should not re-plan v0.13 bounded generics, repeat v0.12 production evidence, or start the v0.15 primitive-kernel reset.
+v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, and Spawn/IPC. It should not re-plan v0.13 bounded generics, reopen 0.13.2 syntax governance, repeat 0.13 stateful production evidence as new scope, or start the v0.15 primitive-kernel reset.
 
 v0.14 provides low-level Spawn/IPC and CKB Source/Witness semantics. It does not define the full protocol composability model. The higher-level question of trigger, scope, reads, coverage, and builder assumptions is intentionally deferred to v0.15's Scoped Invariants and Covenant ProofPlan.
 
@@ -41,16 +43,32 @@ The following capabilities are already delivered and will not be re-planned:
 - ✅ Package manager local workflow (registry fail-closed)
 - ✅ LSP: JSON-RPC stdio + VS Code integration
 
-### v0.13 Deliverables (Performance + Expressiveness)
+### v0.13 Deliverables (Stable Explicit Verifier Surface)
 
 - ✅ Stack-backed fixed-width value-vector helpers for checked `Vec<T>` paths
 - ✅ Metadata and `cellc explain-generics` for concrete checked vector instantiations
+- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `move` state edges
+- ✅ `preserve` sugar and anonymous `require` blocks with canonical verifier expansion and pure-boolean enforcement
+- ✅ Compiler-recognized stdlib patterns for lifecycle and Cell metadata:
+  `std::lifecycle::transfer`, `std::receipt::claim`,
+  `std::lifecycle::settle`, `std::cell::same_lock`,
+  `std::cell::preserve_lock`, and `std::cell::preserve_capacity`
+- ✅ Syntax-combination audit methodology and quick/CI gates across parser,
+  formatter, type checking, lowering, metadata, and codegen
+- ✅ Builder-backed CKB action and lock acceptance, including valid-spend and
+  invalid-spend lock matrices
+- ✅ Stateful local CKB release evidence: 7 end-to-end business scenarios, 20
+  action-branch scenarios, 46 committed stateful steps, and 43/43 production
+  acceptance actions covered
 - ✅ Deserialization code specialization
 - ✅ Function inlining for safe pure helpers
 - ✅ Dead code elimination + constant propagation
 - ✅ CLI: `cellc new`, `build` default O1, error codes with `cellc explain`
 - ✅ Hash type DSL exposure (`with_default_hash_type`)
-- ✅ Clear fail-closed boundary for `Option<T>`, phantom asset tags, generic interfaces/templates, full maps, and cell-backed collection ownership
+- ✅ Metadata schema 30
+- ✅ Clear fail-closed boundary for `Option<T>`, phantom asset tags, generic
+  interfaces/templates, full maps, cell-backed collection ownership, hidden
+  signer authority, and hidden sighash defaults
 
 ---
 
@@ -464,7 +482,8 @@ done
 |----------|-----------|
 | Epoch support outside CKB profile | Epoch is CKB-specific and must not leak into portable semantics. |
 | On-chain WASM execution | RISC-V remains the on-chain target. WASM is for browser simulation only. |
-| Breaking changes to existing DSL syntax | All new features are additive. Existing `.cell` files must compile without modification. |
+| Reopening the 0.13 action model | Signature-direction outputs, `where`, explicit `move`, named `create`, and stdlib lifecycle patterns are already stable 0.13 surface. |
+| Breaking changes to existing DSL syntax | All new features are additive. Existing 0.13.2 `.cell` files must compile without modification. |
 | Primitive kernel reset | v0.15 owns protocol-macro lowering, ProofPlan unification, and core primitive redesign. |
 | Reintroducing compiler-core `transfer` / `claim` / `settle` verbs | v0.13.2 removed these from the executable core; v0.14 may add source sugar only when it expands to auditable stdlib/core effects. |
 | `Address` / `LockScript` / `LockHash` type-system split | v0.14 records precise CKB script references; v0.15 owns semantic type separation. |
@@ -568,10 +587,11 @@ done
 
 ### CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md
 
-v0.14 **extends** the production plan:
+v0.14 **extends** the 0.13.2 production plan:
 
-- ✅ CKB production gate remains 43/43+ actions
-- ✅ 7+ bundled examples remain regression test suite (extended with spawn examples)
+- ✅ CKB production gate remains 43/43+ actions, with stateful coverage for every production acceptance action
+- ✅ 7+ bundled examples remain regression test suite (extended only when new v0.14 features are production-gated)
+- ✅ Stateful business-flow acceptance remains a full release requirement
 - ✅ Molecule ABI remains public format
 - ✅ Registry remains fail-closed
 - **New**: Profile semantic spec becomes a mandatory production artifact
@@ -626,7 +646,7 @@ cargo run -p cellscript -- explain-profile ckb
 ## 🎉 Summary
 
 **v0.12 proved CellScript can compile production-grade cell contracts.**
-**v0.13 proved CellScript runs efficiently with strong developer ergonomics.**
+**v0.13 proved CellScript has a stable explicit verifier surface with strict CKB release evidence.**
 **v0.14 will prove CellScript exposes bounded verifier composition, and the target-profile model is formally complete.**
 
 v0.14 delivers:

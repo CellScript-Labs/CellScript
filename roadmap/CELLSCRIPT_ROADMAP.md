@@ -21,11 +21,11 @@ The current project direction is simple:
 
 | Area | Current status | Detailed document |
 |---|---|---|
-| 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
+| 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate now includes stateful business-flow/action coverage. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
-| Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax governance](../docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
+| Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
-| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; production claims still require report validation. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
+| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
 
 ## Release Tracks
@@ -41,6 +41,8 @@ The current project direction is simple:
   verifier effects instead of core protocol-name magic;
 - automated syntax-combination audit coverage for parser, formatter, type,
   lowering, metadata, codegen, and release-gate contracts.
+- full release-gate stateful evidence: 7 end-to-end business scenarios plus
+  action-branch coverage for all 43 production acceptance actions.
 
 0.13 deliberately does not introduce hidden signer authority, hidden sighash
 defaults, full generic maps, or cell-backed collection ownership.
@@ -91,6 +93,7 @@ Priorities:
   transaction rejection;
 - keep cycles, serialized transaction size, occupied capacity, and malformed
   rejection evidence in reports;
+- keep stateful business-flow/action coverage mandatory for full releases;
 - extend the matrix when new bundled locks enter production scope.
 
 Source documents:

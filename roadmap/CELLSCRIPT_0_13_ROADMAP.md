@@ -1,6 +1,7 @@
 # CellScript v0.13 Roadmap
 
-**Status**: Historical planning draft; authoritative 0.13 release scope lives in
+**Status**: Historical planning draft with final 0.13.2 release snapshot;
+authoritative 0.13 release scope lives in
 `CELLSCRIPT_0_13_RELEASE_SCOPE.md`, and final release notes live in
 `../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`.
 **Scope**: Expanded design notes for zero-cost abstractions, bounded collection
@@ -10,6 +11,37 @@ examples are evidence-gated ideas, not 0.13 release promises.
 **Release tracker**: [CELLSCRIPT_0_13_TODOLIST.md](CELLSCRIPT_0_13_TODOLIST.md)
 
 ---
+
+## Final 0.13.2 Release Snapshot
+
+The 0.13 implementation scope is closed for the stable `v0.13.2` line. The
+final release gate is:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh full
+```
+
+That gate now includes:
+
+- Rust formatting, check, test, and clippy;
+- syntax-combination quick and CI audits;
+- VS Code extension validation and VSIX dry-run packaging;
+- documentation-boundary checks;
+- builder-backed local CKB production acceptance;
+- strict stateful CKB scenario/action coverage.
+
+The stateful acceptance layer is the final business-flow evidence for this
+line: 7 end-to-end scenarios plus 20 action-branch scenarios cover all 43
+production acceptance actions with no missing action IDs. This is the release
+claim for the bundled production examples; it does not promote
+`examples/language/registry.cell` or other language examples into the CKB
+production matrix.
+
+0.13.2 also closes the syntax-governance pass: stdlib lifecycle and Cell
+metadata helpers lower to explicit verifier obligations, `preserve` is
+type-equivalent to its canonical `require` expansion, `require` blocks remain
+pure boolean grouping, and compiler behavior no longer derives protocol
+semantics from action names.
 
 ## 📊 v0.12 Achievements
 

@@ -34,7 +34,8 @@ For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 | `lock_args` | Done | Fixed-width lock parameters are decoded from the executing script's `Script.args`; explicit signature verification is still deferred. |
 | Stdlib lifecycle and Cell metadata patterns | Done | `std::lifecycle::transfer`, `std::receipt::claim`, `std::lifecycle::settle`, `std::cell::same_lock`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity` lower to explicit verifier obligations. |
 | Syntax-combination audit | Done | Quick and CI matrices exercise parser, formatter, type, lowering, metadata, codegen, and negative obsolete-syntax oracles. |
-| Release gate wrapper | Done | `./scripts/cellscript_ckb_release_gate.sh full` is the release-facing gate and includes the syntax-combination CI matrix plus builder-backed CKB acceptance. |
+| Stateful business-flow acceptance | Done | The production CKB gate can run stateful scenarios that commit live outputs from earlier actions into later actions, then fill remaining action branches so all production acceptance actions appear in the stateful report. |
+| Release gate wrapper | Done | `./scripts/cellscript_ckb_release_gate.sh full` is the release-facing gate and includes the syntax-combination CI matrix, builder-backed CKB acceptance, and stateful action coverage. |
 | Explicit sighash verification | Deferred | Requires digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class signer values | Deferred | Must wait for explicit verification primitives. |
 | Generic maps / cell-backed collections | Out of scope | Remain fail-closed until ownership semantics are executable. |
@@ -195,6 +196,8 @@ Required evidence for the bundled suite:
 - strict CKB profile admission;
 - scoped action compile and builder-backed action runs;
 - scoped lock compile and builder-backed valid-spend / invalid-spend matrices;
+- stateful local CKB scenario coverage for every production acceptance action;
+- live-output handoff checks for the main bundled business flows;
 - stable invalid-spend script failure evidence;
 - valid transaction dry-runs and committed valid transactions;
 - malformed rejection;
@@ -261,8 +264,9 @@ For release-facing evidence:
 ```
 
 The full gate includes the compiler/tooling checks, syntax-combination CI
-matrix, VS Code validation, docs boundary checks, and builder-backed local CKB
-acceptance. The component commands remain useful for focused debugging:
+matrix, VS Code validation, docs boundary checks, builder-backed local CKB
+acceptance, and stateful scenario/action coverage. The component commands
+remain useful for focused debugging:
 
 ```bash
 ./scripts/cellscript_syntax_combo_audit.sh ci
@@ -270,7 +274,13 @@ cargo fmt --all --check
 cargo clippy --locked -p cellscript --all-targets -- -D warnings
 cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
-./scripts/ckb_cellscript_acceptance.sh --production
+./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
+./scripts/cellscript_ckb_stateful_scenarios.sh
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
 ```
+
+The stateful section is intentionally stricter than a few happy-path flows:
+the current production scope requires 7 end-to-end business scenarios, 20
+stateful action-branch scenarios, 46 committed stateful steps, and 43/43
+production acceptance actions covered with no missing action IDs.

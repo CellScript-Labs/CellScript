@@ -15,6 +15,9 @@ stable surface rather than act as release logs.
 
 - `docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` is the final 0.13.2
   release note and the canonical 0.13 release summary.
+- `docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md` is a
+  community-facing summary of the 0.13.2 CKB acceptance and stateful flow
+  evidence.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
@@ -28,7 +31,8 @@ matrices.
 
 High-value active references include:
 
-- `CELLSCRIPT_SYNTAX_GOVERNANCE.md`
+- `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
+  governance summary
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
 - `CELLSCRIPT_CKB_LANGUAGE_AUDIT.md`
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`

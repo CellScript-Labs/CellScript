@@ -425,7 +425,9 @@ But that should remain metadata, not semantics.
 ## 5. Syntax Governance
 
 0.13.1 introduces a formal syntax-governance policy.
-See `docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md` for the full document.
+The final 0.13.2 release contract is summarized in
+`docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`, with automated audit
+methodology in `docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`.
 
 The governance model classifies language features into four layers:
 
@@ -774,6 +776,6 @@ Audit mode can always expand everything.
    (10 parser tests, 2 IR lowering tests, 3 formatter tests)
 ✅ cargo fmt/check/clippy/test pass cleanly
 ✅ CompileError supports structured error codes via .with_code()
-✅ Syntax governance document published (docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md)
+✅ Syntax governance contract recorded in the 0.13.2 release notes
 ✅ Examples updated to demonstrate 0.13.1 syntax and 0.13.2 stdlib lifecycle/cell metadata patterns
 ```
