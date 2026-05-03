@@ -4,14 +4,63 @@
 
 [mode.quick]
 budget = 64
+min_cases = 17
+min_accept = 8
+min_reject = 9
+required_origins = [
+    "generated",
+    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/require-block-lifecycle.cell",
+]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
 [mode.ci]
 budget = 1000
+min_cases = 37
+min_accept = 22
+min_reject = 15
+required_origins = [
+    "generated",
+    "matrix:continuity/std-cell",
+    "matrix:lifecycle/proof/control-flow",
+    "matrix:lifecycle/proof/local-binding",
+    "matrix:lock/source-qualifier",
+    "matrix:receipt/metadata",
+    "matrix:receipt/proof",
+    "matrix:reject/metadata",
+    "matrix:reject/proof-purity",
+    "matrix:reject/stdlib-lifecycle",
+    "matrix:stdlib-lifecycle/metadata",
+    "matrix:stdlib-lifecycle/proof",
+    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/require-block-lifecycle.cell",
+]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
 [mode.deep]
 budget = 5000
+min_cases = 40
+min_accept = 22
+min_reject = 18
+required_origins = [
+    "generated",
+    "matrix:continuity/std-cell",
+    "matrix:deep/reject/proof-purity",
+    "matrix:deep/reject/source-qualifier",
+    "matrix:deep/reject/stdlib-namespace",
+    "matrix:lifecycle/proof/control-flow",
+    "matrix:lifecycle/proof/local-binding",
+    "matrix:lock/source-qualifier",
+    "matrix:receipt/metadata",
+    "matrix:receipt/proof",
+    "matrix:reject/metadata",
+    "matrix:reject/proof-purity",
+    "matrix:reject/stdlib-lifecycle",
+    "matrix:stdlib-lifecycle/metadata",
+    "matrix:stdlib-lifecycle/proof",
+    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/require-block-lifecycle.cell",
+]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
 [axes]

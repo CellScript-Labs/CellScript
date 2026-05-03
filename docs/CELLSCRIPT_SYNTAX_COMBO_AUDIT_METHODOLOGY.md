@@ -89,6 +89,9 @@ tests/syntax_combo/seeds/*.cell
 `ci` adds matrix-generated stdlib lifecycle, proof-syntax, metadata-helper, and
 lock-source qualifier combinations. `deep` adds higher-risk reject mutations for
 release-local replay before expensive CKB-node execution.
+Each mode has a contract in `tests/syntax_combo/matrix.toml`: minimum generated,
+accepted, and rejected case counts plus required origin families. A mode fails
+closed if a budget/configuration change drops coverage below that contract.
 
 Recommended repository layout:
 

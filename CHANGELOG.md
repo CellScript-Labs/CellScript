@@ -22,6 +22,8 @@
   checking/lowering metadata/codegen oracles, wire the quick audit into local
   gates, and run the broader CI matrix in GitHub Actions and the full release
   gate.
+- Make CI run on nightly branches and version tags, and add syntax-audit mode
+  contracts so accidental coverage shrinkage fails closed.
 
 ## 0.13.0 - 2026-04-30
 

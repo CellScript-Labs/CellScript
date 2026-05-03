@@ -888,6 +888,44 @@ def load_cases(mode: str, budget: int | None) -> list[AuditCase]:
     return selected
 
 
+def contract_failure(code: str, summary: str) -> dict[str, Any]:
+    return {
+        "case": "-",
+        "name": "mode-contract",
+        "origin": str(MATRIX.relative_to(ROOT)),
+        "phase": "contract",
+        "code": code,
+        "summary": summary,
+        "shrunk": "",
+        "output": "",
+    }
+
+
+def validate_mode_contract(mode: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+    if mode == "repro":
+        return []
+    config = read_matrix().get("mode", {}).get(mode, {})
+    failures: list[dict[str, Any]] = []
+    numeric_contracts = [
+        ("min_cases", "generated", "SCA-CONTRACT-CASES"),
+        ("min_accept", "accepted", "SCA-CONTRACT-ACCEPT"),
+        ("min_reject", "rejected", "SCA-CONTRACT-REJECT"),
+    ]
+    for config_key, report_key, code in numeric_contracts:
+        expected = config.get(config_key)
+        if expected is None:
+            continue
+        actual = report.get(report_key, 0)
+        if actual < expected:
+            failures.append(contract_failure(code, f"{mode} {report_key} floor {expected} not met; got {actual}"))
+
+    origins = report.get("origins", {})
+    missing_origins = [origin for origin in config.get("required_origins", []) if origin not in origins]
+    if missing_origins:
+        failures.append(contract_failure("SCA-CONTRACT-ORIGIN", f"{mode} missing required origins: {', '.join(missing_origins)}"))
+    return failures
+
+
 def failure(
     case: AuditCase,
     phase: str,
@@ -1166,6 +1204,12 @@ def main(argv: list[str]) -> int:
         "origins": origin_counts,
         "failures": failures[:10],
     }
+    contract_failures = validate_mode_contract(args.mode, report)
+    if contract_failures:
+        failures.extend(contract_failures)
+        report["status"] = "failed"
+        report["failures_count"] = len(failures)
+        report["failures"] = failures[:10]
     write_reports(run_dir, report, failures)
 
     print(

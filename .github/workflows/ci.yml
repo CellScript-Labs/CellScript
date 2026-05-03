@@ -6,6 +6,9 @@ on:
     branches:
       - main
       - master
+      - "nightly-*"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
