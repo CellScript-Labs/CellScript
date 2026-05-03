@@ -2276,7 +2276,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Unit)
             }
             Expr::Require(require_expr) => {
-                self.validate_require_condition_is_pure(&require_expr.condition, "require condition")?;
+                Self::validate_require_condition_is_pure(&require_expr.condition, "require condition")?;
                 let cond_ty = self.infer_expr(env, &require_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
@@ -2367,7 +2367,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::RequireBlock(require_block) => {
                 for expr in &require_block.expressions {
-                    self.validate_require_condition_is_pure(expr, "require block")?;
+                    Self::validate_require_condition_is_pure(expr, "require block")?;
                     let ty = self.infer_expr(env, expr)?;
                     if !self.is_bool_type(&ty) {
                         return Err(CompileError::new("require block expressions must be boolean", expr_span(expr)).with_code("E1004"));
@@ -2413,7 +2413,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn validate_require_condition_is_pure(&self, expr: &Expr, context: &str) -> Result<()> {
+    fn validate_require_condition_is_pure(expr: &Expr, context: &str) -> Result<()> {
         match expr {
             Expr::Create(_) | Expr::Consume(_) | Expr::Destroy(_) | Expr::ReadRef(_) => {
                 return Err(CompileError::new(
@@ -2447,38 +2447,38 @@ impl<'a> TypeChecker<'a> {
                 .with_code("E1005"));
             }
             Expr::Binary(binary) => {
-                self.validate_require_condition_is_pure(&binary.left, context)?;
-                self.validate_require_condition_is_pure(&binary.right, context)?;
+                Self::validate_require_condition_is_pure(&binary.left, context)?;
+                Self::validate_require_condition_is_pure(&binary.right, context)?;
             }
-            Expr::Unary(unary) => self.validate_require_condition_is_pure(&unary.expr, context)?,
+            Expr::Unary(unary) => Self::validate_require_condition_is_pure(&unary.expr, context)?,
             Expr::Call(call) => {
-                self.validate_require_condition_is_pure(&call.func, context)?;
+                Self::validate_require_condition_is_pure(&call.func, context)?;
                 for arg in &call.args {
-                    self.validate_require_condition_is_pure(arg, context)?;
+                    Self::validate_require_condition_is_pure(arg, context)?;
                 }
             }
-            Expr::FieldAccess(field) => self.validate_require_condition_is_pure(&field.expr, context)?,
+            Expr::FieldAccess(field) => Self::validate_require_condition_is_pure(&field.expr, context)?,
             Expr::Index(index) => {
-                self.validate_require_condition_is_pure(&index.expr, context)?;
-                self.validate_require_condition_is_pure(&index.index, context)?;
+                Self::validate_require_condition_is_pure(&index.expr, context)?;
+                Self::validate_require_condition_is_pure(&index.index, context)?;
             }
             Expr::Assert(assert_expr) => {
-                self.validate_require_condition_is_pure(&assert_expr.condition, context)?;
-                self.validate_require_condition_is_pure(&assert_expr.message, context)?;
+                Self::validate_require_condition_is_pure(&assert_expr.condition, context)?;
+                Self::validate_require_condition_is_pure(&assert_expr.message, context)?;
             }
             Expr::Tuple(items) | Expr::Array(items) => {
                 for item in items {
-                    self.validate_require_condition_is_pure(item, context)?;
+                    Self::validate_require_condition_is_pure(item, context)?;
                 }
             }
-            Expr::Cast(cast) => self.validate_require_condition_is_pure(&cast.expr, context)?,
+            Expr::Cast(cast) => Self::validate_require_condition_is_pure(&cast.expr, context)?,
             Expr::Range(range) => {
-                self.validate_require_condition_is_pure(&range.start, context)?;
-                self.validate_require_condition_is_pure(&range.end, context)?;
+                Self::validate_require_condition_is_pure(&range.start, context)?;
+                Self::validate_require_condition_is_pure(&range.end, context)?;
             }
             Expr::StructInit(init) => {
                 for (_, value) in &init.fields {
-                    self.validate_require_condition_is_pure(value, context)?;
+                    Self::validate_require_condition_is_pure(value, context)?;
                 }
             }
             Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}

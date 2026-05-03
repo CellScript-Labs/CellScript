@@ -5419,10 +5419,8 @@ fn metadata_u64_source_collect_amount_split_subtrahends(
 fn operation_input_feature(feature: &str) -> Option<(&'static str, &str)> {
     if let Some(binding) = feature.strip_prefix("consume-input:") {
         Some(("consume", binding))
-    } else if let Some(binding) = feature.strip_prefix("destroy-input:") {
-        Some(("destroy", binding))
     } else {
-        None
+        feature.strip_prefix("destroy-input:").map(|binding| ("destroy", binding))
     }
 }
 
