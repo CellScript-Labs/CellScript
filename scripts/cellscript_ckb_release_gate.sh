@@ -36,9 +36,10 @@ check_trailing_whitespace() {
         "CHANGELOG.md"
         "docs/README.md"
         "roadmap/CELLSCRIPT_ROADMAP.md"
-        "roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "roadmap/CELLSCRIPT_0_13_TODOLIST.md"
+        "docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
@@ -80,9 +81,9 @@ check_release_roadmap_docs() {
     local required=(
         'roadmap/CELLSCRIPT_ROADMAP.md::0.13.2 syntax-governance hardening'
         'roadmap/CELLSCRIPT_ROADMAP.md::syntax-combination audit'
-        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
-        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_ckb_release_gate.sh full'
-        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_syntax_combo_audit.sh ci'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_ckb_release_gate.sh full'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_syntax_combo_audit.sh ci'
         'roadmap/CELLSCRIPT_0_13_TODOLIST.md::0.13.2 Syntax Governance And Release Hardening'
         'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Syntax Governance And Standard Library'
         'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Release tag'

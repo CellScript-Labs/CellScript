@@ -10,7 +10,7 @@ the full CKB release script and syntax-combination audit.
 This file records the implemented 0.13 scope and the explicit deferred work.
 For the broader planning context, see
 [CellScript Roadmap](CELLSCRIPT_ROADMAP.md) and
-[CellScript 0.13 Release Scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md).
+[CellScript 0.13 Release Scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md).
 
 ---
 

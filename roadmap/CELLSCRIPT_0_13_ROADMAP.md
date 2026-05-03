@@ -2,7 +2,7 @@
 
 **Status**: Historical planning draft with final 0.13.2 release snapshot;
 authoritative 0.13 release scope lives in
-`CELLSCRIPT_0_13_RELEASE_SCOPE.md`, and final release notes live in
+`../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md`, and final release notes live in
 `../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`.
 **Scope**: Expanded design notes for zero-cost abstractions, bounded collection
 runtime gaps, and CLI ergonomics. Quantified performance claims and future

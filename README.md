@@ -385,7 +385,7 @@ CellScript includes production-style local language tooling for early users:
 - [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
 - [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
 - [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
-- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 
 ---
 

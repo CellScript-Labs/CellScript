@@ -6,7 +6,7 @@
 `v0.13.2`; this document explains what 0.13 includes, what it intentionally
 leaves out, and where each subtopic is tracked in more detail.
 
-For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
+For the broader plan, see [CellScript Roadmap](../../roadmap/CELLSCRIPT_ROADMAP.md).
 
 ## 0.13 Goals
 
@@ -81,8 +81,8 @@ Important boundaries:
 
 Detailed tracker:
 
-- [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
-- [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [0.13 release tracker](../../roadmap/CELLSCRIPT_0_13_TODOLIST.md)
+- [Collections support matrix](../CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 
 ## Surface Syntax And Examples
 
@@ -107,8 +107,8 @@ Design boundary:
 
 Detailed design:
 
-- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [Wiki cookbook](../docs/wiki/Cookbook-Recipes.md)
+- [Surface elegance RFC](../CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [Wiki cookbook](../wiki/Cookbook-Recipes.md)
 
 ## Syntax Governance And Stdlib Patterns
 
@@ -142,7 +142,7 @@ Removed boundary:
 
 Automated audit:
 
-- [Syntax-combination audit methodology](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
+- [Syntax-combination audit methodology](../CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
 - `./scripts/cellscript_syntax_combo_audit.sh quick`
 - `./scripts/cellscript_syntax_combo_audit.sh ci`
 
@@ -182,9 +182,9 @@ Deferred authorization roadmap:
 
 Detailed design:
 
-- [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
-- [CKB glossary](../docs/wiki/CKB-Glossary.md)
+- [Surface elegance RFC](../CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [CKB language audit](../CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB glossary](../wiki/CKB-Glossary.md)
 
 ## CKB Production Evidence
 
@@ -209,9 +209,9 @@ Required evidence for the bundled suite:
 
 Detailed evidence docs:
 
-- [Metadata verification and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [Metadata verification and production gates wiki](../wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Capacity and builder contract](../CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [CKB language audit](../CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ## Documentation And Tooling
 
@@ -230,7 +230,7 @@ Detailed evidence docs:
 Detailed docs:
 
 - [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
-- [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
+- [0.13.2 release notes](CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 
 ## Explicit Non-Goals
 

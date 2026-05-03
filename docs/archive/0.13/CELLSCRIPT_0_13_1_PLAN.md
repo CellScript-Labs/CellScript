@@ -43,7 +43,7 @@ The goal is to reduce repetitive notation without hiding verifier obligations.
 
 ### Version Positioning
 
-0.13 has been released; see `../../../roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md`
+0.13 has been released; see `../../releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md`
 for the accepted scope and
 `../../releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the release notes.
 0.13.1 is a **forward patch** on the current development branch: it

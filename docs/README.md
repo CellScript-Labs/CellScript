@@ -15,6 +15,8 @@ stable surface rather than act as release logs.
 
 - `docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` is the final 0.13.2
   release note and the canonical 0.13 release summary.
+- `docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md` records the closed 0.13
+  implementation scope and release evidence boundary.
 - `docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md` is a
   community-facing summary of the 0.13.2 CKB acceptance and stateful flow
   evidence.
