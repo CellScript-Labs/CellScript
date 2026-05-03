@@ -30,6 +30,8 @@
   packaging dry-runs part of the release gate.
 - Document the syntax-combination audit as a reusable release acceptance
   preflight that runs before builder-backed CKB acceptance.
+- Finalize the 0.13.2 release notes under `docs/releases/`, add a docs map, and
+  move historical 0.13 planning documents into `docs/archive/0.13/`.
 
 ## 0.13.0 - 2026-04-30
 

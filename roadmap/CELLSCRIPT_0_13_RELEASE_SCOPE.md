@@ -2,23 +2,22 @@
 
 **Updated**: 2026-05-03
 
-0.13 is a closed implementation-scope release track. The current
-release-candidate line is `nightly-0.13`; this document explains what 0.13
-includes, what it intentionally leaves out, and where each subtopic is tracked
-in more detail.
+0.13 is a closed implementation-scope release track. The stable release is
+`v0.13.2`; this document explains what 0.13 includes, what it intentionally
+leaves out, and where each subtopic is tracked in more detail.
 
 For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 
 ## 0.13 Goals
 
-0.13 has four concrete goals:
+0.13 has five concrete goals:
 
 1. add executable stack-backed `Vec<T>` helper support for fixed-width values;
 2. improve the source surface without changing core CKB semantics;
 3. make verifier-boundary data sources visible with `protected`, `witness`,
    `lock_args`, and pure `require` constraints;
 4. keep CKB production evidence strict enough to support release claims for the
-   bundled suite.
+   bundled suite;
 5. keep stdlib and syntax sugar audit-visible by lowering them to canonical
    verifier effects and checking the parser/type/lowering/codegen combinations
    automatically.
@@ -228,7 +227,7 @@ Detailed evidence docs:
 Detailed docs:
 
 - [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
-- [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
+- [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 
 ## Explicit Non-Goals
 

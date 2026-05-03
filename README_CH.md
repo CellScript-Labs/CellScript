@@ -280,7 +280,7 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
 - [Collections 支持矩阵](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 - [Output binding](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [Signature-direction 执行计划](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
+- [历史 Signature-direction 执行计划](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
 - [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity 与 builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)

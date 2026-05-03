@@ -34,10 +34,13 @@ check_trailing_whitespace() {
         "README.md"
         "README_CH.md"
         "CHANGELOG.md"
+        "docs/README.md"
         "roadmap/CELLSCRIPT_ROADMAP.md"
         "roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "roadmap/CELLSCRIPT_0_13_TODOLIST.md"
-        "docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md"
+        "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
+        "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
+        "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
@@ -81,7 +84,9 @@ check_release_roadmap_docs() {
         'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_ckb_release_gate.sh full'
         'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_syntax_combo_audit.sh ci'
         'roadmap/CELLSCRIPT_0_13_TODOLIST.md::0.13.2 Syntax Governance And Release Hardening'
-        'docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md::Syntax Governance And Standard Library'
+        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Syntax Governance And Standard Library'
+        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Release tag'
+        'docs/README.md::CellScript Documentation Map'
     )
     local item file pattern
     for item in "${required[@]}"; do

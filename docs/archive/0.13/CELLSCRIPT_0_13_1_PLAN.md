@@ -4,6 +4,11 @@
 
 ---
 
+**Status**: archived 0.13.1 patch plan. The implemented release contract is
+recorded in `../../releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`.
+
+---
+
 # CellScript 0.13.1 Patch Plan
 
 ## Local Ergonomics and Syntax Governance
@@ -38,9 +43,10 @@ The goal is to reduce repetitive notation without hiding verifier obligations.
 
 ### Version Positioning
 
-0.13 has been released; see `roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md` for the
-accepted scope and `docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md` for the release
-notes. 0.13.1 is a **forward patch** on the current development branch: it
+0.13 has been released; see `../../../roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md`
+for the accepted scope and
+`../../releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the release notes.
+0.13.1 is a **forward patch** on the current development branch: it
 extends 0.13 surface syntax without reopening the 0.13 release boundary.
 
 The 0.14 roadmap (`roadmap/CELLSCRIPT_0_14_ROADMAP.md` §12) lists surface

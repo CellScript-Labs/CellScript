@@ -12,7 +12,7 @@ The current project direction is simple:
 2. keep release claims tied to compiler evidence and builder-backed CKB
    evidence;
 3. make the language surface easier to teach without hiding authorization,
-   capacity, witness, or lock-group boundaries.
+   capacity, witness, or lock-group boundaries;
 4. keep syntax sugar audit-visible by requiring parser, formatter, type,
    lowering, metadata, codegen, docs, and automated syntax-combination gates to
    agree before release.
@@ -21,7 +21,7 @@ The current project direction is simple:
 
 | Area | Current status | Detailed document |
 |---|---|---|
-| 0.13 release scope | Implementation scope is closed on the `nightly-0.13` release-candidate line; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
+| 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax governance](../docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -36,7 +36,7 @@ The current project direction is simple:
 
 - executable stack-backed `Vec<T>` helper support for fixed-width values;
 - low-risk surface syntax improvements and cleaner example organization;
-- CKB lock-boundary classification with `protected`, `witness`, and `require`.
+- CKB lock-boundary classification with `protected`, `witness`, and `require`;
 - 0.13.2 stdlib lifecycle/cell metadata patterns that lower to explicit
   verifier effects instead of core protocol-name magic;
 - automated syntax-combination audit coverage for parser, formatter, type,
@@ -49,7 +49,7 @@ Detailed status:
 
 - [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
-- [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
+- [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 - [Syntax-combination audit methodology](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
 
 ### Next Authorization Hardening Track
@@ -157,7 +157,7 @@ Future work:
 
 - keep wiki links rendered through GitHub Wiki URLs;
 - add recipes when new stable language patterns land;
-- keep release notes in `docs/` and roadmap files in `roadmap/`, separate from tutorial pages;
+- keep release notes in `docs/releases/` and roadmap files in `roadmap/`, separate from tutorial pages;
 - keep examples split by audience: business, language, and acceptance.
 
 Source documents:

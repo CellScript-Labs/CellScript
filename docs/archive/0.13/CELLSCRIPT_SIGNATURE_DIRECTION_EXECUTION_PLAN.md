@@ -1,6 +1,8 @@
 # CellScript Signature-Direction Execution Plan
 
-**Status**: execution plan for the canonical action/input/output surface.
+**Status**: archived 0.13 execution plan. The canonical action/input/output
+surface it describes has shipped; use this document as historical design and
+migration context, not as the current release contract.
 
 This document consolidates the signature-direction design into an actionable
 compiler, docs, and example-migration plan. It intentionally keeps the CKB

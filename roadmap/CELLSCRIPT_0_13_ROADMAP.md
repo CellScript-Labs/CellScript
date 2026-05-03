@@ -1,9 +1,13 @@
 # CellScript v0.13 Roadmap
 
-**Status**: Historical planning draft; authoritative 0.13 release scope lives in `CELLSCRIPT_0_13_RELEASE_SCOPE.md`
-**Scope**: Expanded design notes for zero-cost abstractions, bounded collection runtime gaps, and CLI ergonomics. Quantified performance claims and future examples are evidence-gated ideas, not 0.13 release promises.
+**Status**: Historical planning draft; authoritative 0.13 release scope lives in
+`CELLSCRIPT_0_13_RELEASE_SCOPE.md`, and final release notes live in
+`../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`.
+**Scope**: Expanded design notes for zero-cost abstractions, bounded collection
+runtime gaps, and CLI ergonomics. Quantified performance claims and future
+examples are evidence-gated ideas, not 0.13 release promises.
 **Dependencies**: v0.12 released (CKB production closure)
-**Live TODO**: [CELLSCRIPT_0_13_TODOLIST.md](CELLSCRIPT_0_13_TODOLIST.md)
+**Release tracker**: [CELLSCRIPT_0_13_TODOLIST.md](CELLSCRIPT_0_13_TODOLIST.md)
 
 ---
 

@@ -1,9 +1,52 @@
-# CellScript 0.13 Release Notes Draft
+# CellScript 0.13.2 Release Notes
 
-**Status**: Release notes for the 0.13.2 release-candidate line on
-`nightly-0.13`.
+**Status**: Final release notes for the 0.13 stable line.
 
 **Updated**: 2026-05-03.
+
+**Release tag**: `v0.13.2`
+
+## Release Boundary
+
+CellScript 0.13.2 closes the 0.13 stable line. It includes the original 0.13
+implementation work plus the 0.13.1 and 0.13.2 hardening passes:
+
+- executable stack-backed `Vec<T: FixedWidth>` helper support;
+- canonical action/update syntax with named outputs, `where` proof blocks, and
+  explicit `move` state edges;
+- lock-boundary data-source syntax for `protected`, `witness`, and fixed-width
+  `lock_args`;
+- stdlib lifecycle and Cell metadata patterns that lower to explicit verifier
+  obligations;
+- syntax-combination audit gates for parser, formatter, type checking,
+  lowering, metadata, and codegen combinations;
+- builder-backed local CKB production evidence for the bundled suite.
+
+The release does not claim hidden signer authority, hidden sighash defaults,
+full generic maps, Cell-backed collection ownership, or declarative capacity /
+since policy. Those remain future work because they need stronger CKB binding
+semantics and separate release evidence.
+
+## Compatibility Notes
+
+Source compatibility expectations:
+
+- canonical actions use signature-direction outputs:
+  `action update(before: T) -> after: T`;
+- proof logic lives under `where`;
+- state transitions use action-level `move before.state: A -> after.state: B`;
+- proposed persistent outputs are constrained with named
+  `create output = T { ... }`;
+- old action brace bodies are rejected;
+- obsolete core lifecycle expression forms are rejected in favor of stdlib
+  patterns.
+
+Tooling compatibility expectations:
+
+- package manifests use version `0.13.2`;
+- the VS Code extension version is `0.13.2`;
+- metadata schema version is `30`;
+- CKB production claims require `./scripts/cellscript_ckb_release_gate.sh full`.
 
 ## Collections Scope
 
@@ -154,18 +197,25 @@ Important boundaries:
 - Acceptance/profiled copies still carry scheduler and effect metadata because
   they are part of release evidence.
 
-## Verification
+## Verification And Release Evidence
 
-Current release-gate commands:
+Release-facing gate commands:
 
 ```bash
 ./scripts/cellscript_ckb_release_gate.sh quick
 ./scripts/cellscript_ckb_release_gate.sh full
 ```
 
-The full gate is the release-facing command. It expands to the compiler,
-tooling, syntax-combination, VS Code, documentation-boundary, and
-builder-backed local CKB acceptance checks. Useful component commands are:
+The full gate is the release-facing command. It expands to:
+
+- Rust formatting, check, test, and clippy gates;
+- package/LSP/tooling boundary validation;
+- VS Code extension validation and local VSIX packaging dry-run;
+- syntax-combination quick and CI audits;
+- documentation-boundary checks for release scope and production evidence;
+- builder-backed local CKB production acceptance.
+
+Useful component commands are:
 
 ```bash
 ./scripts/cellscript_syntax_combo_audit.sh ci
@@ -188,6 +238,12 @@ the quick syntax-combination audit plus compile-only production acceptance and
 is useful before push. The `production`/`full` mode also runs the broader
 syntax-combination CI matrix before the full local CKB acceptance script, and is
 the release-facing gate.
+
+The release evidence standard is strict about ordering: syntax-combination CI
+is a preflight before builder-backed CKB acceptance. A passing CKB acceptance
+run does not replace a failed syntax-combination audit, because CKB evidence
+proves selected concrete transactions while the syntax-combination audit proves
+that dangerous compiler pipeline combinations are not silently accepted.
 
 ## Syntax Governance And Standard Library
 
@@ -223,6 +279,19 @@ Important boundaries:
   policy.
 - The current stdlib does not infer signer authority, generate change outputs,
   implement generic maps, or model Cell-backed collection ownership.
+
+## Documentation And Packaging
+
+New in the 0.13.2 release cutoff:
+
+- release notes moved from draft status to `docs/releases/`;
+- historical 0.13 planning documents moved under `docs/archive/0.13/`;
+- `docs/README.md` classifies stable wiki tutorials, release notes, reference
+  documents, design records, audits, examples, and archive material;
+- the release gate checks that release-scope and production-gate docs keep the
+  syntax-combination preflight and CKB acceptance boundary visible;
+- VS Code extension packaging now pins `@vscode/vsce` and runs a local VSIX
+  dry-run through `npm --prefix editors/vscode-cellscript run publish:dry-run`.
 
 ## Backend And ELF Emission
 

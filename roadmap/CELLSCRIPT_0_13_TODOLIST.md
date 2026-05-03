@@ -2,7 +2,7 @@
 
 **Updated**: 2026-05-03
 
-**Branch**: `nightly-0.13` release-candidate line
+**Branch**: `nightly-0.13` stable release line
 
 **Status**: Implementation scope closed; 0.13.2 release hardening is gated by
 the full CKB release script and syntax-combination audit.
@@ -159,7 +159,7 @@ Notes:
   `Address`/`Hash`-width values => 8.
 - [x] Add release notes that distinguish 0.12 schema/ABI vector support from
   0.13 executable stack-backed vector helper support:
-  [CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md).
+  [CELLSCRIPT_0_13_2_RELEASE_NOTES.md](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md).
 - [x] Check generated assembly/code-size impact after the helper set expansion;
   current bundled-example backend-shape budget test passes and the release
   notes draft records the branch baseline snapshot.
