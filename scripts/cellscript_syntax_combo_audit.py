@@ -137,6 +137,396 @@ def module_source(module_name: str, body: str) -> str:
     return BASE_TYPES.format(module_name=module_name) + "\n" + textwrap.dedent(body).strip() + "\n"
 
 
+def matrix_cases(include_deep: bool) -> list[AuditCase]:
+    cases: list[AuditCase] = []
+
+    helper_specs = [
+        ("preserve_type", "std::cell::preserve_type", ()),
+        ("same_lock", "std::cell::same_lock", ("cell-metadata-equality:lock_hash",)),
+        ("preserve_lock", "std::cell::preserve_lock", ("cell-metadata-equality:lock_hash",)),
+        ("preserve_capacity", "std::cell::preserve_capacity", ("cell-metadata-equality:capacity",)),
+        ("conserved", "std::accounting::conserved", ()),
+    ]
+    for short_name, helper, obligations in helper_specs:
+        action = f"matrix_{short_name}"
+        cases.append(
+            AuditCase(
+                name=f"matrix-cell-helper-{short_name}",
+                source=module_source(
+                    f"matrix_cell_helper_{short_name}",
+                    f"""
+                    action {action}(coin_before: Coin) -> coin_after: Coin
+                    where
+                        {helper}(coin_after, coin_before)
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(action=action, obligation_contains=obligations),
+                origin="matrix:continuity/std-cell",
+            )
+        )
+
+    cases.extend(
+        [
+            AuditCase(
+                name="matrix-explicit-transfer-branch-require",
+                source=module_source(
+                    "matrix_explicit_transfer_branch_require",
+                    """
+                    action branch_keep(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        consume coin
+
+                        create next_coin = Coin {
+                            amount: coin.amount,
+                            nonce: coin.nonce
+                        } with_lock(to)
+
+                        if next_coin.amount == coin.amount {
+                            require next_coin.nonce == coin.nonce
+                        } else {
+                            require next_coin.nonce == coin.nonce
+                        }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="branch_keep",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                ),
+                origin="matrix:lifecycle/proof/control-flow",
+            ),
+            AuditCase(
+                name="matrix-explicit-transfer-let-proof",
+                source=module_source(
+                    "matrix_explicit_transfer_let_proof",
+                    """
+                    action let_keep(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        consume coin
+
+                        create next_coin = Coin {
+                            amount: coin.amount,
+                            nonce: coin.nonce
+                        } with_lock(to)
+
+                        let same_amount = next_coin.amount == coin.amount
+                        require same_amount
+                        require next_coin.nonce == coin.nonce
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="let_keep",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                ),
+                origin="matrix:lifecycle/proof/local-binding",
+            ),
+            AuditCase(
+                name="matrix-stdlib-transfer-require-block",
+                source=module_source(
+                    "matrix_stdlib_transfer_require_block",
+                    """
+                    action transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+
+                        require {
+                            next_coin.amount == coin.amount
+                            next_coin.nonce == coin.nonce
+                        }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="transfer_with_block",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                    obligation_contains=("create-output-lock", "consume-input:Coin:coin"),
+                ),
+                origin="matrix:stdlib-lifecycle/proof",
+            ),
+            AuditCase(
+                name="matrix-stdlib-transfer-lock-capacity",
+                source=module_source(
+                    "matrix_stdlib_transfer_lock_capacity",
+                    """
+                    action transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                        std::cell::preserve_lock(next_coin, coin)
+                        std::cell::preserve_capacity(next_coin, coin)
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="transfer_with_metadata",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                    obligation_contains=("cell-metadata-equality:lock_hash", "cell-metadata-equality:capacity"),
+                ),
+                origin="matrix:stdlib-lifecycle/metadata",
+            ),
+            AuditCase(
+                name="matrix-stdlib-claim-require-block",
+                source=module_source(
+                    "matrix_stdlib_claim_require_block",
+                    """
+                    action claim_with_block(voucher: Voucher) -> coin: Coin
+                    where
+                        std::receipt::claim(voucher, coin, voucher.holder) {
+                            amount
+                            nonce
+                        }
+
+                        require {
+                            coin.amount == voucher.amount
+                            coin.nonce == voucher.nonce
+                        }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="claim_with_block",
+                    consume_bindings=("voucher",),
+                    create_bindings=("coin",),
+                    locked_outputs=("coin",),
+                    create_fields={"coin": ("amount", "nonce")},
+                ),
+                origin="matrix:receipt/proof",
+            ),
+            AuditCase(
+                name="matrix-stdlib-settle-preserve-capacity",
+                source=module_source(
+                    "matrix_stdlib_settle_preserve_capacity",
+                    """
+                    action settle_with_capacity(voucher: Voucher) -> coin: Coin
+                    where
+                        std::lifecycle::settle(voucher, coin, voucher.holder) {
+                            amount
+                            nonce
+                        }
+                        std::cell::preserve_capacity(coin, voucher)
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="settle_with_capacity",
+                    consume_bindings=("voucher",),
+                    create_bindings=("coin",),
+                    locked_outputs=("coin",),
+                    create_fields={"coin": ("amount", "nonce")},
+                    obligation_contains=("cell-metadata-equality:capacity",),
+                ),
+                origin="matrix:receipt/metadata",
+            ),
+            AuditCase(
+                name="matrix-lock-protected-only",
+                source=module_source(
+                    "matrix_lock_protected_only",
+                    """
+                    lock protected_wallet(protected wallet: Wallet) -> bool {
+                        require wallet.owner == wallet.owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-lock-witness-only",
+                source=module_source(
+                    "matrix_lock_witness_only",
+                    """
+                    lock witness_owner(witness owner: Address) -> bool {
+                        require owner == owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-lock-args-only",
+                source=module_source(
+                    "matrix_lock_args_only",
+                    """
+                    lock args_owner(lock_args owner: Address) -> bool {
+                        require owner == owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-reject-require-block-assignment",
+                source=module_source(
+                    "matrix_reject_require_block_assignment",
+                    """
+                    action hidden_mutation(flag: bool)
+                    where
+                        let mut ok = flag
+                        require {
+                            ok = false
+                        }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("require block", "assignment")),
+                origin="matrix:reject/proof-purity",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-non-receipt",
+                source=module_source(
+                    "matrix_reject_claim_non_receipt",
+                    """
+                    action bad_claim(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        std::receipt::claim(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim requires a receipt",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-extra-args",
+                source=module_source(
+                    "matrix_reject_claim_extra_args",
+                    """
+                    action bad_claim(voucher: Voucher) -> coin: Coin
+                    where
+                        std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {
+                            amount
+                            nonce
+                        }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-transfer-extra-args",
+                source=module_source(
+                    "matrix_reject_transfer_extra_args",
+                    """
+                    action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
+                    where
+                        std::lifecycle::transfer(coin, next_coin, to, to) {
+                            amount
+                            nonce
+                        }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("transfer expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-settle-missing-args",
+                source=module_source(
+                    "matrix_reject_settle_missing_args",
+                    """
+                    action bad_settle(voucher: Voucher) -> coin: Coin
+                    where
+                        std::lifecycle::settle(voucher, coin) {
+                            amount
+                            nonce
+                        }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("settle expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-cell-metadata-non-cell",
+                source=module_source(
+                    "matrix_reject_cell_metadata_non_cell",
+                    """
+                    action bad_metadata(amount: u64) -> out: Coin
+                    where
+                        std::cell::preserve_capacity(out, amount)
+                    """,
+                ),
+                expected=Expected("reject_compile", ("preserve_capacity input must be a cell-backed value",)),
+                origin="matrix:reject/metadata",
+            ),
+        ]
+    )
+
+    if include_deep:
+        cases.extend(
+            [
+                AuditCase(
+                    name="matrix-deep-reject-transfer-read-param",
+                    source=module_source(
+                        "matrix_deep_reject_transfer_read_param",
+                        """
+                        action bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin
+                        where
+                            std::lifecycle::transfer(coin, next_coin, to) {
+                                amount
+                                nonce
+                            }
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("cell-backed linear",)),
+                    origin="matrix:deep/reject/source-qualifier",
+                ),
+                AuditCase(
+                    name="matrix-deep-reject-require-block-transfer",
+                    source=module_source(
+                        "matrix_deep_reject_require_block_transfer",
+                        """
+                        action hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin
+                        where
+                            require {
+                                std::lifecycle::transfer(coin, next_coin, to) {
+                                    amount
+                                    nonce
+                                }
+                            }
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
+                    origin="matrix:deep/reject/proof-purity",
+                ),
+                AuditCase(
+                    name="matrix-deep-reject-unknown-accounting",
+                    source=module_source(
+                        "matrix_deep_reject_unknown_accounting",
+                        """
+                        action bad_accounting(coin_before: Coin) -> coin_after: Coin
+                        where
+                            std::accounting::minted(coin_after, coin_before)
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("unknown stdlib pattern",)),
+                    origin="matrix:deep/reject/stdlib-namespace",
+                ),
+            ]
+        )
+
+    return cases
+
+
 def generated_cases() -> list[AuditCase]:
     cases: list[AuditCase] = [
         AuditCase(
@@ -470,9 +860,16 @@ def parse_seed(path: Path) -> AuditCase:
 
 
 def load_cases(mode: str, budget: int | None) -> list[AuditCase]:
+    include_matrix = mode in {"ci", "deep", "repro"}
+    include_deep = mode in {"deep", "repro"}
     cases = generated_cases()
+    if include_matrix:
+        cases.extend(matrix_cases(include_deep=include_deep))
+
+    seed_cases: list[AuditCase] = []
     if SEEDS.exists():
-        cases.extend(parse_seed(path) for path in sorted(SEEDS.glob("*.cell")))
+        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell"))]
+
     if mode == "quick":
         default_budget = read_matrix().get("mode", {}).get("quick", {}).get("budget", len(cases))
     elif mode == "ci":
@@ -480,7 +877,15 @@ def load_cases(mode: str, budget: int | None) -> list[AuditCase]:
     else:
         default_budget = read_matrix().get("mode", {}).get("deep", {}).get("budget", len(cases))
     limit = budget or default_budget or len(cases)
-    return cases[: min(limit, len(cases))]
+    selected = cases[: min(limit, len(cases))]
+
+    # Regression seeds are never dropped by a small generation budget.
+    existing = {case.name for case in selected}
+    for seed_case in seed_cases:
+        if seed_case.name not in existing:
+            selected.append(seed_case)
+            existing.add(seed_case.name)
+    return selected
 
 
 def failure(
@@ -732,8 +1137,10 @@ def main(argv: list[str]) -> int:
     accepted = 0
     rejected = 0
     phase_counts: dict[str, dict[str, int]] = {}
+    origin_counts: dict[str, int] = {}
 
     for case in cases:
+        origin_counts[case.origin] = origin_counts.get(case.origin, 0) + 1
         status, case_failures = audit_case(case, run_dir, cellc)
         expected_phase = case.expected.phase
         phase_counts.setdefault(expected_phase, {"passed": 0, "failed": 0})
@@ -756,6 +1163,7 @@ def main(argv: list[str]) -> int:
         "rejected": rejected,
         "failures_count": len(failures),
         "phases": phase_counts,
+        "origins": origin_counts,
         "failures": failures[:10],
     }
     write_reports(run_dir, report, failures)

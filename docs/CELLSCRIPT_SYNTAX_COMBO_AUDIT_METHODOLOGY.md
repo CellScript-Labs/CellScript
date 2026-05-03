@@ -85,10 +85,10 @@ tests/syntax_combo/matrix.toml
 tests/syntax_combo/seeds/*.cell
 ```
 
-The initial `quick` mode runs deterministic generated cases plus regression
-seeds through parser, formatter roundtrip, compile/codegen, metadata, and compact
-report oracles. Later `ci` and `deep` expansion should grow the matrix before it
-adds expensive CKB-node execution.
+`quick` mode runs the minimal deterministic corpus plus regression seeds.
+`ci` adds matrix-generated stdlib lifecycle, proof-syntax, metadata-helper, and
+lock-source qualifier combinations. `deep` adds higher-risk reject mutations for
+release-local replay before expensive CKB-node execution.
 
 Recommended repository layout:
 

@@ -18,6 +18,10 @@
   and reserve the old claim-signature runtime error code.
 - Add example and editor-tooling coverage for the stdlib lifecycle and cell
   metadata helper surface.
+- Add an executable syntax-combination audit runner for parser/formatter/type
+  checking/lowering metadata/codegen oracles, wire the quick audit into local
+  gates, and run the broader CI matrix in GitHub Actions and the full release
+  gate.
 
 ## 0.13.0 - 2026-04-30
 

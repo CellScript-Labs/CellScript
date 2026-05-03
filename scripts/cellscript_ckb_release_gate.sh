@@ -142,6 +142,7 @@ run_quick_gate() {
 
 run_production_gate() {
     run_common_gate
+    run ./scripts/cellscript_syntax_combo_audit.sh ci
     run ./scripts/ckb_cellscript_acceptance.sh --production
     printf '\nCellScript backend shape report: %s\n' "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     printf 'CellScript Molecule schema manifest report: %s\n' "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT"

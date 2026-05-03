@@ -159,6 +159,7 @@ Current release-gate commands:
 
 ```bash
 cargo fmt --all
+./scripts/cellscript_syntax_combo_audit.sh ci
 cargo clippy --locked -p cellscript --all-targets -- -D warnings
 cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
@@ -173,8 +174,10 @@ CKB-facing repository gates:
 ```
 
 The default `cellscript_ckb_release_gate.sh` mode is the quick gate. It includes
-compile-only production acceptance and is useful before push. The `production`
-mode runs the full local CKB acceptance script and is the release-facing gate.
+the quick syntax-combination audit plus compile-only production acceptance and
+is useful before push. The `production`/`full` mode also runs the broader
+syntax-combination CI matrix before the full local CKB acceptance script, and is
+the release-facing gate.
 
 ## Backend And ELF Emission
 
