@@ -326,7 +326,7 @@ impl LspServer {
             ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    require ${6} == ${2}.owner\n    require ${4} == ${6}\n    $0\n}",
             ),
             ("const", "const ${1:NAME}: ${2:u64} = $0;"),
             ("enum", "enum ${1:Name} {\n    $0\n}"),
@@ -490,11 +490,55 @@ impl LspServer {
                 return items;
             }
             "env" => {
-                for (name, insert) in [("caller", "env::caller()"), ("height", "env::height()"), ("hash", "env::hash()")] {
+                for (name, insert) in [
+                    ("current_timepoint", "env::current_timepoint()"),
+                    ("sighash_all", "env::sighash_all(${1:source::group_input(0)})"),
+                ] {
                     items.push(CompletionItem {
                         label: name.to_string(),
                         kind: CompletionItemKind::Method,
                         detail: Some(format!("env::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
+            "source" => {
+                for name in ["input", "output", "cell_dep", "header_dep", "group_input", "group_output"] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("source::{}", name)),
+                        documentation: None,
+                        insert_text: Some(format!("source::{}(${{1:0}})", name)),
+                    });
+                }
+                return items;
+            }
+            "witness" => {
+                for name in ["raw", "lock", "input_type", "output_type"] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("witness::{}", name)),
+                        documentation: None,
+                        insert_text: Some(format!("witness::{}(${{1:source::group_input(0)}})", name)),
+                    });
+                }
+                return items;
+            }
+            "ckb" => {
+                for (name, insert) in [
+                    ("header_epoch_number", "ckb::header_epoch_number()"),
+                    ("header_epoch_start_block_number", "ckb::header_epoch_start_block_number()"),
+                    ("header_epoch_length", "ckb::header_epoch_length()"),
+                    ("input_since", "ckb::input_since()"),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("ckb::{}", name)),
                         documentation: None,
                         insert_text: Some(insert.to_string()),
                     });
@@ -611,7 +655,7 @@ impl LspServer {
             ("move", "move ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2:state}: ${5:Live}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {\n    require $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    require ${6} == ${2}.owner\n    require ${4} == ${6}\n    $0\n}",
             ),
             ("let", "let ${1:name} = $0"),
             ("if", "if ${1:condition} {\n    $0\n}"),
@@ -1628,8 +1672,15 @@ pub struct TextDocumentContentChangeEvent {
 ///
 /// Replaces the text in `range` with `new_text`.
 fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> String {
-    let start_offset = position_to_offset(content, range.start).unwrap_or(0);
-    let end_offset = position_to_offset(content, range.end).unwrap_or(content.len());
+    let Some(start_offset) = position_to_offset(content, range.start) else {
+        return content.to_string();
+    };
+    let Some(end_offset) = position_to_offset(content, range.end) else {
+        return content.to_string();
+    };
+    if start_offset > end_offset {
+        return content.to_string();
+    }
     let mut result = String::with_capacity(content.len() + new_text.len());
     result.push_str(&content[..start_offset]);
     result.push_str(new_text);
@@ -2156,6 +2207,25 @@ mod tests {
     }
 
     #[test]
+    fn test_incremental_change_ignores_invalid_utf16_ranges() {
+        let source = "module demo\n// 😀 marker\n";
+
+        let invalid_surrogate_middle = apply_incremental_change(
+            source,
+            Range { start: Position { line: 1, character: 4 }, end: Position { line: 1, character: 4 } },
+            "bad",
+        );
+        assert_eq!(invalid_surrogate_middle, source);
+
+        let reversed = apply_incremental_change(
+            source,
+            Range { start: Position { line: 1, character: 12 }, end: Position { line: 1, character: 8 } },
+            "bad",
+        );
+        assert_eq!(reversed, source);
+    }
+
+    #[test]
     fn test_lsp_server() {
         let mut server = LspServer::new();
 
@@ -2193,6 +2263,24 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "std::lifecycle::settle"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
+        assert!(keywords.iter().any(|k| k.label == "lock_args"));
+    }
+
+    #[test]
+    fn test_ckb_namespace_completions() {
+        let server = LspServer::new();
+
+        let env = server.member_completions("file:///test.cell", "env");
+        assert!(env.iter().any(|item| item.label == "sighash_all"));
+
+        let source = server.member_completions("file:///test.cell", "source");
+        assert!(source.iter().any(|item| item.label == "group_input"));
+
+        let witness = server.member_completions("file:///test.cell", "witness");
+        assert!(witness.iter().any(|item| item.label == "lock"));
+
+        let ckb = server.member_completions("file:///test.cell", "ckb");
+        assert!(ckb.iter().any(|item| item.label == "input_since"));
     }
 
     #[test]

@@ -253,7 +253,7 @@ CKB vocabulary mapping:
 |---|---|
 | `protected T` | Typed view of one selected input Cell in the current script group whose spend is guarded by this lock invocation. |
 | `witness T` | Typed data decoded from the transaction witness surface for the entry. |
-| `lock_args T` | Typed decoding of fixed-width values from the executing script args. |
+| `lock_args T` | Typed fixed-width decoding of the executing script args; this is data-source binding, not signer authority. |
 | `require condition` | Fail the current script if `condition` is false. |
 
 Until first-class signer or lock-args binding exists, examples must not imply
@@ -427,13 +427,15 @@ with the canonical top-level modules during compiler module loading.
 
 ## Canonical Style Example
 
-A future `examples/canonical_style.cell` should demonstrate:
+`examples/language/canonical_style.cell` demonstrates:
 
 - namespace module declaration;
 - resource, shared, and receipt declarations;
 - create/consume/destroy flows;
 - named action outputs plus `move`/`require` constraints for update semantics;
-- a lock boundary;
+- `protected`, `lock_args`, `witness`, and `require` lock-boundary syntax;
+- named action outputs plus `move`/`require` constraints for update semantics;
+- `protected`, `lock_args`, `witness`, and `require` lock-boundary syntax;
 - field shorthand;
 - bounded collection literals;
 - minimal comments.
@@ -473,7 +475,7 @@ This list is the living implementation tracker for the RFC.
 | Hidden sighash defaults | Rejected | Digest mode and signature scope must be visible. |
 | Implicit `Address` as signer | Rejected | Address values do not become authorization proofs by name. |
 | Business/language/acceptance example directory split | Done | `examples/business` holds clean canonical examples, `examples/acceptance` holds production/profiled examples, and `examples/language` holds `registry.cell`. Flat `examples/*.cell` remains a compatibility mirror for existing commands. |
-| `examples/canonical_style.cell` | Not started | Should become the idiomatic reference once pending syntax is available. |
+| `examples/language/canonical_style.cell` | Done | Provides a compact idiomatic reference for module style, capabilities, field shorthand, `[]`, `&mut` replacement, and lock-boundary classification. |
 | Action production acceptance | Done | Existing bundled action acceptance remains builder-backed. |
 | Lock valid-spend and invalid-spend matrix | Done | Existing bundled locks are exercised through builder-backed local CKB transactions. |
 

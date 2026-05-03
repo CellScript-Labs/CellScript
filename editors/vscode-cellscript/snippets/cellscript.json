@@ -21,11 +21,12 @@
   "Lock": {
     "prefix": "lock",
     "body": [
-      "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}) -> bool {",
-      "    require ${6:${4} == ${2}.owner}",
+      "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {",
+      "    require ${6} == ${2}.owner",
+      "    require ${4} == ${6}",
       "}"
     ],
-    "description": "Create a CellScript lock with explicit protected/witness boundaries"
+    "description": "Create a CellScript lock with explicit protected, lock_args, and witness boundaries"
   },
   "Resource": {
     "prefix": "resource",

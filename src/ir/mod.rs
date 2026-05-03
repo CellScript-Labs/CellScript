@@ -33,6 +33,7 @@ pub struct IrTypeDef {
     pub name: String,
     pub type_id: Option<String>,
     pub default_hash_type: Option<String>,
+    pub capacity_floor_shannons: Option<u64>,
     pub kind: IrTypeKind,
     pub fields: Vec<IrField>,
     pub capabilities: Vec<Capability>,
@@ -576,6 +577,7 @@ impl IrGenerator {
             name: resource.name.clone(),
             type_id: resource.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: resource.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: resource.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Resource,
             fields: self.layout_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
@@ -591,6 +593,7 @@ impl IrGenerator {
             name: shared.name.clone(),
             type_id: shared.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: shared.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: shared.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Shared,
             fields: self.layout_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
@@ -606,6 +609,7 @@ impl IrGenerator {
             name: receipt.name.clone(),
             type_id: receipt.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: receipt.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: receipt.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Receipt,
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
@@ -621,6 +625,7 @@ impl IrGenerator {
             name: struct_def.name.clone(),
             type_id: struct_def.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: struct_def.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: struct_def.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Struct,
             fields: self.layout_fields(&struct_def.fields),
             capabilities: Vec::new(),
@@ -702,7 +707,7 @@ impl IrGenerator {
                 let ty = Self::convert_type(&field.ty);
                 let fixed_size = self.fixed_encoded_size(&ty);
                 let offset = next_offset.unwrap_or(0);
-                next_offset = next_offset.and_then(|current| fixed_size.map(|size| current + size));
+                next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
                 IrField { name: field.name.clone(), ty, offset, fixed_size }
             })
             .collect()
@@ -720,10 +725,12 @@ impl IrGenerator {
             IrType::U64 => Some(8),
             IrType::U128 => Some(16),
             IrType::Address | IrType::Hash => Some(32),
-            IrType::Array(inner, len) => self.fixed_encoded_size_with_seen(inner, seen).map(|inner_size| inner_size * len),
-            IrType::Tuple(items) => {
-                items.iter().try_fold(0usize, |acc, item| self.fixed_encoded_size_with_seen(item, seen).map(|size| acc + size))
+            IrType::Array(inner, len) => {
+                self.fixed_encoded_size_with_seen(inner, seen).and_then(|inner_size| inner_size.checked_mul(*len))
             }
+            IrType::Tuple(items) => items
+                .iter()
+                .try_fold(0usize, |acc, item| self.fixed_encoded_size_with_seen(item, seen).and_then(|size| acc.checked_add(size))),
             IrType::Unit => Some(0),
             IrType::Named(name) => {
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
@@ -3509,6 +3516,9 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
+                "env::sighash_all" if call.args.len() == 1 => {
+                    self.lower_simple_runtime_call("__ckb_sighash_all", "sighash_all", IrType::Hash, &call.args, current, blocks, vars)
+                }
                 "ckb::header_epoch_number" if call.args.is_empty() => {
                     let dest = self.new_var("ckb_header_epoch_number", IrType::U64);
                     self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
@@ -3544,6 +3554,198 @@ impl IrGenerator {
                         args: Vec::new(),
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                }
+                "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_input",
+                    "source_input",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "source::output" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_output",
+                    "source_output",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "source::cell_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_cell_dep",
+                    "source_cell_dep",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "source::header_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_header_dep",
+                    "source_header_dep",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "source::group_input" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_group_input",
+                    "source_group_input",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "source::group_output" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_group_output",
+                    "source_group_output",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "witness::raw" if call.args.len() == 1 => {
+                    self.lower_simple_runtime_call("__ckb_witness_raw", "witness_raw", IrType::Hash, &call.args, current, blocks, vars)
+                }
+                "witness::lock" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_lock",
+                    "witness_lock",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "witness::input_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_input_type",
+                    "witness_input_type",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "witness::output_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_witness_output_type",
+                    "witness_output_type",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "spawn" if call.args.len() == 1 => {
+                    let dest = self.new_var("spawn_result", IrType::U64);
+                    let target = match &call.args[0] {
+                        Expr::String(value) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
+                        Expr::Identifier(name) => match self.constants.get(name) {
+                            Some(Expr::String(value)) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
+                            _ => {
+                                let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
+                                let active = lowered.current?;
+                                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                                    dest: Some(dest.clone()),
+                                    func: "__ckb_spawn".to_string(),
+                                    args: vec![lowered.operand],
+                                });
+                                return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
+                            }
+                        },
+                        other => {
+                            let lowered = self.lower_expr(other, current, blocks, vars);
+                            let active = lowered.current?;
+                            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                                dest: Some(dest.clone()),
+                                func: "__ckb_spawn".to_string(),
+                                args: vec![lowered.operand],
+                            });
+                            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
+                        }
+                    };
+                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_spawn".to_string(),
+                        args: vec![target],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                }
+                "pipe" if call.args.is_empty() => {
+                    let dest = self.new_var("pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
+                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_pipe".to_string(),
+                        args: Vec::new(),
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                }
+                "wait" if call.args.is_empty() => {
+                    self.lower_simple_runtime_call("__ckb_wait", "wait_result", IrType::U64, &call.args, current, blocks, vars)
+                }
+                "process_id" if call.args.is_empty() => {
+                    self.lower_simple_runtime_call("__ckb_process_id", "process_id", IrType::U64, &call.args, current, blocks, vars)
+                }
+                "pipe_write" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_pipe_write",
+                    "pipe_write_result",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "pipe_read" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_pipe_read",
+                    "pipe_read_result",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "inherited_fd" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_inherited_fd",
+                    "inherited_fd",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "close" if call.args.len() == 1 => {
+                    self.lower_simple_runtime_call("__ckb_close", "close_result", IrType::U64, &call.args, current, blocks, vars)
+                }
+                "require_maturity" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__ckb_require_maturity", &call.args, current, blocks, vars)
+                }
+                "require_time" if call.args.len() == 1 => {
+                    self.lower_void_runtime_call("__ckb_require_time", &call.args, current, blocks, vars)
+                }
+                "require_epoch_after" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_epoch_after", &call.args, current, blocks, vars)
+                }
+                "require_epoch_relative" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__ckb_require_epoch_relative", &call.args, current, blocks, vars)
+                }
+                "occupied_capacity" if call.args.len() == 1 => {
+                    let dest = self.new_var("occupied_capacity", IrType::U64);
+                    let tag = match &call.args[0] {
+                        Expr::String(value) => stable_u64_tag(value),
+                        _ => 0,
+                    };
+                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_occupied_capacity".to_string(),
+                        args: vec![IrOperand::Const(IrConst::U64(tag))],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                }
+                "hash_chain" if call.args.len() == 1 => {
+                    self.lower_simple_runtime_call("__ckb_hash_chain", "hash_chain", IrType::Hash, &call.args, current, blocks, vars)
                 }
                 "Vec::new" if call.args.is_empty() => {
                     let dest = self.new_var("vec_new_tmp", IrType::Named("Vec".to_string()));
@@ -3879,6 +4081,55 @@ impl IrGenerator {
             },
             _ => None,
         }
+    }
+
+    fn lower_simple_runtime_call(
+        &mut self,
+        func: &str,
+        dest_name: &str,
+        return_ty: IrType,
+        args: &[Expr],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let mut active = current;
+        let mut lowered_args = Vec::with_capacity(args.len());
+        for arg in args {
+            let lowered = self.lower_expr(arg, active, blocks, vars);
+            active = lowered.current?;
+            lowered_args.push(lowered.operand);
+        }
+        let dest = self.new_var(dest_name, return_ty);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(dest.clone()),
+            func: func.to_string(),
+            args: lowered_args,
+        });
+        Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+    }
+
+    fn lower_void_runtime_call(
+        &mut self,
+        func: &str,
+        args: &[Expr],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let mut active = current;
+        let mut lowered_args = Vec::with_capacity(args.len());
+        for arg in args {
+            let lowered = self.lower_expr(arg, active, blocks, vars);
+            active = lowered.current?;
+            lowered_args.push(lowered.operand);
+        }
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: func.to_string(),
+            args: lowered_args,
+        });
+        Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) })
     }
 
     fn lower_match_pattern_operand(&mut self, pattern: &str, span: Span) -> Option<IrOperand> {
@@ -4663,6 +4914,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             name: local_name.to_string(),
             type_id: resource.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: resource.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: resource.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Resource,
             fields: layout_resolver_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
@@ -4675,6 +4927,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             name: local_name.to_string(),
             type_id: shared.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: shared.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: shared.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Shared,
             fields: layout_resolver_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
@@ -4687,6 +4940,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             name: local_name.to_string(),
             type_id: receipt.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: receipt.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: receipt.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Receipt,
             fields: layout_resolver_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
@@ -4699,6 +4953,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             name: local_name.to_string(),
             type_id: struct_def.type_id.as_ref().map(|type_id| type_id.value.clone()),
             default_hash_type: struct_def.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
+            capacity_floor_shannons: struct_def.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Struct,
             fields: layout_resolver_fields(&struct_def.fields),
             capabilities: Vec::new(),
@@ -4719,7 +4974,7 @@ fn layout_resolver_fields(fields: &[Field]) -> Vec<IrField> {
             let ty = ast_type_to_ir_type(&field.ty);
             let fixed_size = fixed_encoded_size_for_ir_type(&ty);
             let offset = next_offset.unwrap_or(0);
-            next_offset = next_offset.and_then(|current| fixed_size.map(|size| current + size));
+            next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
             IrField { name: field.name.clone(), ty, offset, fixed_size }
         })
         .collect()
@@ -4733,8 +4988,10 @@ fn fixed_encoded_size_for_ir_type(ty: &IrType) -> Option<usize> {
         IrType::U64 => Some(8),
         IrType::U128 => Some(16),
         IrType::Address | IrType::Hash => Some(32),
-        IrType::Array(inner, len) => fixed_encoded_size_for_ir_type(inner).map(|inner_size| inner_size * len),
-        IrType::Tuple(items) => items.iter().try_fold(0usize, |acc, item| fixed_encoded_size_for_ir_type(item).map(|size| acc + size)),
+        IrType::Array(inner, len) => fixed_encoded_size_for_ir_type(inner).and_then(|inner_size| inner_size.checked_mul(*len)),
+        IrType::Tuple(items) => {
+            items.iter().try_fold(0usize, |acc, item| fixed_encoded_size_for_ir_type(item).and_then(|size| acc.checked_add(size)))
+        }
         IrType::Unit => Some(0),
         IrType::Named(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
     }
@@ -5026,6 +5283,10 @@ fn binding_pattern_label(pattern: &BindingPattern) -> &str {
 
 pub(crate) fn type_hash_for_name(name: &str) -> [u8; 32] {
     crate::ckb_blake2b256(name.as_bytes())
+}
+
+fn stable_u64_tag(value: &str) -> u64 {
+    value.bytes().fold(0xcbf2_9ce4_8422_2325u64, |acc, byte| acc.wrapping_mul(0x100_0000_01b3).wrapping_add(byte as u64))
 }
 
 #[cfg(test)]

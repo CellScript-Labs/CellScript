@@ -1,0 +1,16 @@
+module cellscript::language::v0_14_witness_source
+
+resource Wallet has store {
+    owner: Address,
+}
+
+lock owner_witness(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
+    // `owner` is decoded from the executing lock script args. `claimed_owner`
+    // and `sig` are witness data; neither is signer authority by name alone.
+    let view = source::group_input(0)
+    let sig = witness::lock(view)
+    let sighash = env::sighash_all(view)
+    require owner == wallet.owner
+    require claimed_owner == owner
+    require sig == sighash
+}

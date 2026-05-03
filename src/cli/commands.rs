@@ -38,6 +38,7 @@ pub enum Command {
     SchedulerPlan(SchedulerPlanArgs),
     CkbHash(CkbHashArgs),
     Explain(ExplainArgs),
+    ExplainProfile(ExplainProfileArgs),
     ExplainGenerics(ExplainGenericsArgs),
     OptReport(OptReportArgs),
     ActionBuild(ActionBuildArgs),
@@ -207,6 +208,12 @@ pub struct ExplainArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct ExplainProfileArgs {
+    pub profile: String,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct ExplainGenericsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
@@ -313,6 +320,7 @@ impl CommandExecutor {
             Command::SchedulerPlan(args) => Self::scheduler_plan(args),
             Command::CkbHash(args) => Self::ckb_hash(args),
             Command::Explain(args) => Self::explain(args),
+            Command::ExplainProfile(args) => Self::explain_profile(args),
             Command::ExplainGenerics(args) => Self::explain_generics(args),
             Command::OptReport(args) => Self::opt_report(args),
             Command::ActionBuild(args) => Self::action_build(args),
@@ -1083,8 +1091,9 @@ impl CommandExecutor {
             .params
             .iter()
             .map(|param| {
-                let runtime_bound = selected.runtime_bound_param_names.contains(&param.name);
-                let payload_bound = !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
+                let runtime_bound = selected.runtime_bound_param_names.contains(&param.name) || param.lock_args_data_source;
+                let payload_bound =
+                    !param.lock_args_data_source && !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
                 let layout = entry_constraints.params.iter().find(|candidate| candidate.name == param.name);
                 serde_json::json!({
                     "name": param.name,
@@ -1109,11 +1118,19 @@ impl CommandExecutor {
             .params
             .iter()
             .filter(|param| {
-                !param.cell_bound_abi && !param.ty.starts_with('&') && !selected.runtime_bound_param_names.contains(&param.name)
+                !param.lock_args_data_source
+                    && !param.cell_bound_abi
+                    && !param.ty.starts_with('&')
+                    && !selected.runtime_bound_param_names.contains(&param.name)
             })
             .map(|param| param.name.as_str())
             .collect::<Vec<_>>();
-        let runtime_bound_params = selected.runtime_bound_param_names.iter().map(|name| name.as_str()).collect::<Vec<_>>();
+        let runtime_bound_params = selected
+            .runtime_bound_param_names
+            .iter()
+            .map(|name| name.as_str())
+            .chain(selected.params.iter().filter(|param| param.lock_args_data_source).map(|param| param.name.as_str()))
+            .collect::<Vec<_>>();
         let summary = serde_json::json!({
             "status": if entry_constraints.unsupported { "fail" } else { "ok" },
             "abi": ENTRY_WITNESS_ABI,
@@ -1404,6 +1421,66 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn explain_profile(args: ExplainProfileArgs) -> Result<()> {
+        let profile = TargetProfile::from_name(&args.profile)?;
+        let metadata = profile.metadata(ArtifactFormat::RiscvElf);
+        let summary = serde_json::json!({
+            "profile": metadata.name,
+            "target_chain": metadata.target_chain,
+            "vm_abi": metadata.vm_abi,
+            "hash_domain": metadata.hash_domain,
+            "syscall_set": metadata.syscall_set,
+            "artifact_packaging": metadata.artifact_packaging,
+            "header_abi": metadata.header_abi,
+            "scheduler_abi": metadata.scheduler_abi,
+            "witness_abi": metadata.witness_abi,
+            "lock_args_abi": metadata.lock_args_abi,
+            "source_encoding": metadata.source_encoding,
+            "spawn_ipc_abi": metadata.spawn_ipc_abi,
+            "since_abi": metadata.since_abi,
+            "cell_dep_abi": metadata.cell_dep_abi,
+            "script_ref_abi": metadata.script_ref_abi,
+            "output_data_abi": metadata.output_data_abi,
+            "capacity_floor_abi": metadata.capacity_floor_abi,
+            "type_id_abi": metadata.type_id_abi,
+            "tx_version": metadata.tx_version,
+            "boundaries": [
+                "WitnessArgs fields are explicit CKB witness surfaces, not implicit signer authority",
+                "lock_args parameters are typed script args, not implicit signer authority",
+                "Source group views are scoped to the active script group",
+                "outputs and outputs_data are index-aligned CKB transaction surfaces",
+                "capacity floors are declared in shannons and still require builder measurement",
+                "script references keep code_hash, hash_type, and args visible",
+                "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
+                "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
+                "Dynamic hash_blake2b is unavailable until a real linked RISC-V implementation is selected"
+            ],
+        });
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary).map_err(|error| {
+                    crate::error::CompileError::without_span(format!("failed to serialize profile explanation: {}", error))
+                })?
+            );
+        } else {
+            println!("Target profile: {}", summary["profile"].as_str().unwrap_or("unknown"));
+            println!("  Target chain: {}", summary["target_chain"].as_str().unwrap_or("unknown"));
+            println!("  VM ABI: {}", summary["vm_abi"].as_str().unwrap_or("unknown"));
+            println!("  Witness ABI: {}", summary["witness_abi"].as_str().unwrap_or("unknown"));
+            println!("  Lock args ABI: {}", summary["lock_args_abi"].as_str().unwrap_or("unknown"));
+            println!("  Source encoding: {}", summary["source_encoding"].as_str().unwrap_or("unknown"));
+            println!("  Spawn/IPC ABI: {}", summary["spawn_ipc_abi"].as_str().unwrap_or("unknown"));
+            println!("  Since ABI: {}", summary["since_abi"].as_str().unwrap_or("unknown"));
+            println!("  CellDep ABI: {}", summary["cell_dep_abi"].as_str().unwrap_or("unknown"));
+            println!("  Script ref ABI: {}", summary["script_ref_abi"].as_str().unwrap_or("unknown"));
+            println!("  Output data ABI: {}", summary["output_data_abi"].as_str().unwrap_or("unknown"));
+            println!("  Capacity floor ABI: {}", summary["capacity_floor_abi"].as_str().unwrap_or("unknown"));
+            println!("  TYPE_ID ABI: {}", summary["type_id_abi"].as_str().unwrap_or("unknown"));
+        }
+        Ok(())
+    }
+
     fn action_build(args: ActionBuildArgs) -> Result<()> {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
@@ -1518,7 +1595,10 @@ impl CommandExecutor {
             .params
             .iter()
             .filter(|param| {
-                !param.cell_bound_abi && !param.ty.starts_with('&') && !selected.runtime_bound_param_names.contains(&param.name)
+                !param.lock_args_data_source
+                    && !param.cell_bound_abi
+                    && !param.ty.starts_with('&')
+                    && !selected.runtime_bound_param_names.contains(&param.name)
             })
             .collect::<Vec<_>>();
         if args.args.len() != payload_params.len() {
@@ -3279,15 +3359,15 @@ fn decode_hex_arg(name: &str, value: &str, expected_len: Option<usize>) -> Resul
     if hex.len() % 2 != 0 {
         return Err(crate::error::CompileError::without_span(format!("parameter '{}' hex value must contain full bytes", name)));
     }
-    let bytes = (0..hex.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&hex[index..index + 2], 16).map_err(|error| {
-                crate::error::CompileError::without_span(format!(
-                    "parameter '{}' has invalid hex byte at offset {}: {}",
-                    name, index, error
-                ))
-            })
+    let bytes = hex
+        .as_bytes()
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(pair_index, pair)| {
+            let offset = pair_index * 2;
+            let high = hex_nibble(pair[0]).ok_or_else(|| invalid_hex_arg_error(name, offset))?;
+            let low = hex_nibble(pair[1]).ok_or_else(|| invalid_hex_arg_error(name, offset))?;
+            Ok((high << 4) | low)
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(expected_len) = expected_len {
@@ -3301,6 +3381,22 @@ fn decode_hex_arg(name: &str, value: &str, expected_len: Option<usize>) -> Resul
         }
     }
     Ok(bytes)
+}
+
+fn invalid_hex_arg_error(name: &str, offset: usize) -> crate::error::CompileError {
+    crate::error::CompileError::without_span(format!(
+        "parameter '{}' has invalid hex byte at offset {}: invalid digit found in string",
+        name, offset
+    ))
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub struct CliParser;
@@ -3531,6 +3627,12 @@ impl CliParser {
                 ClapCommand::new("explain")
                     .about("Explain a CellScript runtime error code")
                     .arg(Arg::new("code").value_name("CODE").required(true).help("Runtime error code, E-code, or error name"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+            )
+            .subcommand(
+                ClapCommand::new("explain-profile")
+                    .about("Explain a CellScript target profile semantic contract")
+                    .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
             )
             .subcommand(
@@ -3814,6 +3916,10 @@ impl CliParser {
             }),
             Some(("explain", m)) => Command::Explain(ExplainArgs {
                 code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
+                json: m.get_flag("json"),
+            }),
+            Some(("explain-profile", m)) => Command::ExplainProfile(ExplainProfileArgs {
+                profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
                 json: m.get_flag("json"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {

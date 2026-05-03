@@ -24,6 +24,27 @@ v0.14 provides low-level Spawn/IPC and CKB Source/Witness semantics. It does not
 
 ---
 
+## Current Nightly Exploration Snapshot
+
+The `nightly-0.14` branch carries the prior `feat/ckb-surface` exploration as a
+working CKB semantic-completeness surface:
+
+| Track | Current nightly status |
+|---|---|
+| Spawn/IPC surface | Implemented as bounded verifier helper calls with metadata-visible runtime accesses. |
+| Spawn/IPC fd safety | Type checker rejects statically visible use-after-close, double-close, and leaked fd paths. |
+| Source views | `source::input`, `source::output`, `source::cell_dep`, `source::header_dep`, `source::group_input`, and `source::group_output` are typed and metadata-visible. |
+| Witness fields | `witness::raw`, `witness::lock`, `witness::input_type`, and `witness::output_type` are explicit CKB witness surfaces. |
+| Lock args source | Fixed-width `lock_args` parameters decode executing `Script.args`; this is data-source binding only, not signer authority. |
+| ScriptGroup metadata | Actions and locks expose entry kind, active group kind, selected Source surfaces, and group-scoped Source usage. |
+| outputs/outputs_data binding | CKB create outputs record index-aligned output-data bindings and metadata validation rejects missing or mismatched bindings. |
+| TYPE_ID/script references | TYPE_ID output plans, spawn targets, and read_ref CellDep references are surfaced in `constraints.ckb.script_references`. |
+| Since/time/capacity | Declarative since/time helpers and `with_capacity_floor(shannons)` are metadata-visible; builder capacity evidence remains required. |
+| Dynamic BLAKE2b | `hash_blake2b` remains fail-closed until a real linked RISC-V implementation has vectors, cycles, and profile policy. |
+| Examples | Language examples cover delegate verification, Spawn/IPC pipelines, witness/source views, TYPE_ID creation, capacity/time policy, and canonical lock-boundary style. |
+
+---
+
 ## 📋 What v0.14 Does NOT Redo
 
 The following capabilities are already delivered and will not be re-planned:
@@ -126,14 +147,15 @@ where
 |-------|--------|---------|
 | Lexer | New keywords | `spawn`, `pipe`, `pipe_write`, `pipe_read`, `wait`, `process_id`, `inherited_fd`, `close` added to TokenKind or stdlib builtin table |
 | AST | New nodes | `SpawnExpr`, `PipeExpr`, `WaitExpr` with typed fields |
-| Type checker | Argument validation | Verify spawn target is string literal or const, args are byte-serializable; fd usage tracking (no double-read, no use-after-close) |
+| Type checker | Argument validation | Verify spawn target is a string literal or `String` const; fd usage tracking rejects use-after-close, double-close, and leaked descriptors |
+| Metadata | Spawn target evidence | Emit runtime-required CellDep/DepGroup script-reference obligations for each spawn target so builders cannot treat a string name as authority |
 | IR | New instructions | `IrInstruction::Spawn`, `IrInstruction::Pipe`, `IrInstruction::PipeWrite`, `IrInstruction::PipeRead`, `IrInstruction::Wait`, `IrInstruction::Close` |
 | Codegen | Syscall mapping | `spawn` -> 2601, `wait` -> 2602, `process_id` -> 2603, `pipe` -> 2604, `pipe_write` -> 2605, `pipe_read` -> 2606, `inherited_fd` -> 2607, `close` -> 2608 |
 
 **Safety Constraints**:
 - Max VM spawn depth enforced at compile time (configurable, default 4)
 - Cycle budget allocation: shared budget model (parent + children share a total cycle limit, matching CKB's existing semantics)
-- File descriptor lifetime tracking: compiler warns on leaked fds
+- File descriptor lifetime tracking: compiler rejects use-after-close, double-close, and statically visible leaked fds
 - Spawn target resolution: must reference a known script (dep cell or inline)
 
 **Risk**: **MEDIUM** — Syscalls are stable; complexity is in DSL ergonomics and fd tracking
@@ -241,7 +263,7 @@ where
 
 | Item | Details |
 |------|---------|
-| ScriptGroup metadata | Emit `entry_group_kind`, input/output group index sets, selected Source view, and source-to-group mapping for every CKB entry |
+| ScriptGroup metadata | Emit entry kind, active lock/type group kind, selected Source surfaces, and group-scoped Source usage for every CKB entry |
 | Source conformance tests | Cover `Input`, `Output`, `CellDep`, `HeaderDep`, `GroupInput`, `GroupOutput`, out-of-bounds access, and wrong-profile access |
 | Output data binding | Emit output-data index obligations for every created or updated output; reject metadata where output data is detached from the output cell index |
 | TYPE_ID metadata validation MVP | For `#[type_id]` under CKB profile, validate output index, first-input args source, one-input/one-output group rule, duplicate output rejection, and missing-plan rejection |

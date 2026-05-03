@@ -22,6 +22,7 @@ The current project direction is simple:
 | Area | Current status | Detailed document |
 |---|---|---|
 | 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate now includes stateful business-flow/action coverage. | [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
+| 0.14 release scope | `nightly-0.14` carries the current CKB semantic-completeness exploration surface. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -53,6 +54,25 @@ Detailed status:
 - [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
 - [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 - [Syntax-combination audit methodology](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
+
+### 0.14: CKB Semantic Completeness
+
+0.14 exposes more of CKB's concrete execution surface without hiding lock/type
+boundaries:
+
+- Spawn/IPC builtins for bounded verifier reuse;
+- explicit Source views, typed fixed-width lock args, and structured
+  WitnessArgs field access;
+- target profile metadata for witness ABI, lock args ABI, Source encoding,
+  Spawn/IPC ABI, since semantics, CellDep ABI, script reference ABI,
+  outputs/outputs_data ABI, capacity floor ABI, TYPE_ID ABI, and tx version;
+- declarative since/time and capacity surfaces;
+- fail-closed dynamic BLAKE2b policy until a real linked implementation exists.
+
+Detailed status:
+
+- [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
 
 ### Next Authorization Hardening Track
 

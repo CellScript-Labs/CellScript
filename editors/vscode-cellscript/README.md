@@ -52,6 +52,8 @@ outside the LSP scope.
   field-to-field state moves, locks, source-qualified parameters, effects,
   named output `create ... = ... with_lock`, anonymous `require` blocks,
   `preserve` blocks, and stdlib lifecycle/cell metadata helpers
+- 0.14 lock-boundary snippets and highlighting for `protected`, `lock_args`,
+  `witness`, `require`, `source::*`, `witness::*`, and `env::sighash_all`
 - status bar state indicator
 
 ## 0.13 Authoring Surface

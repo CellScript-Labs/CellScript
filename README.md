@@ -67,6 +67,21 @@ It is not yet recommended for unaudited mainnet deployment without manual
 review. The current focus is developer-readiness, diagnostics, ProofPlan /
 metadata visibility, and CKB target-profile stability.
 
+## Current Status
+
+CellScript is currently in a CKB-focused alpha / stabilisation phase.
+
+It is suitable for:
+- experimenting with CKB Cell-contract authoring;
+- compiling and inspecting the bundled examples;
+- exploring typed Cell effects, metadata, constraints, and CKB target-profile
+  checks;
+- trying the local VS Code extension and LSP tooling.
+
+It is not yet recommended for unaudited mainnet deployment without manual
+review. The current focus is developer-readiness, diagnostics, ProofPlan /
+metadata visibility, and CKB target-profile stability.
+
 ## Quick Start
 
 Install from this repository:
@@ -386,6 +401,9 @@ CellScript includes production-style local language tooling for early users:
 - [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
 - [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
+- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
 
 ---
 
@@ -506,7 +524,7 @@ treated as deployable.
 ```mermaid
 flowchart TB
     Source[".cell source + Cell.toml\n--target-profile ckb"] --> Frontend["Lexer + parser\nstable source spans"]
-    Frontend --> Semantics["Type + state checks\nlinear resources, verifier require,\ninput/output/protected/witness classification"]
+    Frontend --> Semantics["Type + state checks\nlinear resources, verifier require,\ninput/output/protected/witness/lock_args classification"]
     Semantics --> Policy["CKB policy gate\nfail closed on unsupported runtime or state shapes"]
 
     subgraph Rules["CKB profile rules"]
@@ -543,7 +561,7 @@ This separates three boundaries:
 Capacity in this profile has two layers. `with_capacity_floor(shannons)`
 declares a type-level output floor that is visible in metadata and constraints.
 `occupied_capacity("TypeName")` keeps runtime-visible capacity checks available.
-Neither supersedes builder evidence: the final transaction still has to measure
+Neither replaces builder evidence: the final transaction still has to measure
 occupied capacity, provide enough output capacity, and record tx-size evidence.
 
 ### Wasm Gate

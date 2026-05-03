@@ -312,7 +312,7 @@ of hiding it behind account-style authorization language.
 | `protected T` | Typed view of the Cell state guarded by this lock invocation. | One selected input Cell in the current script group, not an output Cell and not a transaction-wide scan. |
 | `witness T` | Typed value decoded from transaction witness data. | User-supplied witness bytes decoded by the entry ABI. It is not a signer proof. |
 | `require expr` / `require expr, "message"` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. The optional string message is kept for source readability and tooling. |
-| `lock_args T` | Typed script args for lock parameters. | Fixed-width bytes decoded from the executing lock script's `Script.args`. |
+| `lock_args T` | Typed fixed-width value decoded from the executing script args. | CKB `Script.args` data for this lock invocation. It is not a signer proof. |
 
 Use `require` for verifier guards inside actions and locks. Use
 `assert` for ordinary internal sanity checks where the condition is not
@@ -337,24 +337,30 @@ lock misleading(protected wallet: Wallet, witness signer: Address) -> bool {
 ```
 
 Real CKB authorization needs explicit binding to script args, transaction digest
-scope, witness layout, and signature verification. `lock_args` provides the
-script-args binding today; the signature verification primitive remains
-deliberately explicit:
+scope, witness layout, and signature verification. Script args can now be named
+explicitly, but signature verification is still deliberately not implicit:
 
 ```cellscript
-lock signed_owner(
-    protected wallet: Wallet,
-    lock_args owner: Address,
-    witness sig: Signature
+lock owner_boundary(
+    wallet: protected Wallet,
+    owner: lock_args Address,
+    claimed_owner: witness Address
 ) -> bool {
-    require verify_sighash_all(sig, owner)
+    let input = source::group_input(0)
+    let witness_lock = witness::lock(input)
+    let digest = env::sighash_all(input)
     require wallet.owner == owner
+    require claimed_owner == owner
+    require witness_lock == digest
 }
 ```
 
-Until those primitives are available, treat `Address` and `witness Address` as
-data only. They are useful for expressing and testing lock predicates, but they
-are not cryptographic authorization by themselves.
+`lock_args Address` tells the reader where the owner value comes from. It still
+does not prove a signature. `env::sighash_all(input)` makes the digest surface
+visible, and `witness::lock(input)` makes the witness field visible, but the
+example above is still a boundary-classification example. Until explicit
+signature verification primitives are available, treat `Address`,
+`lock_args Address`, and `witness Address` as data only.
 
 `lock_args Address` is already bound to the executing lock script's typed
 `Script.args` bytes. That makes it a stable script-argument value, but it still

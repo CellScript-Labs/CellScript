@@ -11,7 +11,8 @@ stable surface rather than act as release logs.
 
 ## Release Notes
 
-`docs/releases/` contains finalized release notes.
+`docs/releases/` contains finalized release notes and active release-note
+drafts.
 
 - `docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` is the final 0.13.2
   release note and the canonical 0.13 release summary.
@@ -20,6 +21,8 @@ stable surface rather than act as release logs.
 - `docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md` is a
   community-facing summary of the 0.13.2 CKB acceptance and stateful flow
   evidence.
+- `docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md` tracks the active
+  0.14 nightly release-note draft.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
