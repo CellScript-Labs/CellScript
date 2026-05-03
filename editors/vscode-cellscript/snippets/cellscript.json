@@ -140,6 +140,27 @@
     ],
     "description": "Require output.type_hash == input.type_hash"
   },
+  "Stdlib Preserve Lock": {
+    "prefix": "std-cell-preserve-lock",
+    "body": [
+      "std::cell::preserve_lock(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.lock_hash == input.lock_hash"
+  },
+  "Stdlib Preserve Type": {
+    "prefix": "std-cell-preserve-type",
+    "body": [
+      "std::cell::preserve_type(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.type_hash == input.type_hash"
+  },
+  "Stdlib Preserve Capacity": {
+    "prefix": "std-cell-preserve-capacity",
+    "body": [
+      "std::cell::preserve_capacity(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.capacity == input.capacity"
+  },
   "Stdlib Transfer": {
     "prefix": "std-lifecycle-transfer",
     "body": [
@@ -148,16 +169,25 @@
       "    ${5:field2}",
       "}"
     ],
-    "description": "Consume input, require type_hash preservation, and preserve listed fields"
+    "description": "Consume input, lock output, and preserve all output fields"
   },
   "Stdlib Claim": {
     "prefix": "std-receipt-claim",
     "body": [
-      "std::receipt::claim(${1:receipt}, ${2:output}) {",
-      "    ${3:field1}",
+      "std::receipt::claim(${1:receipt}, ${2:output}, ${3:lock}) {",
+      "    ${4:field1}",
       "}"
     ],
-    "description": "Consume receipt with optional field preservation to output"
+    "description": "Consume receipt and create locked output preserving all output fields"
+  },
+  "Stdlib Settle": {
+    "prefix": "std-lifecycle-settle",
+    "body": [
+      "std::lifecycle::settle(${1:input}, ${2:output}, ${3:lock}) {",
+      "    ${4:field1}",
+      "}"
+    ],
+    "description": "Consume input and create locked output preserving all output fields"
   },
   "Stdlib Conserved": {
     "prefix": "std-accounting-conserved",

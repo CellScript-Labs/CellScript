@@ -172,8 +172,8 @@ resource Token has store, transfer, destroy {
 ```
 
 Resources are linear values. When an action receives one, the action must say
-where it goes: consume it, validate a proposed output, transfer it, return
-it, claim it, settle it, or destroy it.
+where it goes: consume it, validate a proposed output, return it, destroy it,
+or use an explicit stdlib lifecycle pattern for transfer, claim, or settle.
 
 Persistent declarations can also declare the default CKB script hash type used
 for their type identity metadata:

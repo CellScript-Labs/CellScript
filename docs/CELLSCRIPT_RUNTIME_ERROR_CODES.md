@@ -38,13 +38,13 @@ When a CLI failure can be tied to this registry, stderr uses the same
 | 16 | `dynamic-field-bounds-invalid` | A Molecule dynamic field offset or length failed bounds validation. | Validate Molecule table offsets, field count, and dynamic field lengths. |
 | 17 | `type-hash-mismatch` | A loaded cell type hash did not match the expected CellScript type identity. | Check type script hash/hash_type/args and the expected CellScript type identity. |
 | 18 | `fixed-byte-comparison-unresolved` | A fixed-byte verifier comparison could not resolve its trusted source bytes. | Use schema-backed parameters or fixed-byte values that the verifier can address. |
-| 19 | `claim-signature-failed` | Claim authorization signature verification failed. | Check the authorization domain, signer public key hash, signature, and target profile. |
 | 20 | `numeric-or-discriminant-invalid` | A numeric verifier check, enum discriminant, or arithmetic guard failed. | Check enum tags, arithmetic bounds, and generated collection length arithmetic. |
 | 21 | `collection-bounds-invalid` | A runtime collection index, length, or capacity check failed. | Check collection length, index, and capacity values in witness or cell data. |
 | 22 | `consume-invalid-operand` | A consume operation or target-profile runtime primitive reached an unsupported operand/path. | Inspect compiler metadata blockers and target-profile policy output. |
 | 23 | `destroy-invalid-operand` | A destroy operation reached codegen with an invalid or unsupported operand. | This indicates an unsupported lowering path; inspect compiler metadata blockers. |
 | 24 | `collection-runtime-unsupported` | A runtime collection helper shape is not supported by the current backend. | Avoid advertising this collection helper as production-ready until support is implemented. |
 | 25 | `entry-witness-abi-invalid` | Entry witness payload layout, width, or parameter ABI placement was invalid. | Inspect `cellc constraints` or `cellc abi` output for parameter slots and witness byte layout. |
+| 26 | `capacity-preservation-mismatch` | A proposed output did not preserve the consumed input capacity. | Check the proposed output capacity and builder output ordering. |
 | 32 | `dynamic-field-value-mismatch` | A dynamic Molecule field value did not match the expected verifier source. | Check dynamic Molecule field encoding and the value source used by the verifier. |
 
 ## Stability
@@ -52,4 +52,4 @@ When a CLI failure can be tied to this registry, stderr uses the same
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `26` through `31`, and values above `32` are currently reserved.
+- Codes `6`, `19`, `27` through `31`, and values above `32` are currently reserved.

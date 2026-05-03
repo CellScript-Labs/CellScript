@@ -242,7 +242,7 @@ is dangerous because newly added fields may be accidentally preserved or acciden
 
 In 0.13.1, `preserve` applies only to resource data fields.
 
-It does **not** preserve Cell metadata such as:
+Cell metadata such as:
 
 ```text
 lock
@@ -250,21 +250,21 @@ type
 capacity
 ```
 
-Those remain explicit for now:
+is handled through explicit constraints or compiler-recognized stdlib patterns:
 
 ```cellscript
 require output.lock_hash == input.lock_hash
 require output.type_hash == input.type_hash
 require output.capacity == input.capacity
-```
-Future versions may consider standard-library helpers such as:
 
-```cellscript
 std::cell::same_lock(output, input)
 std::cell::same_type(output, input)
+std::cell::preserve_lock(output, input)
+std::cell::preserve_type(output, input)
+std::cell::preserve_capacity(output, input)
 ```
 
-or later namespaced sugar, but these should not be part of 0.13.1 core.
+These helpers are Layer 3 stdlib patterns, not 0.13.1 core syntax.
 
 ### Relationship to Existing IR `preserved_fields`
 
@@ -432,11 +432,11 @@ Layer 4: Avoided                — policy primitives, preserve all/except
 
 Key governance decisions for 0.13.1:
 
-- `claim`, `settle`, `transfer` should be **removed from core** and
-  deprecated with a three-phase timeline (0.13.1 warn → 0.14.0 remove → 0.15.0 stdlib).
+- `claim`, `settle`, `transfer` are **removed from core** and represented as
+  compiler-recognized stdlib patterns.
 - Core input-fate verbs are reduced to `consume` and `destroy` only.
 - `preserve` and `require` block are accepted as Layer 2 local sugar.
-- All higher-level patterns move to future stdlib namespaces
+- All higher-level patterns live in stdlib namespaces
   (`std::cell`, `std::accounting`, `std::receipt`, `std::lifecycle`, `std::ckb`).
 
 ---

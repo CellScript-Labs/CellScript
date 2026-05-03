@@ -543,8 +543,8 @@ pub enum EffectClass {
 /// Stdlib call expression: `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`
 ///
 /// Each stdlib pattern has a canonical expansion into core CellScript.
-/// Constraint patterns (same_lock, same_type, etc.) expand to `require` constraints.
-/// Lifecycle patterns (transfer, claim) expand to `consume` + `require` sequences.
+/// Constraint patterns expand to `require` constraints or canonical verifier metadata checks.
+/// Lifecycle patterns expand to `consume` plus explicit output and verifier constraints.
 #[derive(Debug, Clone)]
 pub struct StdlibCallExpr {
     pub namespace: String,

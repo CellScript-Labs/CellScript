@@ -66,8 +66,6 @@ pub const CKB_BLANK_HASH: [u8; 32] = [
     181, 99, 61, 22, 62,
 ];
 const METADATA_MUTATE_CELL_BUFFER_SIZE: usize = 512;
-const CLAIM_SIGNER_PUBKEY_HASH_FIELDS: [&str; 5] =
-    ["signer_pubkey_hash", "claim_pubkey_hash", "owner_pubkey_hash", "beneficiary_pubkey_hash", "pubkey_hash"];
 const CKB_TYPE_ID_CODE_HASH: [u8; 32] =
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'T', b'Y', b'P', b'E', b'_', b'I', b'D'];
 const CKB_TYPE_ID_ABI: &str = "ckb-type-id-v1";
@@ -3826,6 +3824,10 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand } => {
             collect_operand_named_types(operand, used_types);
         }
+        ir::IrInstruction::CellMetadataEquality { left, right, .. } => {
+            collect_operand_named_types(left, used_types);
+            collect_operand_named_types(right, used_types);
+        }
         ir::IrInstruction::Create { dest, pattern } => {
             collect_ir_type_named_types(&dest.ty, used_types);
             used_types.insert(pattern.ty.clone());
@@ -4733,6 +4735,11 @@ fn body_transaction_resource_obligations(
                         checks.push(check);
                     }
                 }
+                ir::IrInstruction::CellMetadataEquality { left, right, field } => {
+                    if let Some(check) = cell_metadata_equality_obligation(left, right, *field) {
+                        checks.push(check);
+                    }
+                }
                 ir::IrInstruction::Destroy { operand } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
                         checks.push(check);
@@ -4783,6 +4790,40 @@ fn operation_input_data_obligation(
             type_name, binding, component
         ),
     })
+}
+
+fn cell_metadata_equality_obligation(
+    left: &ir::IrOperand,
+    right: &ir::IrOperand,
+    field: ir::CellMetadataField,
+) -> Option<TransactionResourceObligation> {
+    let left_binding = operand_var_name(left)?;
+    let right_binding = operand_var_name(right)?;
+    let field_name = cell_metadata_field_name(field);
+    Some(TransactionResourceObligation {
+        category: "transaction-invariant",
+        feature: format!("cell-metadata-equality:{}:{}:{}", field_name, left_binding, right_binding),
+        status: "checked-runtime",
+        detail: format!(
+            "Compiler-emitted runtime verifier compares cell metadata '{}' for '{}' and '{}'; cell-metadata-{}=checked-runtime",
+            field_name, left_binding, right_binding, field_name
+        ),
+    })
+}
+
+fn cell_metadata_field_name(field: ir::CellMetadataField) -> &'static str {
+    match field {
+        ir::CellMetadataField::LockHash => "lock_hash",
+        ir::CellMetadataField::Capacity => "capacity",
+    }
+}
+
+fn cell_metadata_field_byte_len(field_name: &str) -> Option<usize> {
+    match field_name {
+        "lock_hash" => Some(32),
+        "capacity" => Some(8),
+        _ => None,
+    }
 }
 
 fn read_ref_cell_dep_data_obligations(body: &ir::IrBody) -> Vec<TransactionResourceObligation> {
@@ -5433,6 +5474,8 @@ fn transaction_runtime_input_requirements_from_obligations(
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
         let include_checked_create_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("create-output:");
+        let include_checked_cell_metadata =
+            obligation.status == "checked-runtime" && obligation.feature.starts_with("cell-metadata-equality:");
         let include_checked_resource_conservation =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("resource-conservation:");
         if obligation.category != "transaction-invariant"
@@ -5441,6 +5484,7 @@ fn transaction_runtime_input_requirements_from_obligations(
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
+                && !include_checked_cell_metadata
                 && !include_checked_resource_conservation)
         {
             continue;
@@ -5544,6 +5588,29 @@ fn transaction_runtime_input_requirements_from_obligations(
                 }
                 _ => {}
             }
+        } else if let Some(rest) = obligation.feature.strip_prefix("cell-metadata-equality:") {
+            let Some((field_name, bindings)) = rest.split_once(':') else {
+                continue;
+            };
+            let binding = bindings.to_string();
+            let component = format!("cell-metadata-{}", field_name);
+            let abi = format!(
+                "cell-metadata-{}-equality-{}",
+                field_name.replace('_', "-"),
+                cell_metadata_field_byte_len(field_name).unwrap_or(0)
+            );
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                &component,
+                "checked-runtime",
+                None,
+                None,
+                "InputOutput",
+                &binding,
+                Some(field_name),
+                &abi,
+                cell_metadata_field_byte_len(field_name),
+            ));
         } else if let Some(binding) = obligation.feature.strip_prefix("linear-collection:") {
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
@@ -9648,10 +9715,10 @@ fn metadata_fixed_scalar_const_value(value: &ir::IrConst) -> Option<u64> {
 }
 
 fn body_ckb_runtime_features(
-    name: &str,
+    _name: &str,
     body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
+    _cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    _type_layouts: &MetadataTypeLayouts,
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
     if !body.consume_set.is_empty() {
@@ -9666,13 +9733,6 @@ fn body_ckb_runtime_features(
     if !body.mutate_set.is_empty() {
         features.insert("mutate-input-cell".to_string());
         features.insert("verify-mutate-output-cell".to_string());
-    }
-    if body_has_claim_witness_authorization_domain_check(name, body, cell_type_kinds, type_layouts) {
-        features.insert("load-claim-witness".to_string());
-        features.insert("load-claim-ecdsa-signature-hash".to_string());
-    }
-    if body_has_claim_witness_signature_verification_check(name, body, cell_type_kinds, type_layouts) {
-        features.insert("verify-claim-secp256k1-signature".to_string());
     }
     for block in &body.blocks {
         for instruction in &block.instructions {
@@ -9757,79 +9817,6 @@ fn is_executable_destroy(operand: &ir::IrOperand) -> bool {
     operand_named_type_name(operand).is_some()
 }
 
-fn body_has_claim_witness_authorization_domain_check(
-    name: &str,
-    body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    body.consume_set
-        .iter()
-        .any(|pattern| is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts))
-}
-
-fn body_has_claim_witness_signature_verification_check(
-    name: &str,
-    body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    body.consume_set
-        .iter()
-        .any(|pattern| is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts))
-}
-
-fn is_claim_witness_authorization_domain_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if pattern.operation == "claim" {
-        return true;
-    }
-    if pattern.operation != "consume" || !name.starts_with("claim") {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some()
-}
-
-fn is_claim_witness_signature_verification_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if !is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts) {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some()
-}
-
-fn cell_pattern_receipt_type_name<'a>(
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &'a HashMap<String, ir::IrTypeKind>,
-) -> Option<&'a str> {
-    let type_hash = pattern.type_hash?;
-    cell_type_kinds.iter().find_map(|(type_name, kind)| {
-        (*kind == ir::IrTypeKind::Receipt && ir::type_hash_for_name(type_name) == type_hash).then_some(type_name.as_str())
-    })
-}
-
-fn metadata_claim_signer_pubkey_hash_field<'a>(type_name: &str, type_layouts: &'a MetadataTypeLayouts) -> Option<&'a str> {
-    let fields = type_layouts.get(type_name)?;
-    CLAIM_SIGNER_PUBKEY_HASH_FIELDS.iter().find_map(|field| {
-        let layout = fields.get(*field)?;
-        (metadata_layout_fixed_byte_width(layout) == Some(20)).then_some(*field)
-    })
-}
-
 fn schema_pointer_var_ids(body: &ir::IrBody, params: &[ir::IrParam]) -> BTreeSet<usize> {
     let mut vars =
         params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
@@ -9860,10 +9847,10 @@ fn consumed_schema_var_id(instruction: &ir::IrInstruction) -> Option<usize> {
 }
 
 fn body_ckb_runtime_accesses(
-    name: &str,
+    _name: &str,
     body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
+    _cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    _type_layouts: &MetadataTypeLayouts,
 ) -> Vec<CkbRuntimeAccessMetadata> {
     let mut accesses = Vec::new();
     for (index, pattern) in body.consume_set.iter().enumerate() {
@@ -9874,31 +9861,6 @@ fn body_ckb_runtime_accesses(
             index,
             binding: pattern.binding.clone(),
         });
-        if is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts) {
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-witness".to_string(),
-                syscall: "LOAD_WITNESS".to_string(),
-                source: "GroupInput".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-authorization-domain".to_string(),
-                syscall: "LOAD_ECDSA_SIGNATURE_HASH".to_string(),
-                source: "GroupInput".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-        }
-        if is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts) {
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-signature".to_string(),
-                syscall: "SECP256K1_VERIFY".to_string(),
-                source: "Witness".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-        }
     }
     for (index, pattern) in body.read_refs.iter().enumerate() {
         accesses.push(CkbRuntimeAccessMetadata {
@@ -15530,6 +15492,27 @@ where
     fn compile_rejects_string_literals_as_runtime_values() {
         let err = compile(STRING_VALUE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("string literals are only supported in metadata positions"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_cell_metadata_stdlib_on_non_cell_args() {
+        let source = r#"
+module test
+
+resource Coin has store {
+    amount: u64
+}
+
+action bad(amount: u64) -> out: Coin
+where
+    std::cell::preserve_capacity(out, amount)
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(
+            err.message.contains("std::cell::preserve_capacity input must be a cell-backed value"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

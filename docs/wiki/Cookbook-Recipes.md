@@ -29,7 +29,8 @@ resource Token has store, transfer, destroy {
 ```
 
 The compiler tracks `Token` as a linear value. An action that receives a token
-must consume, return, transfer, claim, settle, or destroy it.
+must consume, return, destroy, or pass it through an explicit stdlib lifecycle
+pattern such as transfer, claim, or settle.
 
 ## Recipe: Mint A New Output Cell
 

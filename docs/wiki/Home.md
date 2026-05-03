@@ -76,8 +76,9 @@ That is why the language has:
 
 - `resource`, `shared`, and `receipt` for persistent Cell-backed values;
 - explicit effects such as `consume`, `create`, action-boundary `read`
-  parameters, expression-level `read_ref<T>()`, `transfer`, `destroy`, `claim`,
-  and `settle`;
+  parameters, expression-level `read_ref<T>()`, and `destroy`;
+- compiler-recognized stdlib lifecycle patterns for explicit transfer, claim,
+  and settle expansions;
 - `action` entries for type-script style state transitions;
 - `lock` entries for spend-boundary predicates;
 - `protected`, `witness`, and `require` so lock source data and failure points

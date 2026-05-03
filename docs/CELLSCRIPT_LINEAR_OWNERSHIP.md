@@ -3,15 +3,16 @@
 **Status**: production semantics for the current CellScript CKB profile.
 
 CellScript treats cell-backed resources as linear values. A linear value cannot
-be copied, silently dropped, or used after it has been consumed, transferred,
-destroyed, claimed, settled, or moved into an input/output transition.
+be copied, silently dropped, or used after it has been consumed, destroyed,
+moved into an input/output transition, or consumed by a stdlib lifecycle
+pattern such as transfer, claim, or settle.
 
 ## Compile-Time Rules
 
 The type checker enforces:
 
-- values are unavailable after `consume`, `transfer`, `destroy`, `claim`, or
-  `settle`
+- values are unavailable after `consume`, `destroy`, or a stdlib lifecycle
+  pattern that consumes the value
 - both branches of `if` and `match` must leave linear values in compatible
   ownership states
 - loops cannot hide linear state changes that would make ownership depend on
@@ -28,10 +29,8 @@ ownership model.
 
 Every acquired cell-backed value must reach an explicit terminal operation:
 
-- `transfer`
 - `destroy`
-- `claim`
-- `settle`
+- stdlib lifecycle transfer, claim, or settle pattern
 - named output binding
 - another verified operation documented in metadata
 

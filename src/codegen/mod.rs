@@ -18,8 +18,6 @@ const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = 2074;
 const CKB_LOAD_SCRIPT_SYSCALL_NUMBER: u64 = 2052;
 const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = 2081;
 const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
-const CLAIM_SECP256K1_VERIFY_SYSCALL_NUMBER: u64 = 3002;
-const CLAIM_LOAD_ECDSA_SIGNATURE_HASH_SYSCALL_NUMBER: u64 = 3004;
 const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = 1;
 const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = 2;
@@ -31,11 +29,11 @@ const CKB_SOURCE_HEADER_DEP: u64 = 0x04;
 const CKB_SOURCE_GROUP_FLAG: u64 = 0x0100_0000_0000_0000;
 const CKB_SOURCE_GROUP_INPUT: u64 = 0x0100;
 const CKB_SOURCE_GROUP_OUTPUT: u64 = 0x0200;
+const CKB_CELL_FIELD_CAPACITY: u64 = 0;
 const CKB_CELL_FIELD_LOCK_HASH: u64 = 3;
 const CKB_CELL_FIELD_TYPE_HASH: u64 = 5;
 const CKB_INDEX_OUT_OF_BOUND: u64 = 1;
 const CKB_ITEM_MISSING: u64 = 2;
-const CKB_SIG_HASH_ALL: u64 = 1;
 const RUNTIME_SCRATCH_BUFFER_SIZE: usize = 512;
 const RUNTIME_SCRATCH_SLOT_SIZE: usize = 8 + RUNTIME_SCRATCH_BUFFER_SIZE;
 const RUNTIME_SCRATCH_SIZE: usize = RUNTIME_SCRATCH_SLOT_SIZE * 2;
@@ -58,9 +56,6 @@ const ENTRY_WITNESS_FRAME_SIZE: usize = 2304;
 const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
 const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
 const ENTRY_WITNESS_RA_OFFSET: usize = ENTRY_WITNESS_FRAME_SIZE - 8;
-const CLAIM_SIGNER_PUBKEY_HASH_FIELDS: [&str; 5] =
-    ["signer_pubkey_hash", "claim_pubkey_hash", "owner_pubkey_hash", "beneficiary_pubkey_hash", "pubkey_hash"];
-const CLAIM_AUTH_LOCK_HASH_FIELDS: [&str; 5] = ["beneficiary", "owner", "recipient", "authority", "admin"];
 
 #[derive(Debug, Clone, Copy)]
 struct RuntimeSyscallAbi {
@@ -70,8 +65,6 @@ struct RuntimeSyscallAbi {
     load_script: u64,
     load_cell_by_field: u64,
     load_cell_data: u64,
-    secp256k1_verify: u64,
-    load_ecdsa_signature_hash: u64,
     source_group_input: u64,
     source_header_dep: u64,
 }
@@ -83,9 +76,6 @@ const CKB_RUNTIME_SYSCALL_ABI: RuntimeSyscallAbi = RuntimeSyscallAbi {
     load_script: CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
     load_cell_by_field: CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER,
     load_cell_data: CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
-    // Claim helper syscalls are rejected by CKB profile policy before codegen.
-    secp256k1_verify: CLAIM_SECP256K1_VERIFY_SYSCALL_NUMBER,
-    load_ecdsa_signature_hash: CLAIM_LOAD_ECDSA_SIGNATURE_HASH_SYSCALL_NUMBER,
     source_group_input: CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT,
     source_header_dep: CKB_SOURCE_HEADER_DEP,
 };
@@ -2381,16 +2371,6 @@ impl CodeGenerator {
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
                 self.emit_stack_store("t0", var_id * 8);
-                if self.should_emit_claim_witness_authorization_domain_check(pattern, var_id) {
-                    let signer_source = self.claim_signer_pubkey_hash_source(var_id);
-                    self.emit_claim_witness_authorization_domain_check(input_index, &pattern.binding, signer_source.as_ref());
-                } else if pattern.operation == "consume"
-                    && self.current_function.as_deref().is_some_and(|name| name.starts_with("claim"))
-                {
-                    if let Some(lock_hash_source) = self.claim_auth_lock_hash_source(var_id) {
-                        self.emit_claim_input_lock_hash_binding_check(input_index, &pattern.binding, &lock_hash_source);
-                    }
-                }
                 if pattern.operation == "destroy" {
                     self.emit_destroy_group_output_absence_scan(pattern, input_index);
                 }
@@ -2400,9 +2380,6 @@ impl CodeGenerator {
 
         self.emit_load_cell_data_syscall(&pattern.operation, CKB_SOURCE_INPUT, index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        if pattern.operation == "claim" {
-            self.emit_claim_witness_authorization_domain_check(index, &pattern.binding, None);
-        }
         if pattern.operation == "destroy" {
             self.emit_destroy_group_output_absence_scan(pattern, index);
         }
@@ -2677,6 +2654,9 @@ impl CodeGenerator {
             }
             IrInstruction::Destroy { operand } => {
                 self.emit_destroy(operand)?;
+            }
+            IrInstruction::CellMetadataEquality { left, right, field } => {
+                self.emit_cell_metadata_equality(left, right, *field)?;
             }
         }
         Ok(())
@@ -3222,32 +3202,6 @@ impl CodeGenerator {
         self.emit("# a0 = CKB syscall return code");
     }
 
-    fn emit_load_ecdsa_signature_hash_syscall_to_offsets(
-        &mut self,
-        reason: &str,
-        source: u64,
-        index: usize,
-        hash_type_reg: &str,
-        size_offset: usize,
-        buffer_offset: usize,
-        max_bytes: usize,
-    ) {
-        self.emit(format!(
-            "# cellscript abi: LOAD_ECDSA_SIGNATURE_HASH reason={} source={} index={} hash_type={}",
-            reason,
-            ckb_source_name(source),
-            index,
-            hash_type_reg
-        ));
-        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
-        self.emit(format!("li a3, {}", index));
-        self.emit(format!("li a4, {}", source));
-        self.emit(format!("addi a5, {}, 0", hash_type_reg));
-        self.emit(format!("li a7, {}", self.runtime_abi().load_ecdsa_signature_hash));
-        self.emit("ecall");
-        self.emit("# a0 = CKB syscall return code");
-    }
-
     fn emit_load_cell_by_field_syscall_to_offsets(
         &mut self,
         reason: &str,
@@ -3477,180 +3431,93 @@ impl CodeGenerator {
         }
     }
 
-    fn should_emit_claim_witness_authorization_domain_check(&self, pattern: &CellPattern, var_id: usize) -> bool {
-        if pattern.operation == "claim" {
-            return true;
-        }
-        if pattern.operation != "consume" {
-            return false;
-        }
-        if !self.current_function.as_deref().is_some_and(|name| name.starts_with("claim")) {
-            return false;
-        }
-        self.claim_signer_pubkey_hash_source(var_id).is_some()
-    }
+    fn emit_cell_metadata_equality(&mut self, left: &IrOperand, right: &IrOperand, field: CellMetadataField) -> Result<()> {
+        let Some((left_source, left_index)) = self.operand_cell_location(left) else {
+            self.emit("# cellscript abi: fail closed because left cell metadata source cannot be determined");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        let Some((right_source, right_index)) = self.operand_cell_location(right) else {
+            self.emit("# cellscript abi: fail closed because right cell metadata source cannot be determined");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        let (cell_field, field_name, width, mismatch_error) = match field {
+            CellMetadataField::LockHash => {
+                (CKB_CELL_FIELD_LOCK_HASH, "lock_hash", 32usize, CellScriptRuntimeError::LockHashPreservationMismatch)
+            }
+            CellMetadataField::Capacity => {
+                (CKB_CELL_FIELD_CAPACITY, "capacity", 8usize, CellScriptRuntimeError::CapacityPreservationMismatch)
+            }
+        };
 
-    fn claim_signer_pubkey_hash_source(&self, var_id: usize) -> Option<SchemaFieldValueSource> {
-        let type_name = self.consume_type_names.get(&var_id)?;
-        if !self.receipt_type_names.contains(type_name) {
-            return None;
-        }
-        let fields = self.type_layouts.get(type_name)?;
-        CLAIM_SIGNER_PUBKEY_HASH_FIELDS.iter().find_map(|field| {
-            let layout = fields.get(*field)?.clone();
-            (layout_fixed_byte_width(&layout) == Some(20)).then(|| SchemaFieldValueSource {
-                obj_var_id: var_id,
-                type_name: type_name.clone(),
-                field: (*field).to_string(),
-                layout,
-            })
-        })
-    }
+        let left_size_offset = self.runtime_scratch_size_offset();
+        let left_buffer_offset = self.runtime_scratch_buffer_offset();
+        let right_size_offset = self.runtime_scratch2_size_offset();
+        let right_buffer_offset = self.runtime_scratch2_buffer_offset();
 
-    fn claim_auth_lock_hash_source(&self, var_id: usize) -> Option<SchemaFieldValueSource> {
-        let type_name = self.consume_type_names.get(&var_id)?;
-        if !self.receipt_type_names.contains(type_name) {
-            return None;
-        }
-        let fields = self.type_layouts.get(type_name)?;
-        CLAIM_AUTH_LOCK_HASH_FIELDS.iter().find_map(|field| {
-            let layout = fields.get(*field)?.clone();
-            (layout_fixed_byte_width(&layout) == Some(32)).then(|| SchemaFieldValueSource {
-                obj_var_id: var_id,
-                type_name: type_name.clone(),
-                field: (*field).to_string(),
-                layout,
-            })
-        })
-    }
-
-    fn emit_claim_input_lock_hash_binding_check(&mut self, input_index: usize, binding: &str, source: &SchemaFieldValueSource) {
-        let size_offset = self.runtime_scratch_size_offset();
-        let buffer_offset = self.runtime_scratch_buffer_offset();
-        self.emit(format!(
-            "# cellscript abi: claim input lock-hash binding binding={} source=Input index={} field={}.{}",
-            binding, input_index, source.type_name, source.field
-        ));
         self.emit_load_cell_by_field_syscall_to_offsets(
-            "claim_input_lock_hash",
-            CKB_SOURCE_INPUT,
-            input_index,
-            CKB_CELL_FIELD_LOCK_HASH,
-            size_offset,
-            buffer_offset,
+            &format!("cell_metadata_left_{}", field_name),
+            left_source,
+            left_index,
+            cell_field,
+            left_size_offset,
+            left_buffer_offset,
             RUNTIME_SCRATCH_BUFFER_SIZE,
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        self.emit_loaded_schema_exact_size_check(size_offset, 32, "claim input lock hash");
-        self.emit("# cellscript abi: verify claim input lock hash offset=0 size=32");
-        if self.emit_schema_field_source_pointer_to("a1", source, 32) {
-            self.emit_sp_addi("a0", buffer_offset);
-            self.emit("li a2, 32");
-            self.emit("call __cellscript_memcmp_fixed");
-            let ok_label = self.fresh_label("claim_input_lock_hash_ok");
-            self.emit(format!("beqz a0, {}", ok_label));
-            self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+        self.emit_load_cell_by_field_syscall_to_offsets(
+            &format!("cell_metadata_right_{}", field_name),
+            right_source,
+            right_index,
+            cell_field,
+            right_size_offset,
+            right_buffer_offset,
+            RUNTIME_SCRATCH_BUFFER_SIZE,
+        );
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+        self.emit_loaded_schema_exact_size_check(left_size_offset, width, &format!("cell metadata left {}", field_name));
+        self.emit_loaded_schema_exact_size_check(right_size_offset, width, &format!("cell metadata right {}", field_name));
+        self.emit(format!(
+            "# cellscript abi: verify cell metadata {} equality {}#{} == {}#{} size={}",
+            field_name,
+            ckb_source_name(left_source),
+            left_index,
+            ckb_source_name(right_source),
+            right_index,
+            width
+        ));
+        self.emit_sp_addi("t4", left_buffer_offset);
+        self.emit_sp_addi("t5", right_buffer_offset);
+        for byte_index in 0..width {
+            self.emit(format!("lbu t0, {}(t4)", byte_index));
+            self.emit(format!("lbu t1, {}(t5)", byte_index));
+            self.emit("sub t2, t0, t1");
+            let ok_label = self.fresh_label("cell_metadata_byte_ok");
+            self.emit(format!("beqz t2, {}", ok_label));
+            self.emit_runtime_error_comment(mismatch_error);
+            self.emit(format!("li a0, {}", mismatch_error.code()));
+            self.emit_epilogue();
             self.emit_label(&ok_label);
+        }
+        Ok(())
+    }
+
+    fn operand_cell_location(&self, operand: &IrOperand) -> Option<(u64, usize)> {
+        let IrOperand::Var(var) = operand else {
+            return None;
+        };
+        if let Some(input_index) = self.consume_indices.get(&var.id).copied() {
+            Some((CKB_SOURCE_INPUT, input_index))
+        } else if let Some(output_index) = self.operation_output_indices.get(&var.id).copied() {
+            Some((CKB_SOURCE_OUTPUT, output_index))
+        } else if let Some(dep_index) = self.read_ref_indices.get(&var.id).copied() {
+            Some((CKB_SOURCE_CELL_DEP, dep_index))
+        } else if let Some(input_index) = self.read_ref_param_input_indices.get(&var.id).copied() {
+            Some((CKB_SOURCE_INPUT, input_index))
         } else {
-            self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+            self.read_ref_param_dep_indices.get(&var.id).copied().map(|dep_index| (CKB_SOURCE_CELL_DEP, dep_index))
         }
-    }
-
-    fn emit_claim_witness_authorization_domain_check(
-        &mut self,
-        group_input_index: usize,
-        binding: &str,
-        signer_source: Option<&SchemaFieldValueSource>,
-    ) {
-        let witness_size_offset = self.runtime_scratch2_size_offset();
-        let witness_buffer_offset = self.runtime_scratch2_buffer_offset();
-        let sighash_size_offset = self.runtime_scratch_size_offset();
-        let sighash_buffer_offset = self.runtime_scratch_buffer_offset();
-
-        self.emit(format!(
-            "# cellscript abi: claim witness authorization-domain check binding={} source=GroupInput index={}",
-            binding, group_input_index
-        ));
-        self.emit_load_witness_syscall_to_offsets(
-            "claim_witness",
-            self.runtime_abi().source_group_input,
-            group_input_index,
-            witness_size_offset,
-            witness_buffer_offset,
-            66,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::TypeHashMismatch);
-        self.emit_claim_witness_signature_size_check(witness_size_offset, witness_buffer_offset);
-        self.emit_load_ecdsa_signature_hash_syscall_to_offsets(
-            "claim_authorization_domain",
-            self.runtime_abi().source_group_input,
-            group_input_index,
-            "t3",
-            sighash_size_offset,
-            sighash_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-        self.emit_loaded_schema_exact_size_check(sighash_size_offset, 32, "claim ECDSA signature hash");
-        if let Some(source) = signer_source {
-            self.emit_claim_witness_signature_verification(group_input_index, witness_buffer_offset, sighash_buffer_offset, source);
-        }
-    }
-
-    fn emit_claim_witness_signature_size_check(&mut self, size_offset: usize, buffer_offset: usize) {
-        let hash_type_from_witness_label = self.fresh_label("claim_witness_hash_type");
-        let ok_label = self.fresh_label("claim_witness_size_ok");
-        self.emit("# cellscript abi: claim witness signature length check accepted=65|66");
-        self.emit_stack_load("t0", size_offset);
-        self.emit(format!("li t1, {}", 65));
-        self.emit("sub t2, t0, t1");
-        self.emit(format!("li t3, {}", CKB_SIG_HASH_ALL));
-        self.emit(format!("beqz t2, {}", ok_label));
-        self.emit(format!("li t1, {}", 66));
-        self.emit("sub t2, t0, t1");
-        self.emit(format!("beqz t2, {}", hash_type_from_witness_label));
-        self.emit_fail(CellScriptRuntimeError::TypeHashMismatch);
-        self.emit_label(&hash_type_from_witness_label);
-        self.emit_sp_addi("t4", buffer_offset);
-        self.emit("lbu t3, 65(t4)");
-        self.emit_label(&ok_label);
-    }
-
-    fn emit_claim_witness_signature_verification(
-        &mut self,
-        group_input_index: usize,
-        witness_buffer_offset: usize,
-        sighash_buffer_offset: usize,
-        signer_source: &SchemaFieldValueSource,
-    ) {
-        if let Some(size_offset) = self.cell_buffer_size_offsets.get(&signer_source.obj_var_id).copied() {
-            if let Some(expected_size) = self.type_fixed_sizes.get(&signer_source.type_name).copied() {
-                self.emit_loaded_schema_exact_size_check(
-                    size_offset,
-                    expected_size,
-                    &format!("{} claim signer input", signer_source.type_name),
-                );
-            }
-            self.emit_loaded_schema_bounds_check(
-                size_offset,
-                signer_source.layout.offset + 20,
-                &format!("{}.{}", signer_source.type_name, signer_source.field),
-            );
-        }
-        self.emit(format!(
-            "# cellscript abi: SECP256K1_VERIFY reason=claim_signature source=Input field={}.{} witness=GroupInput index={}",
-            signer_source.type_name, signer_source.field, group_input_index
-        ));
-        self.emit_stack_load("t4", signer_source.obj_var_id * 8);
-        self.emit(format!("addi a0, t4, {}", signer_source.layout.offset));
-        self.emit_sp_addi("a1", witness_buffer_offset);
-        self.emit_sp_addi("a2", sighash_buffer_offset);
-        self.emit(format!("li a7, {}", self.runtime_abi().secp256k1_verify));
-        self.emit("ecall");
-        let ok_label = self.fresh_label("claim_signature_ok");
-        self.emit(format!("beqz a0, {}", ok_label));
-        self.emit_fail(CellScriptRuntimeError::ClaimSignatureFailed);
-        self.emit_label(&ok_label);
     }
 
     fn emit_destroy_group_output_absence_scan(&mut self, pattern: &CellPattern, input_index: usize) {
@@ -6320,6 +6187,10 @@ impl CodeGenerator {
                 }
             }
             IrInstruction::Consume { operand } | IrInstruction::Destroy { operand } => self.record_operand(operand, max_var_id),
+            IrInstruction::CellMetadataEquality { left, right, .. } => {
+                self.record_operand(left, max_var_id);
+                self.record_operand(right, max_var_id);
+            }
             IrInstruction::CollectionPush { collection, value } => {
                 self.record_operand(collection, max_var_id);
                 self.record_operand(value, max_var_id);
@@ -6407,6 +6278,7 @@ impl CodeGenerator {
             IrInstruction::StoreVar { .. }
             | IrInstruction::Consume { .. }
             | IrInstruction::Destroy { .. }
+            | IrInstruction::CellMetadataEquality { .. }
             | IrInstruction::CollectionPush { .. }
             | IrInstruction::CollectionExtend { .. }
             | IrInstruction::CollectionClear { .. }
@@ -7074,7 +6946,7 @@ impl CodeGenerator {
             self.emit_stack_load("t0", size_offset);
         } else {
             self.emit("# cellscript abi: fail closed because dynamic length is not available");
-            self.emit_fail(CellScriptRuntimeError::ClaimSignatureFailed);
+            self.emit_fail(CellScriptRuntimeError::CollectionRuntimeUnsupported);
             return Ok(());
         }
         self.emit_stack_store("t0", dest.id * 8);

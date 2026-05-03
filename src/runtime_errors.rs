@@ -23,13 +23,13 @@ pub enum CellScriptRuntimeError {
     DynamicFieldBoundsInvalid = 16,
     TypeHashMismatch = 17,
     FixedByteComparisonUnresolved = 18,
-    ClaimSignatureFailed = 19,
     NumericOrDiscriminantInvalid = 20,
     CollectionBoundsInvalid = 21,
     ConsumeInvalidOperand = 22,
     DestroyInvalidOperand = 23,
     CollectionRuntimeUnsupported = 24,
     EntryWitnessAbiInvalid = 25,
+    CapacityPreservationMismatch = 26,
     DynamicFieldValueMismatch = 32,
 }
 
@@ -57,13 +57,13 @@ impl CellScriptRuntimeError {
             Self::DynamicFieldBoundsInvalid => "dynamic-field-bounds-invalid",
             Self::TypeHashMismatch => "type-hash-mismatch",
             Self::FixedByteComparisonUnresolved => "fixed-byte-comparison-unresolved",
-            Self::ClaimSignatureFailed => "claim-signature-failed",
             Self::NumericOrDiscriminantInvalid => "numeric-or-discriminant-invalid",
             Self::CollectionBoundsInvalid => "collection-bounds-invalid",
             Self::ConsumeInvalidOperand => "consume-invalid-operand",
             Self::DestroyInvalidOperand => "destroy-invalid-operand",
             Self::CollectionRuntimeUnsupported => "collection-runtime-unsupported",
             Self::EntryWitnessAbiInvalid => "entry-witness-abi-invalid",
+            Self::CapacityPreservationMismatch => "capacity-preservation-mismatch",
             Self::DynamicFieldValueMismatch => "dynamic-field-value-mismatch",
         }
     }
@@ -87,13 +87,13 @@ impl CellScriptRuntimeError {
             Self::DynamicFieldBoundsInvalid => "A Molecule dynamic field offset or length failed bounds validation.",
             Self::TypeHashMismatch => "A loaded cell type hash did not match the expected CellScript type identity.",
             Self::FixedByteComparisonUnresolved => "A fixed-byte verifier comparison could not resolve its trusted source bytes.",
-            Self::ClaimSignatureFailed => "Claim authorization signature verification failed.",
             Self::NumericOrDiscriminantInvalid => "A numeric verifier check, enum discriminant, or arithmetic guard failed.",
             Self::CollectionBoundsInvalid => "A runtime collection index, length, or capacity check failed.",
             Self::ConsumeInvalidOperand => "A consume operation reached codegen with an invalid or unsupported operand.",
             Self::DestroyInvalidOperand => "A destroy operation reached codegen with an invalid or unsupported operand.",
             Self::CollectionRuntimeUnsupported => "A runtime collection helper shape is not supported by the current backend.",
             Self::EntryWitnessAbiInvalid => "Entry witness payload layout, width, or parameter ABI placement was invalid.",
+            Self::CapacityPreservationMismatch => "A proposed output did not preserve the consumed input capacity.",
             Self::DynamicFieldValueMismatch => "A dynamic Molecule field value did not match the expected verifier source.",
         }
     }
@@ -125,7 +125,6 @@ impl CellScriptRuntimeError {
             Self::DynamicFieldBoundsInvalid => "Validate Molecule table offsets, field count, and dynamic field lengths.",
             Self::TypeHashMismatch => "Check type script hash/hash_type/args and the expected CellScript type identity.",
             Self::FixedByteComparisonUnresolved => "Use schema-backed parameters or fixed-byte values that the verifier can address.",
-            Self::ClaimSignatureFailed => "Check the authorization domain, signer public key hash, signature, and target profile.",
             Self::NumericOrDiscriminantInvalid => "Check enum tags, arithmetic bounds, and generated collection length arithmetic.",
             Self::CollectionBoundsInvalid => "Check collection length, index, and capacity values in witness or cell data.",
             Self::ConsumeInvalidOperand => "This indicates an unsupported lowering path; inspect compiler metadata blockers.",
@@ -136,6 +135,7 @@ impl CellScriptRuntimeError {
             Self::EntryWitnessAbiInvalid => {
                 "Inspect cellc constraints or cellc abi output for parameter slots and witness byte layout."
             }
+            Self::CapacityPreservationMismatch => "Check the proposed output capacity and builder output ordering.",
             Self::DynamicFieldValueMismatch => "Check dynamic Molecule field encoding and the value source used by the verifier.",
         }
     }
@@ -159,13 +159,13 @@ impl CellScriptRuntimeError {
             16 => Some(Self::DynamicFieldBoundsInvalid),
             17 => Some(Self::TypeHashMismatch),
             18 => Some(Self::FixedByteComparisonUnresolved),
-            19 => Some(Self::ClaimSignatureFailed),
             20 => Some(Self::NumericOrDiscriminantInvalid),
             21 => Some(Self::CollectionBoundsInvalid),
             22 => Some(Self::ConsumeInvalidOperand),
             23 => Some(Self::DestroyInvalidOperand),
             24 => Some(Self::CollectionRuntimeUnsupported),
             25 => Some(Self::EntryWitnessAbiInvalid),
+            26 => Some(Self::CapacityPreservationMismatch),
             32 => Some(Self::DynamicFieldValueMismatch),
             _ => None,
         }
@@ -198,13 +198,13 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::DynamicFieldBoundsInvalid,
     CellScriptRuntimeError::TypeHashMismatch,
     CellScriptRuntimeError::FixedByteComparisonUnresolved,
-    CellScriptRuntimeError::ClaimSignatureFailed,
     CellScriptRuntimeError::NumericOrDiscriminantInvalid,
     CellScriptRuntimeError::CollectionBoundsInvalid,
     CellScriptRuntimeError::ConsumeInvalidOperand,
     CellScriptRuntimeError::DestroyInvalidOperand,
     CellScriptRuntimeError::CollectionRuntimeUnsupported,
     CellScriptRuntimeError::EntryWitnessAbiInvalid,
+    CellScriptRuntimeError::CapacityPreservationMismatch,
     CellScriptRuntimeError::DynamicFieldValueMismatch,
 ];
 

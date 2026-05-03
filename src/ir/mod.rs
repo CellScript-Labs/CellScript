@@ -201,6 +201,12 @@ pub enum MutateTransitionOp {
     Append,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellMetadataField {
+    LockHash,
+    Capacity,
+}
+
 #[derive(Debug, Clone)]
 pub struct IrBlock {
     pub id: BlockId,
@@ -242,6 +248,7 @@ pub enum IrInstruction {
     Consume { operand: IrOperand },
     Create { dest: IrVar, pattern: CreatePattern },
     Destroy { operand: IrOperand },
+    CellMetadataEquality { left: IrOperand, right: IrOperand, field: CellMetadataField },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2310,12 +2317,103 @@ impl IrGenerator {
         LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
     }
 
+    fn lower_cell_metadata_equality_call(
+        &mut self,
+        qualified: &str,
+        call: &StdlibCallExpr,
+        field: CellMetadataField,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        if call.args.len() != 2 {
+            self.record_error(format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()), call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(current) };
+        }
+
+        let left = self.lower_expr(&call.args[0], current, blocks, vars);
+        let Some(active) = left.current else {
+            return left;
+        };
+        let right = self.lower_expr(&call.args[1], active, blocks, vars);
+        let Some(active) = right.current else {
+            return right;
+        };
+
+        self.block_mut(blocks, active).instructions.push(IrInstruction::CellMetadataEquality {
+            left: left.operand,
+            right: right.operand,
+            field,
+        });
+        LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+    }
+
+    fn lower_stdlib_output_create_and_preserve(
+        &mut self,
+        qualified: &str,
+        input_role: &str,
+        input: &Expr,
+        output: &Expr,
+        lock: Option<&Expr>,
+        preserve_fields: &[String],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<BlockId> {
+        let output_name = match output {
+            Expr::Identifier(name) => name.clone(),
+            _ => {
+                self.record_error(format!("{} output must be a named Cell output binding", qualified), output.span());
+                return None;
+            }
+        };
+        let input_name = match input {
+            Expr::Identifier(name) => name.clone(),
+            _ => {
+                self.record_error(format!("{} {} must be a named Cell input binding", qualified, input_role), input.span());
+                return None;
+            }
+        };
+        let Some(output_ty) = vars.get(&output_name).and_then(|var| Self::named_type_name_from_ir_type(&var.ty).map(str::to_string))
+        else {
+            self.record_error(format!("{} output must be a named Cell output binding", qualified), output.span());
+            return None;
+        };
+
+        let create_fields = preserve_fields
+            .iter()
+            .map(|field| {
+                (
+                    field.clone(),
+                    Expr::FieldAccess(FieldAccessExpr { expr: Box::new(input.clone()), field: field.clone(), span: input.span() }),
+                )
+            })
+            .collect::<Vec<_>>();
+        let create_expr = CreateExpr {
+            target: Some(output_name.clone()),
+            ty: output_ty,
+            fields: create_fields,
+            lock: lock.cloned().map(Box::new),
+            span: output.span(),
+        };
+        let lowered = self.lower_create_expr(&create_expr, current, blocks, vars);
+        let mut active = lowered.current?;
+
+        if !preserve_fields.is_empty() {
+            let preserve = PreserveExpr { output_name, input_name, fields: preserve_fields.to_vec(), span: input.span() };
+            let lowered = self.lower_preserve_expr(&preserve, active, blocks, vars);
+            active = lowered.current?;
+        }
+
+        Some(active)
+    }
+
     /// Lower a stdlib call expression by expanding it into core IR instructions.
     ///
-    /// Constraint patterns (same_lock, same_type, preserve_capacity, conserved)
-    /// expand into `require` constraints.
+    /// Constraint patterns expand into `require` constraints or canonical
+    /// verifier metadata checks.
     ///
-    /// Lifecycle patterns (transfer, claim) expand into `consume` + `require` sequences.
+    /// Lifecycle patterns expand into `consume` plus explicit output and verifier constraints.
     fn lower_stdlib_call(
         &mut self,
         call: &StdlibCallExpr,
@@ -2327,35 +2425,9 @@ impl IrGenerator {
         let mut active = current;
 
         match qualified.as_str() {
-            // Constraint patterns — expand to require constraints
+            // Constraint patterns — expand to canonical verifier constraints
             "std::cell::same_lock" | "std::cell::preserve_lock" => {
-                if call.args.len() != 2 {
-                    self.record_error(
-                        format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
-                        call.span,
-                    );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
-                }
-                let output = &call.args[0];
-                let input = &call.args[1];
-                let output_lock_hash = Expr::FieldAccess(FieldAccessExpr {
-                    expr: Box::new(output.clone()),
-                    field: "lock_hash".to_string(),
-                    span: call.span,
-                });
-                let input_lock_hash = Expr::FieldAccess(FieldAccessExpr {
-                    expr: Box::new(input.clone()),
-                    field: "lock_hash".to_string(),
-                    span: call.span,
-                });
-                let equality = Expr::Binary(BinaryExpr {
-                    op: BinaryOp::Eq,
-                    left: Box::new(output_lock_hash),
-                    right: Box::new(input_lock_hash),
-                    span: call.span,
-                });
-                let require_expr = RequireExpr { condition: Box::new(equality), message: None, span: call.span };
-                self.lower_require_expr(&require_expr, active, blocks, vars)
+                self.lower_cell_metadata_equality_call(&qualified, call, CellMetadataField::LockHash, active, blocks, vars)
             }
             "std::cell::same_type" | "std::cell::preserve_type" => {
                 if call.args.len() != 2 {
@@ -2395,33 +2467,7 @@ impl IrGenerator {
                 self.lower_require_expr(&require_expr, active, blocks, vars)
             }
             "std::cell::preserve_capacity" => {
-                if call.args.len() != 2 {
-                    self.record_error(
-                        format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
-                        call.span,
-                    );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
-                }
-                let output = &call.args[0];
-                let input = &call.args[1];
-                let output_capacity = Expr::FieldAccess(FieldAccessExpr {
-                    expr: Box::new(output.clone()),
-                    field: "capacity".to_string(),
-                    span: call.span,
-                });
-                let input_capacity = Expr::FieldAccess(FieldAccessExpr {
-                    expr: Box::new(input.clone()),
-                    field: "capacity".to_string(),
-                    span: call.span,
-                });
-                let equality = Expr::Binary(BinaryExpr {
-                    op: BinaryOp::Eq,
-                    left: Box::new(output_capacity),
-                    right: Box::new(input_capacity),
-                    span: call.span,
-                });
-                let require_expr = RequireExpr { condition: Box::new(equality), message: None, span: call.span };
-                self.lower_require_expr(&require_expr, active, blocks, vars)
+                self.lower_cell_metadata_equality_call(&qualified, call, CellMetadataField::Capacity, active, blocks, vars)
             }
             "std::accounting::conserved" => {
                 if call.args.len() != 2 {
@@ -2450,17 +2496,18 @@ impl IrGenerator {
                 self.lower_require_expr(&require_expr, active, blocks, vars)
             }
 
-            // Lifecycle patterns — consume + require constraints
+            // Lifecycle patterns — consume + explicit output and verifier constraints
             "std::lifecycle::transfer" => {
-                if call.args.len() < 3 {
+                if call.args.len() != 3 {
                     self.record_error(
-                        format!("std::lifecycle::transfer expects at least 3 arguments (input, output, to), got {}", call.args.len()),
+                        format!("std::lifecycle::transfer expects 3 arguments (input, output, to), got {}", call.args.len()),
                         call.span,
                     );
                     return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
                 }
                 let input = &call.args[0];
                 let output = &call.args[1];
+                let lock = &call.args[2];
 
                 // 1. consume input
                 let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
@@ -2470,7 +2517,46 @@ impl IrGenerator {
                 };
                 active = next;
 
-                // 2. require output.type_hash == input.type_hash
+                // 2. constrain the proposed output binding and lock target
+                let output_name = match output {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => {
+                        self.record_error("std::lifecycle::transfer output must be a named Cell output binding", call.span);
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    }
+                };
+                let output_ty = vars
+                    .get(&output_name)
+                    .and_then(|var| Self::named_type_name_from_ir_type(&var.ty).map(str::to_string))
+                    .unwrap_or_else(|| "output".to_string());
+                let create_fields = call
+                    .preserve_fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.clone(),
+                            Expr::FieldAccess(FieldAccessExpr {
+                                expr: Box::new(input.clone()),
+                                field: field.clone(),
+                                span: call.span,
+                            }),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let create_expr = CreateExpr {
+                    target: Some(output_name.clone()),
+                    ty: output_ty,
+                    fields: create_fields,
+                    lock: Some(Box::new(lock.clone())),
+                    span: call.span,
+                };
+                let lowered = self.lower_create_expr(&create_expr, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 3. require output.type_hash == input.type_hash
                 let output_type_hash = Expr::Call(CallExpr {
                     func: Box::new(Expr::FieldAccess(FieldAccessExpr {
                         expr: Box::new(output.clone()),
@@ -2502,12 +2588,8 @@ impl IrGenerator {
                 };
                 active = next;
 
-                // 3. preserve listed fields from input to output
+                // 4. preserve listed fields from input to output
                 if !call.preserve_fields.is_empty() {
-                    let output_name = match output {
-                        Expr::Identifier(name) => name.clone(),
-                        _ => "output".to_string(),
-                    };
                     let input_name = match input {
                         Expr::Identifier(name) => name.clone(),
                         _ => "input".to_string(),
@@ -2523,8 +2605,8 @@ impl IrGenerator {
                 LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
             }
             "std::receipt::claim" => {
-                if call.args.is_empty() {
-                    self.record_error("std::receipt::claim expects at least 1 argument (receipt)", call.span);
+                if call.args.len() != 3 {
+                    self.record_error(format!("std::receipt::claim expects 3 arguments, got {}", call.args.len()), call.span);
                     return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
                 }
                 let receipt = &call.args[0];
@@ -2537,30 +2619,27 @@ impl IrGenerator {
                 };
                 active = next;
 
-                // 2. preserve listed fields from receipt to output (if fields provided)
-                if call.args.len() >= 2 && !call.preserve_fields.is_empty() {
-                    let output = &call.args[1];
-                    let output_name = match output {
-                        Expr::Identifier(name) => name.clone(),
-                        _ => "output".to_string(),
-                    };
-                    let input_name = match receipt {
-                        Expr::Identifier(name) => name.clone(),
-                        _ => "receipt".to_string(),
-                    };
-                    let preserve = PreserveExpr { output_name, input_name, fields: call.preserve_fields.clone(), span: call.span };
-                    let lowered = self.lower_preserve_expr(&preserve, active, blocks, vars);
-                    let Some(next) = lowered.current else {
-                        return lowered;
-                    };
-                    active = next;
-                }
+                // 2. canonical output construction from receipt fields with an explicit lock target.
+                let Some(next) = self.lower_stdlib_output_create_and_preserve(
+                    "std::receipt::claim",
+                    "receipt",
+                    receipt,
+                    &call.args[1],
+                    call.args.get(2),
+                    &call.preserve_fields,
+                    active,
+                    blocks,
+                    vars,
+                ) else {
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                };
+                active = next;
 
                 LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
             }
             "std::lifecycle::settle" => {
-                if call.args.is_empty() {
-                    self.record_error("std::lifecycle::settle expects at least 1 argument (input)", call.span);
+                if call.args.len() != 3 {
+                    self.record_error(format!("std::lifecycle::settle expects 3 arguments, got {}", call.args.len()), call.span);
                     return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
                 }
                 let input = &call.args[0];
@@ -2573,24 +2652,21 @@ impl IrGenerator {
                 };
                 active = next;
 
-                // 2. preserve listed fields (if provided)
-                if call.args.len() >= 2 && !call.preserve_fields.is_empty() {
-                    let output = &call.args[1];
-                    let output_name = match output {
-                        Expr::Identifier(name) => name.clone(),
-                        _ => "output".to_string(),
-                    };
-                    let input_name = match input {
-                        Expr::Identifier(name) => name.clone(),
-                        _ => "input".to_string(),
-                    };
-                    let preserve = PreserveExpr { output_name, input_name, fields: call.preserve_fields.clone(), span: call.span };
-                    let lowered = self.lower_preserve_expr(&preserve, active, blocks, vars);
-                    let Some(next) = lowered.current else {
-                        return lowered;
-                    };
-                    active = next;
-                }
+                // 2. canonical output construction from settled fields with an explicit lock target.
+                let Some(next) = self.lower_stdlib_output_create_and_preserve(
+                    "std::lifecycle::settle",
+                    "input",
+                    input,
+                    &call.args[1],
+                    call.args.get(2),
+                    &call.preserve_fields,
+                    active,
+                    blocks,
+                    vars,
+                ) else {
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                };
+                active = next;
 
                 LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
             }
@@ -4892,7 +4968,23 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
             }
         }
-        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::StdlibCall(_) => {}
+        Expr::StdlibCall(call) => {
+            if let Some(name) = stdlib_lifecycle_consumed_binding(call) {
+                bindings.insert(name);
+            }
+        }
+        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
+    }
+}
+
+fn stdlib_lifecycle_consumed_binding(call: &StdlibCallExpr) -> Option<String> {
+    let qualified = format!("std::{}::{}", call.namespace, call.name);
+    match qualified.as_str() {
+        "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => match call.args.first() {
+            Some(Expr::Identifier(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -5039,5 +5131,120 @@ where
             branch_count,
             action.body.blocks.len()
         );
+    }
+
+    #[test]
+    fn stdlib_transfer_lowers_to_single_consumed_input_and_locked_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action transfer_only(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "transfer_only" => Some(a),
+                _ => None,
+            })
+            .expect("expected transfer_only action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib transfer should not also infer an input lineage consume");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "coin");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "next_coin");
+        assert!(output.lock.is_some(), "stdlib transfer must bind the output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+    }
+
+    #[test]
+    fn stdlib_claim_lowers_to_consumed_receipt_and_locked_declared_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+    holder: Address
+}
+
+action claim_only(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.holder) { amount }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "claim_only" => Some(a),
+                _ => None,
+            })
+            .expect("expected claim_only action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib claim should consume exactly the receipt");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "voucher");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "coin");
+        assert!(output.lock.is_some(), "stdlib claim must bind the explicit output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+    }
+
+    #[test]
+    fn stdlib_settle_lowers_to_consumed_input_and_locked_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+action settle_coin(coin: Coin) -> next_coin: Coin
+where
+    std::lifecycle::settle(coin, next_coin, coin.owner) {
+        amount
+        owner
+    }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "settle_coin" => Some(a),
+                _ => None,
+            })
+            .expect("expected settle_coin action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib settle should consume exactly the input");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "coin");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "next_coin");
+        assert!(output.lock.is_some(), "stdlib settle must bind the explicit output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+        assert!(output.fields.iter().any(|(field, _)| field == "owner"));
     }
 }

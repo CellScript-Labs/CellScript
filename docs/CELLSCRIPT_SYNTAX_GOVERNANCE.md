@@ -111,7 +111,8 @@ or deprecated from the core language:
 
 ### 5.1 `claim`
 
-**Current usage in codebase**: `ClaimExpr` exists in AST/IR/types/codegen. Zero usage in example `.cell` files.
+**Former usage in codebase**: `ClaimExpr` used to exist in AST/IR/types/codegen.
+It has been removed from the executable core expression surface.
 
 **Problem**: `claim` sounds like a universal lifecycle verb, but actual claim
 semantics are highly protocol-dependent:
@@ -138,10 +139,19 @@ create token = Token {
 } with_lock(receipt.beneficiary)
 ```
 
-**Future home**: `std::receipt::claim` or typed receipt sugar:
+**Stdlib home**: `std::receipt::claim`:
 
 ```cellscript
-receipt VestingReceipt -> Token
+receipt VestingReceipt -> Token {
+    amount: u64
+    symbol: Symbol
+    beneficiary: Address
+}
+
+std::receipt::claim(receipt, token, receipt.beneficiary) {
+    amount
+    symbol
+}
 ```
 
 **Deprecation path**:
@@ -150,14 +160,17 @@ receipt VestingReceipt -> Token
 DONE (0.13.1): Removed claim keyword from compiler immediately.
                    AST, lexer, parser, IR, types, codegen, flow, optimize,
                    simulate, formatter — all claim expression paths removed.
-Future (0.15.0):   Introduce std::receipt::claim as stdlib pattern
+DONE (0.13.1): Introduced std::receipt::claim as an explicit stdlib pattern
+                   for receipt consumption plus canonical named output
+                   construction from a declared receipt output type.
 ```
 
 ---
 
 ### 5.2 `settle`
 
-**Current usage in codebase**: `SettleExpr` exists in AST/IR/types/codegen. Zero usage in example `.cell` files.
+**Former usage in codebase**: `SettleExpr` used to exist in AST/IR/types/codegen.
+It has been removed from the executable core expression surface.
 
 **Problem**: `settle` is even more abstract than `claim`.
 "Settle order", "settle receipt", "settle channel", "settle DAO position"
@@ -175,7 +188,14 @@ create payout = Token { amount: order.amount, ... }
 require payout.amount == order.amount
 ```
 
-**Future home**: `std::lifecycle::settle` as a protocol-pattern helper.
+**Stdlib home**: `std::lifecycle::settle` as an explicit lifecycle helper:
+
+```cellscript
+std::lifecycle::settle(order, payout, order.seller) {
+    amount
+    symbol
+}
+```
 
 **Deprecation path**:
 
@@ -183,16 +203,18 @@ require payout.amount == order.amount
 DONE (0.13.1): Removed settle keyword from compiler immediately.
                    AST, lexer, parser, IR, types, codegen, flow, optimize,
                    simulate, formatter — all settle expression paths removed.
-Future (0.15.0):   Introduce std::lifecycle::settle as stdlib pattern
+DONE (0.13.1): Introduced std::lifecycle::settle as an explicit stdlib pattern
+                   for input consumption plus canonical named output
+                   construction from explicit output and lock arguments.
 ```
 
 ---
 
 ### 5.3 `transfer`
 
-**Current usage in codebase**: `TransferExpr` exists in AST/IR/types/codegen.
-NFT examples use `transfer x to y` syntax. Token examples already use
-explicit `consume + create with_lock`.
+**Former usage in codebase**: `TransferExpr` used to exist in AST/IR/types/codegen.
+Examples now use explicit `consume + create with_lock` or compiler-recognized
+stdlib lifecycle patterns.
 
 **Problem**: `transfer x to y` sounds simple, but hides audit-critical
 decisions:
@@ -237,7 +259,7 @@ preserve next_token from token {
 }
 ```
 
-**Future home**: `std::lifecycle::transfer` as a protocol-pattern helper
+**Stdlib home**: `std::lifecycle::transfer` as a protocol-pattern helper
 with explicit preservation whitelist.
 
 **Deprecation path**:
@@ -247,8 +269,9 @@ DONE (0.13.1): Removed transfer keyword from compiler immediately.
                    AST, lexer, parser, IR, types, codegen, flow, optimize,
                    simulate, formatter — all transfer expression paths removed.
                    Capability::Transfer retained for resource declarations.
-Future (0.15.0):   Introduce std::lifecycle::transfer as stdlib pattern
-                   (with explicit preserve list parameter)
+DONE (0.13.1): Introduced std::lifecycle::transfer as stdlib pattern
+                   with named input/output bindings, destination lock, and
+                   explicit preserve list parameter.
 ```
 
 **Impact on Capability system**: `Capability::Transfer` on resource declarations
@@ -337,17 +360,17 @@ std::ckb            — CKB-specific protocol operations
 
 ### 7.2 Candidate Stdlib Primitives
 
-| Primitive | Namespace | Core Expansion |
-|-----------|-----------|----------------|
-| `same_lock` | `std::cell` | `require output.lock_hash == input.lock_hash` |
-| `same_type` | `std::cell` | `require output.type_hash == input.type_hash` |
-| `conserved` | `std::accounting` | `require output.amount == input.amount` |
-| `claim` | `std::receipt` | `consume receipt + create output with_lock(receipt.beneficiary)` |
-| `settle` | `std::lifecycle` | `consume input + create outputs + require constraints` |
-| `transfer` | `std::lifecycle` | `consume input + create output with_lock(to) + preserve fields` |
-| `preserve_lock` | `std::cell` | `require output.lock_hash == input.lock_hash` |
-| `preserve_type` | `std::cell` | `require output.type_hash == input.type_hash` |
-| `preserve_capacity` | `std::cell` | `require output.capacity == input.capacity` |
+| Primitive | Namespace | Core Expansion | Current Status |
+|-----------|-----------|----------------|----------------|
+| `same_type` | `std::cell` | `require output.type_hash == input.type_hash` | Implemented |
+| `conserved` | `std::accounting` | `require output.amount == input.amount` | Implemented |
+| `transfer` | `std::lifecycle` | `consume input + create output with_lock(to) + preserve full output field set` | Implemented for named input/output bindings |
+| `claim` | `std::receipt` | `consume receipt + create declared output with explicit lock + preserve full output field set` | Implemented for receipts declaring `-> OutputType` |
+| `settle` | `std::lifecycle` | `consume input + create explicit locked output + preserve full output field set` | Implemented for named input/output bindings |
+| `same_lock` | `std::cell` | `require output.lock_hash == input.lock_hash` | Implemented via canonical cell metadata verifier check |
+| `preserve_lock` | `std::cell` | `require output.lock_hash == input.lock_hash` | Implemented via canonical cell metadata verifier check |
+| `preserve_type` | `std::cell` | `require output.type_hash == input.type_hash` | Implemented |
+| `preserve_capacity` | `std::cell` | `require output.capacity == input.capacity` | Implemented via canonical cell metadata verifier check |
 
 ### 7.3 Rule
 
@@ -414,11 +437,11 @@ NOT ADDED:       preserve *, preserve except, named require blocks,
 ### Standard Library (Layer 3)
 
 ```text
-FUTURE CANDIDATES:
-    std::cell::same_lock
+COMPILER-RECOGNIZED STDLIB PATTERNS:
     std::cell::same_type
-    std::cell::preserve_lock
     std::cell::preserve_type
+    std::cell::same_lock
+    std::cell::preserve_lock
     std::cell::preserve_capacity
     std::accounting::conserved
     std::receipt::claim
@@ -441,14 +464,16 @@ NEVER:    policy primitives, preserve all, preserve except,
 | Version | Action | Status |
 |---------|--------|--------|
 | 0.13.1 | Remove `claim`, `settle`, `transfer` keywords from compiler. No deprecation warnings, no backward compatibility. | **DONE** |
-| 0.13.1 | Introduce `std::receipt::claim`, `std::lifecycle::settle`, `std::lifecycle::transfer`, `std::cell::same_lock`, `std::cell::same_type`, `std::cell::preserve_capacity`, `std::accounting::conserved` as stdlib patterns with canonical expansions. | **DONE** |
+| 0.13.1 | Introduce local `preserve` and anonymous `require` block sugar with type-checked, pure, canonical expansion. | **DONE** |
+| 0.13.1 | Introduce compiler-recognized stdlib patterns for `std::lifecycle::transfer`, `std::receipt::claim`, `std::lifecycle::settle`, `std::cell::preserve_type`, and `std::accounting::conserved`. | **DONE**: lifecycle patterns expand to consume + canonical named output/constraint checks. |
+| 0.13.1 | Implement `std::cell::same_lock`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity` with canonical lock/capacity metadata verifier checks. | **DONE** |
 
 ### Migration Example: `transfer`
 
 The `transfer x to y` expression keyword has been removed.
 All transfer semantics must now use explicit `consume` + `create`:
 
-After (0.14, core only):
+After (core only):
 
 ```cellscript
 action transfer_nft(nft: NFT, to: Address) -> nft_after: NFT
@@ -463,7 +488,7 @@ where
     }
 ```
 
-After (0.15, with preserve sugar + stdlib):
+After (with preserve sugar + stdlib):
 
 ```cellscript
 action transfer_nft(nft: NFT, to: Address) -> nft_after: NFT
@@ -485,7 +510,7 @@ where
     }
 ```
 
-Or with future stdlib:
+Or with the stdlib lifecycle pattern:
 
 ```cellscript
 action transfer_nft(nft: NFT, to: Address) -> nft_after: NFT

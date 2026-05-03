@@ -503,10 +503,23 @@ fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() 
 fn stdlib_language_example_compiles_with_all_patterns() {
     let result = compile_file(language_example_path("stdlib.cell"), CompileOptions::default()).expect("stdlib example should compile");
     assert!(!result.artifact_bytes.is_empty(), "stdlib artifact should be non-empty");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("stdlib asm should be utf8");
 
     assert!(
         result.metadata.actions.iter().any(|action| action.name == "coin_preserve_type"),
         "stdlib example should expose coin_preserve_type action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_same_lock"),
+        "stdlib example should expose coin_same_lock action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_lock"),
+        "stdlib example should expose coin_preserve_lock action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_capacity"),
+        "stdlib example should expose coin_preserve_capacity action"
     );
     assert!(
         result.metadata.actions.iter().any(|action| action.name == "coin_conserved"),
@@ -528,9 +541,87 @@ fn stdlib_language_example_compiles_with_all_patterns() {
     let transfer_coin = result.metadata.actions.iter().find(|action| action.name == "transfer_coin").expect("transfer_coin action");
     assert_eq!(transfer_coin.effect_class, "Mutating");
     assert!(
-        transfer_coin.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "coin"),
+        transfer_coin.consume_set.iter().any(|pattern| pattern.operation == "consume" && pattern.binding == "coin"),
         "transfer_coin should consume the input coin: {:?}",
         transfer_coin.consume_set
+    );
+    let transfer_outputs = transfer_coin
+        .create_set
+        .iter()
+        .filter(|pattern| pattern.operation == "output" && pattern.binding == "next_coin")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transfer_outputs.len(),
+        1,
+        "transfer_coin should expose exactly one canonical output constraint: {:?}",
+        transfer_coin.create_set
+    );
+    assert!(transfer_outputs[0].has_lock, "transfer stdlib output must bind the destination lock");
+    assert_eq!(
+        transfer_outputs[0].fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "transfer stdlib output should preserve the full example output field set"
+    );
+
+    let same_lock = result.metadata.actions.iter().find(|action| action.name == "coin_same_lock").expect("coin_same_lock action");
+    assert!(same_lock.fail_closed_runtime_features.is_empty());
+    assert!(
+        same_lock.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:lock_hash:coin_after:coin_before"
+                && requirement.component == "cell-metadata-lock_hash"
+                && requirement.status == "checked-runtime"
+                && requirement.source == "InputOutput"
+                && requirement.binding == "coin_after:coin_before"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "cell-metadata-lock-hash-equality-32"
+                && requirement.byte_len == Some(32)
+        }),
+        "coin_same_lock should expose checked lock-hash metadata requirements: {:?}",
+        same_lock.transaction_runtime_input_requirements
+    );
+    let preserve_lock =
+        result.metadata.actions.iter().find(|action| action.name == "coin_preserve_lock").expect("coin_preserve_lock action");
+    assert!(
+        preserve_lock.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:lock_hash:coin_after:coin_before"
+                && requirement.component == "cell-metadata-lock_hash"
+                && requirement.status == "checked-runtime"
+                && requirement.byte_len == Some(32)
+        }),
+        "coin_preserve_lock should share the checked lock-hash metadata lowering: {:?}",
+        preserve_lock.transaction_runtime_input_requirements
+    );
+
+    let preserve_capacity =
+        result.metadata.actions.iter().find(|action| action.name == "coin_preserve_capacity").expect("coin_preserve_capacity action");
+    assert!(preserve_capacity.fail_closed_runtime_features.is_empty());
+    assert!(
+        preserve_capacity.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:capacity:coin_after:coin_before"
+                && requirement.component == "cell-metadata-capacity"
+                && requirement.status == "checked-runtime"
+                && requirement.source == "InputOutput"
+                && requirement.binding == "coin_after:coin_before"
+                && requirement.field.as_deref() == Some("capacity")
+                && requirement.abi == "cell-metadata-capacity-equality-8"
+                && requirement.byte_len == Some(8)
+        }),
+        "coin_preserve_capacity should expose checked capacity metadata requirements: {:?}",
+        preserve_capacity.transaction_runtime_input_requirements
+    );
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_left_lock_hash source=Output index=0 field=3")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_right_lock_hash source=Input index=0 field=3")
+            && asm.contains("# cellscript abi: verify cell metadata lock_hash equality Output#0 == Input#0 size=32"),
+        "lock metadata stdlib helpers should lower to canonical cell field syscalls:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_left_capacity source=Output index=0 field=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_right_capacity source=Input index=0 field=0")
+            && asm.contains("# cellscript abi: verify cell metadata capacity equality Output#0 == Input#0 size=8"),
+        "capacity metadata stdlib helper should lower to canonical cell field syscalls:\n{}",
+        asm
     );
 
     let claim_voucher = result.metadata.actions.iter().find(|action| action.name == "claim_voucher").expect("claim_voucher action");
@@ -539,6 +630,38 @@ fn stdlib_language_example_compiles_with_all_patterns() {
         claim_voucher.consume_set.iter().any(|pattern| pattern.binding == "voucher"),
         "claim_voucher should consume the input voucher: {:?}",
         claim_voucher.consume_set
+    );
+    assert!(
+        claim_voucher.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "coin" && pattern.has_lock),
+        "claim_voucher should create and lock the canonical claim output: {:?}",
+        claim_voucher.create_set
+    );
+    let claim_output = claim_voucher
+        .create_set
+        .iter()
+        .find(|pattern| pattern.operation == "output" && pattern.binding == "coin")
+        .expect("claim output metadata");
+    assert_eq!(
+        claim_output.fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "claim_voucher should preserve every Coin field present in the example output"
+    );
+
+    let settle_voucher = result.metadata.actions.iter().find(|action| action.name == "settle_voucher").expect("settle_voucher action");
+    assert!(
+        settle_voucher.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "coin" && pattern.has_lock),
+        "settle_voucher should create and lock the canonical settle output: {:?}",
+        settle_voucher.create_set
+    );
+    let settle_output = settle_voucher
+        .create_set
+        .iter()
+        .find(|pattern| pattern.operation == "output" && pattern.binding == "coin")
+        .expect("settle output metadata");
+    assert_eq!(
+        settle_output.fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "settle_voucher should preserve every Coin field present in the example output"
     );
 
     let elf = compile_file(

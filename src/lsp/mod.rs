@@ -620,7 +620,6 @@ impl LspServer {
             ("return", "return $0"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
             ("destroy", "destroy ${1:expr}"),
-            ("transfer", "transfer ${1:expr} to ${2:addr}"),
             ("assert", "assert ${1:condition}"),
             ("require", "require ${1:condition}"),
             ("require_block", "require {\n    ${1:condition}\n}"),
@@ -2179,6 +2178,7 @@ mod tests {
         assert!(!keywords.iter().any(|k| k.label == "output"));
         assert!(keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
+        assert!(!keywords.iter().any(|k| k.label == "transfer"));
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
     }

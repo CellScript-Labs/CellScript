@@ -2276,6 +2276,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Unit)
             }
             Expr::Require(require_expr) => {
+                self.validate_require_condition_is_pure(&require_expr.condition, "require condition")?;
                 let cond_ty = self.infer_expr(env, &require_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
@@ -2366,6 +2367,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::RequireBlock(require_block) => {
                 for expr in &require_block.expressions {
+                    self.validate_require_condition_is_pure(expr, "require block")?;
                     let ty = self.infer_expr(env, expr)?;
                     if !self.is_bool_type(&ty) {
                         return Err(CompileError::new("require block expressions must be boolean", expr_span(expr)).with_code("E1004"));
@@ -2374,60 +2376,281 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Unit)
             }
             Expr::Preserve(preserve) => {
-                let output_ty = env.lookup(&preserve.output_name).cloned();
-                let input_ty = env.lookup(&preserve.input_name).cloned();
-                if output_ty.is_none() {
-                    return Err(CompileError::new(
-                        format!("preserve: undefined output binding '{}'", preserve.output_name),
-                        preserve.span,
-                    ));
-                }
-                if input_ty.is_none() {
-                    return Err(CompileError::new(
-                        format!("preserve: undefined input binding '{}'", preserve.input_name),
-                        preserve.span,
-                    ));
-                }
+                let output_ty = env.lookup(&preserve.output_name).cloned().ok_or_else(|| {
+                    CompileError::new(format!("preserve: undefined output binding '{}'", preserve.output_name), preserve.span)
+                })?;
+                let input_ty = env.lookup(&preserve.input_name).cloned().ok_or_else(|| {
+                    CompileError::new(format!("preserve: undefined input binding '{}'", preserve.input_name), preserve.span)
+                })?;
                 if preserve.fields.is_empty() {
                     return Err(CompileError::new("preserve block must list at least one field", preserve.span));
                 }
-                // Validate that each field exists on both the output and input types
                 for field in &preserve.fields {
-                    if let Some(ref ty) = output_ty {
-                        if self.lookup_field_type(ty, field, preserve.span).is_err() {
-                            return Err(CompileError::new(
-                                format!("field '{}' does not exist on output type '{:?}'", field, ty),
-                                preserve.span,
-                            )
-                            .with_code("E1002"));
-                        }
-                    }
-                    if let Some(ref ty) = input_ty {
-                        if self.lookup_field_type(ty, field, preserve.span).is_err() {
-                            return Err(CompileError::new(
-                                format!("field '{}' does not exist on input type '{:?}'", field, ty),
-                                preserve.span,
-                            )
-                            .with_code("E1003"));
-                        }
+                    let output_field_ty = self.lookup_field_type(&output_ty, field, preserve.span).map_err(|_| {
+                        CompileError::new(format!("field '{}' does not exist on output type '{:?}'", field, output_ty), preserve.span)
+                            .with_code("E1002")
+                    })?;
+                    let input_field_ty = self.lookup_field_type(&input_ty, field, preserve.span).map_err(|_| {
+                        CompileError::new(format!("field '{}' does not exist on input type '{:?}'", field, input_ty), preserve.span)
+                            .with_code("E1003")
+                    })?;
+                    if !self.types_equal(&output_field_ty, &input_field_ty) {
+                        return Err(CompileError::new(
+                            format!(
+                                "preserve field '{}' type mismatch: output has {}, input has {}",
+                                field,
+                                type_repr(&output_field_ty),
+                                type_repr(&input_field_ty)
+                            ),
+                            preserve.span,
+                        )
+                        .with_code("E1004"));
                     }
                 }
                 Ok(Type::Bool)
             }
-            Expr::StdlibCall(call) => {
-                let qualified = format!("std::{}::{}", call.namespace, call.name);
-                match qualified.as_str() {
-                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
-                        if !call.args.is_empty() {
-                            if let Expr::Identifier(name) = &call.args[0] {
-                                env.consume(name)?;
-                            }
-                        }
+            Expr::StdlibCall(call) => self.infer_stdlib_call(env, call),
+        }
+    }
+
+    fn validate_require_condition_is_pure(&self, expr: &Expr, context: &str) -> Result<()> {
+        match expr {
+            Expr::Create(_) | Expr::Consume(_) | Expr::Destroy(_) | Expr::ReadRef(_) => {
+                return Err(CompileError::new(
+                    format!(
+                        "{} contains cell/runtime operation; move state transition logic into a separate action statement",
+                        context
+                    ),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_) | Expr::StdlibCall(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains verifier-boundary syntax; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::If(_) | Expr::Match(_) | Expr::Block(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains control flow; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1006"));
+            }
+            Expr::Assign(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains assignment; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::Binary(binary) => {
+                self.validate_require_condition_is_pure(&binary.left, context)?;
+                self.validate_require_condition_is_pure(&binary.right, context)?;
+            }
+            Expr::Unary(unary) => self.validate_require_condition_is_pure(&unary.expr, context)?,
+            Expr::Call(call) => {
+                self.validate_require_condition_is_pure(&call.func, context)?;
+                for arg in &call.args {
+                    self.validate_require_condition_is_pure(arg, context)?;
+                }
+            }
+            Expr::FieldAccess(field) => self.validate_require_condition_is_pure(&field.expr, context)?,
+            Expr::Index(index) => {
+                self.validate_require_condition_is_pure(&index.expr, context)?;
+                self.validate_require_condition_is_pure(&index.index, context)?;
+            }
+            Expr::Assert(assert_expr) => {
+                self.validate_require_condition_is_pure(&assert_expr.condition, context)?;
+                self.validate_require_condition_is_pure(&assert_expr.message, context)?;
+            }
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    self.validate_require_condition_is_pure(item, context)?;
+                }
+            }
+            Expr::Cast(cast) => self.validate_require_condition_is_pure(&cast.expr, context)?,
+            Expr::Range(range) => {
+                self.validate_require_condition_is_pure(&range.start, context)?;
+                self.validate_require_condition_is_pure(&range.end, context)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_require_condition_is_pure(value, context)?;
+                }
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
+        }
+        Ok(())
+    }
+
+    fn infer_stdlib_call(&mut self, env: &mut TypeEnv, call: &StdlibCallExpr) -> Result<Type> {
+        let qualified = format!("std::{}::{}", call.namespace, call.name);
+        match qualified.as_str() {
+            "std::cell::same_lock" | "std::cell::preserve_lock" | "std::cell::preserve_capacity" => {
+                self.validate_stdlib_arity(&qualified, call, 2)?;
+                self.require_named_cell_identifier(env, &call.args[0], &qualified, "output")?;
+                self.require_named_cell_identifier(env, &call.args[1], &qualified, "input")?;
+                Ok(Type::Bool)
+            }
+            "std::cell::same_type" | "std::cell::preserve_type" | "std::accounting::conserved" => {
+                self.validate_stdlib_arity(&qualified, call, 2)?;
+                let left_ty = self.infer_expr(env, &call.args[0])?;
+                let right_ty = self.infer_expr(env, &call.args[1])?;
+                if qualified == "std::accounting::conserved" {
+                    let left_amount = self.lookup_field_type(&left_ty, "amount", call.span)?;
+                    let right_amount = self.lookup_field_type(&right_ty, "amount", call.span)?;
+                    if !self.types_equal(&left_amount, &right_amount) {
+                        return Err(CompileError::new("std::accounting::conserved requires matching amount field types", call.span));
                     }
-                    _ => {}
                 }
                 Ok(Type::Bool)
             }
+            "std::lifecycle::transfer" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                let lock_ty = self.infer_expr(env, &call.args[2])?;
+                if !matches!(lock_ty, Type::Address | Type::Hash) {
+                    return Err(CompileError::new("std::lifecycle::transfer lock target must be Address or Hash", call.span));
+                }
+                if !self.types_equal(&input_ty, &output_ty) {
+                    return Err(CompileError::new(
+                        "std::lifecycle::transfer input and output must have the same Cell type",
+                        call.span,
+                    ));
+                }
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            "std::receipt::claim" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                self.validate_receipt_claim_pattern(&input_ty, &output_ty, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            "std::lifecycle::settle" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            _ => Err(CompileError::new(
+                format!("unknown stdlib pattern '{}' — each stdlib primitive must have a canonical expansion", qualified),
+                call.span,
+            )),
+        }
+    }
+
+    fn validate_stdlib_arity(&self, qualified: &str, call: &StdlibCallExpr, expected: usize) -> Result<()> {
+        if call.args.len() == expected {
+            Ok(())
+        } else {
+            Err(CompileError::new(format!("{} expects {} arguments, got {}", qualified, expected, call.args.len()), call.span))
+        }
+    }
+
+    fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
+        let ty = self.infer_expr(env, expr)?;
+        if !self.is_linear_type(&ty) {
+            return Err(CompileError::new(format!("{} {} must be a cell-backed value", operation, role), expr_span(expr)));
+        }
+        if !matches!(expr, Expr::Identifier(_)) {
+            return Err(CompileError::new(format!("{} {} must be a named cell-backed binding", operation, role), expr_span(expr)));
+        }
+        Ok(ty)
+    }
+
+    fn validate_preserve_field_types(&self, output_ty: &Type, input_ty: &Type, fields: &[String], span: Span) -> Result<()> {
+        for field in fields {
+            let output_field_ty = self.lookup_field_type(output_ty, field, span)?;
+            let input_field_ty = self.lookup_field_type(input_ty, field, span)?;
+            if !self.types_equal(&output_field_ty, &input_field_ty) {
+                return Err(CompileError::new(
+                    format!(
+                        "preserve field '{}' type mismatch: output has {}, input has {}",
+                        field,
+                        type_repr(&output_field_ty),
+                        type_repr(&input_field_ty)
+                    ),
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_stdlib_output_field_coverage(&self, qualified: &str, output_ty: &Type, fields: &[String], span: Span) -> Result<()> {
+        let Some(output_type_name) = Self::base_type_name(output_ty) else {
+            return Err(CompileError::new(format!("{} output must be a named cell-backed type", qualified), span));
+        };
+        let Some(output_fields) = self.resolve_named_type_fields(output_type_name) else {
+            return Err(CompileError::new(format!("{} output type '{}' has no known fields", qualified, output_type_name), span));
+        };
+        let preserved = fields.iter().map(String::as_str).collect::<HashSet<_>>();
+        let missing = output_fields.keys().filter(|field| !preserved.contains(field.as_str())).cloned().collect::<Vec<_>>();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                format!(
+                    "{} output construction must cover every '{}' field; missing {}",
+                    qualified,
+                    output_type_name,
+                    missing.join(", ")
+                ),
+                span,
+            ))
+        }
+    }
+
+    fn validate_stdlib_lock_arg(&mut self, qualified: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
+        let lock_ty = self.infer_expr(env, lock)?;
+        if matches!(lock_ty, Type::Address | Type::Hash) {
+            Ok(())
+        } else {
+            Err(CompileError::new(format!("{} lock target must be Address or Hash", qualified), expr_span(lock)))
+        }
+    }
+
+    fn validate_receipt_claim_pattern(&self, receipt_ty: &Type, output_ty: &Type, span: Span) -> Result<()> {
+        let Some(receipt_name) = Self::base_type_name(receipt_ty) else {
+            return Err(CompileError::new("std::receipt::claim requires a receipt cell input", span));
+        };
+        if self.resolve_cell_type_kind(receipt_name) != Some(CellTypeKind::Receipt) {
+            return Err(CompileError::new("std::receipt::claim requires a receipt cell input", span));
+        }
+        let Some(Some(declared_output)) = self.resolve_receipt_claim_output(receipt_name) else {
+            return Err(CompileError::new(
+                format!("std::receipt::claim with an output requires receipt '{}' to declare a claim output type", receipt_name),
+                span,
+            ));
+        };
+        if self.types_equal(output_ty, &declared_output) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                format!(
+                    "std::receipt::claim output type mismatch: receipt '{}' declares {}, got {}",
+                    receipt_name,
+                    type_repr(&declared_output),
+                    type_repr(output_ty)
+                ),
+                span,
+            ))
         }
     }
 
@@ -3969,6 +4192,17 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn resolve_receipt_claim_output(&self, name: &str) -> Option<Option<Type>> {
+        if let Some(output) = self.receipt_claim_outputs.get(name) {
+            return Some(output.clone());
+        }
+        let (resolver, module) = (self.resolver?, self.current_module.as_ref()?);
+        match resolver.resolve_type(module, name)? {
+            TypeDef::Receipt(receipt) => Some(receipt.claim_output),
+            TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
+        }
+    }
+
     fn require_named_linear_cell_operand(
         &mut self,
         env: &mut TypeEnv,
@@ -4064,9 +4298,8 @@ fn stmt_span(stmt: &Stmt) -> Span {
 
 fn expr_span(expr: &Expr) -> Span {
     match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::StdlibCall(_) => {
-            Span::default()
-        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => Span::default(),
+        Expr::StdlibCall(call) => call.span,
         Expr::Assign(assign) => assign.span,
         Expr::Binary(binary) => binary.span,
         Expr::Unary(unary) => unary.span,
@@ -4716,5 +4949,312 @@ where
         }
 
         assert_eq!(env.linear_states.get("pool_paired_token"), Some(&LinearState::Consumed));
+    }
+
+    #[test]
+    fn preserve_rejects_mismatched_field_types() {
+        let module = source_module(
+            r#"
+module test
+
+resource A has store, transfer, destroy {
+    amount: u64
+}
+
+resource B has store, transfer, destroy {
+    amount: bool
+}
+
+action bad_preserve(a: A) -> b: B
+where
+    consume a
+    preserve b from a { amount }
+    create b = B { amount: true }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("preserve field 'amount' type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_rejects_nested_cell_operation() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action hidden_consume(coin: Coin)
+where
+    require (consume coin) == 0
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require condition contains cell/runtime operation"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_block_rejects_lifecycle_stdlib_call() {
+        let module = source_module(
+            r#"
+module test
+
+receipt Voucher has destroy {
+    amount: u64
+}
+
+action hidden_claim(voucher: Voucher)
+where
+    require {
+        std::receipt::claim(voucher, voucher, voucher.amount)
+    }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require block contains verifier-boundary syntax"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_block_rejects_assignment_expression() {
+        let module = source_module(
+            r#"
+module test
+
+action hidden_mutation(flag: bool)
+where
+    let mut ok = flag
+    require {
+        ok = false
+    }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require block contains assignment"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_non_receipt_input() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_claim(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::receipt::claim(coin, next_coin, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim requires a receipt cell input"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_declared_output_type_mismatch() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+resource Badge has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher, to: Address) -> badge: Badge
+where
+    std::receipt::claim(voucher, badge, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim output type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_extra_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, coin, coin)
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_output_requires_declared_claim_output_type() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher has destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::receipt::claim with an output requires receipt 'Voucher' to declare a claim output type"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_claim_requires_explicit_output_and_lock_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_settle_requires_explicit_output_and_lock_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_settle(coin: Coin) -> next_coin: Coin
+where
+    std::lifecycle::settle(coin, next_coin) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::lifecycle::settle expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_transfer_output_requires_complete_field_coverage() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::lifecycle::transfer output construction must cover every 'Coin' field; missing owner"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_claim_output_requires_complete_field_coverage() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::receipt::claim output construction must cover every 'Coin' field; missing owner"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_transfer_rejects_extra_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::lifecycle::transfer expects 3 arguments"), "unexpected error: {}", err.message);
     }
 }

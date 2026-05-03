@@ -10,7 +10,7 @@ place. A transaction spends Cells and creates new Cells.
 ## What You Will Learn
 
 - how linear resources move through an action;
-- why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
+- why `create`, `consume`, `destroy`, and stdlib lifecycle patterns are explicit;
 - how `action(before: T) -> after: T` expresses the verifier core for
   input-to-output transitions;
 - why unsupported CKB runtime behavior should fail closed.
@@ -209,8 +209,9 @@ action creates a right, and another action later consumes it.
 For example:
 
 - a vesting action creates a claimable grant;
-- a later claim action consumes the grant;
-- a settlement action consumes proof that a process completed.
+- a later claim action consumes the grant and explicitly creates its output;
+- a settlement action consumes proof that a process completed and explicitly
+  creates its output.
 
 This makes intermediate protocol state explicit instead of hiding it in a
 generic event log.
