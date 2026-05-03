@@ -34,6 +34,10 @@ check_trailing_whitespace() {
         "README.md"
         "README_CH.md"
         "CHANGELOG.md"
+        "roadmap/CELLSCRIPT_ROADMAP.md"
+        "roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
+        "roadmap/CELLSCRIPT_0_13_TODOLIST.md"
+        "docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
@@ -44,6 +48,7 @@ check_trailing_whitespace() {
         "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
         "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md"
         "editors/vscode-cellscript/extension.js"
+        "editors/vscode-cellscript/package-lock.json"
         "editors/vscode-cellscript/package.json"
         "editors/vscode-cellscript/scripts/validate.mjs"
         "scripts/cellscript_ckb_release_gate.sh"
@@ -66,6 +71,27 @@ check_trailing_whitespace() {
         printf '\nTrailing whitespace found in CellScript CKB release-gate files.\n' >&2
         exit 1
     fi
+}
+
+check_release_roadmap_docs() {
+    local required=(
+        'roadmap/CELLSCRIPT_ROADMAP.md::0.13.2 syntax-governance hardening'
+        'roadmap/CELLSCRIPT_ROADMAP.md::syntax-combination audit'
+        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
+        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_ckb_release_gate.sh full'
+        'roadmap/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_syntax_combo_audit.sh ci'
+        'roadmap/CELLSCRIPT_0_13_TODOLIST.md::0.13.2 Syntax Governance And Release Hardening'
+        'docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md::Syntax Governance And Standard Library'
+    )
+    local item file pattern
+    for item in "${required[@]}"; do
+        file="${item%%::*}"
+        pattern="${item#*::}"
+        if ! rg --quiet --fixed-strings "$pattern" "$file"; then
+            printf '0.13 release roadmap docs are missing required boundary in %s: %s\n' "$file" "$pattern" >&2
+            exit 1
+        fi
+    done
 }
 
 check_ckb_release_docs() {
@@ -127,8 +153,10 @@ run_common_gate() {
     run python3 -m py_compile scripts/cellscript_syntax_combo_audit.py
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run npm --prefix editors/vscode-cellscript run validate
+    run npm --prefix editors/vscode-cellscript run publish:dry-run
     run git diff --check
     check_trailing_whitespace
+    check_release_roadmap_docs
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
 }

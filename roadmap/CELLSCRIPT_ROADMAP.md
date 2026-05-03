@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-04-27
+**Updated**: 2026-05-03
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -13,27 +13,34 @@ The current project direction is simple:
    evidence;
 3. make the language surface easier to teach without hiding authorization,
    capacity, witness, or lock-group boundaries.
+4. keep syntax sugar audit-visible by requiring parser, formatter, type,
+   lowering, metadata, codegen, docs, and automated syntax-combination gates to
+   agree before release.
 
 ## Current State
 
 | Area | Current status | Detailed document |
 |---|---|---|
-| 0.13 release scope | Implementation scope closed and merged to `main`; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
+| 0.13 release scope | Implementation scope is closed on the `nightly-0.13` release-candidate line; release-gate evidence remains the active release boundary. | [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
-| Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
+| Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax governance](../docs/CELLSCRIPT_SYNTAX_GOVERNANCE.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; production claims still require report validation. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
-| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, and published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
+| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
 
 ## Release Tracks
 
 ### 0.13: Closed Implementation Scope
 
-0.13 is the current release gate. It focuses on three themes:
+0.13 is the current release gate. Its closed implementation scope now covers:
 
 - executable stack-backed `Vec<T>` helper support for fixed-width values;
 - low-risk surface syntax improvements and cleaner example organization;
 - CKB lock-boundary classification with `protected`, `witness`, and `require`.
+- 0.13.2 stdlib lifecycle/cell metadata patterns that lower to explicit
+  verifier effects instead of core protocol-name magic;
+- automated syntax-combination audit coverage for parser, formatter, type,
+  lowering, metadata, codegen, and release-gate contracts.
 
 0.13 deliberately does not introduce hidden signer authority, hidden sighash
 defaults, full generic maps, or cell-backed collection ownership.
@@ -43,6 +50,7 @@ Detailed status:
 - [0.13 release scope](CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md)
 - [0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md)
+- [Syntax-combination audit methodology](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
 
 ### Next Authorization Hardening Track
 

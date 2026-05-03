@@ -1,10 +1,11 @@
 # CellScript 0.13 Release Tracker
 
-**Updated**: 2026-04-27
+**Updated**: 2026-05-03
 
-**Branch**: `main` after merging the 0.13 implementation branch
+**Branch**: `nightly-0.13` release-candidate line
 
-**Status**: Implementation scope closed for the current 0.13 release gate
+**Status**: Implementation scope closed; 0.13.2 release hardening is gated by
+the full CKB release script and syntax-combination audit.
 
 This file records the implemented 0.13 scope and the explicit deferred work.
 For the broader planning context, see
@@ -94,6 +95,35 @@ by existing fixed-width machinery):
 - [x] Deferred first-class signer values, implicit `Address` signer semantics,
   hidden sighash defaults, explicit sighash verification primitives, and
   `protects T { self ... }` sugar.
+
+---
+
+### 0.13.2 Syntax Governance And Release Hardening
+
+- [x] Removed old core lifecycle expression verbs from the stable executable
+  surface and moved lifecycle semantics into compiler-recognized stdlib
+  patterns.
+- [x] Implemented `std::lifecycle::transfer`, `std::receipt::claim`, and
+  `std::lifecycle::settle` as explicit consume-plus-named-output expansions
+  with lock arguments and field-preservation whitelists.
+- [x] Implemented `std::cell::same_lock`, `std::cell::preserve_lock`, and
+  `std::cell::preserve_capacity` through canonical Cell metadata verifier
+  obligations.
+- [x] Hardened `preserve` sugar so field existence and field types match the
+  canonical `require output.field == input.field` expansion.
+- [x] Hardened anonymous `require` blocks so lifecycle stdlib calls and other
+  Cell effects cannot hide inside pure boolean proof blocks.
+- [x] Removed compiler/codegen behavior keyed off action names such as
+  `claim_*`; protocol-specific authorization is not inferred from names.
+- [x] Added `examples/language/stdlib.cell` plus VS Code grammar/snippet
+  validation for stable stdlib lifecycle and Cell metadata helpers.
+- [x] Added `docs/wiki/Tutorial-10-Standard-Library.md` and linked it from the
+  wiki home/sidebar.
+- [x] Added an executable syntax-combination audit:
+  `./scripts/cellscript_syntax_combo_audit.sh quick|ci|deep`.
+- [x] Wired quick syntax audit into the local release gate, CI syntax audit into
+  the full release gate and GitHub Actions, and mode contracts so coverage
+  shrinkage fails closed.
 
 ---
 

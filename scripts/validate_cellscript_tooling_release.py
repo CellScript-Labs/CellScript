@@ -61,10 +61,16 @@ def main() -> int:
     require(package_json["main"] == "./dist/extension.js", "VS Code extension entrypoint changed")
     require("vscode-languageclient" in package_json.get("devDependencies", {}), "VS Code extension must build with vscode-languageclient")
     require("esbuild" in package_json.get("devDependencies", {}), "VS Code extension must bundle with esbuild")
+    require("@vscode/vsce" in package_json.get("devDependencies", {}), "VS Code extension must pin vsce for package dry runs")
     require("build" in package_json.get("scripts", {}), "VS Code extension must expose a build script")
     require("vscode:prepublish" in package_json.get("scripts", {}), "VS Code extension must build before publish")
     require("package" in package_json.get("scripts", {}), "VS Code extension must expose a package script")
     require("publish:dry-run" in package_json.get("scripts", {}), "VS Code extension must expose a publish dry-run script")
+    require(
+        "vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix"
+        in package_json["scripts"]["publish:dry-run"],
+        "VS Code publish dry-run must package a local VSIX instead of using an unsupported publish --dry-run flag",
+    )
 
     require_contains(
         "src/main.rs",

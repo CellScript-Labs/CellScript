@@ -2,9 +2,10 @@
 
 **Updated**: 2026-05-03
 
-0.13 is a closed implementation-scope release track. The code has been merged to
-`main`; this document explains what 0.13 includes, what it intentionally leaves
-out, and where each subtopic is tracked in more detail.
+0.13 is a closed implementation-scope release track. The current
+release-candidate line is `nightly-0.13`; this document explains what 0.13
+includes, what it intentionally leaves out, and where each subtopic is tracked
+in more detail.
 
 For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 
@@ -18,6 +19,9 @@ For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
    `lock_args`, and pure `require` constraints;
 4. keep CKB production evidence strict enough to support release claims for the
    bundled suite.
+5. keep stdlib and syntax sugar audit-visible by lowering them to canonical
+   verifier effects and checking the parser/type/lowering/codegen combinations
+   automatically.
 
 ## Status Summary
 
@@ -29,6 +33,9 @@ For the broader plan, see [CellScript Roadmap](CELLSCRIPT_ROADMAP.md).
 | Example canonicalization | Done | Business, language, and acceptance examples are split by audience. |
 | Lock classification syntax | Done | `protected`, `witness`, fixed-width `lock_args`, and pure verifier-boundary `require` constraints are implemented and documented. |
 | `lock_args` | Done | Fixed-width lock parameters are decoded from the executing script's `Script.args`; explicit signature verification is still deferred. |
+| Stdlib lifecycle and Cell metadata patterns | Done | `std::lifecycle::transfer`, `std::receipt::claim`, `std::lifecycle::settle`, `std::cell::same_lock`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity` lower to explicit verifier obligations. |
+| Syntax-combination audit | Done | Quick and CI matrices exercise parser, formatter, type, lowering, metadata, codegen, and negative obsolete-syntax oracles. |
+| Release gate wrapper | Done | `./scripts/cellscript_ckb_release_gate.sh full` is the release-facing gate and includes the syntax-combination CI matrix plus builder-backed CKB acceptance. |
 | Explicit sighash verification | Deferred | Requires digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class signer values | Deferred | Must wait for explicit verification primitives. |
 | Generic maps / cell-backed collections | Out of scope | Remain fail-closed until ownership semantics are executable. |
@@ -103,6 +110,42 @@ Detailed design:
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
 - [Wiki cookbook](../docs/wiki/Cookbook-Recipes.md)
 
+## Syntax Governance And Stdlib Patterns
+
+0.13.2 closes the syntax-governance pass for lifecycle and local verifier
+sugar. The stable rule is that sugar may shorten source, but it must not hide a
+Cell effect or protocol-specific authorization rule.
+
+Implemented:
+
+- `std::lifecycle::transfer(input, output, to) { fields }` consumes `input`,
+  creates the named output with `with_lock(to)`, preserves the listed data
+  fields, and checks type continuity;
+- `std::receipt::claim(receipt, output, lock) { fields }` consumes the receipt,
+  creates the receipt-declared output type with the supplied lock, and
+  preserves only the listed fields;
+- `std::lifecycle::settle(input, output, lock) { fields }` uses the same
+  consume-plus-named-output pattern for settlement-shaped protocols;
+- `std::cell::same_lock`, `std::cell::preserve_lock`, and
+  `std::cell::preserve_capacity` lower to canonical Cell metadata verifier
+  checks;
+- `preserve` sugar checks that preserved fields exist on both sides with
+  matching field types, making it type-equivalent to its canonical `require`
+  expansion;
+- anonymous `require` blocks remain pure boolean proof syntax and reject
+  lifecycle stdlib calls or other Cell effects.
+
+Removed boundary:
+
+- protocol-specific claim/signature behavior is not keyed off action names or
+  compiler-internal string hooks.
+
+Automated audit:
+
+- [Syntax-combination audit methodology](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
+- `./scripts/cellscript_syntax_combo_audit.sh quick`
+- `./scripts/cellscript_syntax_combo_audit.sh ci`
+
 ## Lock Boundary Surface
 
 0.13 adds classification syntax for locks:
@@ -149,6 +192,7 @@ Detailed design:
 
 Required evidence for the bundled suite:
 
+- syntax-combination CI matrix pass before CKB acceptance;
 - strict CKB profile admission;
 - scoped action compile and builder-backed action runs;
 - scoped lock compile and builder-backed valid-spend / invalid-spend matrices;
@@ -173,10 +217,13 @@ Detailed evidence docs:
 
 - version-neutral GitHub Wiki tutorials;
 - cookbook recipes and CKB glossary;
+- standard-library tutorial covering stable lifecycle, Cell metadata,
+  accounting, runtime, and collection helpers;
 - rendered GitHub Wiki links instead of raw markdown links;
-- LSP completions and VS Code grammar/snippets for new lock-boundary syntax;
+- LSP completions and VS Code grammar/snippets for new lock-boundary and
+  stdlib syntax;
 - release notes that separate 0.12 schema/ABI foundation from 0.13 executable
-  collection helper work.
+  collection helper work and record the 0.13.2 syntax-governance boundary.
 
 Detailed docs:
 
@@ -202,18 +249,28 @@ should be exposed as stable source syntax.
 
 ## Verification Commands
 
-The release-gate command set remains:
+For normal pre-push checks:
 
 ```bash
-cargo fmt --all
+./scripts/cellscript_ckb_release_gate.sh quick
+```
+
+For release-facing evidence:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh full
+```
+
+The full gate includes the compiler/tooling checks, syntax-combination CI
+matrix, VS Code validation, docs boundary checks, and builder-backed local CKB
+acceptance. The component commands remain useful for focused debugging:
+
+```bash
+./scripts/cellscript_syntax_combo_audit.sh ci
+cargo fmt --all --check
 cargo clippy --locked -p cellscript --all-targets -- -D warnings
 cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
-```
-
-For CKB production evidence:
-
-```bash
 ./scripts/ckb_cellscript_acceptance.sh --production
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json

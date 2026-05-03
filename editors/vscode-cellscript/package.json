@@ -28,10 +28,11 @@
     "build": "esbuild extension.js --bundle --platform=node --format=cjs --external:vscode --minify --outfile=dist/extension.js",
     "validate": "npm run build && node ./scripts/validate.mjs",
     "vscode:prepublish": "npm run build",
-    "package": "npm run build && npx @vscode/vsce package",
-    "publish:dry-run": "npm run build && npx @vscode/vsce publish --dry-run"
+    "package": "npm run build && vsce package --no-dependencies",
+    "publish:dry-run": "npm run build && vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix"
   },
   "devDependencies": {
+    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.25.3",
     "vscode-languageclient": "^9.0.1"
   },

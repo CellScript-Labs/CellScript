@@ -151,8 +151,11 @@ language configuration, commands, settings, and runtime wiring.
 ```bash
 cd editors/vscode-cellscript
 npm run package
+npm run publish:dry-run
 ```
 
+`npm run publish:dry-run` builds the extension and writes a disposable VSIX to
+`/tmp/cellscript-vscode-dry-run.vsix`; it does not contact the Marketplace.
 Generated `.vsix` files are ignored by git and excluded from packaged source
 archives.
 

@@ -8,6 +8,9 @@
   `std::lifecycle::settle`, `std::cell::same_lock`,
   `std::cell::preserve_lock`, and `std::cell::preserve_capacity`.
 - Highlight `std::...` namespaces as builtin support namespaces.
+- Fixed the publish dry-run script so it performs a local VSIX packaging check
+  with a pinned `@vscode/vsce` dependency instead of invoking an unsupported
+  Marketplace publish flag.
 
 ## 0.13.0
 

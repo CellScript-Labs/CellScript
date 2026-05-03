@@ -24,6 +24,10 @@
   gate.
 - Make CI run on nightly branches and version tags, and add syntax-audit mode
   contracts so accidental coverage shrinkage fails closed.
+- Sync the 0.13 roadmap/release scope with the 0.13.2 governance boundary and
+  add a release-gate check that keeps those docs aligned.
+- Pin VS Code extension packaging to `@vscode/vsce` and make local VSIX
+  packaging dry-runs part of the release gate.
 
 ## 0.13.0 - 2026-04-30
 

@@ -1,8 +1,9 @@
 # CellScript 0.13 Release Notes Draft
 
-**Status**: Release notes for the 0.13 implementation on `nightly-0.13`.
+**Status**: Release notes for the 0.13.2 release-candidate line on
+`nightly-0.13`.
 
-**Updated**: 2026-05-01.
+**Updated**: 2026-05-03.
 
 ## Collections Scope
 
@@ -158,8 +159,17 @@ Important boundaries:
 Current release-gate commands:
 
 ```bash
-cargo fmt --all
+./scripts/cellscript_ckb_release_gate.sh quick
+./scripts/cellscript_ckb_release_gate.sh full
+```
+
+The full gate is the release-facing command. It expands to the compiler,
+tooling, syntax-combination, VS Code, documentation-boundary, and
+builder-backed local CKB acceptance checks. Useful component commands are:
+
+```bash
 ./scripts/cellscript_syntax_combo_audit.sh ci
+cargo fmt --all --check
 cargo clippy --locked -p cellscript --all-targets -- -D warnings
 cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
@@ -178,6 +188,41 @@ the quick syntax-combination audit plus compile-only production acceptance and
 is useful before push. The `production`/`full` mode also runs the broader
 syntax-combination CI matrix before the full local CKB acceptance script, and is
 the release-facing gate.
+
+## Syntax Governance And Standard Library
+
+New in 0.13.2:
+
+- Core `transfer`, `claim`, and `settle` lifecycle expression semantics are not
+  part of the executable core surface. The stable spelling is through explicit
+  compiler-recognized stdlib patterns.
+- `std::lifecycle::transfer(input, output, to) { fields }` consumes `input`,
+  creates the named output with `with_lock(to)`, preserves only the listed data
+  fields, and checks type continuity.
+- `std::receipt::claim(receipt, output, lock) { fields }` consumes the receipt
+  and creates the receipt-declared output type with the supplied lock.
+- `std::lifecycle::settle(input, output, lock) { fields }` follows the same
+  consume-plus-named-output lowering as transfer/claim.
+- `std::cell::same_lock`, `std::cell::preserve_lock`, and
+  `std::cell::preserve_capacity` lower to canonical Cell metadata verifier
+  checks.
+- `preserve` sugar is type-equivalent to its canonical `require` expansion:
+  field names and field types must match on both sides.
+- Anonymous `require` blocks remain pure boolean proof syntax; lifecycle stdlib
+  calls and other Cell effects are rejected inside those blocks.
+- Codegen no longer derives claim authorization checks from action names. If a
+  protocol needs signature authorization, it must use an explicit future
+  verification primitive instead of compiler naming magic.
+- The syntax-combination audit runs parser, formatter, type, lowering,
+  metadata, codegen, and negative obsolete-syntax oracles with fail-closed mode
+  contracts.
+
+Important boundaries:
+
+- Stdlib helpers are audit-visible shorthand, not a place for hidden protocol
+  policy.
+- The current stdlib does not infer signer authority, generate change outputs,
+  implement generic maps, or model Cell-backed collection ownership.
 
 ## Backend And ELF Emission
 
