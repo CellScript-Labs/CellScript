@@ -200,6 +200,10 @@ For release-facing CKB evidence, run the CellScript acceptance gate:
 ./scripts/cellscript_ckb_release_gate.sh full
 ```
 
+This wrapper runs the syntax-combination CI preflight before the builder-backed
+CKB acceptance script, so bundled examples cannot become release evidence if a
+new syntax/lowering combination is failing.
+
 Do not use compile-only or bounded diagnostic runs as production release
 evidence. They are helpful during development, but they do not replace the chain
 acceptance boundary.

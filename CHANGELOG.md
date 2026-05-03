@@ -28,6 +28,8 @@
   add a release-gate check that keeps those docs aligned.
 - Pin VS Code extension packaging to `@vscode/vsce` and make local VSIX
   packaging dry-runs part of the release gate.
+- Document the syntax-combination audit as a reusable release acceptance
+  preflight that runs before builder-backed CKB acceptance.
 
 ## 0.13.0 - 2026-04-30
 

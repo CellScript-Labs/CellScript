@@ -85,6 +85,27 @@ tests/syntax_combo/matrix.toml
 tests/syntax_combo/seeds/*.cell
 ```
 
+## Reuse Contract
+
+The audit is reusable by design. It is not tied to one release candidate or one
+bug class.
+
+To reuse it for a new syntax feature:
+
+1. add or extend one matrix origin in `tests/syntax_combo/matrix.toml`;
+2. add at least one minimized seed under `tests/syntax_combo/seeds/` for the
+   riskiest accepted or rejected shape;
+3. update the mode contract if the new origin should be required in `quick`,
+   `ci`, or `deep`;
+4. run `scripts/cellscript_syntax_combo_audit.sh quick` while developing;
+5. run `scripts/cellscript_syntax_combo_audit.sh ci` before merge or release;
+6. keep reports under `target/syntax-combo-audit/` instead of pasting artifacts
+   into review threads.
+
+The reusable unit is a compact case plus its expected pipeline result, not a
+large log. A failing case should become either a seed or a matrix origin so the
+same class stays covered without an LLM in the loop.
+
 `quick` mode runs the minimal deterministic corpus plus regression seeds.
 `ci` adds matrix-generated stdlib lifecycle, proof-syntax, metadata-helper, and
 lock-source qualifier combinations. `deep` adds higher-risk reject mutations for
@@ -92,6 +113,29 @@ release-local replay before expensive CKB-node execution.
 Each mode has a contract in `tests/syntax_combo/matrix.toml`: minimum generated,
 accepted, and rejected case counts plus required origin families. A mode fails
 closed if a budget/configuration change drops coverage below that contract.
+
+## Acceptance Integration
+
+The syntax-combination audit is a release acceptance preflight. It runs before
+builder-backed CKB acceptance in `scripts/cellscript_ckb_release_gate.sh full`.
+
+Keep this layering strict:
+
+- `scripts/cellscript_syntax_combo_audit.sh quick` is the local smoke gate;
+- `scripts/cellscript_syntax_combo_audit.sh ci` is the merge/release syntax
+  gate;
+- `scripts/cellscript_syntax_combo_audit.sh deep` is for release-local or
+  feature-risk replay;
+- `scripts/ckb_cellscript_acceptance.sh --production` remains the chain-evidence
+  component;
+- `scripts/cellscript_ckb_release_gate.sh full` is the acceptance-standard
+  wrapper that requires both syntax-combination CI and builder-backed CKB
+  evidence.
+
+Do not treat a passing CKB acceptance run as a substitute for a failed
+syntax-combination audit. CKB evidence proves selected concrete transactions;
+the syntax-combination audit proves the compiler pipeline does not silently
+accept dangerous source combinations with missing verifier obligations.
 
 Recommended repository layout:
 

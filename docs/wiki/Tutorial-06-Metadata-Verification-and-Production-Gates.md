@@ -150,6 +150,26 @@ cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-source
 These gates are suitable for a compiler/package CI loop. They are not enough for
 a release claim that says a contract is production-ready on a chain.
 
+## Syntax-Combination Preflight
+
+Syntax and lowering bugs can pass ordinary example compilation when the risky
+shape is hidden in an uncommon combination. The reusable syntax-combination
+audit exists to catch those bugs before chain evidence is generated:
+
+```bash
+./scripts/cellscript_syntax_combo_audit.sh quick
+./scripts/cellscript_syntax_combo_audit.sh ci
+```
+
+The syntax-combination audit is a release acceptance preflight. It exercises
+parser, formatter, type checking, lowering, metadata, codegen, and negative
+obsolete-syntax oracles with compact reports under
+`target/syntax-combo-audit/`.
+
+For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
+before builder-backed CKB acceptance. A direct CKB acceptance run does not
+replace this preflight because it only proves selected concrete transactions.
+
 ## CKB Release Evidence Gate
 
 When you are ready to make a CKB production claim, move from compiler evidence
@@ -168,7 +188,8 @@ compile-only production acceptance:
 ```
 
 The quick gate is useful development evidence. The production mode is the
-release-facing gate because it runs builder-backed local CKB transactions.
+release-facing gate because it first runs the syntax-combination CI preflight
+and then runs builder-backed local CKB transactions.
 
 The CKB validator requires strict original bundled-example coverage, scoped
 action and lock compile coverage, builder-backed action runs, builder-backed lock

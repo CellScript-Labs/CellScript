@@ -98,6 +98,9 @@ check_ckb_release_docs() {
     local release_doc="docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
     local required=(
         "CKB Release Evidence Gate"
+        "Syntax-Combination Preflight"
+        "syntax-combination audit is a release acceptance preflight"
+        "before builder-backed CKB acceptance"
         "./scripts/cellscript_ckb_release_gate.sh full"
         "strict original bundled-example coverage"
         "builder-backed action runs"
