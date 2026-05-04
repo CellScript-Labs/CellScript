@@ -39,6 +39,8 @@ High-value active references include:
 - `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
   governance summary
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
+- `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` for the active grammar-governance
+  direction around transition shape, `where`, `require`, and accounting syntax
 - `CELLSCRIPT_CKB_LANGUAGE_AUDIT.md`
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
