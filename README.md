@@ -67,21 +67,6 @@ It is not yet recommended for unaudited mainnet deployment without manual
 review. The current focus is developer-readiness, diagnostics, ProofPlan /
 metadata visibility, and CKB target-profile stability.
 
-## Current Status
-
-CellScript is currently in a CKB-focused alpha / stabilisation phase.
-
-It is suitable for:
-- experimenting with CKB Cell-contract authoring;
-- compiling and inspecting the bundled examples;
-- exploring typed Cell effects, metadata, constraints, and CKB target-profile
-  checks;
-- trying the local VS Code extension and LSP tooling.
-
-It is not yet recommended for unaudited mainnet deployment without manual
-review. The current focus is developer-readiness, diagnostics, ProofPlan /
-metadata visibility, and CKB target-profile stability.
-
 ## Quick Start
 
 Install from this repository:
@@ -281,6 +266,26 @@ lifecycle patterns as **Cell effects**, not ordinary opaque function calls.
 Those effects are reflected in metadata so CKB admission policy, schema
 decoding, and artifact verification can audit the generated script.
 
+**Scoped invariants and ProofPlan metadata:**
+
+```cellscript
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+
+    assert_conserved(Token.amount, scope = group)
+}
+```
+
+Declared invariants must state their CKB trigger and scope explicitly. In v0.15
+they are emitted into Covenant ProofPlan metadata with trigger/scope/read
+coverage, aggregate primitive relation checks, and a `gap:metadata-only` status
+until executable verifier lowering is available. ProofPlan records also carry
+macro expansion provenance for selected protocol flows and warnings for risky
+coverage assumptions such as `lock_group` verifiers that scan transaction-wide
+views.
+
 **Complete fungible-token example:**
 
 ```cellscript
@@ -406,6 +411,7 @@ CellScript includes production-style local language tooling for early users:
 - [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
 - [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
 
 ---
 
@@ -483,6 +489,7 @@ policy gates need — without re-parsing source:
 | Scheduler witness ABI & access domains | `codegen/` | CKB block builder, parallel scheduler |
 | Source hashes, artifact CKB Blake2b | `lib.rs` | `cellc verify-artifact`, CI gates |
 | Verifier obligations, pool invariants | `ir/` | On-chain verifier, policy checker |
+| Covenant ProofPlan trigger/scope/read coverage, risk diagnostics, macro provenance | `proof_plan/` | `cellc explain-proof`, auditors |
 | Target-profile policy violations | `lib.rs` | `cellc check`, CI gates |
 
 `cellc constraints` produces a human-readable subset focused on production
@@ -586,7 +593,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.13.2"
+version = "0.15.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

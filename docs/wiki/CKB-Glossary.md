@@ -50,6 +50,29 @@ inputs, invariants, and outputs of a state change.
 
 Use `assert` inside actions for business-state transition checks.
 
+## TYPE_ID
+
+TYPE_ID is the CKB convention for giving a Cell lineage a unique type identity
+derived from the first input and output index chosen by the transaction
+builder. In CellScript 0.15, `identity(ckb_type_id)` and
+`create_unique<T>(identity = ckb_type_id)` surface that lifecycle explicitly in
+source and metadata.
+
+The compiler can require the TYPE_ID output plan and preserve TypeHash on
+replacement, but the transaction builder still has to construct the concrete
+TYPE_ID-compatible output.
+
+## Identity Policy
+
+An identity policy says how CellScript should recognize the same logical Cell
+across lifecycle operations. Supported v0.15 policies are `ckb_type_id`,
+`field(name)`, `script_args`, and `singleton_type`.
+
+`replace_unique` emits runtime preservation checks for the selected policy.
+`create_unique` emits a local runtime anchor for the created output. Chain-wide
+uniqueness for non-TYPE_ID policies remains a builder or indexer claim, not a
+standalone compiler proof.
+
 ## Witness
 
 Witness data is user-supplied transaction data. It can carry signatures,
@@ -67,6 +90,10 @@ bind a script to a particular owner, policy, or configuration.
 CellScript uses `lock_args T` on lock parameters for typed fixed-width decoding
 from the executing lock script's `Script.args`. This binds data to script args;
 it does not by itself verify a transaction signature.
+
+When `identity(script_args)` is used, ProofPlan reports the provenance as
+`lock_args` rather than witness data. Runtime identity preservation is checked
+through the CKB LockHash because script args are part of the lock script.
 
 ## Lock Group
 
@@ -95,6 +122,17 @@ reviewers can see which dependencies must be present.
 A DepGroup packages multiple CellDeps behind one dependency reference. Release
 metadata reports DepGroup policy so deployment and builder workflows can audit
 which dependencies are being used.
+
+## ProofPlan
+
+ProofPlan is CellScript's audit metadata for verifier obligations. It records
+where an obligation came from, which trigger and scope apply, what CKB views it
+reads, which checks are covered by generated code, and which builder
+assumptions remain.
+
+Use `cellc explain-proof` to read ProofPlan data in human-readable or JSON form.
+If a plan says `runtime-required` or `gap:metadata-only`, it is not yet a fully
+covered on-chain proof.
 
 ## Sighash
 

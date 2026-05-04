@@ -6,8 +6,8 @@ use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, Cell
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, TargetProfile,
-    ENTRY_WITNESS_ABI,
+    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
+    TargetProfile, ENTRY_WITNESS_ABI,
 };
 use camino::Utf8Path;
 #[cfg(feature = "vm-runner")]
@@ -39,6 +39,7 @@ pub enum Command {
     CkbHash(CkbHashArgs),
     Explain(ExplainArgs),
     ExplainProfile(ExplainProfileArgs),
+    ExplainProof(ExplainProofArgs),
     ExplainGenerics(ExplainGenericsArgs),
     OptReport(OptReportArgs),
     ActionBuild(ActionBuildArgs),
@@ -70,6 +71,7 @@ pub struct BuildArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -155,6 +157,7 @@ pub struct CheckArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -214,6 +217,14 @@ pub struct ExplainProfileArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct ExplainProofArgs {
+    pub input: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct ExplainGenericsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
@@ -266,6 +277,7 @@ pub struct VerifyArtifactArgs {
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
+    pub primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -321,6 +333,7 @@ impl CommandExecutor {
             Command::CkbHash(args) => Self::ckb_hash(args),
             Command::Explain(args) => Self::explain(args),
             Command::ExplainProfile(args) => Self::explain_profile(args),
+            Command::ExplainProof(args) => Self::explain_proof(args),
             Command::ExplainGenerics(args) => Self::explain_generics(args),
             Command::OptReport(args) => Self::opt_report(args),
             Command::ActionBuild(args) => Self::action_build(args),
@@ -344,6 +357,7 @@ impl CommandExecutor {
             debug: false,
             target: args.target.clone(),
             target_profile: args.target_profile.clone(),
+            primitive_compat: args.primitive_compat.clone(),
         };
         if args.entry_action.is_some() && args.entry_lock.is_some() {
             return Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"));
@@ -441,7 +455,17 @@ impl CommandExecutor {
         test_inputs.sort();
 
         if test_inputs.is_empty() {
-            compile_path(".", CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None })?;
+            compile_path(
+                ".",
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: None,
+                    primitive_compat: None,
+                },
+            )?;
             if args.json {
                 let summary = serde_json::json!({
                     "status": "ok",
@@ -484,7 +508,14 @@ impl CommandExecutor {
             let expectation = read_test_expectation(input)?;
             let result = compile_path(
                 utf8,
-                CompileOptions { opt_level: 0, output: None, debug: false, target: expectation.target.clone(), target_profile: None },
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: expectation.target.clone(),
+                    target_profile: None,
+                    primitive_compat: None,
+                },
             )
             .and_then(|result| {
                 let policy_args = expectation.check_args();
@@ -583,8 +614,10 @@ impl CommandExecutor {
 
     fn generate_docs(args: &DocArgs) -> Result<PathBuf> {
         let modules = load_modules_for_input(".")?;
-        let compile_result =
-            compile_path(".", CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None })?;
+        let compile_result = compile_path(
+            ".",
+            CompileOptions { opt_level: 0, output: None, debug: false, target: None, target_profile: None, primitive_compat: None },
+        )?;
         let mut generator = DocGenerator::new(args.output_format);
         for module in &modules {
             generator.add_module(&module.ast);
@@ -920,6 +953,7 @@ impl CommandExecutor {
                     debug: false,
                     target: target.map(str::to_string),
                     target_profile: compile_target_profile.clone(),
+                    primitive_compat: args.primitive_compat.clone(),
                 },
             )?;
             validate_check_policy(&result.metadata, &args)?;
@@ -1010,7 +1044,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let json = serde_json::to_string_pretty(&result.metadata)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize metadata: {}", error)))?;
@@ -1037,8 +1078,14 @@ impl CommandExecutor {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        let options =
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile };
+        let options = CompileOptions {
+            opt_level: 0,
+            output: None,
+            debug: false,
+            target: args.target,
+            target_profile: args.target_profile,
+            primitive_compat: None,
+        };
         let result = match (args.entry_action.as_deref(), args.entry_lock.as_deref()) {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
@@ -1071,7 +1118,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
         let entry_constraints = result
@@ -1164,7 +1218,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
 
         let actions = result
@@ -1316,13 +1377,64 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn explain_proof(args: ExplainProofArgs) -> Result<()> {
+        let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
+        let input = Utf8Path::from_path(&input_path)
+            .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
+        let result = compile_path(
+            input,
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let proof_plan = result.metadata.runtime.proof_plan;
+
+        if args.json {
+            let proof_plan_summary = proof_plan_summary_json(&proof_plan);
+            let summary = serde_json::json!({
+                "status": "ok",
+                "module": result.metadata.module,
+                "target_profile": result.metadata.target_profile.name,
+                "proof_plan_summary": proof_plan_summary,
+                "proof_plan": proof_plan,
+            });
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize ProofPlan: {}", error)))?;
+            println!("{}", json);
+            return Ok(());
+        }
+
+        println!("Covenant ProofPlan for module `{}`", result.metadata.module);
+        print_proof_plan_summary(&proof_plan);
+        if proof_plan.is_empty() {
+            println!("  No ProofPlan records emitted.");
+            return Ok(());
+        }
+        for plan in &proof_plan {
+            print_proof_plan_record(plan);
+        }
+        Ok(())
+    }
+
     fn explain_generics(args: ExplainGenericsArgs) -> Result<()> {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let instantiations = result.metadata.runtime.collection_instantiations;
 
@@ -1376,6 +1488,7 @@ impl CommandExecutor {
                     debug: false,
                     target: args.target.clone(),
                     target_profile: args.target_profile.clone(),
+                    primitive_compat: None,
                 },
             )?;
             rows.push(serde_json::json!({
@@ -1493,6 +1606,7 @@ impl CommandExecutor {
                 debug: false,
                 target: args.target,
                 target_profile: args.target_profile.or_else(|| Some("ckb".to_string())),
+                primitive_compat: None,
             },
         )?;
 
@@ -1580,7 +1694,14 @@ impl CommandExecutor {
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
         let result = compile_path(
             input,
-            CompileOptions { opt_level: 0, output: None, debug: false, target: args.target, target_profile: args.target_profile },
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
 
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
@@ -1790,7 +1911,14 @@ impl CommandExecutor {
         let opt_level = if args.release { 3 } else { 0 };
         let compile_result = compile_path(
             ".",
-            CompileOptions { opt_level, output: None, debug: false, target: Some("riscv64-elf".to_string()), target_profile: None },
+            CompileOptions {
+                opt_level,
+                output: None,
+                debug: false,
+                target: Some("riscv64-elf".to_string()),
+                target_profile: None,
+                primitive_compat: None,
+            },
         );
 
         if args.simulate {
@@ -2182,6 +2310,130 @@ struct RegistryCredential {
     token: String,
 }
 
+fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Value {
+    let record_count = proof_plan.len();
+    let on_chain_checked_count = proof_plan.iter().filter(|plan| plan.on_chain_checked).count();
+    let runtime_required_count = proof_plan.iter().filter(|plan| plan.status == "runtime-required").count();
+    let metadata_only_gap_count = proof_plan.iter().filter(|plan| plan.codegen_coverage_status == "gap:metadata-only").count();
+    let fail_closed_count =
+        proof_plan.iter().filter(|plan| plan.status == "fail-closed" || plan.codegen_coverage_status == "fail-closed").count();
+    let diagnostic_error_count =
+        proof_plan.iter().flat_map(|plan| &plan.diagnostics).filter(|diagnostic| diagnostic.severity == "error").count();
+    let diagnostic_warning_count =
+        proof_plan.iter().flat_map(|plan| &plan.diagnostics).filter(|diagnostic| diagnostic.severity == "warning").count();
+    let macro_provenance_count =
+        proof_plan.iter().flat_map(|plan| &plan.coverage).filter(|coverage| coverage.starts_with("macro_expansion:")).count();
+    let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
+    let has_fail_closed_gaps = fail_closed_count > 0;
+
+    serde_json::json!({
+        "record_count": record_count,
+        "on_chain_checked_count": on_chain_checked_count,
+        "runtime_required_count": runtime_required_count,
+        "metadata_only_gap_count": metadata_only_gap_count,
+        "fail_closed_count": fail_closed_count,
+        "diagnostic_error_count": diagnostic_error_count,
+        "diagnostic_warning_count": diagnostic_warning_count,
+        "macro_provenance_count": macro_provenance_count,
+        "has_runtime_required_gaps": has_runtime_required_gaps,
+        "has_fail_closed_gaps": has_fail_closed_gaps,
+        "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
+    })
+}
+
+fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
+    let summary = proof_plan_summary_json(proof_plan);
+    println!("  Summary:");
+    println!("    records: {}", summary["record_count"]);
+    println!("    on_chain_checked: {}", summary["on_chain_checked_count"]);
+    println!("    runtime_required: {}", summary["runtime_required_count"]);
+    println!("    metadata_only_gaps: {}", summary["metadata_only_gap_count"]);
+    println!("    fail_closed: {}", summary["fail_closed_count"]);
+    println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
+    println!("    diagnostic_warnings: {}", summary["diagnostic_warning_count"]);
+    println!("    macro_provenance_records: {}", summary["macro_provenance_count"]);
+}
+
+fn print_proof_plan_record(plan: &ProofPlanMetadata) {
+    let coverage_notes = plan.coverage.iter().filter(|coverage| !coverage.starts_with("macro_expansion:")).collect::<Vec<_>>();
+    let macro_provenance = plan.coverage.iter().filter(|coverage| coverage.starts_with("macro_expansion:")).collect::<Vec<_>>();
+
+    println!();
+    println!("constraint: {}", plan.name);
+    println!("  origin: {}", plan.origin);
+    println!("  trigger: {}", plan.trigger);
+    println!("  scope: {}", plan.scope);
+    println!("  reads:");
+    if plan.reads.is_empty() {
+        println!("    - none");
+    } else {
+        for read in &plan.reads {
+            println!("    - {}", proof_plan_read_label(read));
+        }
+    }
+    println!("  coverage:");
+    if coverage_notes.is_empty() {
+        println!("    - none");
+    } else {
+        for coverage in coverage_notes {
+            println!("    - {}", coverage);
+        }
+    }
+    if !macro_provenance.is_empty() {
+        println!("  macro_provenance:");
+        for provenance in macro_provenance {
+            println!("    - {}", provenance);
+        }
+    }
+    println!("  relation_checks:");
+    if plan.input_output_relation_checks.is_empty() {
+        println!("    - none");
+    } else {
+        for check in &plan.input_output_relation_checks {
+            println!("    - {}", check);
+        }
+    }
+    println!("  on_chain_checked: {}", if plan.on_chain_checked { "yes" } else { "no" });
+    println!("  codegen_coverage_status: {}", plan.codegen_coverage_status);
+    if !plan.witness_fields.is_empty() {
+        println!("  witness_fields:");
+        for field in &plan.witness_fields {
+            println!("    - {}", field);
+        }
+    }
+    if !plan.lock_args_fields.is_empty() {
+        println!("  lock_args_fields:");
+        for field in &plan.lock_args_fields {
+            println!("    - {}", field);
+        }
+    }
+    println!("  builder_assumption:");
+    if plan.builder_assumptions.is_empty() {
+        println!("    - none");
+    } else {
+        for assumption in &plan.builder_assumptions {
+            println!("    - {}", assumption);
+        }
+    }
+    for diagnostic in &plan.diagnostics {
+        println!("  {}: {}", diagnostic.severity, diagnostic.message);
+    }
+}
+
+fn proof_plan_read_label(read: &str) -> String {
+    match read {
+        "input" => "Source::Input".to_string(),
+        "output" => "Source::Output".to_string(),
+        "group_input" => "Source::GroupInput".to_string(),
+        "group_output" => "Source::GroupOutput".to_string(),
+        "cell_dep" => "Source::CellDep".to_string(),
+        "header_dep" => "Source::HeaderDep".to_string(),
+        "witness" => "WitnessArgs".to_string(),
+        "lock_args" => "Script.args".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn dirs_config_dir() -> PathBuf {
     if let Ok(config) = std::env::var("CELLSCRIPT_CONFIG") {
         return PathBuf::from(config);
@@ -2357,6 +2609,7 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         deny_fail_closed: args.deny_fail_closed,
         deny_ckb_runtime: args.deny_ckb_runtime,
         deny_runtime_obligations: args.deny_runtime_obligations,
+        primitive_compat: args.primitive_compat.clone(),
     })
 }
 
@@ -2444,6 +2697,17 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             .collect::<Vec<_>>();
         if !runtime_required_obligations.is_empty() {
             violations.push(format!("runtime-required verifier obligations: {}", runtime_required_obligations.join(", ")));
+        }
+
+        let runtime_required_proof_plan = metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .filter(|plan| plan.status == "runtime-required" && !plan.on_chain_checked)
+            .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+            .collect::<Vec<_>>();
+        if !runtime_required_proof_plan.is_empty() {
+            violations.push(format!("runtime-required ProofPlan gaps: {}", runtime_required_proof_plan.join(", ")));
         }
 
         let transaction_invariants = transaction_invariant_checked_subcondition_summaries(metadata);
@@ -2770,6 +3034,7 @@ impl CompileTestExpectation {
             deny_fail_closed: self.deny_fail_closed,
             deny_ckb_runtime: self.deny_ckb_runtime,
             deny_runtime_obligations: self.deny_runtime_obligations,
+            primitive_compat: None,
         }
     }
 }
@@ -3453,6 +3718,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations before writing artifacts"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3572,6 +3851,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3634,6 +3927,14 @@ impl CliParser {
                     .about("Explain a CellScript target profile semantic contract")
                     .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+            )
+            .subcommand(
+                ClapCommand::new("explain-proof")
+                    .about("Explain Covenant ProofPlan trigger, scope, reads, coverage, and on-chain status")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON ProofPlan")),
             )
             .subcommand(
                 ClapCommand::new("explain-generics")
@@ -3760,6 +4061,20 @@ impl CliParser {
                             .long("deny-runtime-obligations")
                             .action(ArgAction::SetTrue)
                             .help("Reject runtime-required verifier obligations"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -3815,6 +4130,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 ..Default::default()
             }),
             Some(("test", m)) => Command::Test(TestArgs {
@@ -3878,6 +4197,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 features: Vec::new(),
             }),
             Some(("metadata", m)) => Command::Metadata(MetadataArgs {
@@ -3920,6 +4243,12 @@ impl CliParser {
             }),
             Some(("explain-profile", m)) => Command::ExplainProfile(ExplainProfileArgs {
                 profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
+                json: m.get_flag("json"),
+            }),
+            Some(("explain-proof", m)) => Command::ExplainProof(ExplainProofArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
@@ -3968,6 +4297,10 @@ impl CliParser {
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
                 deny_runtime_obligations: m.get_flag("deny-runtime-obligations"),
+                primitive_compat: resolve_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
             }),
             Some(("run", m)) => Command::Run(RunArgs {
                 args: m.get_many::<String>("args").map(|values| values.cloned().collect()).unwrap_or_default(),
@@ -3988,6 +4321,17 @@ impl CliParser {
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
             _ => unreachable!(),
         }
+    }
+}
+
+/// Resolve --primitive-compat and --primitive-strict into a single version string.
+/// --primitive-strict=X takes precedence and sets strict mode.
+/// --primitive-compat=X sets compat mode.
+fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
+    if strict.is_some() {
+        strict
+    } else {
+        compat
     }
 }
 

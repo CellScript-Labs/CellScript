@@ -14,6 +14,7 @@ pub enum Item {
     Receipt(ReceiptDef),
     Struct(StructDef),
     Flow(FlowDef),
+    Invariant(InvariantDef),
     Const(ConstDef),
     Enum(EnumDef),
     Action(ActionDef),
@@ -26,6 +27,7 @@ pub enum Item {
 pub struct ResourceDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
@@ -37,6 +39,7 @@ pub struct ResourceDef {
 pub struct SharedDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
@@ -48,6 +51,7 @@ pub struct SharedDef {
 pub struct ReceiptDef {
     pub name: String,
     pub type_id: Option<TypeIdentity>,
+    pub identity: IdentityPolicy,
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub claim_output: Option<Type>,
@@ -131,15 +135,81 @@ pub struct FlowDef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
+    // v0.14 compat capabilities
     Store,
     Transfer,
     Destroy,
+    // v0.15 kernel effect capabilities
+    Create,
+    Consume,
+    Replace,
+    Burn,
+    Relock,
+    RetargetType,
+    ReadRef,
+}
+
+impl Capability {
+    /// Returns true if this capability is a v0.14-era protocol verb
+    /// that is not allowed in `--primitive-strict=0.15` mode.
+    pub fn is_protocol_verb(self) -> bool {
+        matches!(self, Self::Transfer | Self::Destroy)
+    }
+
+    /// Map a protocol capability to its kernel effect equivalents.
+    pub fn kernel_effects(self) -> Vec<Capability> {
+        match self {
+            Self::Transfer => vec![Self::Replace, Self::Relock],
+            Self::Destroy => vec![Self::Consume, Self::Burn],
+            other => vec![other],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Field {
     pub name: String,
     pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvariantDef {
+    pub name: String,
+    pub trigger: Option<String>,
+    pub scope: Option<String>,
+    pub reads: Vec<String>,
+    pub aggregates: Vec<AggregateInvariant>,
+    pub asserts: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregateInvariantKind {
+    Sum,
+    Conserved,
+    Delta,
+    Distinct,
+    Singleton,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregateRelation {
+    Lt,
+    Le,
+    Eq,
+    Ge,
+    Gt,
+}
+
+#[derive(Debug, Clone)]
+pub struct AggregateInvariant {
+    pub kind: AggregateInvariantKind,
+    pub target: String,
+    pub scope: String,
+    pub argument: Option<String>,
+    pub relation: Option<AggregateRelation>,
+    pub rhs: Option<String>,
     pub span: Span,
 }
 
@@ -309,8 +379,13 @@ pub enum Expr {
     Index(IndexExpr),
     Create(CreateExpr),
     Consume(ConsumeExpr),
+    Transfer(TransferExpr),
     Destroy(DestroyExpr),
     ReadRef(ReadRefExpr),
+    Claim(ClaimExpr),
+    Settle(SettleExpr),
+    CreateUnique(CreateUniqueExpr),
+    ReplaceUnique(ReplaceUniqueExpr),
     Assert(AssertExpr),
     Require(RequireExpr),
     RequireBlock(RequireBlockExpr),
@@ -343,8 +418,13 @@ impl Expr {
             Expr::Index(e) => e.span,
             Expr::Create(e) => e.span,
             Expr::Consume(e) => e.span,
+            Expr::Transfer(e) => e.span,
             Expr::Destroy(e) => e.span,
             Expr::ReadRef(e) => e.span,
+            Expr::Claim(e) => e.span,
+            Expr::Settle(e) => e.span,
+            Expr::CreateUnique(e) => e.span,
+            Expr::ReplaceUnique(e) => e.span,
             Expr::Assert(e) => e.span,
             Expr::Require(e) => e.span,
             Expr::RequireBlock(e) => e.span,
@@ -453,14 +533,69 @@ pub struct ConsumeExpr {
 }
 
 #[derive(Debug, Clone)]
+pub struct TransferExpr {
+    pub expr: Box<Expr>,
+    pub to: Box<Expr>,
+    pub span: Span,
+}
+
+/// Cell identity policy for resource/shared/receipt declarations.
+/// In v0.15, identity is a first-class primitive policy across
+/// create, replace, and destroy flows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum IdentityPolicy {
+    /// No identity tracking (default)
+    #[default]
+    None,
+    /// CKB TYPE_ID based identity
+    CkbTypeId,
+    /// Field-based identity (e.g., identity field(id))
+    Field(String),
+    /// Script args based identity
+    ScriptArgs,
+    /// Singleton type identity (one cell per type script)
+    SingletonType,
+}
+
+/// Destruction policy for the `destroy` expression.
+/// In v0.15, bare `destroy` is deprecated in favor of explicit policies
+/// that specify how the verifier proves destruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DestructionPolicy {
+    /// Bare `destroy cell` — legacy v0.14 compat, same as SingletonType
+    Default,
+    /// `destroy_singleton_type(cell)` — proves absence of same-TypeHash output
+    SingletonType,
+    /// `destroy_unique(cell, identity = type_id)` — uses TYPE_ID to identify cell
+    Unique { identity: String },
+    /// `destroy_instance(cell, identity_field = id)` — identifies by specific field
+    Instance { identity_field: String },
+    /// `burn_amount(cell, field = amount)` — proves quantity delta, not output absence
+    BurnAmount { field: String },
+}
+
+#[derive(Debug, Clone)]
 pub struct DestroyExpr {
     pub expr: Box<Expr>,
+    pub policy: DestructionPolicy,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReadRefExpr {
     pub ty: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimExpr {
+    pub receipt: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettleExpr {
+    pub expr: Box<Expr>,
     pub span: Span,
 }
 
@@ -569,4 +704,26 @@ pub struct StdlibCallExpr {
 pub struct SchedulerHint {
     pub parallelizable: bool,
     pub estimated_cycles: u64,
+}
+
+/// `create_unique<T>(identity = ckb_type_id) { ... } with_lock(addr)`
+/// Identity-aware cell creation that enforces TYPE_ID or other identity rules.
+#[derive(Debug, Clone)]
+pub struct CreateUniqueExpr {
+    pub ty: String,
+    pub fields: Vec<(String, Expr)>,
+    pub lock: Option<Box<Expr>>,
+    pub identity: IdentityPolicy,
+    pub span: Span,
+}
+
+/// `replace_unique<T>(identity = ckb_type_id) { ... }`
+/// Identity-aware cell replacement that enforces identity preservation.
+#[derive(Debug, Clone)]
+pub struct ReplaceUniqueExpr {
+    pub expr: Box<Expr>,
+    pub ty: String,
+    pub fields: Vec<(String, Expr)>,
+    pub identity: IdentityPolicy,
+    pub span: Span,
 }

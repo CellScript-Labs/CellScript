@@ -323,6 +323,10 @@ impl LspServer {
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
+            (
+                "invariant",
+                "invariant ${1:name} {\n    trigger: ${2:type_group}\n    scope: ${3:group}\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount}\n    assert_conserved(${6:Token.amount}, scope = ${7:group})\n}",
+            ),
             ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             (
                 "lock",
@@ -750,6 +754,15 @@ impl LspServer {
                         insert_text: Some(s.name.clone()),
                     });
                 }
+                Item::Invariant(i) => {
+                    items.push(CompletionItem {
+                        label: i.name.clone(),
+                        kind: CompletionItemKind::Keyword,
+                        detail: Some(format!("invariant {}", i.name)),
+                        documentation: None,
+                        insert_text: Some(i.name.clone()),
+                    });
+                }
                 Item::Action(a) => {
                     items.push(CompletionItem {
                         label: a.name.clone(),
@@ -1097,6 +1110,7 @@ impl LspServer {
                 range: Some(range),
             }),
             Item::Lock(l) => Some(Hover { contents: format!("```cellscript\nlock {}\n```", l.name), range: Some(range) }),
+            Item::Invariant(i) => Some(Hover { contents: format!("```cellscript\ninvariant {}\n```", i.name), range: Some(range) }),
             _ => None,
         }
     }
@@ -1169,6 +1183,12 @@ impl LspServer {
                 name: l.name.clone(),
                 kind: SymbolKind::Function,
                 location: Location { uri: uri.to_string(), range: span_to_range(source, l.span) },
+                container_name: None,
+            }),
+            Item::Invariant(i) => Some(SymbolInformation {
+                name: i.name.clone(),
+                kind: SymbolKind::Event,
+                location: Location { uri: uri.to_string(), range: span_to_range(source, i.span) },
                 container_name: None,
             }),
             _ => None,
@@ -1790,6 +1810,7 @@ fn item_name(item: &Item) -> Option<&str> {
         Item::Flow(machine) => machine.name.as_deref(),
         Item::Const(c) => Some(&c.name),
         Item::Enum(e) => Some(&e.name),
+        Item::Invariant(i) => Some(&i.name),
         Item::Action(a) => Some(&a.name),
         Item::Function(f) => Some(&f.name),
         Item::Lock(l) => Some(&l.name),
@@ -1806,6 +1827,7 @@ fn item_span(item: &Item) -> Span {
         Item::Flow(machine) => machine.span,
         Item::Const(c) => c.span,
         Item::Enum(e) => e.span,
+        Item::Invariant(i) => i.span,
         Item::Action(a) => a.span,
         Item::Function(f) => f.span,
         Item::Lock(l) => l.span,

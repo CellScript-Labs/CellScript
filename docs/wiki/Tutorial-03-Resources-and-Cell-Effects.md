@@ -13,6 +13,8 @@ place. A transaction spends Cells and creates new Cells.
 - why `create`, `consume`, `destroy`, and stdlib lifecycle patterns are explicit;
 - how `action(before: T) -> after: T` expresses the verifier core for
   input-to-output transitions;
+- how `create_unique` and `replace_unique` preserve declared identity;
+- why v0.15 uses explicit destruction policy forms;
 - why unsupported CKB runtime behavior should fail closed.
 
 ## The Main Effects
@@ -24,7 +26,17 @@ place. A transaction spends Cells and creates new Cells.
 | `consume value` | Spend an input-backed linear value. |
 | `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
 | `read param: T` | Read dependency-backed state without consuming it. |
+| `read_ref<T>()` | Read dependency-backed state from an expression. |
 | `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
+| `create_unique<T>(identity = policy) { ... }` | Create a typed output and anchor its declared identity. |
+| `replace_unique<T>(identity = policy) input { ... }` | Consume one input-backed value and create a replacement that preserves identity. |
+| `destroy_singleton_type(value)` | Consume a singleton and prove no same-TypeHash output continues it. |
+| `destroy_unique(value, identity = type_id)` | Consume a TYPE_ID-backed unique value without replacement. |
+| `destroy_instance(value, identity_field = id)` | Consume one field-identified instance while allowing unrelated same-type outputs. |
+| `burn_amount(value, field = amount)` | Prove a quantity burn rather than output absence. |
+| `std::lifecycle::transfer(input, output, to) { ... }` | Expand to consume plus a locked output and explicit preservation checks. |
+| `std::receipt::claim(receipt, output, to) { ... }` | Consume a receipt and materialize the claim output. |
+| `std::lifecycle::settle(receipt, output, to) { ... }` | Finalize a receipt-backed process with an explicit output. |
 
 The effects are deliberately visible. They make the source read like a
 transaction plan instead of a hidden storage mutation. The core verifier form
@@ -40,7 +52,7 @@ action must say where it goes.
 action burn(token: Token)
 where
     assert(token.amount > 0, "cannot burn zero")
-    destroy token
+    burn_amount(token, field = amount)
 ```
 
 The `Token` cannot simply disappear. It must be consumed, returned, destroyed,
@@ -121,6 +133,11 @@ symmetrically. If one branch requires `output.claimable`, sibling branches must
 also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
 
+Bare `destroy token` remains a compatibility form for older sources. In
+`--primitive-strict=0.15` mode, choose a policy-specific destruction form so
+reviewers can see whether the contract proves singleton absence, TYPE_ID
+consumption, field-identified instance consumption, or amount burn.
+
 ## Creating Output Cells
 
 `create` describes typed output data and a corresponding Cell output. In the
@@ -168,6 +185,59 @@ where
 
 This is closer to CKB than an account-style assignment. The old Cell is spent;
 the new Cell is a proposed output that the verifier checks.
+
+## Identity-Aware Creation And Replacement
+
+When a type declares an identity policy, use the identity-aware lifecycle forms
+for creation and replacement:
+
+```cellscript
+resource NFT has store, create, replace {
+    identity(field(token_id))
+    token_id: [u8; 32]
+    owner: Address
+}
+
+action mint_nft(token_id: [u8; 32], owner: Address) -> NFT
+where
+    create_unique<NFT>(identity = field(token_id)) {
+        token_id,
+        owner
+    } with_lock(owner)
+
+action move_nft(nft_before: NFT, new_owner: Address) -> NFT
+where
+    replace_unique<NFT>(identity = field(token_id)) nft_before {
+        token_id: nft_before.token_id,
+        owner: new_owner
+    }
+```
+
+`replace_unique<T>(identity = policy) input { ... }` always names the consumed
+input before the replacement fields. The verifier then compares the relevant
+identity evidence across input and output: fixed-width field bytes for
+`field(...)`, LockHash for `script_args`, and TypeHash for `ckb_type_id` or
+`singleton_type`.
+
+For `create_unique`, 0.15 emits local runtime anchors for the created output.
+Global uniqueness for non-TYPE_ID policies still needs builder/indexer evidence;
+do not treat compiler metadata alone as a chain-wide uniqueness proof.
+
+## Explicit Destruction Policies
+
+Use the destruction form that matches the proof you need:
+
+```cellscript
+destroy_singleton_type(config)
+destroy_unique(asset, identity = type_id)
+destroy_instance(nft, identity_field = token_id)
+burn_amount(token, field = amount)
+```
+
+These forms are intentionally different. Destroying a singleton is an output
+absence proof. Destroying a TYPE_ID value is identity consumption. Destroying an
+instance by field still allows unrelated same-type outputs. Burning an amount is
+a quantity relation, not an output absence claim.
 
 ## Updating Existing State
 
@@ -227,6 +297,7 @@ For CKB code, prefer:
 - fixed persistent schemas;
 - explicit action parameters;
 - explicit locks for authorization boundaries;
+- `--primitive-strict=0.15` syntax for new code;
 - explicit capacity, witness, and dependency review;
 - metadata-backed explanations for every runtime obligation.
 

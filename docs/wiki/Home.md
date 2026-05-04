@@ -18,6 +18,8 @@ If CellScript is new to you, read the tutorials in order. The first four
 language chapters explain how a `.cell` file is shaped, how resources move, why
 effects such as `consume` and `create` are explicit, and how the 0.13 action
 model expresses input-to-output verification.
+The v0.15 material then extends that model with identity policies, scoped
+invariants, ProofPlan metadata, and primitive capability boundaries.
 
 After that, the wiki continues outward:
 
@@ -80,16 +82,19 @@ That is why the language has:
 
 - `resource`, `shared`, and `receipt` for persistent Cell-backed values;
 - explicit effects such as `consume`, `create`, action-boundary `read`
-  parameters, expression-level `read_ref<T>()`, and `destroy`;
+  parameters, expression-level `read_ref<T>()`, `destroy`, `claim`, and
+  `settle`;
 - compiler-recognized stdlib lifecycle patterns such as
   `std::lifecycle::transfer`, `std::receipt::claim`, and
   `std::lifecycle::settle`;
+- identity-aware lifecycle forms such as `create_unique` and `replace_unique`;
+- scoped `invariant` declarations with explicit trigger, scope, and reads;
 - `action` entries for type-script style state transitions;
 - `lock` entries for spend-boundary predicates;
 - `protected`, `witness`, `lock_args`, and `require` so verifier-boundary source
   data and failure points are visible in source;
-- metadata sidecars that describe schema, ABI, constraints, runtime
-  requirements, and verifier obligations.
+- metadata sidecars and ProofPlan records that describe schema, ABI,
+  constraints, runtime requirements, and verifier obligations.
 
 The wiki uses the same rule throughout: if something is only compiler evidence,
 it is described as compiler evidence. If something needs a builder-backed CKB

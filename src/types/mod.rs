@@ -49,6 +49,7 @@ pub struct TypeEnv {
 pub enum LinearState {
     Available,
     Consumed,
+    Transferred,
     Destroyed,
 }
 
@@ -124,6 +125,10 @@ impl TypeEnv {
 
     pub fn consume(&mut self, name: &str) -> Result<()> {
         self.set_linear_state(name, LinearState::Consumed)
+    }
+
+    pub fn transfer(&mut self, name: &str) -> Result<()> {
+        self.set_linear_state(name, LinearState::Transferred)
     }
 
     pub fn destroy(&mut self, name: &str) -> Result<()> {
@@ -457,6 +462,7 @@ impl<'a> TypeChecker<'a> {
                         struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                     );
                 }
+                Item::Invariant(_) => {}
                 Item::Enum(enum_def) => {
                     self.enum_variants
                         .insert(enum_def.name.clone(), enum_def.variants.iter().map(|variant| variant.name.clone()).collect());
@@ -774,6 +780,7 @@ impl<'a> TypeChecker<'a> {
             Item::Receipt(r) => self.check_receipt(r),
             Item::Struct(s) => self.check_struct(s),
             Item::Flow(_) => Ok(()),
+            Item::Invariant(i) => self.check_invariant(i),
             Item::Const(c) => self.check_const(c),
             Item::Enum(e) => self.check_enum(e),
             Item::Action(a) => self.check_action(a),
@@ -802,6 +809,201 @@ impl<'a> TypeChecker<'a> {
 
     fn check_struct(&mut self, struct_def: &StructDef) -> Result<()> {
         self.validate_schema_fields(&struct_def.fields, "struct", &struct_def.name)
+    }
+
+    fn check_invariant(&mut self, invariant: &InvariantDef) -> Result<()> {
+        let missing_trigger = invariant.trigger.is_none();
+        let missing_scope = invariant.scope.is_none();
+        if missing_trigger || missing_scope {
+            return Err(CompileError::new(
+                format!("strict CKB invariant '{}' must declare explicit trigger and scope", invariant.name),
+                invariant.span,
+            ));
+        }
+
+        if let Some(trigger) = &invariant.trigger {
+            match trigger.as_str() {
+                "explicit_entry" | "lock_group" | "type_group" => {}
+                _ => {
+                    return Err(CompileError::new(
+                        format!(
+                            "invariant '{}' has unsupported trigger '{}'; expected explicit_entry, lock_group, or type_group",
+                            invariant.name, trigger
+                        ),
+                        invariant.span,
+                    ));
+                }
+            }
+        }
+
+        if let Some(scope) = &invariant.scope {
+            match scope.as_str() {
+                "selected_cells" | "group" | "transaction" => {}
+                _ => {
+                    return Err(CompileError::new(
+                        format!(
+                            "invariant '{}' has unsupported scope '{}'; expected selected_cells, group, or transaction",
+                            invariant.name, scope
+                        ),
+                        invariant.span,
+                    ));
+                }
+            }
+        }
+
+        if invariant.reads.is_empty() {
+            return Err(CompileError::new(
+                format!("invariant '{}' must declare at least one read source", invariant.name),
+                invariant.span,
+            ));
+        }
+
+        for read in &invariant.reads {
+            let base = read.split(['<', '.']).next().unwrap_or(read.as_str());
+            match base {
+                "input" | "inputs" | "output" | "outputs" | "group_input" | "group_inputs" | "group_output" | "group_outputs"
+                | "cell_dep" | "cell_deps" | "header_dep" | "header_deps" | "witness" | "lock_args" => {}
+                _ => {
+                    return Err(CompileError::new(
+                        format!(
+                            "invariant '{}' has unsupported read source '{}'; expected input/output/group_input/group_output/cell_dep/header_dep/witness/lock_args variants",
+                            invariant.name, read
+                        ),
+                        invariant.span,
+                    ));
+                }
+            }
+        }
+
+        if invariant.asserts.is_empty() && invariant.aggregates.is_empty() {
+            return Err(CompileError::new(
+                format!(
+                    "invariant '{}' must contain at least one assert_invariant expression or aggregate invariant primitive",
+                    invariant.name
+                ),
+                invariant.span,
+            ));
+        }
+
+        for aggregate in &invariant.aggregates {
+            self.check_aggregate_invariant(invariant, aggregate)?;
+        }
+
+        let previous_callable = self.current_callable.replace(CallableKind::Function);
+        let mut assert_env = TypeEnv::default();
+        let assert_result = (|| -> Result<()> {
+            for expr in &invariant.asserts {
+                if !matches!(expr, Expr::Assert(_)) {
+                    return Err(CompileError::new(
+                        format!("invariant '{}' body only supports assert_invariant expressions", invariant.name),
+                        invariant.span,
+                    ));
+                }
+                self.infer_expr(&mut assert_env, expr)?;
+            }
+            Ok(())
+        })();
+        self.current_callable = previous_callable;
+        assert_result?;
+
+        Ok(())
+    }
+
+    fn check_aggregate_invariant(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant) -> Result<()> {
+        match aggregate.scope.as_str() {
+            "selected_cells" | "group" | "transaction" => {}
+            _ => {
+                return Err(CompileError::new(
+                    format!(
+                        "aggregate invariant in '{}' has unsupported scope '{}'; expected selected_cells, group, or transaction",
+                        invariant.name, aggregate.scope
+                    ),
+                    aggregate.span,
+                ));
+            }
+        }
+
+        if invariant.scope.as_deref().is_some_and(|scope| scope != aggregate.scope) {
+            return Err(CompileError::new(
+                format!(
+                    "aggregate invariant scope '{}' must match enclosing invariant scope '{}'",
+                    aggregate.scope,
+                    invariant.scope.as_deref().unwrap_or("unspecified")
+                ),
+                aggregate.span,
+            ));
+        }
+
+        match aggregate.kind {
+            AggregateInvariantKind::Conserved | AggregateInvariantKind::Distinct => {
+                self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
+            }
+            AggregateInvariantKind::Delta => {
+                if aggregate.argument.is_none() {
+                    return Err(CompileError::new(
+                        format!("assert_delta in invariant '{}' requires a delta argument", invariant.name),
+                        aggregate.span,
+                    ));
+                }
+                self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
+            }
+            AggregateInvariantKind::Sum => {
+                if aggregate.relation.is_none() || aggregate.rhs.is_none() {
+                    return Err(CompileError::new(
+                        format!("assert_sum in invariant '{}' requires a comparison", invariant.name),
+                        aggregate.span,
+                    ));
+                }
+                self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
+                if let Some(rhs) = &aggregate.rhs {
+                    self.validate_aggregate_field_target(invariant, aggregate, rhs)?;
+                }
+            }
+            AggregateInvariantKind::Singleton => {
+                if aggregate.target != "type_id" {
+                    self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_aggregate_field_target(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, target: &str) -> Result<()> {
+        let Some((type_name, field_name)) = aggregate_target_type_and_field(target) else {
+            return Err(CompileError::new(
+                format!(
+                    "aggregate invariant in '{}' must target a concrete field like Token.amount or group_inputs<Token>.amount",
+                    invariant.name
+                ),
+                aggregate.span,
+            ));
+        };
+        let Some(fields) = self.type_fields.get(type_name) else {
+            return Err(CompileError::new(
+                format!("aggregate invariant in '{}' references unknown type '{}'", invariant.name, type_name),
+                aggregate.span,
+            ));
+        };
+        let Some(field_ty) = fields.get(field_name) else {
+            return Err(CompileError::new(
+                format!("aggregate invariant in '{}' references unknown field '{}.{}'", invariant.name, type_name, field_name),
+                aggregate.span,
+            ));
+        };
+        if !aggregate_field_type_is_supported(field_ty) {
+            return Err(CompileError::new(
+                format!(
+                    "aggregate invariant in '{}' field '{}.{}' must be a fixed-width integer or fixed bytes, found {}",
+                    invariant.name,
+                    type_name,
+                    field_name,
+                    type_repr(field_ty)
+                ),
+                aggregate.span,
+            ));
+        }
+        Ok(())
     }
 
     fn validate_schema_fields(&self, fields: &[Field], item_kind: &str, item_name: &str) -> Result<()> {
@@ -1066,7 +1268,29 @@ impl<'a> TypeChecker<'a> {
                 Ok(guaranteed)
             }
             Expr::Consume(consume) => self.validate_branch_obligations_in_expr(&consume.expr, outputs, guaranteed),
+            Expr::Transfer(transfer) => {
+                self.validate_branch_obligations_in_expr(&transfer.expr, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&transfer.to, outputs, guaranteed)
+            }
             Expr::Destroy(destroy) => self.validate_branch_obligations_in_expr(&destroy.expr, outputs, guaranteed),
+            Expr::Claim(claim) => self.validate_branch_obligations_in_expr(&claim.receipt, outputs, guaranteed),
+            Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_branch_obligations_in_expr(&replace.expr, outputs, guaranteed.clone())?;
+                for (_, value) in &replace.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
             Expr::Assert(assert_expr) => {
                 self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
@@ -1217,7 +1441,27 @@ impl<'a> TypeChecker<'a> {
                 self.validate_create_targets_in_expr(&index.index, outputs)?;
             }
             Expr::Consume(consume) => self.validate_create_targets_in_expr(&consume.expr, outputs)?,
+            Expr::Transfer(transfer) => {
+                self.validate_create_targets_in_expr(&transfer.expr, outputs)?;
+                self.validate_create_targets_in_expr(&transfer.to, outputs)?;
+            }
             Expr::Destroy(destroy) => self.validate_create_targets_in_expr(&destroy.expr, outputs)?,
+            Expr::Claim(claim) => self.validate_create_targets_in_expr(&claim.receipt, outputs)?,
+            Expr::Settle(settle) => self.validate_create_targets_in_expr(&settle.expr, outputs)?,
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_create_targets_in_expr(lock, outputs)?;
+                }
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_create_targets_in_expr(&replace.expr, outputs)?;
+                for (_, value) in &replace.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+            }
             Expr::Assert(assert_expr) => {
                 self.validate_create_targets_in_expr(&assert_expr.condition, outputs)?;
                 self.validate_create_targets_in_expr(&assert_expr.message, outputs)?;
@@ -1764,6 +2008,10 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn identity_static_width(ty: &Type) -> Option<usize> {
+        lock_args_static_type_len(ty)
+    }
+
     fn validate_callable_param_reference_shape(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
@@ -2003,7 +2251,14 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Consume(consume) => self.validate_spawn_ipc_fd_usage_expr(&consume.expr, state)?,
+            Expr::Transfer(transfer) => {
+                self.validate_spawn_ipc_fd_usage_expr(&transfer.expr, state)?;
+                self.validate_spawn_ipc_fd_usage_expr(&transfer.to, state)?;
+            }
             Expr::Destroy(destroy) => self.validate_spawn_ipc_fd_usage_expr(&destroy.expr, state)?,
+            Expr::Claim(claim) => self.validate_spawn_ipc_fd_usage_expr(&claim.receipt, state)?,
+            Expr::Settle(settle) => self.validate_spawn_ipc_fd_usage_expr(&settle.expr, state)?,
+            Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
             Expr::Assert(assert_expr) => {
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.condition, state)?;
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.message, state)?;
@@ -2545,6 +2800,16 @@ impl<'a> TypeChecker<'a> {
                 env.consume(&name)?;
                 Ok(Type::U64)
             }
+            Expr::Transfer(transfer) => {
+                let (expr_ty, name) = self.require_named_linear_cell_operand(env, &transfer.expr, "transfer", transfer.span)?;
+                let to_ty = self.infer_expr(env, &transfer.to)?;
+                if !Self::is_address_like_type(&to_ty) {
+                    return Err(CompileError::new("transfer destination must be address-like", transfer.span));
+                }
+                self.require_capability(&expr_ty, Capability::Transfer, "transfer", transfer.span)?;
+                env.transfer(&name)?;
+                Ok(expr_ty)
+            }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
                 self.require_capability(&destroy_ty, Capability::Destroy, "destroy", destroy.span)?;
@@ -2554,6 +2819,46 @@ impl<'a> TypeChecker<'a> {
             Expr::ReadRef(read_ref) => {
                 self.require_read_ref_target_cell_backed(&read_ref.ty, read_ref.span)?;
                 Ok(Type::Ref(Box::new(Type::Named(read_ref.ty.clone()))))
+            }
+            Expr::Claim(claim) => {
+                let (receipt_ty, name) = self.require_named_linear_cell_operand(env, &claim.receipt, "claim", claim.span)?;
+                if !self.is_receipt_type(&receipt_ty) {
+                    return Err(CompileError::new("claim requires a receipt value", claim.span));
+                }
+                env.consume(&name)?;
+                let receipt_name = Self::base_type_name(&receipt_ty).unwrap_or_default();
+                Ok(self.resolve_receipt_claim_output(receipt_name).flatten().unwrap_or(Type::U64))
+            }
+            Expr::Settle(settle) => {
+                let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
+                env.consume(&name)?;
+                Ok(settle_ty)
+            }
+            Expr::CreateUnique(cu) => {
+                self.require_create_target_cell_backed(&cu.ty, cu.span)?;
+                self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
+                self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
+                if let Some(lock) = &cu.lock {
+                    let lock_ty = self.infer_expr(env, lock)?;
+                    if !Self::is_address_like_type(&lock_ty) {
+                        return Err(CompileError::new("lock target must be address-like", cu.span));
+                    }
+                }
+                Ok(Type::Named(cu.ty.clone()))
+            }
+            Expr::ReplaceUnique(ru) => {
+                let (input_ty, name) = self.require_named_linear_cell_operand(env, &ru.expr, "replace_unique", ru.span)?;
+                let output_ty = Type::Named(ru.ty.clone());
+                if !self.types_equal(&input_ty, &output_ty) {
+                    return Err(CompileError::new(
+                        format!("replace_unique output type '{}' must match consumed input type {:?}", ru.ty, input_ty),
+                        ru.span,
+                    ));
+                }
+                self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
+                self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
+                env.consume(&name)?;
+                Ok(input_ty)
             }
             Expr::Assert(assert_expr) => {
                 let cond_ty = self.infer_expr(env, &assert_expr.condition)?;
@@ -2705,7 +3010,15 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_require_condition_is_pure(expr: &Expr, context: &str) -> Result<()> {
         match expr {
-            Expr::Create(_) | Expr::Consume(_) | Expr::Destroy(_) | Expr::ReadRef(_) => {
+            Expr::Create(_)
+            | Expr::Consume(_)
+            | Expr::Transfer(_)
+            | Expr::Destroy(_)
+            | Expr::ReadRef(_)
+            | Expr::Claim(_)
+            | Expr::Settle(_)
+            | Expr::CreateUnique(_)
+            | Expr::ReplaceUnique(_) => {
                 return Err(CompileError::new(
                     format!(
                         "{} contains cell/runtime operation; move state transition logic into a separate action statement",
@@ -3192,6 +3505,36 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn validate_unique_identity_policy(&self, type_name: &str, identity: &IdentityPolicy, span: Span, operation: &str) -> Result<()> {
+        match identity {
+            IdentityPolicy::None | IdentityPolicy::CkbTypeId | IdentityPolicy::ScriptArgs | IdentityPolicy::SingletonType => Ok(()),
+            IdentityPolicy::Field(field) => {
+                let Some(expected_fields) = self.resolve_named_type_fields(type_name) else {
+                    return Err(CompileError::new(
+                        format!("{} identity field target type '{}' has no declared fields", operation, type_name),
+                        span,
+                    ));
+                };
+                let Some(field_ty) = expected_fields.get(field) else {
+                    return Err(CompileError::new(
+                        format!("{} identity field '{}' does not exist on '{}'", operation, field, type_name),
+                        span,
+                    ));
+                };
+                if Self::identity_static_width(field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "{} identity field '{}.{}' must be fixed-width so CKB runtime can compare it",
+                            operation, type_name, field
+                        ),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {
         match self.resolve_cell_type_kind(type_name) {
             Some(CellTypeKind::Resource | CellTypeKind::Shared | CellTypeKind::Receipt) => Ok(()),
@@ -3262,6 +3605,7 @@ impl<'a> TypeChecker<'a> {
         let operation = match expr {
             Expr::Create(_) => Some("create"),
             Expr::Consume(_) => Some("consume"),
+            Expr::Transfer(_) => Some("transfer"),
             Expr::Destroy(_) => Some("destroy"),
             Expr::ReadRef(_) => Some("read_ref"),
             Expr::StdlibCall(call) => {
@@ -3271,6 +3615,10 @@ impl<'a> TypeChecker<'a> {
                     _ => None,
                 }
             }
+            Expr::Claim(_) => Some("claim"),
+            Expr::Settle(_) => Some("settle"),
+            Expr::CreateUnique(_) => Some("create_unique"),
+            Expr::ReplaceUnique(_) => Some("replace_unique"),
             _ => None,
         };
 
@@ -3540,6 +3888,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Cast(cast) => self.mark_expr_as_moved(env, &cast.expr),
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
             Expr::Preserve(_) => Ok(()),
+            Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
             Expr::Require(require_expr) => {
                 self.mark_expr_as_moved(env, &require_expr.condition)?;
@@ -4593,6 +4942,14 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn is_address_like_type(ty: &Type) -> bool {
+        matches!(ty, Type::Address | Type::Hash)
+    }
+
+    fn is_receipt_type(&self, ty: &Type) -> bool {
+        Self::base_type_name(ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some_and(|kind| kind == CellTypeKind::Receipt)
+    }
+
     fn resolve_cell_type_kind(&self, name: &str) -> Option<CellTypeKind> {
         if let Some(kind) = self.cell_type_kinds.get(name).copied() {
             return Some(kind);
@@ -4733,8 +5090,13 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Index(index) => index.span,
         Expr::Create(create) => create.span,
         Expr::Consume(consume) => consume.span,
+        Expr::Transfer(transfer) => transfer.span,
         Expr::Destroy(destroy) => destroy.span,
         Expr::ReadRef(read_ref) => read_ref.span,
+        Expr::Claim(claim) => claim.span,
+        Expr::Settle(settle) => settle.span,
+        Expr::CreateUnique(cu) => cu.span,
+        Expr::ReplaceUnique(ru) => ru.span,
         Expr::Assert(assert_expr) => assert_expr.span,
         Expr::Require(require_expr) => require_expr.span,
         Expr::Block(stmts) => stmts.last().map(stmt_span).unwrap_or_default(),
@@ -4784,7 +5146,27 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
             }
         }
         Expr::Consume(consume) => collect_required_output_fields(&consume.expr, outputs, fields),
+        Expr::Transfer(transfer) => {
+            collect_required_output_fields(&transfer.expr, outputs, fields);
+            collect_required_output_fields(&transfer.to, outputs, fields);
+        }
         Expr::Destroy(destroy) => collect_required_output_fields(&destroy.expr, outputs, fields),
+        Expr::Claim(claim) => collect_required_output_fields(&claim.receipt, outputs, fields),
+        Expr::Settle(settle) => collect_required_output_fields(&settle.expr, outputs, fields),
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+            if let Some(lock) = &create.lock {
+                collect_required_output_fields(lock, outputs, fields);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            collect_required_output_fields(&replace.expr, outputs, fields);
+            for (_, value) in &replace.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+        }
         Expr::Assert(assert_expr) => {
             collect_required_output_fields(&assert_expr.condition, outputs, fields);
             collect_required_output_fields(&assert_expr.message, outputs, fields);
@@ -4945,12 +5327,38 @@ fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
         Item::Receipt(def) => Some((&def.name, def.span)),
         Item::Struct(def) => Some((&def.name, def.span)),
         Item::Flow(def) => def.name.as_deref().map(|name| (name, def.span)),
+        Item::Invariant(def) => Some((&def.name, def.span)),
         Item::Enum(def) => Some((&def.name, def.span)),
         Item::Const(def) => Some((&def.name, def.span)),
         Item::Action(def) => Some((&def.name, def.span)),
         Item::Function(def) => Some((&def.name, def.span)),
         Item::Lock(def) => Some((&def.name, def.span)),
         Item::Use(_) => None,
+    }
+}
+
+fn aggregate_target_type_and_field(target: &str) -> Option<(&str, &str)> {
+    if let Some((before_field, field)) = target.rsplit_once('.') {
+        if field.is_empty() {
+            return None;
+        }
+        if let Some(type_name) = before_field.split('<').nth(1).and_then(|rest| rest.split('>').next()) {
+            if !type_name.is_empty() {
+                return Some((type_name, field));
+            }
+        }
+        if !before_field.is_empty() {
+            return Some((before_field, field));
+        }
+    }
+    None
+}
+
+fn aggregate_field_type_is_supported(ty: &Type) -> bool {
+    match ty {
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Address | Type::Hash => true,
+        Type::Array(inner, _) => matches!(inner.as_ref(), Type::U8),
+        _ => false,
     }
 }
 
@@ -5082,6 +5490,13 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
             collect_consumed_bindings_from_expr(&consume.expr, bindings);
         }
+        Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
         Expr::Assign(assign) => {
             collect_consumed_bindings_from_expr(&assign.target, bindings);
             collect_consumed_bindings_from_expr(&assign.value, bindings);
@@ -5115,6 +5530,35 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
+        }
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            if let Expr::Identifier(name) = replace.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&replace.expr, bindings);
+            for (_, value) in &replace.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
         }
         Expr::Assert(assert_expr) => {
             collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
@@ -5247,6 +5691,13 @@ fn capability_name(capability: Capability) -> &'static str {
         Capability::Store => "store",
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
+        Capability::Create => "create",
+        Capability::Consume => "consume",
+        Capability::Replace => "replace",
+        Capability::Burn => "burn",
+        Capability::Relock => "relock",
+        Capability::RetargetType => "retarget_type",
+        Capability::ReadRef => "read_ref",
     }
 }
 

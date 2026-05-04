@@ -71,6 +71,7 @@ impl Optimizer {
                 | Item::Receipt(_)
                 | Item::Struct(_)
                 | Item::Flow(_)
+                | Item::Invariant(_)
                 | Item::Enum(_)
                 | Item::Use(_) => {}
             }
@@ -226,10 +227,24 @@ impl Optimizer {
             Expr::Consume(consume) => {
                 Ok(Expr::Consume(ConsumeExpr { expr: Box::new(self.optimize_expr(&consume.expr)?), span: consume.span }))
             }
-            Expr::Destroy(destroy) => {
-                Ok(Expr::Destroy(DestroyExpr { expr: Box::new(self.optimize_expr(&destroy.expr)?), span: destroy.span }))
-            }
+            Expr::Transfer(transfer) => Ok(Expr::Transfer(TransferExpr {
+                expr: Box::new(self.optimize_expr(&transfer.expr)?),
+                to: Box::new(self.optimize_expr(&transfer.to)?),
+                span: transfer.span,
+            })),
+            Expr::Destroy(destroy) => Ok(Expr::Destroy(DestroyExpr {
+                expr: Box::new(self.optimize_expr(&destroy.expr)?),
+                policy: destroy.policy.clone(),
+                span: destroy.span,
+            })),
             Expr::ReadRef(_) => Ok(expr.clone()),
+            Expr::Claim(claim) => {
+                Ok(Expr::Claim(ClaimExpr { receipt: Box::new(self.optimize_expr(&claim.receipt)?), span: claim.span }))
+            }
+            Expr::Settle(settle) => {
+                Ok(Expr::Settle(SettleExpr { expr: Box::new(self.optimize_expr(&settle.expr)?), span: settle.span }))
+            }
+            Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(expr.clone()),
             Expr::Assert(assert) => Ok(Expr::Assert(AssertExpr {
                 condition: Box::new(self.optimize_expr(&assert.condition)?),
                 message: Box::new(self.optimize_expr(&assert.message)?),
@@ -576,8 +591,15 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
             }
         }
         Expr::Consume(consume) => collect_call_names_from_expr(&consume.expr, names),
+        Expr::Transfer(transfer) => {
+            collect_call_names_from_expr(&transfer.expr, names);
+            collect_call_names_from_expr(&transfer.to, names);
+        }
         Expr::Destroy(destroy) => collect_call_names_from_expr(&destroy.expr, names),
         Expr::ReadRef(_) => {}
+        Expr::Claim(claim) => collect_call_names_from_expr(&claim.receipt, names),
+        Expr::Settle(settle) => collect_call_names_from_expr(&settle.expr, names),
+        Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
         Expr::Assert(assert) => {
             collect_call_names_from_expr(&assert.condition, names);
             collect_call_names_from_expr(&assert.message, names);
@@ -704,8 +726,15 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Consume(consume) => collect_names_by_walking_expr(&consume.expr, names),
+        Expr::Transfer(transfer) => {
+            collect_names_by_walking_expr(&transfer.expr, names);
+            collect_names_by_walking_expr(&transfer.to, names);
+        }
         Expr::Destroy(destroy) => collect_names_by_walking_expr(&destroy.expr, names),
         Expr::ReadRef(_) => {}
+        Expr::Claim(claim) => collect_names_by_walking_expr(&claim.receipt, names),
+        Expr::Settle(settle) => collect_names_by_walking_expr(&settle.expr, names),
+        Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => {}
         Expr::Assert(assert) => {
             collect_names_by_walking_expr(&assert.condition, names);
             collect_names_by_walking_expr(&assert.message, names);
@@ -781,8 +810,13 @@ fn expr_is_pure_inlineable(expr: &Expr) -> bool {
         Expr::Assign(_)
         | Expr::Create(_)
         | Expr::Consume(_)
+        | Expr::Transfer(_)
         | Expr::Destroy(_)
         | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
         | Expr::Assert(_)
         | Expr::Require(_)
         | Expr::RequireBlock(_)
@@ -888,8 +922,13 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
         }),
         Expr::Create(_)
         | Expr::Consume(_)
+        | Expr::Transfer(_)
         | Expr::Destroy(_)
         | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
         | Expr::Assert(_)
         | Expr::Block(_)
         | Expr::Integer(_)
@@ -949,6 +988,7 @@ mod tests {
                     condition: Expr::Bool(false),
                     then_branch: vec![Stmt::Expr(Expr::Destroy(DestroyExpr {
                         expr: Box::new(Expr::Identifier("token".to_string())),
+                        policy: DestructionPolicy::Default,
                         span: Span::default(),
                     }))],
                     else_branch: Some(vec![Stmt::Expr(Expr::Integer(1))]),

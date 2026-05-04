@@ -69,12 +69,47 @@ impl Formatter {
     fn format_item(&mut self, item: &Item) -> Result<()> {
         match item {
             Item::Resource(resource) => {
-                self.format_type_def("resource", &resource.name, &resource.fields, Some(&resource.capabilities))
+                self.format_type_id_attr(resource.type_id.as_ref());
+                self.format_type_def(
+                    "resource",
+                    &resource.name,
+                    &resource.fields,
+                    Some(&resource.capabilities),
+                    Some(&resource.identity),
+                    resource.default_hash_type.as_ref(),
+                    resource.capacity_floor.as_ref(),
+                )
             }
-            Item::Shared(shared) => self.format_type_def("shared", &shared.name, &shared.fields, Some(&shared.capabilities)),
-            Item::Receipt(receipt) => self.format_receipt_def(receipt),
-            Item::Struct(struct_def) => self.format_type_def("struct", &struct_def.name, &struct_def.fields, None),
+            Item::Shared(shared) => {
+                self.format_type_id_attr(shared.type_id.as_ref());
+                self.format_type_def(
+                    "shared",
+                    &shared.name,
+                    &shared.fields,
+                    Some(&shared.capabilities),
+                    Some(&shared.identity),
+                    shared.default_hash_type.as_ref(),
+                    shared.capacity_floor.as_ref(),
+                )
+            }
+            Item::Receipt(receipt) => {
+                self.format_type_id_attr(receipt.type_id.as_ref());
+                self.format_receipt_def(receipt)
+            }
+            Item::Struct(struct_def) => {
+                self.format_type_id_attr(struct_def.type_id.as_ref());
+                self.format_type_def(
+                    "struct",
+                    &struct_def.name,
+                    &struct_def.fields,
+                    None,
+                    None,
+                    struct_def.default_hash_type.as_ref(),
+                    struct_def.capacity_floor.as_ref(),
+                )
+            }
             Item::Flow(machine) => self.format_flow(machine),
+            Item::Invariant(invariant) => self.format_invariant(invariant),
             Item::Const(constant) => {
                 self.push_line(&format!(
                     "const {}: {} = {}",
@@ -153,7 +188,22 @@ impl Formatter {
         Ok(())
     }
 
-    fn format_type_def(&mut self, keyword: &str, name: &str, fields: &[Field], capabilities: Option<&[Capability]>) -> Result<()> {
+    fn format_type_id_attr(&mut self, type_id: Option<&TypeIdentity>) {
+        if let Some(type_id) = type_id {
+            self.push_line(&format!("#[type_id({:?})]", type_id.value));
+        }
+    }
+
+    fn format_type_def(
+        &mut self,
+        keyword: &str,
+        name: &str,
+        fields: &[Field],
+        capabilities: Option<&[Capability]>,
+        identity: Option<&IdentityPolicy>,
+        default_hash_type: Option<&HashTypeDecl>,
+        capacity_floor: Option<&CapacityFloorDecl>,
+    ) -> Result<()> {
         let mut header = format!("{} {}", keyword, name);
         if let Some(capabilities) = capabilities {
             if !capabilities.is_empty() {
@@ -161,7 +211,13 @@ impl Formatter {
                 header.push_str(&format!(" has {}", rendered));
             }
         }
-        self.push_line(&format!("{} {{", header));
+        if has_type_policy(identity, default_hash_type, capacity_floor) {
+            self.push_line(&header);
+            self.format_type_policy(identity, default_hash_type, capacity_floor);
+            self.push_line("{");
+        } else {
+            self.push_line(&format!("{} {{", header));
+        }
         self.indent_level += 1;
         for field in fields {
             self.push_line(&format!("{}: {},", field.name, format_type(&field.ty)));
@@ -180,10 +236,58 @@ impl Formatter {
             let rendered = receipt.capabilities.iter().map(format_capability).collect::<Vec<_>>().join(", ");
             header.push_str(&format!(" has {}", rendered));
         }
-        self.push_line(&format!("{} {{", header));
+        if has_type_policy(Some(&receipt.identity), receipt.default_hash_type.as_ref(), receipt.capacity_floor.as_ref()) {
+            self.push_line(&header);
+            self.format_type_policy(Some(&receipt.identity), receipt.default_hash_type.as_ref(), receipt.capacity_floor.as_ref());
+            self.push_line("{");
+        } else {
+            self.push_line(&format!("{} {{", header));
+        }
         self.indent_level += 1;
         for field in &receipt.fields {
             self.push_line(&format!("{}: {},", field.name, format_type(&field.ty)));
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
+        Ok(())
+    }
+
+    fn format_type_policy(
+        &mut self,
+        identity: Option<&IdentityPolicy>,
+        default_hash_type: Option<&HashTypeDecl>,
+        capacity_floor: Option<&CapacityFloorDecl>,
+    ) {
+        if let Some(default_hash_type) = default_hash_type {
+            self.push_line(&format!("with_default_hash_type({})", default_hash_type.value));
+        }
+        if let Some(capacity_floor) = capacity_floor {
+            self.push_line(&format!("with_capacity_floor({})", capacity_floor.shannons));
+        }
+        if let Some(identity) = identity {
+            if !matches!(identity, IdentityPolicy::None) {
+                self.push_line(&format!("identity({})", format_identity_policy(identity)));
+            }
+        }
+    }
+
+    fn format_invariant(&mut self, invariant: &InvariantDef) -> Result<()> {
+        self.push_line(&format!("invariant {} {{", invariant.name));
+        self.indent_level += 1;
+        if let Some(trigger) = &invariant.trigger {
+            self.push_line(&format!("trigger: {}", trigger));
+        }
+        if let Some(scope) = &invariant.scope {
+            self.push_line(&format!("scope: {}", scope));
+        }
+        if !invariant.reads.is_empty() {
+            self.push_line(&format!("reads: {}", invariant.reads.join(", ")));
+        }
+        for aggregate in &invariant.aggregates {
+            self.push_line(&format_aggregate_invariant(aggregate));
+        }
+        for expr in &invariant.asserts {
+            self.push_line(&self.format_expr(expr));
         }
         self.indent_level -= 1;
         self.push_line("}");
@@ -386,9 +490,42 @@ impl Formatter {
                 rendered
             }
             Expr::Consume(consume) => format!("consume {}", self.format_expr(&consume.expr)),
-            Expr::Destroy(destroy) => format!("destroy {}", self.format_expr(&destroy.expr)),
+            Expr::Transfer(transfer) => format!("transfer {} to {}", self.format_expr(&transfer.expr), self.format_expr(&transfer.to)),
+            Expr::Destroy(destroy) => match &destroy.policy {
+                DestructionPolicy::Default => format!("destroy {}", self.format_expr(&destroy.expr)),
+                DestructionPolicy::SingletonType => format!("destroy_singleton_type({})", self.format_expr(&destroy.expr)),
+                DestructionPolicy::Unique { identity } => {
+                    format!("destroy_unique({}, identity = {})", self.format_expr(&destroy.expr), identity)
+                }
+                DestructionPolicy::Instance { identity_field } => {
+                    format!("destroy_instance({}, identity_field = {})", self.format_expr(&destroy.expr), identity_field)
+                }
+                DestructionPolicy::BurnAmount { field } => {
+                    format!("burn_amount({}, field = {})", self.format_expr(&destroy.expr), field)
+                }
+            },
             Expr::ReadRef(read_ref) => format!("read_ref<{}>()", read_ref.ty),
-
+            Expr::Claim(claim) => format!("claim {}", self.format_expr(&claim.receipt)),
+            Expr::Settle(settle) => format!("settle {}", self.format_expr(&settle.expr)),
+            Expr::CreateUnique(cu) => {
+                let fields = cu.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
+                let mut rendered =
+                    format!("create_unique<{}>(identity = {}) {{ {} }}", cu.ty, format_identity_policy(&cu.identity), fields);
+                if let Some(lock) = &cu.lock {
+                    rendered.push_str(&format!(" with_lock({})", self.format_expr(lock)));
+                }
+                rendered
+            }
+            Expr::ReplaceUnique(ru) => {
+                let fields = ru.fields.iter().map(|(n, v)| self.format_field_initializer(n, v)).collect::<Vec<_>>().join(", ");
+                format!(
+                    "replace_unique<{}>(identity = {}) {} {{ {} }}",
+                    ru.ty,
+                    format_identity_policy(&ru.identity),
+                    self.format_expr(&ru.expr),
+                    fields
+                )
+            }
             Expr::Assert(assert_expr) => {
                 format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
@@ -488,6 +625,33 @@ fn format_capability(capability: &Capability) -> &'static str {
         Capability::Store => "store",
         Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
+        Capability::Create => "create",
+        Capability::Consume => "consume",
+        Capability::Replace => "replace",
+        Capability::Burn => "burn",
+        Capability::Relock => "relock",
+        Capability::RetargetType => "retarget_type",
+        Capability::ReadRef => "read_ref",
+    }
+}
+
+fn has_type_policy(
+    identity: Option<&IdentityPolicy>,
+    default_hash_type: Option<&HashTypeDecl>,
+    capacity_floor: Option<&CapacityFloorDecl>,
+) -> bool {
+    default_hash_type.is_some()
+        || capacity_floor.is_some()
+        || identity.is_some_and(|identity| !matches!(identity, IdentityPolicy::None))
+}
+
+fn format_identity_policy(policy: &IdentityPolicy) -> String {
+    match policy {
+        IdentityPolicy::None => "none".to_string(),
+        IdentityPolicy::CkbTypeId => "ckb_type_id".to_string(),
+        IdentityPolicy::Field(path) => format!("field({})", path),
+        IdentityPolicy::ScriptArgs => "script_args".to_string(),
+        IdentityPolicy::SingletonType => "singleton_type".to_string(),
     }
 }
 
@@ -498,6 +662,36 @@ fn format_effect(effect: EffectClass) -> &'static str {
         EffectClass::Mutating => "mutating",
         EffectClass::Creating => "creating",
         EffectClass::Destroying => "destroying",
+    }
+}
+
+fn format_aggregate_invariant(aggregate: &AggregateInvariant) -> String {
+    match aggregate.kind {
+        AggregateInvariantKind::Sum => format!(
+            "assert_sum({}) {} assert_sum({})",
+            aggregate.target,
+            aggregate.relation.map(format_aggregate_relation).unwrap_or("?"),
+            aggregate.rhs.as_deref().unwrap_or("?")
+        ),
+        AggregateInvariantKind::Conserved => format!("assert_conserved({}, scope = {})", aggregate.target, aggregate.scope),
+        AggregateInvariantKind::Delta => format!(
+            "assert_delta({}, {}, scope = {})",
+            aggregate.target,
+            aggregate.argument.as_deref().unwrap_or("?"),
+            aggregate.scope
+        ),
+        AggregateInvariantKind::Distinct => format!("assert_distinct({}, scope = {})", aggregate.target, aggregate.scope),
+        AggregateInvariantKind::Singleton => format!("assert_singleton({}, scope = {})", aggregate.target, aggregate.scope),
+    }
+}
+
+fn format_aggregate_relation(relation: AggregateRelation) -> &'static str {
+    match relation {
+        AggregateRelation::Lt => "<",
+        AggregateRelation::Le => "<=",
+        AggregateRelation::Eq => "==",
+        AggregateRelation::Ge => ">=",
+        AggregateRelation::Gt => ">",
     }
 }
 
@@ -839,5 +1033,59 @@ where
             "stdlib field blocks use newline-separated field names, not comma-separated lists:\n{}",
             formatted
         );
+    }
+
+    #[test]
+    fn format_preserves_type_policy_metadata() {
+        let source = r#"
+module fmt::identity
+
+#[type_id("cellscript::fmt::Token:v1")]
+resource Token has store
+with_default_hash_type(Type)
+with_capacity_floor(6100000000)
+identity(field(token_id))
+{
+    token_id: u64,
+    amount: u64
+}
+
+shared Config has store
+identity(singleton_type)
+{
+    value: u64
+}
+
+receipt Burn -> Token has store
+identity(script_args)
+{
+    amount: u64
+}
+
+#[type_id("cellscript::fmt::Snapshot:v1")]
+struct Snapshot
+with_default_hash_type(Data2)
+with_capacity_floor(6100000000)
+{
+    amount: u64
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains(r#"#[type_id("cellscript::fmt::Token:v1")]"#), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("with_default_hash_type(type)"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("with_capacity_floor(6100000000)"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("identity(field(token_id))"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("identity(singleton_type)"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("identity(script_args)"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains(r#"#[type_id("cellscript::fmt::Snapshot:v1")]"#), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("with_default_hash_type(data2)"), "unexpected formatted source:\n{}", formatted);
+
+        let tokens = lexer::lex(&formatted).unwrap();
+        let reparsed = parser::parse(&tokens).unwrap();
+        let reformatted = format_default(&reparsed).unwrap();
+        assert_eq!(formatted, reformatted);
     }
 }

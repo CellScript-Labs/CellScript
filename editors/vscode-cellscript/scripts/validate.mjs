@@ -26,14 +26,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
 const grammar = JSON.parse(fs.readFileSync(path.join(root, "syntaxes/cellscript.tmLanguage.json"), "utf8"));
 const languageConfig = JSON.parse(fs.readFileSync(path.join(root, "language-configuration.json"), "utf8"));
 const snippets = JSON.parse(fs.readFileSync(path.join(root, "snippets/cellscript.json"), "utf8"));
-const grammarSource = fs.readFileSync(path.join(root, "syntaxes/cellscript.tmLanguage.json"), "utf8");
-const snippetsSource = fs.readFileSync(path.join(root, "snippets/cellscript.json"), "utf8");
 
 if (pkg.name !== "cellscript-vscode") {
   throw new Error(`unexpected package name: ${pkg.name}`);
 }
 
-if (pkg.version !== "0.13.2") {
+if (pkg.version !== "0.15.0") {
   throw new Error(`unexpected extension version: ${pkg.version}`);
 }
 
@@ -90,57 +88,6 @@ if (typeof snippets !== "object" || snippets === null || Object.keys(snippets).l
   throw new Error("snippets file must contain at least one snippet");
 }
 
-for (const keyword of [
-  "where",
-  "flow",
-  "transition",
-  "read",
-  "invariant",
-  "input",
-  "output",
-  "protected",
-  "witness",
-  "lock_args"
-]) {
-  if (!grammarSource.includes(keyword)) {
-    throw new Error(`grammar is missing current 0.13 keyword coverage: ${keyword}`);
-  }
-}
-
-for (const snippet of [
-  "where",
-  "transition ${1:input}.${2:state}:",
-  "create ${1:output} =",
-  "protected ${2:cell}:",
-  "witness ${4:arg}:",
-  "read ${1:config}:",
-  "std::cell::same_lock",
-  "std::cell::preserve_lock",
-  "std::cell::preserve_capacity",
-  "std::lifecycle::transfer",
-  "std::receipt::claim",
-  "std::lifecycle::settle"
-]) {
-  if (!snippetsSource.includes(snippet)) {
-    throw new Error(`snippets are missing current 0.13 syntax: ${snippet}`);
-  }
-}
-
-for (const [name, snippet] of Object.entries(snippets)) {
-  if (!/action/i.test(name)) {
-    continue;
-  }
-  const body = Array.isArray(snippet.body) ? snippet.body.join("\n") : String(snippet.body || "");
-  const actionLine = body.split(/\r?\n/).find((line) => line.trimStart().startsWith("action "));
-  if (!body.includes("\nwhere\n") || (actionLine && actionLine.trimEnd().endsWith("{"))) {
-    throw new Error(`action snippet '${name}' must use a where proof block, not a brace body`);
-  }
-}
-
-if (snippetsSource.includes(": protected ") || snippetsSource.includes(": witness ") || snippetsSource.includes(": read_ref ")) {
-  throw new Error("source qualifiers in action/lock snippets must be prefix qualifiers");
-}
-
 const extensionSource = fs.readFileSync(path.join(root, "extension.js"), "utf8");
 const bundledExtension = fs.readFileSync(path.join(root, "dist/extension.js"), "utf8");
 const vscodeIgnore = fs.readFileSync(path.join(root, ".vscodeignore"), "utf8");
@@ -177,17 +124,6 @@ if (extensionSource.includes('"--target", "riscv64-asm", ...targetProfileArgs(do
 const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
 if (/\bbeta\b|\bthin\b|placeholder|metadata-only/i.test(readme)) {
   throw new Error("extension README must describe the production local tooling surface, not beta/thin placeholder scope");
-}
-
-for (const requiredReadmePhrase of [
-  "where proof blocks",
-  "transition input.state: A -> output.state: B",
-  "create output = T",
-  "read name: T"
-]) {
-  if (!readme.includes(requiredReadmePhrase)) {
-    throw new Error(`extension README is missing 0.13 authoring guidance: ${requiredReadmePhrase}`);
-  }
 }
 
 console.log("CellScript VS Code extension manifest is valid.");

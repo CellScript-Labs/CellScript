@@ -19,6 +19,7 @@ struct PendingAttrs {
 struct TypePolicyDecls {
     default_hash_type: Option<HashTypeDecl>,
     capacity_floor: Option<CapacityFloorDecl>,
+    identity: Option<IdentityPolicy>,
 }
 
 impl<'a> Parser<'a> {
@@ -84,6 +85,7 @@ impl<'a> Parser<'a> {
             TokenKind::Struct => Some("struct".to_string()),
             TokenKind::Const => Some("const".to_string()),
             TokenKind::Enum => Some("enum".to_string()),
+            TokenKind::Invariant => Some("invariant".to_string()),
             TokenKind::Action => Some("action".to_string()),
             TokenKind::Lock => Some("lock".to_string()),
             TokenKind::Where => Some("where".to_string()),
@@ -205,6 +207,35 @@ impl<'a> Parser<'a> {
                             }
                             TokenKind::Destroy | TokenKind::DestroyKw => {
                                 caps.push(Capability::Destroy);
+                                self.advance();
+                            }
+                            TokenKind::Create => {
+                                caps.push(Capability::Create);
+                                self.advance();
+                            }
+                            TokenKind::Consume => {
+                                caps.push(Capability::Consume);
+                                self.advance();
+                            }
+                            TokenKind::ReadRef => {
+                                caps.push(Capability::ReadRef);
+                                self.advance();
+                            }
+                            // v0.15 context-sensitive capability keywords (identifiers)
+                            TokenKind::Identifier(s) if s == "replace" => {
+                                caps.push(Capability::Replace);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "burn" => {
+                                caps.push(Capability::Burn);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "relock" => {
+                                caps.push(Capability::Relock);
+                                self.advance();
+                            }
+                            TokenKind::Identifier(s) if s == "retarget_type" => {
+                                caps.push(Capability::RetargetType);
                                 self.advance();
                             }
                             _ => {
@@ -360,6 +391,10 @@ impl<'a> Parser<'a> {
                 self.reject_type_id_attr(&attrs)?;
                 Ok(Item::Flow(self.parse_flow()?))
             }
+            TokenKind::Invariant => {
+                self.reject_all_attrs("invariant", &attrs)?;
+                Ok(Item::Invariant(self.parse_invariant()?))
+            }
             TokenKind::Const => {
                 self.reject_type_id_attr(&attrs)?;
                 Ok(Item::Const(self.parse_const()?))
@@ -387,6 +422,14 @@ impl<'a> Parser<'a> {
     fn reject_type_id_attr(&self, attrs: &PendingAttrs) -> Result<()> {
         if let Some(type_id) = &attrs.type_id {
             Err(CompileError::new("#[type_id] can only be applied to resource, shared, receipt, or struct definitions", type_id.span))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn reject_all_attrs(&self, item_kind: &str, attrs: &PendingAttrs) -> Result<()> {
+        if attrs.type_id.is_some() || attrs.capabilities.is_some() || attrs.effect.is_some() || attrs.scheduler_hint.is_some() {
+            Err(CompileError::new(format!("attributes cannot be applied to {} definitions", item_kind), self.current().span))
         } else {
             Ok(())
         }
@@ -489,6 +532,7 @@ impl<'a> Parser<'a> {
         Ok(ResourceDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             capabilities,
@@ -514,6 +558,7 @@ impl<'a> Parser<'a> {
         Ok(SharedDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             capabilities,
@@ -545,6 +590,7 @@ impl<'a> Parser<'a> {
         Ok(ReceiptDef {
             name,
             type_id,
+            identity: type_policy.identity.unwrap_or_default(),
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             claim_output,
@@ -671,6 +717,12 @@ impl<'a> Parser<'a> {
                     }
                     policy.capacity_floor = Some(self.parse_capacity_floor_decl()?);
                 }
+                "identity" => {
+                    if policy.identity.is_some() {
+                        return Err(crate::error::CompileError::new("duplicate identity declaration", self.current().span));
+                    }
+                    policy.identity = Some(self.parse_identity_decl()?);
+                }
                 _ => break,
             }
         }
@@ -714,6 +766,50 @@ impl<'a> Parser<'a> {
             return Err(crate::error::CompileError::new("capacity floor must be greater than zero shannons", start_span));
         }
         Ok(CapacityFloorDecl { shannons, span: start_span })
+    }
+
+    fn parse_identity_decl(&mut self) -> Result<IdentityPolicy> {
+        self.advance(); // consume "identity"
+        if self.check(&TokenKind::LParen) {
+            self.advance();
+            let kind = self.parse_name()?;
+            let policy = match kind.as_str() {
+                "ckb_type_id" => IdentityPolicy::CkbTypeId,
+                "field" => {
+                    self.expect(TokenKind::LParen)?;
+                    let path = self.parse_name()?;
+                    self.expect(TokenKind::RParen)?;
+                    IdentityPolicy::Field(path)
+                }
+                "script_args" => IdentityPolicy::ScriptArgs,
+                "singleton_type" => IdentityPolicy::SingletonType,
+                "none" => IdentityPolicy::None,
+                other => {
+                    return Err(crate::error::CompileError::new(
+                        format!(
+                            "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
+                            other
+                        ),
+                        self.current().span,
+                    ));
+                }
+            };
+            self.expect(TokenKind::RParen)?;
+            Ok(policy)
+        } else {
+            // `identity ckb_type_id` without parens
+            let kind = self.parse_name()?;
+            match kind.as_str() {
+                "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
+                "script_args" => Ok(IdentityPolicy::ScriptArgs),
+                "singleton_type" => Ok(IdentityPolicy::SingletonType),
+                "none" => Ok(IdentityPolicy::None),
+                other => Err(crate::error::CompileError::new(
+                    format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
+                    self.current().span,
+                )),
+            }
+        }
     }
 
     fn parse_const(&mut self) -> Result<ConstDef> {
@@ -789,6 +885,35 @@ impl<'a> Parser<'a> {
                         caps.push(Capability::Destroy);
                         self.advance();
                     }
+                    TokenKind::Create => {
+                        caps.push(Capability::Create);
+                        self.advance();
+                    }
+                    TokenKind::Consume => {
+                        caps.push(Capability::Consume);
+                        self.advance();
+                    }
+                    TokenKind::ReadRef => {
+                        caps.push(Capability::ReadRef);
+                        self.advance();
+                    }
+                    // v0.15 context-sensitive capability keywords (identifiers)
+                    TokenKind::Identifier(s) if s == "replace" => {
+                        caps.push(Capability::Replace);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "burn" => {
+                        caps.push(Capability::Burn);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "relock" => {
+                        caps.push(Capability::Relock);
+                        self.advance();
+                    }
+                    TokenKind::Identifier(s) if s == "retarget_type" => {
+                        caps.push(Capability::RetargetType);
+                        self.advance();
+                    }
                     _ => break,
                 }
 
@@ -831,6 +956,275 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(Field { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
+    }
+
+    fn parse_invariant(&mut self) -> Result<InvariantDef> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Invariant)?;
+        let name = self.parse_name()?;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut trigger = None;
+        let mut scope = None;
+        let mut reads = Vec::new();
+        let mut aggregates = Vec::new();
+        let mut asserts = Vec::new();
+
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            self.skip_newlines();
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+
+            if self.check(&TokenKind::Assert) {
+                if self.check(&TokenKind::Assert) && !self.check_invariant_call_assert() {
+                    asserts.push(self.parse_invariant_assert()?);
+                } else {
+                    asserts.push(self.parse_expr()?);
+                }
+                self.consume_optional_semi();
+                self.skip_newlines();
+                continue;
+            }
+
+            if let Some(name) = self.ident_like_name() {
+                if Self::is_invariant_aggregate_start(&name) {
+                    aggregates.push(self.parse_aggregate_invariant()?);
+                    self.consume_optional_semi();
+                    self.skip_newlines();
+                    continue;
+                }
+            }
+
+            let key_span = self.current().span;
+            let key = self.ident_like_name().ok_or_else(|| {
+                CompileError::new("expected invariant field, aggregate assertion, or assert_invariant", self.current().span)
+            })?;
+            self.advance();
+            self.expect(TokenKind::Colon)?;
+
+            match key.as_str() {
+                "trigger" => {
+                    if trigger.is_some() {
+                        return Err(CompileError::new("duplicate invariant trigger declaration", key_span));
+                    }
+                    trigger = Some(self.parse_name_path()?);
+                }
+                "scope" => {
+                    if scope.is_some() {
+                        return Err(CompileError::new("duplicate invariant scope declaration", key_span));
+                    }
+                    scope = Some(self.parse_name_path()?);
+                }
+                "reads" => {
+                    reads.extend(self.parse_invariant_reads()?);
+                }
+                _ => {
+                    return Err(CompileError::new(
+                        format!("unknown invariant field '{}'; expected trigger, scope, reads, or assert_invariant", key),
+                        key_span,
+                    ));
+                }
+            }
+
+            self.consume_optional_semi();
+            self.skip_newlines();
+        }
+
+        let end_span = self.current().span;
+        self.expect(TokenKind::RBrace)?;
+        Ok(InvariantDef {
+            name,
+            trigger,
+            scope,
+            reads,
+            aggregates,
+            asserts,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn is_invariant_aggregate_start(name: &str) -> bool {
+        matches!(name, "assert_sum" | "assert_conserved" | "assert_delta" | "assert_distinct" | "assert_singleton")
+    }
+
+    fn parse_aggregate_invariant(&mut self) -> Result<AggregateInvariant> {
+        let start_span = self.current().span;
+        let name = self.parse_name()?;
+        if name == "assert_sum" {
+            return self.parse_aggregate_sum_comparison(start_span);
+        }
+
+        self.expect(TokenKind::LParen)?;
+        self.skip_newlines();
+        let target = self.parse_invariant_read()?;
+        self.skip_newlines();
+        self.expect(TokenKind::Comma)?;
+        self.skip_newlines();
+
+        let (kind, argument, scope) = match name.as_str() {
+            "assert_conserved" => (AggregateInvariantKind::Conserved, None, self.parse_aggregate_scope_arg()?),
+            "assert_distinct" => (AggregateInvariantKind::Distinct, None, self.parse_aggregate_scope_arg()?),
+            "assert_singleton" => (AggregateInvariantKind::Singleton, None, self.parse_aggregate_scope_arg()?),
+            "assert_delta" => {
+                let delta = self.parse_aggregate_argument()?;
+                self.skip_newlines();
+                self.expect(TokenKind::Comma)?;
+                self.skip_newlines();
+                (AggregateInvariantKind::Delta, Some(delta), self.parse_aggregate_scope_arg()?)
+            }
+            _ => {
+                return Err(CompileError::new(format!("unknown aggregate invariant primitive '{}'", name), start_span));
+            }
+        };
+
+        self.skip_newlines();
+        let end_span = self.current().span;
+        self.expect(TokenKind::RParen)?;
+        Ok(AggregateInvariant {
+            kind,
+            target,
+            scope,
+            argument,
+            relation: None,
+            rhs: None,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_aggregate_sum_comparison(&mut self, start_span: Span) -> Result<AggregateInvariant> {
+        let left = self.parse_aggregate_sum_operand()?;
+        self.skip_newlines();
+        let relation = match self.current().kind {
+            TokenKind::Lt => AggregateRelation::Lt,
+            TokenKind::Le => AggregateRelation::Le,
+            TokenKind::EqEq => AggregateRelation::Eq,
+            TokenKind::Ge => AggregateRelation::Ge,
+            TokenKind::Gt => AggregateRelation::Gt,
+            _ => {
+                return Err(CompileError::new("assert_sum aggregate assertion requires a comparison operator", self.current().span));
+            }
+        };
+        self.advance();
+        self.skip_newlines();
+
+        let rhs_start = self.current().span;
+        let rhs_name = self.parse_name()?;
+        if rhs_name != "assert_sum" {
+            return Err(CompileError::new("assert_sum comparison right-hand side must be assert_sum(...)", rhs_start));
+        }
+        let right = self.parse_aggregate_sum_operand()?;
+        let scope = aggregate_scope_from_targets(&left, Some(&right)).ok_or_else(|| {
+            CompileError::new("assert_sum aggregate assertion requires explicit input/output source views", start_span)
+        })?;
+        let end_span = self.current().span;
+
+        Ok(AggregateInvariant {
+            kind: AggregateInvariantKind::Sum,
+            target: left,
+            scope,
+            argument: None,
+            relation: Some(relation),
+            rhs: Some(right),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_aggregate_sum_operand(&mut self) -> Result<String> {
+        self.expect(TokenKind::LParen)?;
+        self.skip_newlines();
+        let target = self.parse_invariant_read()?;
+        self.skip_newlines();
+        self.expect(TokenKind::RParen)?;
+        Ok(target)
+    }
+
+    fn parse_aggregate_scope_arg(&mut self) -> Result<String> {
+        let key_span = self.current().span;
+        let key = self.parse_name()?;
+        if key != "scope" {
+            return Err(CompileError::new("aggregate invariant primitive requires `scope = ...`", key_span));
+        }
+        self.skip_newlines();
+        self.expect(TokenKind::Eq)?;
+        self.skip_newlines();
+        self.parse_name_path()
+    }
+
+    fn parse_aggregate_argument(&mut self) -> Result<String> {
+        match &self.current().kind {
+            TokenKind::Integer(value) => {
+                let rendered = value.to_string();
+                self.advance();
+                Ok(rendered)
+            }
+            TokenKind::String(value) => {
+                let rendered = format!("{:?}", value);
+                self.advance();
+                Ok(rendered)
+            }
+            _ => self.parse_invariant_read(),
+        }
+    }
+
+    fn check_invariant_call_assert(&self) -> bool {
+        self.peek(1).kind == TokenKind::LParen || self.peek(1).kind == TokenKind::Not
+    }
+
+    fn parse_invariant_assert(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Assert)?;
+        let condition = self.parse_expr()?;
+        let end_span = self.current().span;
+        Ok(Expr::Assert(AssertExpr {
+            condition: Box::new(condition),
+            message: Box::new(Expr::String("invariant assertion failed".to_string())),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_invariant_reads(&mut self) -> Result<Vec<String>> {
+        let mut reads = Vec::new();
+        self.skip_newlines();
+        if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Semi) {
+            return Ok(reads);
+        }
+
+        loop {
+            reads.push(self.parse_invariant_read()?);
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+                if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Semi) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(reads)
+    }
+
+    fn parse_invariant_read(&mut self) -> Result<String> {
+        let mut read = self.parse_name_path()?;
+        if self.check(&TokenKind::Lt) {
+            self.advance();
+            let ty = self.parse_type()?;
+            self.expect(TokenKind::Gt)?;
+            read.push('<');
+            read.push_str(&Self::render_type(&ty));
+            read.push('>');
+        }
+
+        while self.check(&TokenKind::Dot) {
+            self.advance();
+            read.push('.');
+            read.push_str(&self.parse_name()?);
+        }
+
+        Ok(read)
     }
 
     fn parse_type(&mut self) -> Result<Type> {
@@ -1834,6 +2228,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Create => self.parse_create(),
             TokenKind::Consume => self.parse_consume(),
+            TokenKind::Transfer => self.parse_transfer_expr(),
             TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
             TokenKind::Launch => Err(CompileError::new(
@@ -1847,7 +2242,23 @@ impl<'a> Parser<'a> {
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
             _ if self.ident_like_name().is_some() => {
+                if matches!(self.ident_like_name().as_deref(), Some("claim")) && !self.check_next_lparen() {
+                    return self.parse_claim_expr();
+                }
+                if matches!(self.ident_like_name().as_deref(), Some("settle")) && !self.check_next_lparen() {
+                    return self.parse_settle_expr();
+                }
                 let name = self.parse_name_path()?;
+                // v0.15 destruction policy forms (context-sensitive identifiers)
+                match name.as_str() {
+                    "destroy_singleton_type" => return self.parse_destroy_singleton_type(),
+                    "destroy_unique" => return self.parse_destroy_unique(),
+                    "destroy_instance" => return self.parse_destroy_instance(),
+                    "burn_amount" => return self.parse_burn_amount(),
+                    "create_unique" => return self.parse_create_unique_expr(),
+                    "replace_unique" => return self.parse_replace_unique_expr(),
+                    _ => {}
+                }
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
                     self.parse_struct_init(name)
                 } else {
@@ -1884,6 +2295,10 @@ impl<'a> Parser<'a> {
             }
             _ => Err(CompileError::new(format!("unexpected token in expression: {}", self.current().kind), self.current().span)),
         }
+    }
+
+    fn check_next_lparen(&self) -> bool {
+        self.peek(1).kind == TokenKind::LParen
     }
 
     fn parse_array_expr(&mut self) -> Result<Expr> {
@@ -1997,17 +2412,270 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    fn parse_transfer_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Transfer)?;
+
+        let expr = self.parse_postfix()?;
+        let to_span = self.current().span;
+        let keyword = self.parse_name()?;
+        if keyword != "to" {
+            return Err(CompileError::new("expected 'to' in transfer expression", to_span));
+        }
+        let to = self.parse_expr()?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Transfer(TransferExpr {
+            expr: Box::new(expr),
+            to: Box::new(to),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_claim_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        let keyword = self.parse_name()?;
+        if keyword != "claim" {
+            return Err(CompileError::new("expected 'claim'", start_span));
+        }
+        let receipt = self.parse_expr()?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Claim(ClaimExpr {
+            receipt: Box::new(receipt),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_settle_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        let keyword = self.parse_name()?;
+        if keyword != "settle" {
+            return Err(CompileError::new("expected 'settle'", start_span));
+        }
+        let expr = self.parse_expr()?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Settle(SettleExpr {
+            expr: Box::new(expr),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
     fn parse_destroy(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::DestroyKw)?;
+
+        // Check for v0.15 destruction policy forms:
+        //   destroy_singleton_type(cell)
+        //   destroy_unique(cell, identity = type_id)
+        //   destroy_instance(cell, identity_field = id)
+        //   burn_amount(cell, field = amount)
+        //   bare: destroy cell  (legacy compat → Default policy)
+        let policy = if self.check(&TokenKind::LParen) {
+            return Err(CompileError::new(
+                "expected cell expression after destroy; for policy-specific forms use destroy_singleton_type, destroy_unique, destroy_instance, or burn_amount",
+                self.current().span,
+            ));
+        } else {
+            DestructionPolicy::Default
+        };
 
         let expr = self.parse_expr()?;
 
         let end_span = self.current().span;
         Ok(Expr::Destroy(DestroyExpr {
             expr: Box::new(expr),
+            policy,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
+    }
+
+    fn parse_destroy_singleton_type(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_singleton_type"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::SingletonType,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_destroy_unique(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_unique"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let identity = self.parse_named_arg("identity")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::Unique { identity },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_destroy_instance(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "destroy_instance"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let identity_field = self.parse_named_arg("identity_field")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::Instance { identity_field },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_burn_amount(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "burn_amount"
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        let field = self.parse_named_arg("field")?;
+        self.expect(TokenKind::RParen)?;
+
+        let end_span = self.current().span;
+        Ok(Expr::Destroy(DestroyExpr {
+            expr: Box::new(expr),
+            policy: DestructionPolicy::BurnAmount { field },
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    /// Parse a named argument like `identity = type_id` or `field = amount`.
+    fn parse_named_arg(&mut self, expected_name: &str) -> Result<String> {
+        let name = self.parse_name()?;
+        if name != expected_name {
+            return Err(CompileError::new(
+                format!("expected named argument '{}', got '{}'", expected_name, name),
+                self.current().span,
+            ));
+        }
+        self.expect(TokenKind::Eq)?;
+        let value = self.parse_name()?;
+        Ok(value)
+    }
+
+    fn parse_create_unique_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "create_unique"
+        self.expect(TokenKind::Lt)?;
+        let ty = Self::render_type(&self.parse_type()?);
+        self.expect(TokenKind::Gt)?;
+        self.expect(TokenKind::LParen)?;
+        let identity = self.parse_identity_policy_from_args()?;
+        self.expect(TokenKind::RParen)?;
+
+        let fields = self.parse_field_init_list()?;
+
+        let lock = if self.ident_like_name().as_deref() == Some("with_lock") {
+            self.advance();
+            self.expect(TokenKind::LParen)?;
+            let lock_expr = self.parse_expr()?;
+            self.expect(TokenKind::RParen)?;
+            Some(Box::new(lock_expr))
+        } else {
+            None
+        };
+
+        let end_span = self.current().span;
+        Ok(Expr::CreateUnique(CreateUniqueExpr {
+            ty,
+            fields,
+            lock,
+            identity,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_replace_unique_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        // Already consumed the identifier "replace_unique"
+        self.expect(TokenKind::Lt)?;
+        let ty = Self::render_type(&self.parse_type()?);
+        self.expect(TokenKind::Gt)?;
+        self.expect(TokenKind::LParen)?;
+        let identity = self.parse_identity_policy_from_args()?;
+        self.expect(TokenKind::RParen)?;
+
+        let expr = self.parse_expr()?;
+
+        let fields = self.parse_field_init_list()?;
+
+        let end_span = self.current().span;
+        Ok(Expr::ReplaceUnique(ReplaceUniqueExpr {
+            expr: Box::new(expr),
+            ty,
+            fields,
+            identity,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_identity_policy_from_args(&mut self) -> Result<IdentityPolicy> {
+        let name = self.parse_name()?;
+        if name != "identity" {
+            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), self.current().span));
+        }
+        self.expect(TokenKind::Eq)?;
+        let kind = self.parse_name()?;
+        match kind.as_str() {
+            "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
+            "field" => {
+                self.expect(TokenKind::LParen)?;
+                let path = self.parse_name()?;
+                self.expect(TokenKind::RParen)?;
+                Ok(IdentityPolicy::Field(path))
+            }
+            "script_args" => Ok(IdentityPolicy::ScriptArgs),
+            "singleton_type" => Ok(IdentityPolicy::SingletonType),
+            "none" => Ok(IdentityPolicy::None),
+            other => Err(CompileError::new(
+                format!(
+                    "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
+                    other
+                ),
+                self.current().span,
+            )),
+        }
+    }
+
+    fn parse_field_init_list(&mut self) -> Result<Vec<(String, Expr)>> {
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let name = self.parse_name_path()?;
+            if self.check(&TokenKind::Colon) {
+                self.advance();
+                let value = self.parse_expr()?;
+                fields.push((name, value));
+            } else {
+                // Field shorthand: `amount` means `amount: amount`
+                fields.push((name.clone(), Expr::Identifier(name)));
+            }
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(fields)
     }
 
     fn parse_read_ref_expr(&mut self) -> Result<Expr> {
@@ -2338,6 +3006,26 @@ fn normalize_hash_type_decl(value: &str) -> Option<String> {
     }
 }
 
+fn aggregate_scope_from_targets(left: &str, right: Option<&str>) -> Option<String> {
+    let left_scope = aggregate_scope_from_target(left)?;
+    if let Some(right) = right {
+        let right_scope = aggregate_scope_from_target(right)?;
+        if left_scope != right_scope {
+            return None;
+        }
+    }
+    Some(left_scope.to_string())
+}
+
+fn aggregate_scope_from_target(target: &str) -> Option<&'static str> {
+    let base = target.split(['<', '.']).next().unwrap_or(target);
+    match base {
+        "group_input" | "group_inputs" | "group_output" | "group_outputs" => Some("group"),
+        "input" | "inputs" | "output" | "outputs" => Some("transaction"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2379,6 +3067,85 @@ resource Token has transfer, destroy {
         assert!(resource.capabilities.contains(&Capability::Store));
         assert!(resource.capabilities.contains(&Capability::Transfer));
         assert!(resource.capabilities.contains(&Capability::Destroy));
+    }
+
+    #[test]
+    fn test_parse_invariant() {
+        let input = r#"
+module test
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_invariant(true, "token amount is conserved")
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let invariant = match &module.items[0] {
+            Item::Invariant(invariant) => invariant,
+            other => panic!("expected invariant item, found {:?}", other),
+        };
+
+        assert_eq!(invariant.name, "token_conservation");
+        assert_eq!(invariant.trigger.as_deref(), Some("type_group"));
+        assert_eq!(invariant.scope.as_deref(), Some("group"));
+        assert_eq!(invariant.reads, vec!["group_inputs<Token>.amount", "group_outputs<Token>.amount"]);
+        assert_eq!(invariant.asserts.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_aggregate_invariant_primitives() {
+        let input = r#"
+module test
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let invariant = match &module.items[0] {
+            Item::Invariant(invariant) => invariant,
+            other => panic!("expected invariant item, found {:?}", other),
+        };
+
+        assert_eq!(invariant.aggregates.len(), 2);
+        assert_eq!(invariant.aggregates[0].kind, AggregateInvariantKind::Conserved);
+        assert_eq!(invariant.aggregates[0].target, "Token.amount");
+        assert_eq!(invariant.aggregates[0].scope, "group");
+        assert_eq!(invariant.aggregates[1].kind, AggregateInvariantKind::Sum);
+        assert_eq!(invariant.aggregates[1].relation, Some(AggregateRelation::Le));
+        assert_eq!(invariant.aggregates[1].target, "group_outputs<Token>.amount");
+        assert_eq!(invariant.aggregates[1].rhs.as_deref(), Some("group_inputs<Token>.amount"));
+    }
+
+    #[test]
+    fn test_parse_invariant_assert_statement() {
+        let input = r#"
+module test
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert true
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let invariant = match &module.items[0] {
+            Item::Invariant(invariant) => invariant,
+            other => panic!("expected invariant item, found {:?}", other),
+        };
+
+        assert_eq!(invariant.asserts.len(), 1);
+        assert!(matches!(invariant.asserts[0], Expr::Assert(_)));
     }
 
     #[test]

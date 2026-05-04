@@ -64,21 +64,6 @@ CellScript 目前处于 CKB-focused alpha / stabilization 阶段。
 developer-readiness、diagnostics、ProofPlan / metadata visibility，以及
 CKB target-profile stability。
 
-## 当前状态
-
-CellScript 目前处于 CKB-focused alpha / stabilization 阶段。
-
-它适合用于：
-- 试验 CKB Cell-contract authoring；
-- 编译并检查内置示例；
-- 探索类型化 Cell effects、metadata、constraints 和 CKB target-profile
-  checks；
-- 试用本地 VS Code 扩展和 LSP tooling。
-
-它尚不建议在没有人工审查和审计的情况下直接用于 mainnet 部署。当前重点是
-developer-readiness、diagnostics、ProofPlan / metadata visibility，以及
-CKB target-profile stability。
-
 ## 快速开始
 
 从仓库安装：
@@ -487,7 +472,7 @@ IR 模块输出审计报告；其他入口返回
 ```toml
 [package]
 name = "token"
-version = "0.13.2"
+version = "0.15.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

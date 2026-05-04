@@ -199,6 +199,8 @@ valid transactions, malformed rejection, measured cycles, consensus-serialized
 transaction size, occupied-capacity evidence, no under-capacity outputs, bundled
 example deployment, and a passed final production hardening gate.
 
+The report must explicitly record a passed final production hardening gate.
+
 The production gate compiles the seven checked-in top-level
 `examples/*.cell` bundled examples directly. Those files are the single
 canonical business source and the cleaner reading surface; there are no

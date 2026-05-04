@@ -2,7 +2,7 @@
   "name": "cellscript-vscode",
   "displayName": "CellScript",
   "description": "Production-grade local VS Code tooling for CellScript (.cell) contracts.",
-  "version": "0.13.2",
+  "version": "0.15.0",
   "publisher": "arthurzhang",
   "license": "MIT",
   "main": "./dist/extension.js",
@@ -28,11 +28,10 @@
     "build": "esbuild extension.js --bundle --platform=node --format=cjs --external:vscode --minify --outfile=dist/extension.js",
     "validate": "npm run build && node ./scripts/validate.mjs",
     "vscode:prepublish": "npm run build",
-    "package": "npm run build && vsce package --no-dependencies",
-    "publish:dry-run": "npm run build && vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix"
+    "package": "npm run build && npx @vscode/vsce package",
+    "publish:dry-run": "npm run build && npx @vscode/vsce publish --dry-run"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.25.3",
     "vscode-languageclient": "^9.0.1"
   },

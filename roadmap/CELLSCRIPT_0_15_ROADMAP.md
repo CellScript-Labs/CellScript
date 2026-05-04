@@ -1,6 +1,6 @@
 # CellScript v0.15 Roadmap
 
-**Status**: Draft
+**Status**: Implemented (P0 complete, P1 partial)
 **Scope**: Scoped Invariants and Covenant ProofPlan
 **Dependencies**: v0.13 and v0.14 complete
 
@@ -62,7 +62,7 @@ Do not re-plan v0.14:
 
 ## P0
 
-### 1. First-Class Script Semantics
+### 1. First-Class Script Semantics *(Implemented)*
 
 **Problem**
 
@@ -110,7 +110,7 @@ invariant udt_amount_non_increase {
 
 ---
 
-### 2. Scoped Aggregate Invariant Primitives
+### 2. Scoped Aggregate Invariant Primitives *(Implemented as metadata-only)*
 
 **Problem**
 
@@ -153,7 +153,7 @@ Rules:
 
 ---
 
-### 3. Covenant ProofPlan
+### 3. Covenant ProofPlan *(Implemented)*
 
 **Problem**
 
@@ -222,7 +222,7 @@ builder_assumption: none
 
 ---
 
-### 4. Split Kernel Primitives from Protocol Macros
+### 4. Split Kernel Primitives from Protocol Macros *(Implemented)*
 
 **Problem**
 
@@ -282,7 +282,7 @@ Protocol macros must lower through scoped invariants and ProofPlan, not protocol
 
 ---
 
-### 5. Add First-Class Cell Identity and TYPE_ID Policy
+### 5. Add First-Class Cell Identity and TYPE_ID Lifecycle *(Implemented)*
 
 **Problem**
 
@@ -310,6 +310,18 @@ preserve_identity(input, output)
 assert_identity_absent(identity, scope)
 ```
 
+**Implementation**
+
+- `IdentityPolicy` enum (`None`, `CkbTypeId`, `Field(String)`, `ScriptArgs`, `SingletonType`) added as first-class AST primitive on `ResourceDef`, `SharedDef`, `ReceiptDef`
+- `IrIdentityPolicy` enum mirrors AST in IR layer; `IrTypeDef.identity` field carries the policy
+- `IrInstruction::CreateUnique { dest, pattern, identity }` and `IrInstruction::ReplaceUnique { dest, operand, pattern, identity }` carry identity metadata through full pipeline
+- Parser: `identity(ckb_type_id)`, `identity(field(path))`, `identity(script_args)`, `identity(singleton_type)` on type declarations; `create_unique<T>(identity = ...) { ... }` and `replace_unique<T>(identity = ...) { ... }` as expression forms
+- Type checker: validates identity policy constraints for CreateUnique and ReplaceUnique
+- Codegen: `emit_create_unique` and `emit_replace_unique` emit identity-aware RISC-V with identity labels
+- Metadata: `TypeMetadata.identity_policy` field exposes the policy in compiled JSON (hidden for default `none`)
+- Formatter: `format_identity_policy()` handles all 5 variants
+- 5 dedicated tests for identity metadata emission, default policy, field/script_args/singleton_type variants
+
 **Code Areas**
 
 - type identity attributes
@@ -327,7 +339,7 @@ assert_identity_absent(identity, scope)
 
 ---
 
-### 6. Replace Bare `destroy` with Explicit Destruction Policies
+### 6. Replace Bare `destroy` with Explicit Destruction Policies *(Implemented)*
 
 **Problem**
 
@@ -344,6 +356,16 @@ burn_amount(cell, field = amount)
 destroy_singleton_type(cell)
 forbid_output_successor(cell, match = script_hash + identity)
 ```
+
+**Implementation**
+
+- `DestructionPolicy` enum (`Default`, `SingletonType`, `Unique { identity }`, `Instance { identity_field }`, `BurnAmount { field }`) added to AST
+- `IrDestructionPolicy` mirrors AST in IR layer; `IrInstruction::Destroy` carries `policy: IrDestructionPolicy`
+- Parser: `destroy_singleton_type(cell)`, `destroy_unique(cell, identity = type_id)`, `destroy_instance(cell, identity_field = id)`, `burn_amount(cell, field = amount)` as context-sensitive identifiers; bare `destroy cell` still accepted as `DestructionPolicy::Default`
+- `lower_destruction_policy()` converts AST→IR policy
+- Codegen: all `Destroy` instruction matches updated with `policy` field
+- Formatter: policy-specific output for each destruction variant
+- `check_primitive_strict_015()` rejects bare `destroy` (protocol verb) in strict mode
 
 **Code Areas**
 
@@ -488,7 +510,7 @@ transition
 
 ---
 
-### 10. Rename Internal `type_hash`
+### 10. Rename Internal `type_hash` *(Implemented)*
 
 **Problem**
 
@@ -506,6 +528,11 @@ ckb_lock_script_hash
 ckb_type_id_args
 ```
 
+**Implementation**
+
+- Metadata fields renamed: `type_hash-absence` → `ckb_type_script_hash-absence`, `type_hash-preservation` → `ckb_type_script_hash-preservation`, `lock_hash-preservation` → `ckb_lock_script_hash-preservation`
+- All internal references updated in `src/lib.rs`
+
 **Code Areas**
 
 - IR pattern metadata
@@ -522,7 +549,7 @@ ckb_type_id_args
 
 ---
 
-### 11. Reset Resource Capability Vocabulary
+### 11. Reset Resource Capability Vocabulary *(Implemented)*
 
 **Problem**
 
@@ -549,6 +576,15 @@ Rejected protocol capability spellings:
 transfer
 destroy
 ```
+
+**Implementation**
+
+- AST `Capability` extended with 7 new variants: `Create`, `Consume`, `Replace`, `Burn`, `Relock`, `RetargetType`, `ReadRef`
+- New capabilities are context-sensitive identifiers in `has ...` clauses (not global lexer keywords), preserving backward compatibility with code using these words as identifiers
+- `Capability::is_protocol_verb()` and `Capability::kernel_effects()` classify capabilities for migration
+- `format_capability()` and `capability_name()` updated in fmt, docgen, and types modules
+- Strict mode (`--primitive-strict=0.15`) rejects `has transfer` (CS0150) and `has destroy` (CS0151/CS0156) with precise diagnostics
+- Compatibility mode (`--primitive-compat=0.14`) accepts legacy vocabulary
 
 **Code Areas**
 
@@ -740,7 +776,7 @@ shared.queue_claim
 
 ---
 
-### 17. Canonical Syntax Cutover
+### 17. Compatibility and Migration *(Implemented)*
 
 **Change**
 
@@ -765,6 +801,13 @@ CS0158 invariant trigger and scope must be explicit
 CS0159 lock_group + transaction scope requires explicit coverage acknowledgement
 CS0160 builder assumption is not on-chain checked
 ```
+
+**Implementation**
+
+- `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags added to `CompileOptions`
+- `check_primitive_strict_015()` gate in `src/lib.rs` rejects protocol verbs (`has transfer`, `has destroy`) in strict mode
+- CS0150 (transfer→stdlib macro) and CS0151/CS0156 (destroy requires explicit policy / protocol capabilities not allowed in strict mode) diagnostics emitted
+- Remaining CS0152–CS0160 codes reserved for future P1/P2 items
 
 **Acceptance**
 

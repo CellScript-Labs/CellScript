@@ -101,6 +101,7 @@ impl ModuleResolver {
                 Item::Lock(l) => {
                     Self::insert_function_symbol(&mut symbol_table, &l.name, FunctionDef::Lock(l.clone()), l.span)?;
                 }
+                Item::Invariant(_) => {}
                 Item::Use(u) => {
                     for import in &u.imports {
                         let import_item = ImportItem {
@@ -379,6 +380,7 @@ mod tests {
                 default_hash_type: None,
                 capacity_floor: None,
                 capabilities: vec![Capability::Store],
+                identity: IdentityPolicy::default(),
                 fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
                 span: Span::default(),
             })],
@@ -405,6 +407,7 @@ mod tests {
                         default_hash_type: None,
                         capacity_floor: None,
                         capabilities: vec![Capability::Store],
+                        identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
                         span: Span::default(),
                     }),
@@ -414,6 +417,7 @@ mod tests {
                         default_hash_type: None,
                         capacity_floor: None,
                         capabilities: vec![Capability::Store],
+                        identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "max_supply".to_string(), ty: Type::U64, span: Span::default() }],
                         span: Span::default(),
                     }),
@@ -454,6 +458,7 @@ mod tests {
                         default_hash_type: None,
                         capacity_floor: None,
                         capabilities: vec![Capability::Store],
+                        identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
                         span: Span::default(),
                     }),
@@ -490,6 +495,7 @@ mod tests {
                     default_hash_type: None,
                     capacity_floor: None,
                     capabilities: vec![Capability::Store],
+                    identity: IdentityPolicy::default(),
                     fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
                     span: Span::default(),
                 })],

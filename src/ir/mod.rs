@@ -23,6 +23,7 @@ pub struct IrCallableAbi {
 #[derive(Debug, Clone)]
 pub enum IrItem {
     TypeDef(IrTypeDef),
+    Invariant(IrInvariant),
     Action(IrAction),
     PureFn(IrPureFn),
     Lock(IrLock),
@@ -41,6 +42,30 @@ pub struct IrTypeDef {
     pub flow_states: Option<Vec<String>>,
     pub flow_state_field: Option<String>,
     pub flow_rules: Vec<IrFlowRule>,
+    /// Identity policy for v0.15 cell identity system
+    pub identity: IrIdentityPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrInvariant {
+    pub name: String,
+    pub trigger: Option<String>,
+    pub scope: Option<String>,
+    pub reads: Vec<String>,
+    pub aggregates: Vec<IrAggregateInvariant>,
+    pub assert_count: usize,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrAggregateInvariant {
+    pub kind: AggregateInvariantKind,
+    pub target: String,
+    pub scope: String,
+    pub argument: Option<String>,
+    pub relation: Option<AggregateRelation>,
+    pub rhs: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +86,38 @@ pub struct IrStateTransitionEdge {
     pub to: String,
     pub from_index: usize,
     pub to_index: usize,
+}
+
+/// Destruction policy in IR, mirroring the AST-level DestructionPolicy
+/// but simplified for codegen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrDestructionPolicy {
+    /// Bare `destroy` — legacy v0.14, same as SingletonType
+    Default,
+    /// `destroy_singleton_type` — proves absence of same-TypeHash output
+    SingletonType,
+    /// `destroy_unique` — uses TYPE_ID to identify cell
+    Unique { identity: String },
+    /// `destroy_instance` — identifies by specific field
+    Instance { identity_field: String },
+    /// `burn_amount` — proves quantity delta, not output absence
+    BurnAmount { field: String },
+}
+
+/// Identity policy in IR, mirroring the AST-level IdentityPolicy
+/// but simplified for codegen and metadata emission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrIdentityPolicy {
+    /// No identity tracking (default)
+    None,
+    /// CKB TYPE_ID based identity
+    CkbTypeId,
+    /// Field-based identity
+    Field(String),
+    /// Script args based identity
+    ScriptArgs,
+    /// Singleton type identity
+    SingletonType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +219,7 @@ pub struct CreatePattern {
     pub binding: String,
     pub fields: Vec<(String, IrOperand)>,
     pub lock: Option<IrOperand>,
+    pub identity: IrIdentityPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -248,7 +306,12 @@ pub enum IrInstruction {
     Tuple { dest: IrVar, fields: Vec<IrOperand> },
     Consume { operand: IrOperand },
     Create { dest: IrVar, pattern: CreatePattern },
-    Destroy { operand: IrOperand },
+    Transfer { dest: IrVar, operand: IrOperand, to: IrOperand },
+    Destroy { operand: IrOperand, policy: IrDestructionPolicy },
+    Claim { dest: IrVar, receipt: IrOperand },
+    Settle { dest: IrVar, operand: IrOperand },
+    CreateUnique { dest: IrVar, pattern: CreatePattern, identity: IrIdentityPolicy },
+    ReplaceUnique { dest: IrVar, operand: IrOperand, pattern: CreatePattern, identity: IrIdentityPolicy },
     CellMetadataEquality { left: IrOperand, right: IrOperand, field: CellMetadataField },
 }
 
@@ -491,6 +554,10 @@ impl IrGenerator {
                     let ir_item = IrItem::TypeDef(self.gen_struct(s));
                     self.module.items.push(ir_item);
                 }
+                Item::Invariant(invariant) => {
+                    let ir_item = IrItem::Invariant(self.gen_invariant(invariant));
+                    self.module.items.push(ir_item);
+                }
                 Item::Const(_) | Item::Enum(_) => {}
                 Item::Action(a) => {
                     let ir_item = IrItem::Action(self.gen_action(a));
@@ -585,6 +652,7 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&resource.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&resource.name).cloned(),
             flow_rules: self.flow_rules.get(&resource.name).cloned().unwrap_or_default(),
+            identity: Self::lower_identity_policy(&resource.identity),
         }
     }
 
@@ -601,6 +669,7 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&shared.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&shared.name).cloned(),
             flow_rules: self.flow_rules.get(&shared.name).cloned().unwrap_or_default(),
+            identity: Self::lower_identity_policy(&shared.identity),
         }
     }
 
@@ -617,6 +686,7 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&receipt.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
             flow_rules: self.flow_rules.get(&receipt.name).cloned().unwrap_or_default(),
+            identity: Self::lower_identity_policy(&receipt.identity),
         }
     }
 
@@ -633,6 +703,31 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&struct_def.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&struct_def.name).cloned(),
             flow_rules: self.flow_rules.get(&struct_def.name).cloned().unwrap_or_default(),
+            identity: IrIdentityPolicy::None,
+        }
+    }
+
+    fn gen_invariant(&self, invariant: &InvariantDef) -> IrInvariant {
+        IrInvariant {
+            name: invariant.name.clone(),
+            trigger: invariant.trigger.clone(),
+            scope: invariant.scope.clone(),
+            reads: invariant.reads.clone(),
+            aggregates: invariant
+                .aggregates
+                .iter()
+                .map(|aggregate| IrAggregateInvariant {
+                    kind: aggregate.kind,
+                    target: aggregate.target.clone(),
+                    scope: aggregate.scope.clone(),
+                    argument: aggregate.argument.clone(),
+                    relation: aggregate.relation,
+                    rhs: aggregate.rhs.clone(),
+                    span: aggregate.span,
+                })
+                .collect(),
+            assert_count: invariant.asserts.len(),
+            span: invariant.span,
         }
     }
 
@@ -1203,8 +1298,24 @@ impl IrGenerator {
                     if let Some(pattern) = self.cell_pattern_from_operand(operand, "consume") {
                         patterns.push(pattern);
                     }
-                } else if let IrInstruction::Destroy { operand } = instruction {
+                } else if let IrInstruction::Transfer { operand, .. } = instruction {
+                    if let Some(pattern) = self.cell_pattern_from_operand(operand, "transfer") {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::Destroy { operand, .. } = instruction {
                     if let Some(pattern) = self.cell_pattern_from_operand(operand, "destroy") {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::ReplaceUnique { operand, .. } = instruction {
+                    if let Some(pattern) = self.cell_pattern_from_operand(operand, "replace_unique") {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::Claim { receipt, .. } = instruction {
+                    if let Some(pattern) = self.cell_pattern_from_operand(receipt, "claim") {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::Settle { operand, .. } = instruction {
+                    if let Some(pattern) = self.cell_pattern_from_operand(operand, "settle") {
                         patterns.push(pattern);
                     }
                 }
@@ -1264,6 +1375,22 @@ impl IrGenerator {
                         }
                     } else {
                         patterns.push(pattern.clone());
+                    }
+                } else if let IrInstruction::CreateUnique { pattern, .. } = instruction {
+                    patterns.push(pattern.clone());
+                } else if let IrInstruction::ReplaceUnique { pattern, .. } = instruction {
+                    patterns.push(pattern.clone());
+                } else if let IrInstruction::Transfer { dest, to, .. } = instruction {
+                    if let Some(pattern) = self.create_pattern_from_var_with_lock(dest, "transfer", Some(to.clone())) {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::Claim { dest, .. } = instruction {
+                    if let Some(pattern) = self.create_pattern_from_var(dest, "claim") {
+                        patterns.push(pattern);
+                    }
+                } else if let IrInstruction::Settle { dest, .. } = instruction {
+                    if let Some(pattern) = self.create_pattern_from_var(dest, "settle") {
+                        patterns.push(pattern);
                     }
                 }
             }
@@ -1371,7 +1498,14 @@ impl IrGenerator {
                 fields
             })
             .unwrap_or_default();
-        Some(CreatePattern { operation: operation.to_string(), ty: type_name.to_string(), binding: var.name.clone(), fields, lock })
+        Some(CreatePattern {
+            operation: operation.to_string(),
+            ty: type_name.to_string(),
+            binding: var.name.clone(),
+            fields,
+            lock,
+            identity: IrIdentityPolicy::None,
+        })
     }
 
     fn named_type_name_from_ir_type(ty: &IrType) -> Option<&str> {
@@ -1380,6 +1514,48 @@ impl IrGenerator {
             IrType::Ref(inner) | IrType::MutRef(inner) => Self::named_type_name_from_ir_type(inner),
             _ => None,
         }
+    }
+
+    fn claim_output_type_for_operand(&self, operand: &IrOperand) -> IrType {
+        let ty = self.operand_type(operand);
+        Self::named_type_name_from_ir_type(&ty)
+            .and_then(|name| self.receipt_claim_outputs.get(name))
+            .and_then(Clone::clone)
+            .unwrap_or(IrType::U64)
+    }
+
+    fn materialize_matching_output_fields(
+        &mut self,
+        source: &IrOperand,
+        output_ty: &IrType,
+        active: BlockId,
+        blocks: &mut Vec<IrBlock>,
+    ) -> HashMap<String, IrVar> {
+        let (IrOperand::Var(source_var), Some(output_type_name)) = (source, Self::named_type_name_from_ir_type(output_ty)) else {
+            return HashMap::new();
+        };
+        let Some(output_fields) = self.type_fields.get(output_type_name).cloned() else {
+            return HashMap::new();
+        };
+
+        let mut field_names = output_fields.keys().cloned().collect::<Vec<_>>();
+        field_names.sort();
+        let mut field_vars = HashMap::new();
+        for field_name in field_names {
+            let Some(output_field_ty) = output_fields.get(&field_name) else {
+                continue;
+            };
+            let Some(source_field_ty) = self.lookup_field_ir_type(&source_var.ty, &field_name) else {
+                continue;
+            };
+            if &source_field_ty != output_field_ty || !is_verifier_coverable_output_field_type(output_field_ty) {
+                continue;
+            }
+            if let Some(field_var) = self.materialize_schema_field(source_var, &field_name, active, blocks) {
+                field_vars.insert(field_name, field_var);
+            }
+        }
+        field_vars
     }
 
     fn named_type_name_from_ast_type(ty: &Type) -> Option<&str> {
@@ -1759,7 +1935,12 @@ impl IrGenerator {
             Expr::ReadRef(read_ref) => self.lower_read_ref_expr(read_ref, current, blocks),
             Expr::Create(create) => self.lower_create_expr(create, current, blocks, vars),
             Expr::Consume(consume) => self.lower_consume_expr(consume, current, blocks, vars),
+            Expr::Transfer(transfer) => self.lower_transfer_expr(transfer, current, blocks, vars),
             Expr::Destroy(destroy) => self.lower_destroy_expr(destroy, current, blocks, vars),
+            Expr::Claim(claim) => self.lower_claim_expr(claim, current, blocks, vars),
+            Expr::Settle(settle) => self.lower_settle_expr(settle, current, blocks, vars),
+            Expr::CreateUnique(cu) => self.lower_create_unique_expr(cu, current, blocks, vars),
+            Expr::ReplaceUnique(ru) => self.lower_replace_unique_expr(ru, current, blocks, vars),
             Expr::Assert(assert_expr) => self.lower_assert_expr(assert_expr, current, blocks, vars),
             Expr::Require(require_expr) => self.lower_require_expr(require_expr, current, blocks, vars),
             Expr::RequireBlock(require_block) => self.lower_require_block_expr(require_block, current, blocks, vars),
@@ -2797,6 +2978,7 @@ impl IrGenerator {
             binding: dest.name.clone(),
             fields: lowered_fields,
             lock: lowered_lock,
+            identity: IrIdentityPolicy::None,
         };
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
         self.aggregate_fields.insert(dest.id, field_vars);
@@ -2840,14 +3022,231 @@ impl IrGenerator {
         let Some(active) = lowered.current else {
             return lowered;
         };
-        self.block_mut(blocks, active).instructions.push(IrInstruction::Destroy { operand: lowered.operand.clone() });
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Destroy {
+            operand: lowered.operand.clone(),
+            policy: Self::lower_destruction_policy(&destroy.policy),
+        });
         LoweredExpr { operand: lowered.operand, current: Some(active) }
+    }
+
+    fn lower_destruction_policy(policy: &DestructionPolicy) -> IrDestructionPolicy {
+        match policy {
+            DestructionPolicy::Default => IrDestructionPolicy::Default,
+            DestructionPolicy::SingletonType => IrDestructionPolicy::SingletonType,
+            DestructionPolicy::Unique { identity } => IrDestructionPolicy::Unique { identity: identity.clone() },
+            DestructionPolicy::Instance { identity_field } => IrDestructionPolicy::Instance { identity_field: identity_field.clone() },
+            DestructionPolicy::BurnAmount { field } => IrDestructionPolicy::BurnAmount { field: field.clone() },
+        }
+    }
+
+    fn lower_identity_policy(policy: &IdentityPolicy) -> IrIdentityPolicy {
+        match policy {
+            IdentityPolicy::None => IrIdentityPolicy::None,
+            IdentityPolicy::CkbTypeId => IrIdentityPolicy::CkbTypeId,
+            IdentityPolicy::Field(path) => IrIdentityPolicy::Field(path.clone()),
+            IdentityPolicy::ScriptArgs => IrIdentityPolicy::ScriptArgs,
+            IdentityPolicy::SingletonType => IrIdentityPolicy::SingletonType,
+        }
+    }
+
+    fn lower_create_unique_expr(
+        &mut self,
+        cu: &CreateUniqueExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let dest = self.new_var(format!("create_unique_{}", cu.ty), IrType::Named(cu.ty.clone()));
+        let mut active = current;
+        let mut lowered_fields = Vec::with_capacity(cu.fields.len());
+        let mut field_vars = HashMap::new();
+
+        for (field_name, field_expr) in &cu.fields {
+            let expected_ty = self.type_fields.get(&cu.ty).and_then(|fields| fields.get(field_name)).cloned();
+            let lowered = if let Some(expected_ty) = expected_ty {
+                self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
+            } else {
+                self.lower_expr(field_expr, active, blocks, vars)
+            };
+            let Some(next) = lowered.current else {
+                return lowered;
+            };
+            active = next;
+            lowered_fields.push((field_name.clone(), lowered.operand.clone()));
+
+            let field_ty = match &lowered.operand {
+                IrOperand::Var(var) => var.ty.clone(),
+                IrOperand::Const(value) => self.const_type(value),
+            };
+            let field_var = self.new_var(format!("{}_{}", cu.ty, field_name), field_ty);
+            self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
+            field_vars.insert(field_name.clone(), field_var);
+        }
+
+        let lowered_lock = if let Some(lock_expr) = &cu.lock {
+            let lowered = self.lower_expr(lock_expr, active, blocks, vars);
+            let Some(next) = lowered.current else {
+                return lowered;
+            };
+            active = next;
+            Some(lowered.operand)
+        } else {
+            None
+        };
+
+        let identity = Self::lower_identity_policy(&cu.identity);
+        let pattern = CreatePattern {
+            operation: "create_unique".to_string(),
+            ty: cu.ty.clone(),
+            binding: dest.name.clone(),
+            fields: lowered_fields,
+            lock: lowered_lock,
+            identity: identity.clone(),
+        };
+        self.block_mut(blocks, active).instructions.push(IrInstruction::CreateUnique { dest: dest.clone(), pattern, identity });
+        self.aggregate_fields.insert(dest.id, field_vars);
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_replace_unique_expr(
+        &mut self,
+        ru: &ReplaceUniqueExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        // Lower the input cell expression
+        let lowered_input = self.lower_expr(&ru.expr, current, blocks, vars);
+        let Some(active) = lowered_input.current else {
+            return lowered_input;
+        };
+
+        // Lower the replacement output fields
+        let dest_ty = self.operand_type(&lowered_input.operand);
+        let dest = self.new_var(format!("replace_unique_{}", ru.ty), dest_ty);
+        let mut active = active;
+        let mut lowered_fields = Vec::with_capacity(ru.fields.len());
+        let mut field_vars = HashMap::new();
+
+        for (field_name, field_expr) in &ru.fields {
+            let expected_ty = self.type_fields.get(&ru.ty).and_then(|fields| fields.get(field_name)).cloned();
+            let lowered = if let Some(expected_ty) = expected_ty {
+                self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
+            } else {
+                self.lower_expr(field_expr, active, blocks, vars)
+            };
+            let Some(next) = lowered.current else {
+                return lowered;
+            };
+            active = next;
+            lowered_fields.push((field_name.clone(), lowered.operand.clone()));
+
+            let field_ty = match &lowered.operand {
+                IrOperand::Var(var) => var.ty.clone(),
+                IrOperand::Const(value) => self.const_type(value),
+            };
+            let field_var = self.new_var(format!("{}_{}", ru.ty, field_name), field_ty);
+            self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
+            field_vars.insert(field_name.clone(), field_var);
+        }
+
+        let identity = Self::lower_identity_policy(&ru.identity);
+        let pattern = CreatePattern {
+            operation: "replace_unique".to_string(),
+            ty: ru.ty.clone(),
+            binding: dest.name.clone(),
+            fields: lowered_fields,
+            lock: None,
+            identity: identity.clone(),
+        };
+        self.block_mut(blocks, active).instructions.push(IrInstruction::ReplaceUnique {
+            dest: dest.clone(),
+            operand: lowered_input.operand,
+            pattern,
+            identity,
+        });
+        self.aggregate_fields.insert(dest.id, field_vars);
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_transfer_expr(
+        &mut self,
+        transfer: &TransferExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let lowered_expr = self.lower_expr(&transfer.expr, current, blocks, vars);
+        let Some(active) = lowered_expr.current else {
+            return lowered_expr;
+        };
+        let lowered_to = self.lower_expr(&transfer.to, active, blocks, vars);
+        let Some(active) = lowered_to.current else {
+            return lowered_to;
+        };
+
+        let dest_ty = self.operand_type(&lowered_expr.operand);
+        let dest = self.new_var("transfer_tmp", dest_ty);
+        let transfer_output_fields = self.materialize_matching_output_fields(&lowered_expr.operand, &dest.ty, active, blocks);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Transfer {
+            dest: dest.clone(),
+            operand: lowered_expr.operand,
+            to: lowered_to.operand,
+        });
+        if !transfer_output_fields.is_empty() {
+            self.aggregate_fields.insert(dest.id, transfer_output_fields);
+        }
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
     fn lower_read_ref_expr(&mut self, read_ref: &ReadRefExpr, current: BlockId, blocks: &mut Vec<IrBlock>) -> LoweredExpr {
         let dest = self.new_var(format!("read_ref_{}", read_ref.ty), IrType::Ref(Box::new(IrType::Named(read_ref.ty.clone()))));
         self.block_mut(blocks, current).instructions.push(IrInstruction::ReadRef { dest: dest.clone(), ty: read_ref.ty.clone() });
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) }
+    }
+
+    fn lower_claim_expr(
+        &mut self,
+        claim: &ClaimExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let lowered_receipt = self.lower_expr(&claim.receipt, current, blocks, vars);
+        let Some(active) = lowered_receipt.current else {
+            return lowered_receipt;
+        };
+        let dest_ty = self.claim_output_type_for_operand(&lowered_receipt.operand);
+        let dest = self.new_var("claim_tmp", dest_ty);
+        let claim_output_fields = self.materialize_matching_output_fields(&lowered_receipt.operand, &dest.ty, active, blocks);
+        self.block_mut(blocks, active)
+            .instructions
+            .push(IrInstruction::Claim { dest: dest.clone(), receipt: lowered_receipt.operand });
+        if !claim_output_fields.is_empty() {
+            self.aggregate_fields.insert(dest.id, claim_output_fields);
+        }
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_settle_expr(
+        &mut self,
+        settle: &SettleExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let lowered = self.lower_expr(&settle.expr, current, blocks, vars);
+        let Some(active) = lowered.current else {
+            return lowered;
+        };
+        let dest_ty = self.operand_type(&lowered.operand);
+        let dest = self.new_var("settle_tmp", dest_ty);
+        let settle_output_fields = self.materialize_matching_output_fields(&lowered.operand, &dest.ty, active, blocks);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Settle { dest: dest.clone(), operand: lowered.operand });
+        if !settle_output_fields.is_empty() {
+            self.aggregate_fields.insert(dest.id, settle_output_fields);
+        }
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
     fn lower_index_expr(
@@ -4485,7 +4884,7 @@ fn ir_item_callable_name(item: &IrItem) -> Option<&str> {
         IrItem::Action(action) => Some(&action.name),
         IrItem::PureFn(function) => Some(&function.name),
         IrItem::Lock(lock) => Some(&lock.name),
-        IrItem::TypeDef(_) => None,
+        IrItem::TypeDef(_) | IrItem::Invariant(_) => None,
     }
 }
 
@@ -4520,7 +4919,7 @@ fn collect_ir_item_call_names(item: &IrItem, pending: &mut Vec<String>) {
         IrItem::Action(action) => collect_ir_body_call_names(&action.body, pending),
         IrItem::PureFn(function) => collect_ir_body_call_names(&function.body, pending),
         IrItem::Lock(lock) => collect_ir_body_call_names(&lock.body, pending),
-        IrItem::TypeDef(_) => {}
+        IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
     }
 }
 
@@ -4651,7 +5050,27 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Consume(consume) => collect_call_names_from_expr(&consume.expr, names),
+        Expr::Transfer(transfer) => {
+            collect_call_names_from_expr(&transfer.expr, names);
+            collect_call_names_from_expr(&transfer.to, names);
+        }
         Expr::Destroy(destroy) => collect_call_names_from_expr(&destroy.expr, names),
+        Expr::Claim(claim) => collect_call_names_from_expr(&claim.receipt, names),
+        Expr::Settle(settle) => collect_call_names_from_expr(&settle.expr, names),
+        Expr::CreateUnique(cu) => {
+            for (_, value) in &cu.fields {
+                collect_call_names_from_expr(value, names);
+            }
+            if let Some(lock) = &cu.lock {
+                collect_call_names_from_expr(lock, names);
+            }
+        }
+        Expr::ReplaceUnique(ru) => {
+            collect_call_names_from_expr(&ru.expr, names);
+            for (_, value) in &ru.fields {
+                collect_call_names_from_expr(value, names);
+            }
+        }
         Expr::Assert(assert_expr) => {
             collect_call_names_from_expr(&assert_expr.condition, names);
         }
@@ -4931,6 +5350,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            identity: lower_identity_policy_ast(&resource.identity),
         }),
         TypeDef::Shared(shared) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4944,6 +5364,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            identity: lower_identity_policy_ast(&shared.identity),
         }),
         TypeDef::Receipt(receipt) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4957,6 +5378,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            identity: lower_identity_policy_ast(&receipt.identity),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -4970,8 +5392,19 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            identity: IrIdentityPolicy::None,
         }),
         TypeDef::Enum(_) => None,
+    }
+}
+
+fn lower_identity_policy_ast(policy: &IdentityPolicy) -> IrIdentityPolicy {
+    match policy {
+        IdentityPolicy::None => IrIdentityPolicy::None,
+        IdentityPolicy::CkbTypeId => IrIdentityPolicy::CkbTypeId,
+        IdentityPolicy::Field(path) => IrIdentityPolicy::Field(path.clone()),
+        IdentityPolicy::ScriptArgs => IrIdentityPolicy::ScriptArgs,
+        IdentityPolicy::SingletonType => IrIdentityPolicy::SingletonType,
     }
 }
 
@@ -5190,6 +5623,42 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
         }
+        Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            if let Expr::Identifier(name) = replace.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&replace.expr, bindings);
+            for (_, value) in &replace.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
         Expr::ReadRef(_) => {}
         Expr::Assert(assert_expr) => {
             collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
@@ -5280,6 +5749,11 @@ fn same_direct_field_access(expr: &Expr, root: &str, field_name: &str) -> bool {
 
 fn call_target_is_min(expr: &Expr) -> bool {
     matches!(expr, Expr::Identifier(name) if name == "min" || name == "math_min")
+}
+
+fn is_verifier_coverable_output_field_type(ty: &IrType) -> bool {
+    matches!(ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 | IrType::Address | IrType::Hash)
+        || matches!(ty, IrType::Array(inner, _) if matches!(inner.as_ref(), IrType::U8))
 }
 
 fn binding_pattern_label(pattern: &BindingPattern) -> &str {
