@@ -2485,7 +2485,7 @@ shared Config {
     threshold: u64,
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
@@ -2557,7 +2557,7 @@ shared Config {
     threshold: u64,
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 

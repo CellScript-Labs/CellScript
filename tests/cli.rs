@@ -45,6 +45,93 @@ where
 }
 
 #[test]
+fn cellc_top_level_accepts_primitive_strict_for_kernel_effect_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("strict.cell");
+    let output = dir.path().join("strict.s");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+resource Token has store, consume, burn {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg(&input)
+        .arg("--primitive-strict")
+        .arg("0.15")
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .unwrap();
+
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(output.exists());
+}
+
+#[test]
+fn cellc_top_level_primitive_strict_rejects_legacy_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("legacy.cell");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+resource Token has store, destroy {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
+
+    assert!(!run.status.success(), "legacy capability should fail strict mode");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("CS0151"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("legacy capability 'destroy'"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("consume + burn"), "unexpected stderr: {}", stderr);
+
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+resource Token has store, transfer {
+    amount: u64,
+}
+
+action send(token: Token, to: Address)
+where
+    transfer token to to
+"#,
+    )
+    .unwrap();
+
+    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
+
+    assert!(!run.status.success(), "legacy transfer capability should fail strict mode");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("CS0150"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("legacy capability 'transfer'"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("replace + relock"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
 fn cellc_constraints_subcommand_surfaces_ckb_deployment_manifest() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

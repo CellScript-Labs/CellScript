@@ -1,11 +1,11 @@
 module cellscript::language::stdlib
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, create, consume, replace, burn, relock {
     amount: u64,
     nonce: u64,
 }
 
-receipt Voucher -> Coin has destroy {
+receipt Voucher -> Coin has create, consume, burn {
     amount: u64,
     nonce: u64,
     holder: Address,

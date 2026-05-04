@@ -29,7 +29,7 @@ resource MultisigWallet has store {
     created_at: u64,
 }
 
-receipt Proposal has destroy {
+receipt Proposal has create, consume, replace, burn {
     wallet_id: Hash,
     proposal_id: u64,
     proposer: Address,

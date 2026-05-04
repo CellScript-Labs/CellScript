@@ -108,7 +108,7 @@ The fastest way to get oriented is to compile the token example:
 git clone https://github.com/tsukifune-kosei/CellScript.git
 cd CellScript
 cargo test --locked
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb -o /tmp/token.elf
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
 cargo run --locked --bin cellc -- verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 

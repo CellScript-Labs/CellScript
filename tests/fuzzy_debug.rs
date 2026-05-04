@@ -36,6 +36,14 @@ impl Rng64 {
     }
 }
 
+fn fuzz_seed(default: u64) -> u64 {
+    std::env::var("CELLSCRIPT_FUZZ_SEED")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok().or_else(|| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok()))
+        .map(|seed| default ^ seed.rotate_left(17))
+        .unwrap_or(default)
+}
+
 fn mutate_source(seed: &str, rng: &mut Rng64) -> String {
     const INSERTS: [&str; 24] = [
         "",
@@ -155,7 +163,7 @@ lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: wi
         include_str!("../examples/language/v0_14_multi_step_pipeline.cell"),
     ];
 
-    let mut rng = Rng64::new(0xC311_5C21_0014_F00D);
+    let mut rng = Rng64::new(fuzz_seed(0xC311_5C21_0014_F00D));
     for index in 0..160 {
         let seed = seeds[rng.usize(seeds.len())];
         let source = mutate_source(seed, &mut rng);
@@ -173,7 +181,7 @@ lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: wi
 fn fuzzy_lsp_incremental_edits_never_panic() {
     let uri = "file:///fuzzy.cell".to_string();
     let mut server = LspServer::new();
-    let mut rng = Rng64::new(0x15F_0014_C0DE);
+    let mut rng = Rng64::new(fuzz_seed(0x15F_0014_C0DE));
     let mut content = include_str!("../examples/language/canonical_style.cell").to_string();
     server.open_document(uri.clone(), content.clone());
 
@@ -245,7 +253,7 @@ lock owner_lock(token: protected Token, owner: lock_args Address, claimed_owner:
     let action = result.metadata.actions.iter().find(|action| action.name == "spend").expect("spend metadata");
     let lock = result.metadata.locks.iter().find(|lock| lock.name == "owner_lock").expect("owner_lock metadata");
 
-    let mut rng = Rng64::new(0xAB1_000E_5717_5514);
+    let mut rng = Rng64::new(fuzz_seed(0xAB1_000E_5717_5514));
     for index in 0..128 {
         let args = random_entry_args(&mut rng);
         let action_outcome = catch_unwind(AssertUnwindSafe(|| action.entry_witness_args(&args)));
@@ -303,7 +311,7 @@ fn fuzzy_metadata_tampering_never_panics() {
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
     .unwrap();
-    let mut rng = Rng64::new(0x0A11_DA7A_0014_0001);
+    let mut rng = Rng64::new(fuzz_seed(0x0A11_DA7A_0014_0001));
 
     for index in 0..96 {
         let mut metadata = result.metadata.clone();

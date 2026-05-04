@@ -139,8 +139,8 @@ CKB-VM execution scope.
 
 ### Explicit Destruction Policies
 
-0.15 replaces bare `destroy` with policy-specific forms so the compiler and
-verifier know *what is being proved*:
+0.15 adds policy-specific destruction forms so the compiler and verifier know
+*what is being proved*:
 
 | Form | What it proves |
 |------|---------------|
@@ -149,8 +149,11 @@ verifier know *what is being proved*:
 | `destroy_instance(cell, identity_field = id)` | A specific instance is consumed; unrelated same-type outputs are allowed |
 | `burn_amount(cell, field = amount)` | Quantity delta, not output absence |
 
-Bare `destroy cell` still compiles as `DestructionPolicy::Default` for
-backward compatibility but is rejected in strict mode.
+Bare `destroy cell` still compiles as `DestructionPolicy::Default`. In strict
+mode it must be authorized by the 0.15 kernel effects `consume + burn` instead
+of the legacy `has destroy` capability. Use a policy-specific form when the
+audit needs to distinguish singleton absence, TYPE_ID consumption,
+field-identified instance consumption, or amount burn.
 
 `IrInstruction::Destroy` now carries `policy: IrDestructionPolicy` through
 IR and codegen.
@@ -188,8 +191,18 @@ destroy   -> consume + burn (or consume + assert_absence)
 
 **Strict mode** (`--primitive-strict=0.15`):
 - rejects `has transfer` with diagnostic CS0150
-- rejects `has destroy` with diagnostic CS0151/CS0156
+- rejects `has destroy` with diagnostic CS0151
 - requires kernel-effect capabilities and explicit destruction policies
+
+Top-level single-file compilation accepts the same primitive migration flags as
+package subcommands, so this works for direct example inspection:
+
+```bash
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15
+```
+
+Direct lifecycle checks accept the 0.15 kernel-effect equivalents:
+`transfer` accepts `replace + relock`; `destroy` accepts `consume + burn`.
 
 Migration diagnostics (CS0150–CS0160) provide old syntax, new syntax, and
 affected proof obligations.

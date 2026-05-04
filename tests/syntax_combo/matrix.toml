@@ -9,7 +9,7 @@ min_accept = 8
 min_reject = 9
 required_origins = [
     "generated",
-    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
@@ -32,7 +32,7 @@ required_origins = [
     "matrix:reject/stdlib-lifecycle",
     "matrix:stdlib-lifecycle/metadata",
     "matrix:stdlib-lifecycle/proof",
-    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
@@ -58,7 +58,7 @@ required_origins = [
     "matrix:reject/stdlib-lifecycle",
     "matrix:stdlib-lifecycle/metadata",
     "matrix:stdlib-lifecycle/proof",
-    "tests/syntax_combo/seeds/obsolete-transfer-keyword.cell",
+    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."

@@ -80,10 +80,10 @@ cargo install --path .
 cellc examples/token.cell
 
 # 输出 CKB 的 RISC-V ELF
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15
 
 # 输出 CKB 的 RISC-V ELF，指定入口 action
-cellc examples/nft.cell --target riscv64-elf --target-profile ckb --entry-action transfer
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 --entry-action transfer
 ```
 
 创建包：
@@ -131,7 +131,7 @@ struct Config {
     threshold: u64
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -141,7 +141,7 @@ shared Pool has store {
     ckb_reserve: u64
 }
 
-receipt VestingGrant has store, claim {
+receipt VestingGrant has store, create, consume {
     beneficiary: Address
     amount: u64
     unlock_epoch: u64
@@ -182,7 +182,7 @@ effect 会反映到 metadata 中，使 CKB admission policy、schema decoding
 ```cellscript
 module cellscript::fungible_token
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }

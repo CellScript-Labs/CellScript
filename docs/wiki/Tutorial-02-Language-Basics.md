@@ -32,7 +32,7 @@ syntax forms you will see in the examples:
 |---|---|
 | `module cellscript::name` | Stable module identity. |
 | `use cellscript::path::{A, B}` | Grouped imports from another module. |
-| `resource T has store, transfer, destroy` | Linear Cell-backed assets with explicit capabilities. |
+| `resource T has store, create, consume, replace, burn, relock` | Linear Cell-backed assets with explicit kernel-effect capabilities. |
 | `shared T has store` | Shared Cell-backed state such as pools or registries. |
 | `receipt T has store` | Settlement-style proof Cells. |
 | `receipt T -> Output` | Claimable receipt Cells with a declared claim output type. |

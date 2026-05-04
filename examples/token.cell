@@ -1,6 +1,6 @@
 module cellscript::fungible_token
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
     symbol: [u8; 8],
 }

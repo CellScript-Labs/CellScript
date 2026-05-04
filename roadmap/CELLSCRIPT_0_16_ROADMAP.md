@@ -49,9 +49,23 @@ Do not re-plan v0.15:
 - scoped invariants
 - Covenant ProofPlan
 - trigger/scope/reads/coverage modeling
-- protocol macro lowering
 - identity policy primitives
 - explicit destroy policies
+
+v0.16 does promote the following deferred v0.15 hardening tracks. These are not
+new syntax promises; they turn the 0.15 audit-visible semantics into executable,
+soundness-checked, compatibility-tested production behavior:
+
+- executable verifier lowering for aggregate invariants
+- full ProofPlan soundness checking
+- macro-only protocol lowering, with no protocol-name recognizers in core/codegen
+- covenant helper stdlib
+- `Address` / `LockScript` / `LockHash` type separation
+- explicit `#[entry(lock)]` / `#[entry(type)]` role declarations
+- versioned data-layout preserve/migrate policies
+- full `cellc explain-macro` source maps
+- non-TYPE-ID global uniqueness proof boundaries
+- standard CKB compatibility suites with accepted/rejected transaction fixtures
 
 ---
 
@@ -135,7 +149,78 @@ Add an internal checker that rejects:
 
 ---
 
-### 3. Standard CKB Contract Compatibility Suite
+### 3. Executable Aggregate Invariant Lowering
+
+**Problem**
+
+v0.15 aggregate primitives are intentionally metadata-only. They are useful for
+audits, but they do not yet emit verifier loops for output/input sums,
+distinctness, singleton checks, or scoped deltas.
+
+**Change**
+
+Lower aggregate ProofPlan obligations into bounded CKB verifier code for:
+
+- `assert_sum`
+- `assert_conserved`
+- `assert_delta`
+- `assert_distinct`
+- `assert_singleton`
+
+Rules:
+
+- every aggregate lowering is tied to an explicit trigger and scope
+- loop bounds are profile-visible and fail closed
+- fixed-width ABI assumptions are checked before arithmetic or comparison
+- overflow and malformed `outputs_data` fail with stable runtime errors
+- metadata-only status is removed only when emitted code covers the obligation
+
+**Acceptance**
+
+- strict mode can require executable aggregate coverage
+- accepted/rejected fixtures prove conserved, delta, distinct, and singleton cases
+- tampered metadata claiming aggregate coverage without emitted code is rejected
+- cycle reports include aggregate-loop costs
+
+---
+
+### 4. Macro-Only Protocol Lowering
+
+**Problem**
+
+v0.15 records protocol macro provenance but still allows selected lifecycle and
+protocol flows to pass through compiler-recognized names. For production
+soundness, protocol behavior should lower through explicit stdlib macros,
+ProofPlan obligations, and kernel effects instead of name-based recognizers.
+
+**Change**
+
+Move protocol-name behavior out of core/codegen:
+
+- `transfer`
+- `claim`
+- `settle`
+- pool lifecycle helpers
+- receipt redemption helpers
+
+Each stable macro must publish:
+
+- canonical core expansion
+- required kernel effects
+- trigger/scope/coverage facts
+- builder assumptions
+- source-map spans for macro expansion
+
+**Acceptance**
+
+- core/codegen has no protocol-name special cases for stable protocol flows
+- `cellc explain-macro` shows source-to-expansion-to-ProofPlan mapping
+- strict tests reject hidden protocol recognizers
+- stdlib macro output matches accepted/rejected transaction fixtures
+
+---
+
+### 5. Standard CKB Contract Compatibility Suite
 
 **Problem**
 
@@ -179,7 +264,44 @@ Each suite must cover:
 
 ---
 
-### 4. Builder Assumption Contract
+### 6. Script Role and Lock Identity Precision
+
+**Problem**
+
+v0.15 exposes lock/type trigger semantics in metadata, but source code can still
+lean on generic `Address`-like values and implicit entry-role inference in some
+places. That is too loose for production compatibility and audit tooling.
+
+**Change**
+
+Add strict source distinctions:
+
+- `Address`
+- `LockScript`
+- `LockHash`
+- `TypeScript`
+- `TypeHash`
+
+Require explicit entry-role declarations where ambiguity affects trigger scope:
+
+```cellscript
+#[entry(lock)]
+lock owner_guard(...)
+
+#[entry(type)]
+action transfer(...)
+```
+
+**Acceptance**
+
+- strict mode rejects implicit signer/lock-hash coercions
+- `#[entry(lock)]` and `#[entry(type)]` determine active ScriptGroup metadata
+- error messages explain whether a proof is lock-triggered or type-triggered
+- compatibility fixtures cover lock/type ScriptGroup positive and negative cases
+
+---
+
+### 7. Builder Assumption Contract
 
 **Problem**
 
@@ -219,7 +341,61 @@ Add validation APIs:
 
 ## P1
 
-### 5. Transaction Solver
+### 8. Versioned Data-Layout Policies
+
+**Problem**
+
+0.15 can preserve identity and expose layout assumptions, but protocol upgrades
+need explicit rules for preserving, migrating, or rejecting data layout changes.
+
+**Change**
+
+Add versioned layout policies:
+
+```text
+preserve_layout<T>(version = ...)
+migrate_layout<T>(from = ..., to = ...)
+reject_layout<T>(version = ...)
+```
+
+Policies must connect source fields, output fields, schema hashes, and
+ProofPlan obligations.
+
+**Acceptance**
+
+- replacements without required layout policy fail in strict mode
+- migration fixtures prove accepted and rejected layout transitions
+- audit bundles show layout version diffs and field-level obligations
+
+---
+
+### 9. Non-TYPE-ID Global Uniqueness Proof Boundaries
+
+**Problem**
+
+v0.15 emits local runtime anchors for field-, script-args-, and singleton-type
+identity creation, but global uniqueness outside TYPE_ID still needs
+builder/indexer/deployment evidence.
+
+**Change**
+
+Define proof boundaries for non-TYPE-ID uniqueness:
+
+- on-chain absence checks where ScriptGroup scope can prove them
+- builder/indexer assumption records where CKB-VM cannot see global state
+- registry/deployment manifests for singleton and script-args identities
+
+**Acceptance**
+
+- `create_unique(field(...))`, `create_unique(script_args)`, and
+  `create_unique(singleton_type)` cannot overstate global on-chain proof
+- transaction fixtures cover valid creation, duplicate rejection, and
+  builder-assumption-only cases
+- ProofPlan distinguishes local anchors from global uniqueness certification
+
+---
+
+### 10. Transaction Solver
 
 **Problem**
 
@@ -256,7 +432,7 @@ Solver responsibilities:
 
 ---
 
-### 6. Deployment and Upgrade Governance
+### 11. Deployment and Upgrade Governance
 
 **Problem**
 
@@ -291,7 +467,7 @@ cellc lock-deps
 
 ---
 
-### 7. Audit and Debug UX
+### 12. Audit and Debug UX
 
 **Problem**
 
@@ -312,6 +488,7 @@ Add audit tooling:
 
 ```bash
 cellc explain-proof
+cellc explain-macro
 cellc proof-diff old.json new.json
 cellc profile --entry transfer
 cellc trace-tx tx.json
@@ -321,12 +498,14 @@ cellc audit-bundle
 **Acceptance**
 
 - audit bundle links source spans, ProofPlan obligations, emitted code, and metadata
+- `cellc explain-macro` links source macro calls, canonical expansion, ProofPlan
+  obligations, and emitted checks
 - proof diff highlights changed trigger/scope/coverage semantics
 - cycle profiler identifies the most expensive generated checks
 
 ---
 
-### 8. Standard Library Release Track
+### 13. Standard Library Release Track
 
 **Problem**
 
@@ -419,10 +598,17 @@ v0.16 cannot ship until:
 
 - operational semantics document covers resource state, cell effects, triggers, scopes, and ProofPlan
 - ProofPlan soundness checker is mandatory in strict mode
+- aggregate invariants have executable verifier lowering or fail strict executable coverage gates
+- stable protocol flows lower through stdlib macros, not protocol-name codegen recognizers
 - standard CKB compatibility suites cover accepted and rejected fixtures
+- ScriptGroup and `outputs` / `outputs_data` positive and negative fixture matrices are included
+- explicit lock/type entry roles and lock identity types are enforced in strict mode
+- versioned data-layout preserve/migrate fixtures cover accepted and rejected replacements
+- non-TYPE-ID global uniqueness boundaries cannot be reported as fully on-chain unless proven
 - builder assumption schema is stable
 - `cellc validate-tx` checks builder assumptions against a transaction
 - transaction solver builds all bundled examples
 - deployment manifests are reproducible
 - audit bundle links source, ProofPlan, emitted code, metadata, and cycles
+- `cellc explain-macro` links macro source, canonical expansion, ProofPlan, and emitted checks
 - stdlib stable modules have compatibility fixtures and audit bundles

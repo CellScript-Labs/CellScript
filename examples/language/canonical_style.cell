@@ -1,12 +1,12 @@
 module cellscript::canonical_style
 
-resource Vault has store, transfer {
+resource Vault has store, create, consume, replace, relock {
     owner: Address
     asset_symbol: [u8; 8]
     balance: u64
 }
 
-receipt DepositReceipt has store, destroy {
+receipt DepositReceipt has store, create, consume, burn {
     amount: u64
     participant: Address
     approvals: Vec<Address>

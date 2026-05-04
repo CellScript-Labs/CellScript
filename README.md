@@ -83,10 +83,10 @@ Compile your first contract:
 cellc examples/token.cell
 
 # Emit a RISC-V ELF for CKB
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15
 
 # Emit a RISC-V ELF for CKB, with a specific entry action
-cellc examples/nft.cell --target riscv64-elf --target-profile ckb --entry-action transfer
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 --entry-action transfer
 ```
 
 Start a package:
@@ -134,7 +134,7 @@ CellScript now supports CKB as its only target profile:
 > normal target-profile policy.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15
 cellc check --target-profile ckb
 ```
 
@@ -172,8 +172,9 @@ transformations:
 - **Receipts as stateful proofs** — `receipt` is a single-use Cell that proves
   an operation happened and can later be consumed directly or through an explicit
   stdlib claim/settlement pattern.
-- **Capability gates** — `has store, transfer, destroy` makes asset permissions
-  explicit instead of implicit.
+- **Capability gates** — `has store, create, consume, replace, burn, relock`
+  makes asset permissions explicit in kernel-effect terms instead of protocol
+  verbs.
 - **Declarative flows** — state remains explicit schema data, while
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
@@ -220,7 +221,7 @@ struct Config {
     threshold: u64
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -230,7 +231,7 @@ shared Pool has store {
     ckb_reserve: u64
 }
 
-receipt VestingGrant has store, claim {
+receipt VestingGrant has store, create, consume {
     beneficiary: Address
     amount: u64
     unlock_epoch: u64
@@ -291,7 +292,7 @@ views.
 ```cellscript
 module ckb::fungible_token
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }

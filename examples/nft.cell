@@ -11,7 +11,7 @@ struct Metadata {
     attributes: Vec<(String, String)>,
 }
 
-resource NFT has store, transfer, destroy {
+resource NFT has store, create, consume, replace, burn, relock {
     token_id: u64,
     owner: Address,
     metadata_hash: Hash,
@@ -28,7 +28,7 @@ resource Collection has store {
     base_uri: String,
 }
 
-receipt Listing has destroy {
+receipt Listing has create, consume, burn {
     token_id: u64,
     seller: Address,
     price: u64,
@@ -36,7 +36,7 @@ receipt Listing has destroy {
     state: u8,
 }
 
-receipt Offer has destroy {
+receipt Offer has create, consume, burn {
     token_id: u64,
     buyer: Address,
     price: u64,

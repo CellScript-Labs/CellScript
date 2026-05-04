@@ -2806,13 +2806,25 @@ impl<'a> TypeChecker<'a> {
                 if !Self::is_address_like_type(&to_ty) {
                     return Err(CompileError::new("transfer destination must be address-like", transfer.span));
                 }
-                self.require_capability(&expr_ty, Capability::Transfer, "transfer", transfer.span)?;
+                self.require_capability_or_kernel_effects(
+                    &expr_ty,
+                    Capability::Transfer,
+                    &[Capability::Replace, Capability::Relock],
+                    "transfer",
+                    transfer.span,
+                )?;
                 env.transfer(&name)?;
                 Ok(expr_ty)
             }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
-                self.require_capability(&destroy_ty, Capability::Destroy, "destroy", destroy.span)?;
+                self.require_capability_or_kernel_effects(
+                    &destroy_ty,
+                    Capability::Destroy,
+                    &[Capability::Consume, Capability::Burn],
+                    "destroy",
+                    destroy.span,
+                )?;
                 env.destroy(&name)?;
                 Ok(Type::U64)
             }
@@ -5018,26 +5030,33 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn require_capability(&self, ty: &Type, capability: Capability, operation: &str, span: Span) -> Result<()> {
+    fn require_capability_or_kernel_effects(
+        &self,
+        ty: &Type,
+        legacy_capability: Capability,
+        kernel_effects: &[Capability],
+        operation: &str,
+        span: Span,
+    ) -> Result<()> {
         let Some(type_name) = Self::base_type_name(ty) else {
             return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
         };
         let Some(capabilities) = self.resolve_capabilities(type_name) else {
             return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
         };
-        if capabilities.contains(&capability) {
-            Ok(())
-        } else {
-            Err(CompileError::new(
-                format!(
-                    "type '{}' does not declare '{}' capability required by {}",
-                    type_name,
-                    capability_name(capability),
-                    operation
-                ),
-                span,
-            ))
+        if capabilities.contains(&legacy_capability) || kernel_effects.iter().all(|effect| capabilities.contains(effect)) {
+            return Ok(());
         }
+        Err(CompileError::new(
+            format!(
+                "type '{}' does not declare '{}' capability or kernel effects '{}' required by {}",
+                type_name,
+                capability_name(legacy_capability),
+                kernel_effects.iter().map(|effect| capability_name(*effect)).collect::<Vec<_>>().join("+"),
+                operation
+            ),
+            span,
+        ))
     }
 
     fn is_linear_type(&self, ty: &Type) -> bool {

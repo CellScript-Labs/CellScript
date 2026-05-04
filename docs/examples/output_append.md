@@ -6,7 +6,7 @@ cell in place.
 Conceptual source shape:
 
 ```cellscript
-resource Log has store, transfer {
+resource Log has store, create, consume, replace {
     owner: Address,
     bytes: Vec<u8>,
 }

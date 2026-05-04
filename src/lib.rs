@@ -91,10 +91,11 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
                 let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
                 return Err(CompileError::new(
                     format!(
-                        "{}: type '{}' declares '{}' which is not allowed in --primitive-strict=0.15 mode",
+                        "{}: type '{}' declares legacy capability '{}', which is not allowed in --primitive-strict=0.15 mode; use kernel effects '{}'",
                         diag.full_message(),
                         type_name,
-                        cap.kernel_effects().iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join("+"),
+                        strict_capability_name(*cap),
+                        cap.kernel_effects().iter().map(|c| strict_capability_name(*c)).collect::<Vec<_>>().join(", "),
                     ),
                     span,
                 ));
@@ -102,6 +103,21 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn strict_capability_name(capability: ast::Capability) -> &'static str {
+    match capability {
+        ast::Capability::Store => "store",
+        ast::Capability::Transfer => "transfer",
+        ast::Capability::Destroy => "destroy",
+        ast::Capability::Create => "create",
+        ast::Capability::Consume => "consume",
+        ast::Capability::Replace => "replace",
+        ast::Capability::Burn => "burn",
+        ast::Capability::Relock => "relock",
+        ast::Capability::RetargetType => "retarget_type",
+        ast::Capability::ReadRef => "read_ref",
+    }
 }
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
@@ -6010,7 +6026,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
                         checks.push(StaticResourceOperationCheck {
                             feature: format!("destroy:{}", type_name),
                             detail: format!(
-                                "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of replacement outputs remains a runtime/protocol obligation",
+                                "Type checker verified '{}' declares destroy capability or consume+burn kernel effects and the source value is marked destroyed; transaction-level absence of replacement outputs remains a runtime/protocol obligation",
                                 type_name
                             ),
                         });
@@ -6032,7 +6048,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
                         checks.push(StaticResourceOperationCheck {
                             feature: format!("transfer:{}", type_name),
                             detail: format!(
-                                "Type checker verified '{}' declares transfer capability and the source value is linearly transferred; output relation remains a runtime/protocol obligation",
+                                "Type checker verified '{}' declares transfer capability or replace+relock kernel effects and the source value is linearly transferred; output relation remains a runtime/protocol obligation",
                                 type_name
                             ),
                         });
@@ -23205,6 +23221,40 @@ where
     fn compile_rejects_destroy_without_destroy_capability() {
         let err = compile(MISSING_DESTROY_CAPABILITY_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("does not declare 'destroy' capability"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_kernel_effect_capabilities_for_destroy() {
+        let source = r#"
+module test
+
+resource Token has store, consume, burn {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#;
+
+        compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
+    }
+
+    #[test]
+    fn compile_accepts_kernel_effect_capabilities_for_transfer() {
+        let source = r#"
+module test
+
+resource Token has store, replace, relock {
+    amount: u64,
+}
+
+action transfer_token(token: Token, to: Address) -> Token
+where
+    return transfer token to to
+"#;
+
+        compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
     }
 
     #[test]

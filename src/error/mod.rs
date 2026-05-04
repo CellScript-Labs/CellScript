@@ -104,9 +104,9 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 /// mode they appear as warnings with migration hints instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationDiagnostic {
-    /// CS0150: `transfer` is now a stdlib proof macro; use `consume` + `create` + relock
+    /// CS0150: legacy `has transfer` capability must be expressed as kernel effects
     Cs0150,
-    /// CS0151: `destroy` requires an explicit destruction policy
+    /// CS0151: legacy `has destroy` capability must be expressed as kernel effects
     Cs0151,
     /// CS0152: `Address` cannot be used as `LockHash` without a resolver
     Cs0152,
@@ -147,8 +147,8 @@ impl MigrationDiagnostic {
 
     pub fn message(self) -> &'static str {
         match self {
-            Self::Cs0150 => "transfer is now a stdlib proof macro; use consume + create + relock",
-            Self::Cs0151 => "destroy requires an explicit destruction policy",
+            Self::Cs0150 => "legacy transfer capability must use replace + relock kernel effects",
+            Self::Cs0151 => "legacy destroy capability must use consume + burn kernel effects",
             Self::Cs0152 => "Address cannot be used as LockHash without a resolver",
             Self::Cs0153 => "CKB entry role must be explicit",
             Self::Cs0154 => "claim proof bindings must be explicit",
@@ -163,8 +163,12 @@ impl MigrationDiagnostic {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Cs0150 => "replace `transfer X to ADDR` with `consume X` + `create T { ... } with_lock(ADDR)`",
-            Self::Cs0151 => "use destroy_singleton_type(X), destroy_instance(X, ...), or burn_amount(X, ...) instead of bare destroy",
+            Self::Cs0150 => {
+                "replace `has transfer` with `has replace, relock`; use explicit lifecycle proof forms for transfer semantics"
+            }
+            Self::Cs0151 => {
+                "replace `has destroy` with `has consume, burn`; use a policy-specific destruction form when the proof needs one"
+            }
             Self::Cs0152 => "use LockHash, LockScript, or transfer_to_lock_hash/transfer_to_lock_script explicitly",
             Self::Cs0153 => "add #[entry(lock)] or #[entry(type)] to the entry declaration",
             Self::Cs0154 => "use claim_proof(receipt, signer=..., recipient=..., amount=..., nonce=...) with explicit bindings",

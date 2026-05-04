@@ -129,7 +129,7 @@ example contracts.
 Prefer DSL-native capability declarations:
 
 ```cell
-resource NFT has store, transfer, destroy {
+resource NFT has store, create, consume, replace, burn, relock {
     token_id: u64
     owner: Address
 }
@@ -139,7 +139,7 @@ shared Pool has store {
     reserve_b: u64
 }
 
-receipt Listing has store, destroy {
+receipt Listing has store, create, consume, burn {
     token_id: u64
     seller: Address
 }

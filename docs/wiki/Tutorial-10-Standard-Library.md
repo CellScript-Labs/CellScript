@@ -106,7 +106,7 @@ silently ignored.
 Example transfer:
 
 ```cellscript
-resource Coin has store, transfer, destroy {
+resource Coin has store, create, consume, replace, burn, relock {
     amount: u64,
     nonce: u64,
 }
@@ -135,7 +135,7 @@ std::cell::preserve_type(next_coin, coin)
 Example receipt claim:
 
 ```cellscript
-receipt Voucher -> Coin has destroy {
+receipt Voucher -> Coin has create, consume, burn {
     amount: u64,
     nonce: u64,
     holder: Address,

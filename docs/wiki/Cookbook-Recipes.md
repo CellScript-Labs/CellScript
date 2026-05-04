@@ -10,7 +10,7 @@ you already know what you want to do.
 Use this when you have a single `.cell` file and want a CKB-profile artifact.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb -o /tmp/token.elf
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
 cellc verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -22,7 +22,7 @@ not prove that a complete CKB transaction has been built or accepted.
 Use a `resource` when a value should not be duplicated or silently dropped.
 
 ```cellscript
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -114,9 +114,10 @@ destroy_instance(badge, identity_field = badge_id)
 burn_amount(token, field = amount)
 ```
 
-In `--primitive-strict=0.15` mode, bare `destroy value` is rejected. Keep the
-policy explicit so reviewers can distinguish output absence, identity
-consumption, instance consumption, and quantity burn.
+In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
+burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
+when reviewers must distinguish output absence, identity consumption, instance
+consumption, and quantity burn.
 
 ## Recipe: Write An Honest Lock Predicate
 

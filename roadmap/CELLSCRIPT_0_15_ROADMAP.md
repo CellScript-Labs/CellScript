@@ -1,6 +1,6 @@
 # CellScript v0.15 Roadmap
 
-**Status**: Implemented (P0 complete, P1 partial)
+**Status**: Implemented for P0 release scope; P1/P2 items are deferred unless explicitly promoted
 **Scope**: Scoped Invariants and Covenant ProofPlan
 **Dependencies**: v0.13 and v0.14 complete
 
@@ -222,7 +222,7 @@ builder_assumption: none
 
 ---
 
-### 4. Split Kernel Primitives from Protocol Macros *(Implemented)*
+### 4. Split Kernel Primitives from Protocol Macros *(Implemented for capability vocabulary; macro-only lowering deferred)*
 
 **Problem**
 
@@ -275,10 +275,10 @@ Protocol macros must lower through scoped invariants and ProofPlan, not protocol
 
 **Acceptance**
 
-- strict CKB mode has no compiler-core lowering path for `transfer`, `claim`, `settle`, or `shared`
-- stdlib macros expand into inspectable ProofPlan obligations
-- codegen consumes ProofPlan, not protocol-name recognizers
-- non-canonical syntax fails with a precise diagnostic that names the required proof obligation
+- strict mode rejects protocol-verb capability declarations such as `has transfer` and `has destroy`
+- 0.15 kernel-effect capabilities are accepted by direct lifecycle checks where applicable
+- stdlib and source lifecycle forms emit inspectable ProofPlan obligations and macro provenance
+- fully macro-only lowering for `transfer`, `claim`, `settle`, and `shared` remains deferred
 
 ---
 
@@ -304,11 +304,13 @@ Add identity policy forms:
 
 ```text
 create_unique<T>(identity = ckb_type_id)
-update_unique<T>(identity = ckb_type_id)
+replace_unique<T>(identity = ckb_type_id)
 destroy_unique<T>(identity = ckb_type_id)
-preserve_identity(input, output)
-assert_identity_absent(identity, scope)
 ```
+
+`preserve_identity(input, output)` and
+`assert_identity_absent(identity, scope)` remain future helper names until they
+have canonical lowering and ProofPlan coverage.
 
 **Implementation**
 
@@ -339,7 +341,7 @@ assert_identity_absent(identity, scope)
 
 ---
 
-### 6. Replace Bare `destroy` with Explicit Destruction Policies *(Implemented)*
+### 6. Add Explicit Destruction Policies *(Implemented)*
 
 **Problem**
 
@@ -347,15 +349,18 @@ Current CKB lowering scans all outputs and rejects any output with the same Type
 
 **Change**
 
-Replace bare `destroy` with policy-specific forms:
+Add policy-specific forms alongside bare `destroy`:
 
 ```text
 destroy_unique(cell, identity = type_id)
 destroy_instance(cell, identity_field = id)
 burn_amount(cell, field = amount)
 destroy_singleton_type(cell)
-forbid_output_successor(cell, match = script_hash + identity)
 ```
+
+`forbid_output_successor(cell, match = script_hash + identity)` remains a
+future helper. v0.15 implements the four policy-specific destruction forms
+above.
 
 **Implementation**
 
@@ -365,7 +370,7 @@ forbid_output_successor(cell, match = script_hash + identity)
 - `lower_destruction_policy()` converts AST→IR policy
 - Codegen: all `Destroy` instruction matches updated with `policy` field
 - Formatter: policy-specific output for each destruction variant
-- `check_primitive_strict_015()` rejects bare `destroy` (protocol verb) in strict mode
+- `check_primitive_strict_015()` rejects legacy `has destroy` capability declarations in strict mode; bare `destroy cell` requires the `consume + burn` kernel effects
 
 **Code Areas**
 
@@ -386,7 +391,7 @@ forbid_output_successor(cell, match = script_hash + identity)
 
 ## P1
 
-### 7. Covenant Helper Stdlib
+### 7. Covenant Helper Stdlib *(Deferred)*
 
 **Problem**
 
@@ -420,7 +425,7 @@ Helpers must emit ProofPlan records with trigger/scope/coverage.
 
 ---
 
-### 8. Split Address, LockScript, and LockHash
+### 8. Split Address, LockScript, and LockHash *(Deferred)*
 
 **Problem**
 
@@ -464,7 +469,7 @@ transfer_to_address(asset, address, resolver = standard_lock)
 
 ---
 
-### 9. Make CKB Script Role Explicit
+### 9. Make CKB Script Role Explicit *(Deferred)*
 
 **Problem**
 
@@ -583,7 +588,7 @@ destroy
 - New capabilities are context-sensitive identifiers in `has ...` clauses (not global lexer keywords), preserving backward compatibility with code using these words as identifiers
 - `Capability::is_protocol_verb()` and `Capability::kernel_effects()` classify capabilities for migration
 - `format_capability()` and `capability_name()` updated in fmt, docgen, and types modules
-- Strict mode (`--primitive-strict=0.15`) rejects `has transfer` (CS0150) and `has destroy` (CS0151/CS0156) with precise diagnostics
+- Strict mode (`--primitive-strict=0.15`) rejects `has transfer` (CS0150) and `has destroy` (CS0151) with precise diagnostics
 - Compatibility mode (`--primitive-compat=0.14`) accepts legacy vocabulary
 
 **Code Areas**
@@ -602,7 +607,7 @@ destroy
 
 ---
 
-### 12. Add Versioned Cell Data Layout Policies
+### 12. Add Versioned Cell Data Layout Policies *(Deferred)*
 
 **Problem**
 
@@ -637,7 +642,7 @@ assert_data_version<T>(version)
 
 ---
 
-### 13. Remove Claim/Receipt Name Heuristics
+### 13. Remove Claim/Receipt Name Heuristics *(Deferred)*
 
 **Problem**
 
@@ -672,7 +677,7 @@ claim_proof(
 
 ---
 
-### 14. Make Update Cardinality Explicit
+### 14. Make Update Cardinality Explicit *(Deferred)*
 
 **Problem**
 
@@ -708,7 +713,7 @@ rebalance(inputs, outputs, invariant)
 
 ---
 
-### 15. Emit Macro Expansion Provenance
+### 15. Emit Macro Expansion Provenance *(Partially implemented)*
 
 **Problem**
 
@@ -727,11 +732,16 @@ proof_plan_obligations
 codegen_coverage
 ```
 
-Add:
+Implemented in v0.15:
+
+- ProofPlan coverage records expose selected `macro_expansion:*` provenance for
+  lifecycle and pool-related flows.
+- `cellc explain-proof` reports those records in human-readable and JSON output.
+
+Deferred:
 
 ```text
 cellc explain-macro <entry>
-cellc explain-proof <entry>
 ```
 
 **Code Areas**
@@ -751,7 +761,7 @@ cellc explain-proof <entry>
 
 ## P2
 
-### 16. Move `shared` to a Scheduler Policy Library
+### 16. Move `shared` to a Scheduler Policy Library *(Deferred)*
 
 **Problem**
 
@@ -789,8 +799,8 @@ Keep one canonical primitive surface:
 Add diagnostics:
 
 ```text
-CS0150 transfer is now a stdlib proof macro
-CS0151 destroy requires an explicit destruction policy
+CS0150 legacy transfer capability must use replace + relock kernel effects
+CS0151 legacy destroy capability must use consume + burn kernel effects
 CS0152 Address cannot be used as LockHash
 CS0153 CKB entry role must be explicit
 CS0154 claim proof bindings must be explicit
@@ -806,7 +816,7 @@ CS0160 builder assumption is not on-chain checked
 
 - `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags added to `CompileOptions`
 - `check_primitive_strict_015()` gate in `src/lib.rs` rejects protocol verbs (`has transfer`, `has destroy`) in strict mode
-- CS0150 (transfer→stdlib macro) and CS0151/CS0156 (destroy requires explicit policy / protocol capabilities not allowed in strict mode) diagnostics emitted
+- CS0150 (legacy transfer capability) and CS0151 (legacy destroy capability) diagnostics emitted; CS0156 remains reserved for broader protocol-capability diagnostics
 - Remaining CS0152–CS0160 codes reserved for future P1/P2 items
 
 **Acceptance**
@@ -822,15 +832,21 @@ v0.15 cannot ship until:
 
 - every invariant records trigger, scope, reads, coverage, and enforcement status
 - `lock_group + transaction` covenant patterns produce coverage diagnostics
-- strict CKB mode has zero protocol-verb codegen recognizers
-- all protocol verbs lower through stdlib proof macros and scoped invariants
-- every protocol macro has expansion provenance
+- strict primitive mode rejects protocol-verb capability declarations
+- 0.15 kernel-effect capabilities compile in the canonical examples
+- selected protocol lifecycle forms emit ProofPlan macro provenance
 - `cellc explain-proof` exposes trigger/scope/reads/coverage/on-chain status
-- every CKB artifact has an explicit entry role
-- `Address`, `LockScript`, and `LockHash` are distinct in type checking and metadata
 - TYPE_ID identity policy is covered by ProofPlan and runtime codegen
-- bare `destroy` is removed or expressed through an explicit destruction policy
+- direct `destroy` accepts explicit 0.15 `consume + burn` kernel effects and
+  policy-specific destruction forms remain available
 - resource capabilities use kernel effect names in strict mode
-- schema-backed update output declares preserve or migrate layout policy
 - ProofPlan coverage is checked in tests
 - examples pass in the canonical strict track
+
+Deferred release-gate candidates for later milestones:
+
+- full macro-only lowering with no protocol-name codegen recognizers
+- explicit CKB entry roles
+- `Address` / `LockScript` / `LockHash` type-system split
+- versioned data-layout preserve/migrate policies
+- full `cellc explain-macro` source-map output

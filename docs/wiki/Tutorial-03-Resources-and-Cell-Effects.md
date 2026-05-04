@@ -133,10 +133,11 @@ symmetrically. If one branch requires `output.claimable`, sibling branches must
 also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
 
-Bare `destroy token` remains a compatibility form for older sources. In
-`--primitive-strict=0.15` mode, choose a policy-specific destruction form so
-reviewers can see whether the contract proves singleton absence, TYPE_ID
-consumption, field-identified instance consumption, or amount burn.
+Bare `destroy token` remains available. In `--primitive-strict=0.15` mode, it
+must be authorized by the `consume + burn` kernel effects instead of legacy
+`has destroy`. Choose a policy-specific destruction form when reviewers need to
+see whether the contract proves singleton absence, TYPE_ID consumption,
+field-identified instance consumption, or amount burn.
 
 ## Creating Output Cells
 

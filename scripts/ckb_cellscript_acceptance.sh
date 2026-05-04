@@ -416,7 +416,7 @@ where
     encoding="utf-8",
 )
 
-TOKEN_TYPES_SOURCE = """resource Token has store, transfer, destroy {
+TOKEN_TYPES_SOURCE = """resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -479,7 +479,7 @@ for action, source in TOKEN_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-NFT_TYPES_SOURCE = """resource NFT has store, destroy {
+NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -493,14 +493,14 @@ resource Collection has store {
     max_supply: u64
 }
 
-receipt Listing has destroy {
+receipt Listing has create, consume, burn {
     token_id: u64
     seller: Address
     price: u64
     created_at: u64
 }
 
-receipt Offer has destroy {
+receipt Offer has create, consume, burn {
     token_id: u64
     buyer: Address
     price: u64
@@ -683,25 +683,25 @@ for action, source in NFT_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, destroy {
+TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn {
     owner: Address
     lock_type: u8
     unlock_height: u64
     created_at: u64
 }
 
-resource LockedAsset has store, destroy {
+resource LockedAsset has store, create, consume, burn {
     amount: u64
     lock_hash: Hash
 }
 
-receipt ReleaseRequest has destroy {
+receipt ReleaseRequest has create, consume, burn {
     lock_hash: Hash
     requester: Address
     requested_at: u64
 }
 
-receipt EmergencyRelease has destroy {
+receipt EmergencyRelease has create, consume, replace, burn {
     lock_hash: Hash
     requester: Address
     requested_at: u64
@@ -1128,7 +1128,7 @@ MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
     created_at: u64
 }
 
-receipt Proposal has destroy {
+receipt Proposal has create, consume, replace, burn {
     wallet_id: Hash
     proposal_id: u64
     proposer: Address
@@ -1635,7 +1635,10 @@ validate_source_coverage_matrix()
 def strict_original_compile(name):
     source = production_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact], env=internal_assembler_env())
+    result = run(
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", "-o", artifact],
+        env=internal_assembler_env(),
+    )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -1656,7 +1659,7 @@ def strict_original_compile(name):
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
     result = run(
-        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact],
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", entry_flag, entry_name, "-o", artifact],
         env=internal_assembler_env(),
     )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
@@ -1693,7 +1696,7 @@ for name in EXAMPLES:
     strict = strict_original_compile(name)
     if strict["unexpected_failure"]:
         raise RuntimeError(
-            f"strict original CKB compile for {name} failed for a non-policy reason: {strict['stderr']}"
+            f"primitive-strict original CKB compile for {name} failed for a non-policy reason: {strict['stderr']}"
         )
     record = {
         "name": name,
@@ -1783,7 +1786,7 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
             "original-scoped-action-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
-            entry_args=["--entry-action", action],
+            entry_args=["--primitive-strict", "0.15", "--entry-action", action],
         )
         record["example"] = example_name
         record["action"] = action
@@ -1877,7 +1880,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
             "original-scoped-lock-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
-            entry_args=["--entry-lock", lock],
+            entry_args=["--primitive-strict", "0.15", "--entry-lock", lock],
         )
         record["example"] = example_name
         record["lock"] = lock
@@ -2048,12 +2051,12 @@ def production_gate_failures(report):
     failures = []
     if report.get("strict_original_ckb_compile_policy_fail_closed"):
         failures.append(
-            "strict original bundled examples still fail CKB policy: "
+            "primitive-strict original bundled examples still fail CKB policy: "
             + ", ".join(report["strict_original_ckb_compile_policy_fail_closed"])
         )
     if report.get("strict_original_ckb_compile_unexpected_failures"):
         failures.append(
-            "strict original bundled examples have unexpected compile failures: "
+            "primitive-strict original bundled examples have unexpected compile failures: "
             + ", ".join(report["strict_original_ckb_compile_unexpected_failures"])
         )
     fail_closed_actions = [
@@ -6504,7 +6507,7 @@ try:
     })
     if not report["onchain"]["all_bundled_examples_deployed"]:
         raise RuntimeError(
-            "not all strict original bundled examples deployed: "
+            "not all primitive-strict original bundled examples deployed: "
             f"deployed={report['onchain']['bundled_examples_deployed']}, "
             f"expected={report['bundled_examples_exact_order']}"
         )

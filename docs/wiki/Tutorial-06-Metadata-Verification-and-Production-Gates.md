@@ -192,12 +192,13 @@ The quick gate is useful development evidence. The production mode is the
 release-facing gate because it first runs the syntax-combination CI preflight
 and then runs builder-backed local CKB transactions.
 
-The CKB validator requires strict original bundled-example coverage, scoped
-action and lock compile coverage, builder-backed action runs, builder-backed lock
-valid-spend and invalid-spend matrices, valid transaction dry-runs, committed
-valid transactions, malformed rejection, measured cycles, consensus-serialized
-transaction size, occupied-capacity evidence, no under-capacity outputs, bundled
-example deployment, and a passed final production hardening gate.
+The CKB validator requires primitive-strict original bundled-example coverage,
+scoped action and lock compile coverage, builder-backed action runs,
+builder-backed lock valid-spend and invalid-spend matrices, valid transaction
+dry-runs, committed valid transactions, malformed rejection, measured cycles,
+consensus-serialized transaction size, occupied-capacity evidence, no
+under-capacity outputs, bundled example deployment, and a passed final
+production hardening gate.
 
 The report must explicitly record a passed final production hardening gate.
 

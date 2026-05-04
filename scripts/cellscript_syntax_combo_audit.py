@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -116,18 +117,18 @@ def cellc_bin() -> str:
 BASE_TYPES = """\
 module cellscript::audit::{module_name}
 
-resource Coin has store, transfer, destroy {{
+resource Coin has store, create, consume, replace, burn, relock {{
     amount: u64,
     nonce: u64,
 }}
 
-receipt Voucher -> Coin has destroy {{
+receipt Voucher -> Coin has create, consume, burn {{
     amount: u64,
     nonce: u64,
     holder: Address,
 }}
 
-resource Wallet has store, transfer, destroy {{
+resource Wallet has store, create, consume, replace, burn, relock {{
     owner: Address,
 }}
 """
@@ -740,11 +741,11 @@ def generated_cases() -> list[AuditCase]:
             source="""\
 module cellscript::audit::reject_preserve_type_mismatch
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
-resource BadCoin has store, transfer, destroy {
+resource BadCoin has store, create, consume, replace, burn, relock {
     amount: bool,
 }
 
@@ -799,12 +800,12 @@ where
             source="""\
 module cellscript::audit::reject_claim_without_output_arrow
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, create, consume, replace, burn, relock {
     amount: u64,
     nonce: u64,
 }
 
-receipt Voucher has destroy {
+receipt Voucher has create, consume, burn {
     amount: u64,
     nonce: u64,
     holder: Address,
@@ -820,19 +821,126 @@ where
             expected=Expected("reject_compile", ("declare a claim output type",)),
         ),
         AuditCase(
-            name="reject-obsolete-transfer-keyword",
-            source=module_source(
-                "reject_obsolete_transfer_keyword",
-                """
-                action bad(coin: Coin, to: Address) -> next_coin: Coin
-                where
-                    transfer coin to to
-                """,
-            ),
-            expected=Expected("reject_compile", ("undefined variable", "transfer")),
+            name="reject-legacy-transfer-capability-strict",
+            source="""\
+module cellscript::audit::reject_legacy_transfer_capability_strict
+
+resource Coin has store, transfer {
+    amount: u64,
+    nonce: u64,
+}
+
+action bad(coin: Coin, to: Address)
+where
+    transfer coin to to
+""",
+            expected=Expected("reject_compile", ("CS0150", "legacy capability 'transfer'", "replace + relock")),
         ),
     ]
     return cases
+
+
+def seeded_deep_cases(seed: int) -> list[AuditCase]:
+    rng = random.Random(seed)
+    suffix = f"{seed & 0xffff_ffff:x}"
+    field_order = ["amount", "nonce"]
+    rng.shuffle(field_order)
+    transfer_fields = "\n".join(f"                        {field}" for field in field_order)
+    helper = rng.choice(
+        [
+            "std::cell::preserve_type",
+            "std::cell::same_lock",
+            "std::cell::preserve_lock",
+            "std::cell::preserve_capacity",
+        ]
+    )
+    reject = rng.choice(
+        [
+            (
+                "require_block_lifecycle",
+                """
+                action seeded_reject_lifecycle_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
+                where
+                    require {
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                """,
+                ("require block", "verifier-boundary syntax"),
+            ),
+            (
+                "unknown_stdlib",
+                """
+                action seeded_reject_unknown_{suffix}(coin_before: Coin) -> coin_after: Coin
+                where
+                    std::cell::teleport(coin_after, coin_before)
+                """,
+                ("unknown stdlib pattern",),
+            ),
+            (
+                "transfer_missing_field",
+                """
+                action seeded_reject_missing_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
+                where
+                    std::lifecycle::transfer(coin, next_coin, to) {
+                        amount
+                    }
+                """,
+                ("missing nonce",),
+            ),
+        ]
+    )
+    reject_name, reject_body, reject_tokens = reject
+    return [
+        AuditCase(
+            name=f"seeded-deep-transfer-{suffix}",
+            source=module_source(
+                f"seeded_deep_transfer_{suffix}",
+                f"""
+                action seeded_transfer_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
+                where
+                    std::lifecycle::transfer(coin, next_coin, to) {{
+{transfer_fields}
+                    }}
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action=f"seeded_transfer_{suffix}",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": tuple(field_order)},
+                obligation_contains=("create-output-lock", "consume-input:Coin:coin"),
+            ),
+            origin="seeded:deep/stdlib-lifecycle",
+        ),
+        AuditCase(
+            name=f"seeded-deep-cell-helper-{suffix}",
+            source=module_source(
+                f"seeded_deep_cell_helper_{suffix}",
+                f"""
+                action seeded_helper_{suffix}(coin_before: Coin) -> coin_after: Coin
+                where
+                    {helper}(coin_after, coin_before)
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(action=f"seeded_helper_{suffix}"),
+            origin="seeded:deep/cell-helper",
+        ),
+        AuditCase(
+            name=f"seeded-deep-reject-{reject_name}-{suffix}",
+            source=module_source(
+                f"seeded_deep_reject_{reject_name}_{suffix}",
+                reject_body.replace("{suffix}", suffix),
+            ),
+            expected=Expected("reject_compile", reject_tokens),
+            origin="seeded:deep/reject",
+        ),
+    ]
 
 
 def parse_seed(path: Path) -> AuditCase:
@@ -859,12 +967,14 @@ def parse_seed(path: Path) -> AuditCase:
     )
 
 
-def load_cases(mode: str, budget: int | None) -> list[AuditCase]:
+def load_cases(mode: str, budget: int | None, seed: int) -> list[AuditCase]:
     include_matrix = mode in {"ci", "deep", "repro"}
     include_deep = mode in {"deep", "repro"}
     cases = generated_cases()
     if include_matrix:
         cases.extend(matrix_cases(include_deep=include_deep))
+    if include_deep:
+        cases.extend(seeded_deep_cases(seed))
 
     seed_cases: list[AuditCase] = []
     if SEEDS.exists():
@@ -1087,6 +1197,8 @@ def audit_case(case: AuditCase, run_dir: Path, cellc: str) -> tuple[str, list[di
         "riscv64-asm",
         "--target-profile",
         "ckb",
+        "--primitive-strict",
+        "0.15",
         "-o",
         str(asm_path),
     ]
@@ -1163,7 +1275,7 @@ def main(argv: list[str]) -> int:
     run_dir = ROOT / "target" / "syntax-combo-audit" / f"{timestamp}-{args.mode}-{args.seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    cases = load_cases(args.mode, args.budget)
+    cases = load_cases(args.mode, args.budget, args.seed)
     if args.mode == "repro":
         if not args.case:
             raise SystemExit("repro mode requires --case <name-or-id>")

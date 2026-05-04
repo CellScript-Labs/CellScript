@@ -9,7 +9,7 @@ enum LockType {
     Relative,
 }
 
-resource TimeLock has store, destroy {
+resource TimeLock has store, create, consume, replace, burn {
     lock_id: Hash,
     owner: Address,
     lock_type: LockType,
@@ -17,7 +17,7 @@ resource TimeLock has store, destroy {
     created_at: u64,
 }
 
-resource LockedAsset has store, destroy {
+resource LockedAsset has store, create, consume, burn {
     asset_type: AssetType,
     amount: u64,
     lock_id: Hash,
@@ -29,7 +29,7 @@ enum AssetType {
     NFT(Hash, u64),
 }
 
-receipt ReleaseRequest has destroy {
+receipt ReleaseRequest has create, consume, burn {
     lock_id: Hash,
     requester: Address,
     requested_at: u64,
@@ -42,7 +42,7 @@ receipt ReleaseRecord {
     released_by: Address,
 }
 
-receipt EmergencyRelease has destroy {
+receipt EmergencyRelease has create, consume, replace, burn {
     lock_id: Hash,
     requester: Address,
     reason: String,

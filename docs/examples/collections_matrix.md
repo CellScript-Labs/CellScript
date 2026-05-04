@@ -41,12 +41,12 @@ where
 
     return owners.contains(owner) && snapshots.len() == 1
 
-resource Blob has store, transfer {
+resource Blob has store, create, consume, replace {
     owner: Address,
     data: Vec<u8>,
 }
 
-resource FixedVotes has store, transfer {
+resource FixedVotes has store, create, consume, replace {
     owner: Address,
     votes: [u64; 4],
 }
@@ -55,11 +55,11 @@ resource FixedVotes has store, transfer {
 Avoid claiming production support for shapes like:
 
 ```cellscript
-resource NestedDynamic has store, transfer {
+resource NestedDynamic has store, create, consume, replace {
     rows: Vec<Vec<u8>>,
 }
 
-resource Token has store, transfer {
+resource Token has store, create, consume, replace {
     owner: Address,
     amount: u64,
 }

@@ -13,8 +13,8 @@ CellScript's mission is to make the power of CKB's Cell model — linear resourc
 | Version | Theme | One-liner | Status |
 |---------|-------|-----------|--------|
 | v0.12 | Production Foundation | "Write real CKB contracts safely" | ✅ Released |
-| v0.13 | Bounded Helpers & Evidence-Gated Optimization | "Write less while keeping helper boundaries explicit" | 🚧 In Progress |
-| v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse" | 📋 Planned |
+| v0.13 | Bounded Helpers & Evidence-Gated Optimization | "Write less while keeping helper boundaries explicit" | ✅ Released |
+| v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse" | ✅ Implemented |
 | v0.15 | Scoped Invariants & Covenant ProofPlan | "Show when constraints run, what they read, and who they protect" | 🚧 In Progress |
 | v0.16 | Formal Semantics & Production Tooling | "Prove, validate, deploy, and audit" | 📋 Planned |
 
@@ -37,14 +37,14 @@ CellScript models Cells with three type classes:
 
 | Type Class | CKB Mapping | Capabilities |
 |-----------|-------------|-------------|
-| `resource` | Consumed Cell (CellInput) | `has store, transfer, destroy` |
+| `resource` | Consumed Cell (CellInput) | `has store, create, consume, replace, burn, relock` |
 | `shared` | Reference Cell (CellDep) | read-only, no consumption |
 | `receipt` | Proof / witness artifact | consumed via `consume` |
 
 Compile-time safety guarantees:
 - **Double-spend prevention**: Linear state tracking (`Available → Consumed / Destroyed`) — the compiler rejects any code path that uses a Cell after consumption.
 - **Branch consistency**: Both sides of an `if-else` must leave every resource in the same state.
-- **Capability gating**: Only resources declaring `has destroy` can be destroyed; the compiler enforces this statically.
+- **Capability gating**: destructive operations require either legacy compatibility capability or the 0.15 `consume + burn` kernel effects.
 
 ### 2.2 Cell Effect Operations
 
@@ -177,7 +177,7 @@ lock standard_lock(lock_args args: OwnerArgs, witness sig: Signature) -> bool {
 
 ```cellscript
 @capacity_floor(61_00000000)  // minimum 61 CKB (in Shannons)
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -240,16 +240,19 @@ coverage   = which cells are actually protected
 - Internal `type_hash` renaming
 - Compatibility and migration infrastructure (`--primitive-compat`/`--primitive-strict`)
 
-Remaining P1/P2 items not yet implemented:
+Deferred to v0.16 production assurance:
 
-- Covenant helper stdlib (#7)
-- Address/LockScript/LockHash split (#8)
-- Explicit CKB script role (#9)
-- Versioned cell data layout policies (#12)
-- Claim/receipt name heuristic removal (#13)
-- Explicit mutation cardinality (#14)
-- Macro expansion provenance (#15)
-- Shared → scheduler policy library (#16)
+- executable verifier lowering for aggregate invariants
+- full ProofPlan soundness checker
+- full macro-only lowering with no protocol-name recognizers in core/codegen
+- covenant helper stdlib
+- `Address` / `LockScript` / `LockHash` type split
+- explicit `#[entry(lock)]` / `#[entry(type)]` script roles
+- versioned cell data-layout preserve/migrate policies
+- full `cellc explain-macro` source maps
+- non-TYPE-ID global uniqueness proof boundaries
+- standard CKB compatibility suite with accepted/rejected transaction fixtures,
+  ScriptGroup / `outputs_data` matrices, cycles, and script reference metadata
 
 ### 5.1 First-Class Script Semantics (P0)
 
@@ -338,7 +341,6 @@ v0.15 promotes identity and script semantics beyond the v0.14 metadata MVP:
 - First-class cell identity policies: `ckb_type_id`, field identity, script args, singleton type
 - TYPE_ID identity policy across create / update-output / destroy
 - Explicit destruction policies: `destroy_unique`, `destroy_instance`, `burn_amount`, `destroy_singleton_type`
-- Address type split: `Address`, `LockScript`, `LockHash`, `TypeScript`, `TypeHash`, `ScriptHash`
 - Public metadata rename: `dsl_type_fingerprint` vs `ckb_type_script_hash`
 
 ### 5.6 Covenant Helper Stdlib and Migration (P1/P2)
@@ -368,7 +370,12 @@ v0.16 does not add another large DSL surface. It proves, validates, and operatio
 
 - formal semantics
 - ProofPlan soundness checks
+- executable aggregate invariant lowering
+- macro-only protocol lowering
 - CKB standard compatibility suites
+- explicit lock/type role and identity-type boundaries
+- versioned data-layout policies
+- non-TYPE-ID uniqueness proof boundaries
 - builder assumption validation
 - transaction solving
 - deployment governance
@@ -485,11 +492,11 @@ dates, quarters, week counts, and effort estimates.
 
 **Today (v0.12)**: You can write safe CKB contracts in CellScript right now. The compiler prevents double-spend at compile time, records capacity evidence, and generates optimized RISC-V ELF binaries. Seven example contracts cover token, AMM, vesting, timelock, multisig, NFT, and launch patterns.
 
-**Soon (v0.13)**: Bounded value-vector helpers make whitelists, fixed membership sets, simple registries, and AMM helper code easier to write while keeping performance claims tied to release evidence. Proof-backed maps and order books stay explicit future work instead of being hidden inside generic collection syntax.
+**Stable (v0.13)**: Bounded value-vector helpers make whitelists, fixed membership sets, simple registries, and AMM helper code easier to write while keeping performance claims tied to release evidence. Proof-backed maps and order books stay explicit future work instead of being hidden inside generic collection syntax.
 
-**Next (v0.14)**: CellScript will cover CKB's complete execution surface. Spawn/IPC enables bounded verifier reuse and delegated checks within explicit lock/type boundaries; it is not a promise of multi-tenant type-script composition. WitnessArgs, Source views, ScriptGroup, outputs_data binding, TYPE_ID metadata validation, script references, Capacity, and time constraints become explicit and testable.
+**Implemented (v0.14)**: CellScript covers CKB's execution surface. Spawn/IPC enables bounded verifier reuse and delegated checks within explicit lock/type boundaries; it is not a promise of multi-tenant type-script composition. WitnessArgs, Source views, ScriptGroup, outputs_data binding, TYPE_ID metadata validation, script references, Capacity, and time constraints are explicit and testable.
 
-**Future (v0.15)**: CellScript becomes a semantic auditing layer for CKB transaction invariants. It does not hide lock/type differences; it shows when each invariant runs, what it reads, which cells it protects, which obligations are checked on-chain, and which are builder assumptions. Cell identity is now a first-class primitive; `create_unique`/`replace_unique` carry identity through the full compile pipeline. Destruction policies make it explicit whether you're proving output absence, identity continuation, or quantity delta. The capability vocabulary has been reset from protocol verbs (`transfer`, `destroy`) to kernel effects (`create`, `consume`, `replace`, `burn`, `relock`). A compat/strict migration path lets existing code compile with `--primitive-compat=0.14` while new code enforces v0.15 semantics with `--primitive-strict=0.15`.
+**Current (v0.15)**: CellScript is a semantic auditing layer for CKB transaction invariants. It does not hide lock/type differences; it shows when each invariant runs, what it reads, which cells it protects, which obligations are checked on-chain, and which are builder assumptions. Cell identity is now a first-class primitive; `create_unique`/`replace_unique` carry identity through the full compile pipeline. Destruction policies make it explicit whether you're proving output absence, identity continuation, or quantity delta. The capability vocabulary has been reset from protocol verbs (`transfer`, `destroy`) to kernel effects (`create`, `consume`, `replace`, `burn`, `relock`). A compat/strict migration path lets existing code compile with `--primitive-compat=0.14` while new code enforces v0.15 semantics with `--primitive-strict=0.15`.
 
 **After that (v0.16)**: CellScript turns those visible semantics into production assurance. It checks ProofPlan soundness, validates transactions against builder assumptions before signing, ships CKB compatibility fixtures, and produces audit bundles that link source, proof, generated code, metadata, and cycles.
 
@@ -521,7 +528,7 @@ dates, quarters, week counts, and effort estimates.
 | Lock covenant | `trigger: lock_group`, explicit reads and coverage diagnostics | v0.15 |
 | Type invariant | `trigger: type_group`, group-scoped invariants | v0.15 |
 | ProofPlan | `cellc explain-proof` trigger/scope/reads/coverage report | v0.15 |
-| Builder assumption | `builder_assumption(...)` marked as not on-chain checked | v0.15 |
+| Builder assumption metadata | ProofPlan `builder_assumptions` marked as not on-chain checked | v0.15 |
 | TypeID lifecycle | `identity ckb_type_id`, `create_unique`, `replace_unique`, `destroy_unique` | v0.15 |
 | Destruction policy | `destroy_singleton_type`, `destroy_instance`, `burn_amount`, `DestructionPolicy` | v0.15 |
 | Capability reset | `has create/consume/replace/burn/relock` (kernel effects); strict/compat modes | v0.15 |

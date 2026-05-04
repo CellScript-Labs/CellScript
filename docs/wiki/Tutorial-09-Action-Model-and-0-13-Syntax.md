@@ -59,7 +59,7 @@ signature.
 Start with a token burn:
 
 ```cellscript
-resource Token has store, destroy {
+resource Token has store, consume, burn {
     amount: u64
     symbol: [u8; 8]
 }
@@ -670,7 +670,7 @@ where
 Example: destruction:
 
 ```cellscript
-resource Token has store, destroy {
+resource Token has store, consume, burn {
     amount: u64
     symbol: [u8; 8]
 }
@@ -793,7 +793,7 @@ resource Offer has store {
     payment_symbol: [u8; 8]
 }
 
-resource Token has store, destroy {
+resource Token has store, consume, burn {
     amount: u64
     symbol: [u8; 8]
 }

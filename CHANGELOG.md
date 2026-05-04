@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.15.0 - 2026-05-04
+
+- Add scoped invariant declarations with explicit trigger, scope, reads,
+  coverage, and runtime-obligation metadata for CKB covenant auditing.
+- Add Covenant ProofPlan records and `cellc explain-proof` so action, lock,
+  invariant, aggregate, identity, and lifecycle obligations are inspectable in
+  human-readable and JSON form.
+- Add aggregate invariant primitives such as `assert_sum`,
+  `assert_conserved`, `assert_delta`, `assert_distinct`, and
+  `assert_singleton`; these currently emit metadata-only runtime obligations
+  until executable aggregate verifier lowering is promoted.
+- Promote cell identity policies and identity-aware lifecycle forms through
+  `identity(...)`, `create_unique`, and `replace_unique`, including TYPE_ID,
+  field, script-args, and singleton-type metadata.
+- Add explicit destruction-policy forms and carry destruction policy through
+  IR/codegen while keeping bare `destroy` available as the default policy.
+- Reset resource capabilities from protocol verbs to 0.15 kernel effects such
+  as `create`, `consume`, `replace`, `burn`, `relock`, `retarget_type`, and
+  `read_ref`.
+- Add `--primitive-compat 0.14` and `--primitive-strict 0.15` migration modes
+  across direct `cellc` compilation and package commands, with CS0150-CS0160
+  diagnostics for legacy `transfer` and `destroy` capabilities.
+- Allow direct lifecycle operations to be authorized by kernel-effect
+  equivalents: `transfer` accepts `replace + relock`, and `destroy` accepts
+  `consume + burn`.
+- Convert canonical bundled examples, language examples, README examples, wiki
+  tutorials, and release gates to strict 0.15 kernel-effect capabilities.
+- Extend strict acceptance and syntax-combination gates so bundled examples
+  compile directly under `--primitive-strict 0.15`, and update release
+  documentation to keep 0.15 P0 scope separate from deferred 0.16 proof
+  soundness and compatibility-suite work.
+
 ## 0.13.2 - 2026-05-03
 
 - Complete syntax-governance layering for lifecycle semantics by keeping

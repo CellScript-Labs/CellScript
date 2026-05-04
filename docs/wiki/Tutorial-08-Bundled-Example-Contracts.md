@@ -59,7 +59,7 @@ From the repository root:
 ```bash
 for f in examples/*.cell; do
   echo "==> $f"
-  cellc "$f" --target riscv64-elf --target-profile ckb -o "/tmp/$(basename "$f" .cell).elf"
+  cellc "$f" --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o "/tmp/$(basename "$f" .cell).elf"
 done
 ```
 
@@ -73,7 +73,7 @@ Start with the token example. It is small enough to keep in your head.
 The token example declares two resources:
 
 ```cellscript
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -165,7 +165,7 @@ script-args data comes from, but it does not turn an `Address` into a signer.
 The CKB profile is strict, and the bundled suite has a defined production
 boundary:
 
-- bundled examples strict-admit under the CKB profile;
+- bundled examples compile under the CKB profile with `--primitive-strict=0.15`;
 - bundled business actions have scoped CKB production harnesses;
 - bundled locks have builder-backed valid-spend and invalid-spend matrices;
 - valid CKB transactions are builder-generated and dry-run;
@@ -186,9 +186,9 @@ checks:
 ```bash
 cellc fmt --check
 cellc check --target-profile ckb --production
-cellc build --target riscv64-elf --target-profile ckb --production
+cellc build --target riscv64-elf --target-profile ckb --production --primitive-strict 0.15
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb --production
-cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --production
+cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.15 --production
 # --entry-action selects a single action entry point for targeted inspection
 ```
 
