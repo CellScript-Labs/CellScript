@@ -10,11 +10,11 @@ pub mod codegen;
 pub mod debug;
 pub mod docgen;
 pub mod error;
+pub mod flow;
 pub mod fmt;
 pub mod incremental;
 pub mod ir;
 pub mod lexer;
-pub mod lifecycle;
 pub mod lsp;
 pub mod optimize;
 pub mod package;
@@ -100,10 +100,11 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
                 let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
                 return Err(CompileError::new(
                     format!(
-                        "{}: type '{}' declares '{}' which is not allowed in primitive strict mode",
+                        "{}: type '{}' declares legacy capability '{}', which is not allowed in primitive strict mode; use kernel effects '{}'",
                         diag.full_message(),
                         type_name,
-                        cap.kernel_effects().iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join("+"),
+                        strict_capability_name(*cap),
+                        cap.kernel_effects().iter().map(|c| strict_capability_name(*c)).collect::<Vec<_>>().join(", "),
                     ),
                     span,
                 ));
@@ -111,6 +112,21 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn strict_capability_name(capability: ast::Capability) -> &'static str {
+    match capability {
+        ast::Capability::Store => "store",
+        ast::Capability::Transfer => "transfer",
+        ast::Capability::Destroy => "destroy",
+        ast::Capability::Create => "create",
+        ast::Capability::Consume => "consume",
+        ast::Capability::Replace => "replace",
+        ast::Capability::Burn => "burn",
+        ast::Capability::Relock => "relock",
+        ast::Capability::RetargetType => "retarget_type",
+        ast::Capability::ReadRef => "read_ref",
+    }
 }
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
@@ -125,9 +141,6 @@ pub const CKB_BLANK_HASH: [u8; 32] = [
     181, 99, 61, 22, 62,
 ];
 const METADATA_MUTATE_CELL_BUFFER_SIZE: usize = 512;
-const CLAIM_SIGNER_PUBKEY_HASH_FIELDS: [&str; 5] =
-    ["signer_pubkey_hash", "claim_pubkey_hash", "owner_pubkey_hash", "beneficiary_pubkey_hash", "pubkey_hash"];
-const CLAIM_AUTH_LOCK_HASH_FIELDS: [&str; 5] = ["beneficiary", "owner", "recipient", "authority", "admin"];
 const CKB_TYPE_ID_CODE_HASH: [u8; 32] =
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, b'T', b'Y', b'P', b'E', b'_', b'I', b'D'];
 const CKB_TYPE_ID_ABI: &str = "ckb-type-id-v1";
@@ -779,8 +792,12 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     }
     validate_type_identity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
+    validate_ckb_constraints_summary_metadata(metadata)?;
     validate_ckb_output_data_binding_metadata(metadata)?;
     validate_ckb_type_id_output_metadata(metadata)?;
+    validate_ckb_runtime_access_metadata(metadata)?;
+    validate_ckb_script_group_metadata(metadata)?;
+    validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
     validate_source_metadata(metadata)?;
@@ -838,27 +855,9 @@ fn validate_target_profile_metadata(metadata: &CompileMetadata, artifact_format:
     Ok(())
 }
 
-fn target_profile_artifact_policy_violations(metadata: &CompileMetadata, profile: TargetProfile) -> Vec<String> {
+fn target_profile_artifact_policy_violations(_metadata: &CompileMetadata, profile: TargetProfile) -> Vec<String> {
     match profile {
-        TargetProfile::Ckb => {
-            // CKB is the only artifact profile; keep these checks focused on CKB-specific unsupported features.
-            let mut violations = Vec::new();
-
-            let unsupported_claim_features = metadata
-                .runtime
-                .ckb_runtime_features
-                .iter()
-                .filter(|feature| matches!(feature.as_str(), "load-claim-ecdsa-signature-hash" | "verify-claim-secp256k1-signature"))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !unsupported_claim_features.is_empty() {
-                violations.push(format!(
-                    "Claim helper syscall features not supported in CKB profile: {}",
-                    unsupported_claim_features.join(", ")
-                ));
-            }
-            violations
-        }
+        TargetProfile::Ckb => Vec::new(),
     }
 }
 
@@ -1077,6 +1076,9 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         let register_slots = (slot_start..slot_start + abi_slots).filter(|slot| *slot < 8).count();
         let stack_spill_slots = abi_slots.saturating_sub(register_slots);
         let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_start + abi_slots > 8;
+        if param.source == "lock_args" || param.cell_bound_abi || param.ty.starts_with('&') {
+            witness_bytes = 0;
+        }
         witness_payload_bytes += witness_bytes;
         param_constraints.push(ParamAbiConstraintsMetadata {
             name: param.name.clone(),
@@ -1099,6 +1101,7 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
 
     let register_slots_used = abi_index.min(8);
     let stack_spill_slots = abi_index.saturating_sub(8);
+    let min_witness_bytes = if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes };
     EntryAbiConstraintsMetadata {
         entry_kind: entry_kind.to_string(),
         entry_name: entry_name.to_string(),
@@ -1108,7 +1111,7 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         stack_spill_slots,
         stack_spill_bytes: stack_spill_slots * 8,
         witness_payload_bytes,
-        min_witness_bytes: ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes,
+        min_witness_bytes,
         unsupported: !unsupported_reasons.is_empty(),
         unsupported_reasons,
         params: param_constraints,
@@ -1696,6 +1699,187 @@ fn validate_capacity_floor_metadata(metadata: &CompileMetadata) -> Result<()> {
             (None, None) => {}
         }
     }
+    let expected_floors = expected_ckb_capacity_floor_metadata(metadata);
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        if expected_floors.is_empty() {
+            return Ok(());
+        }
+        return Err(CompileError::without_span(
+            "metadata has type-level capacity floors but is missing constraints.ckb.declared_capacity_floors",
+        ));
+    };
+    let mut expected = ckb_capacity_floor_fingerprints(expected_floors.iter());
+    let mut actual = ckb_capacity_floor_fingerprints(ckb_constraints.declared_capacity_floors.iter());
+    expected.sort();
+    actual.sort();
+    if actual != expected {
+        let missing = ckb_capacity_floor_multiset_difference(&expected, &actual);
+        let extra = ckb_capacity_floor_multiset_difference(&actual, &expected);
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.declared_capacity_floors do not match type-level capacity floors; missing={:?}; extra={:?}",
+            missing, extra
+        )));
+    }
+    Ok(())
+}
+
+fn expected_ckb_capacity_floor_metadata(metadata: &CompileMetadata) -> Vec<CkbCapacityFloorMetadata> {
+    metadata
+        .types
+        .iter()
+        .filter_map(|ty| {
+            ty.capacity_floor_shannons.map(|shannons| CkbCapacityFloorMetadata {
+                type_name: ty.name.clone(),
+                shannons,
+                source: ty.capacity_floor_source.clone().unwrap_or_else(|| "dsl-with_capacity_floor".to_string()),
+                status: "builder-must-preserve-output-capacity-at-or-above-floor".to_string(),
+            })
+        })
+        .collect()
+}
+
+type CkbCapacityFloorFingerprint = (String, u64, String, String);
+
+fn ckb_capacity_floor_fingerprints<'a>(
+    floors: impl Iterator<Item = &'a CkbCapacityFloorMetadata>,
+) -> Vec<CkbCapacityFloorFingerprint> {
+    floors.map(|floor| (floor.type_name.clone(), floor.shannons, floor.source.clone(), floor.status.clone())).collect()
+}
+
+fn ckb_capacity_floor_multiset_difference(
+    left: &[CkbCapacityFloorFingerprint],
+    right: &[CkbCapacityFloorFingerprint],
+) -> Vec<CkbCapacityFloorFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
+}
+
+fn validate_ckb_constraints_summary_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let profile_is_ckb = TargetProfile::from_name(&metadata.target_profile.name)? == TargetProfile::Ckb;
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        if profile_is_ckb && (metadata.artifact_hash.is_some() || metadata.artifact_size_bytes.is_some()) {
+            return Err(CompileError::without_span("metadata is missing constraints.ckb for the ckb target profile"));
+        }
+        return Ok(());
+    };
+
+    let created_output_count = metadata
+        .actions
+        .iter()
+        .map(|action| action.create_set.len())
+        .chain(metadata.locks.iter().map(|lock| lock.create_set.len()))
+        .sum::<usize>();
+    let mutated_output_count = metadata
+        .actions
+        .iter()
+        .map(|action| action.mutate_set.len())
+        .chain(metadata.locks.iter().map(|lock| lock.mutate_set.len()))
+        .sum::<usize>();
+    let capacity_planning_required = created_output_count > 0 || mutated_output_count > 0;
+    let uses_input_since = metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "ckb-input-since");
+    let uses_header_epoch = metadata.runtime.ckb_runtime_features.iter().any(|feature| feature.starts_with("ckb-header-epoch-"));
+
+    validate_ckb_summary_value("created_output_count", ckb_constraints.created_output_count, created_output_count)?;
+    validate_ckb_summary_value("mutated_output_count", ckb_constraints.mutated_output_count, mutated_output_count)?;
+    validate_ckb_summary_value(
+        "transaction_runtime_input_requirement_count",
+        ckb_constraints.transaction_runtime_input_requirement_count,
+        metadata.runtime.transaction_runtime_input_requirements.len(),
+    )?;
+    validate_ckb_summary_bool("uses_input_since", ckb_constraints.uses_input_since, uses_input_since)?;
+    validate_ckb_summary_bool("uses_header_epoch", ckb_constraints.uses_header_epoch, uses_header_epoch)?;
+    validate_ckb_summary_bool("capacity_planning_required", ckb_constraints.capacity_planning_required, capacity_planning_required)?;
+    validate_ckb_summary_bool(
+        "occupied_capacity_measurement_required",
+        ckb_constraints.occupied_capacity_measurement_required,
+        capacity_planning_required,
+    )?;
+
+    let mut expected_features = metadata.runtime.ckb_runtime_features.clone();
+    let mut actual_features = ckb_constraints.ckb_runtime_features.clone();
+    expected_features.sort();
+    actual_features.sort();
+    if actual_features != expected_features {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.ckb_runtime_features {:?} do not match runtime.ckb_runtime_features {:?}",
+            actual_features, expected_features
+        )));
+    }
+
+    let expected_capacity_policy_surface = if expected_ckb_capacity_floor_metadata(metadata).is_empty() {
+        if capacity_planning_required {
+            "builder/runtime-required; declarative-dsl-capacity-not-yet-first-class"
+        } else {
+            "not-applicable"
+        }
+    } else {
+        "dsl-declared-capacity-floor; builder/runtime-required-for-change-and-measurement"
+    };
+    if ckb_constraints.capacity_policy_surface != expected_capacity_policy_surface {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_policy_surface '{}' does not match expected '{}'",
+            ckb_constraints.capacity_policy_surface, expected_capacity_policy_surface
+        )));
+    }
+
+    let evidence = &ckb_constraints.capacity_evidence_contract;
+    if !evidence.required {
+        return Err(CompileError::without_span("metadata constraints.ckb.capacity_evidence_contract.required must be true"));
+    }
+    validate_ckb_summary_bool(
+        "capacity_evidence_contract.occupied_capacity_measurement_required",
+        evidence.occupied_capacity_measurement_required,
+        capacity_planning_required,
+    )?;
+    validate_ckb_summary_bool("capacity_evidence_contract.tx_size_measurement_required", evidence.tx_size_measurement_required, true)?;
+    let expected_capacity_status =
+        if capacity_planning_required { "builder-occupied-capacity-measurement-required" } else { "code-cell-data-lower-bound" };
+    if ckb_constraints.capacity_status != expected_capacity_status {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_status '{}' does not match expected '{}'",
+            ckb_constraints.capacity_status, expected_capacity_status
+        )));
+    }
+    let expected_evidence_status = if capacity_planning_required {
+        "builder-must-attach-occupied-capacity-and-tx-size-evidence"
+    } else {
+        "builder-must-attach-tx-size-evidence-code-cell-lower-bound-available"
+    };
+    if evidence.status != expected_evidence_status {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_evidence_contract.status '{}' does not match expected '{}'",
+            evidence.status, expected_evidence_status
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ckb_summary_value(field: &str, actual: usize, expected: usize) -> Result<()> {
+    if actual != expected {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.{} {} does not match expected {}",
+            field, actual, expected
+        )));
+    }
+    Ok(())
+}
+
+fn validate_ckb_summary_bool(field: &str, actual: bool, expected: bool) -> Result<()> {
+    if actual != expected {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.{} {} does not match expected {}",
+            field, actual, expected
+        )));
+    }
     Ok(())
 }
 
@@ -1794,7 +1978,12 @@ fn validate_ckb_output_data_create_set_metadata(
                     scope, name, index, binding.output_data_index
                 )));
             }
-        } else if profile_is_ckb && matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
+        } else if profile_is_ckb
+            && matches!(
+                pattern.operation.as_str(),
+                "create" | "output" | "create_unique" | "replace_unique" | "transfer" | "claim" | "settle"
+            )
+        {
             return Err(CompileError::without_span(format!(
                 "metadata {} '{}' create_set[{}] creates output '{}' but is missing ckb_output_data index binding",
                 scope, name, index, pattern.binding
@@ -1828,7 +2017,7 @@ fn validate_ckb_type_id_create_set_metadata(
                     scope, name, index
                 )));
             }
-            if !matches!(pattern.operation.as_str(), "create" | "create_unique") {
+            if !matches!(pattern.operation.as_str(), "create" | "output" | "create_unique") {
                 return Err(CompileError::without_span(format!(
                     "metadata {} '{}' create_set[{}] has ckb_type_id for unsupported operation '{}'",
                     scope, name, index, pattern.operation
@@ -1877,7 +2066,7 @@ fn validate_ckb_type_id_create_set_metadata(
                     scope, name, index, plan.output_index
                 )));
             }
-        } else if profile_is_ckb && pattern.operation == "create" && ty.ckb_type_id.is_some() {
+        } else if profile_is_ckb && matches!(pattern.operation.as_str(), "create" | "output") && ty.ckb_type_id.is_some() {
             return Err(CompileError::without_span(format!(
                 "metadata {} '{}' create_set[{}] creates CKB TYPE_ID type '{}' but is missing ckb_type_id output plan",
                 scope, name, index, pattern.ty
@@ -1897,6 +2086,399 @@ fn validate_ckb_type_id_create_set_metadata(
     }
 
     Ok(())
+}
+
+fn validate_ckb_runtime_access_metadata(metadata: &CompileMetadata) -> Result<()> {
+    validate_ckb_runtime_access_list("runtime", "module", &metadata.runtime.ckb_runtime_accesses)?;
+    for action in &metadata.actions {
+        validate_ckb_runtime_access_list("action", &action.name, &action.ckb_runtime_accesses)?;
+    }
+    for function in &metadata.functions {
+        validate_ckb_runtime_access_list("function", &function.name, &function.ckb_runtime_accesses)?;
+    }
+    for lock in &metadata.locks {
+        validate_ckb_runtime_access_list("lock", &lock.name, &lock.ckb_runtime_accesses)?;
+    }
+
+    let mut expected_runtime_accesses = Vec::new();
+    for action in &metadata.actions {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(action.ckb_runtime_accesses.iter()));
+    }
+    for function in &metadata.functions {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(function.ckb_runtime_accesses.iter()));
+    }
+    for lock in &metadata.locks {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(lock.ckb_runtime_accesses.iter()));
+    }
+    let mut actual_runtime_accesses = ckb_runtime_access_fingerprints(metadata.runtime.ckb_runtime_accesses.iter());
+    expected_runtime_accesses.sort();
+    actual_runtime_accesses.sort();
+    if actual_runtime_accesses != expected_runtime_accesses {
+        let missing = ckb_runtime_access_multiset_difference(&expected_runtime_accesses, &actual_runtime_accesses);
+        let extra = ckb_runtime_access_multiset_difference(&actual_runtime_accesses, &expected_runtime_accesses);
+        return Err(CompileError::without_span(format!(
+            "metadata runtime.ckb_runtime_accesses do not match action/function/lock runtime metadata; missing={:?}; extra={:?}",
+            missing, extra
+        )));
+    }
+    Ok(())
+}
+
+type CkbRuntimeAccessFingerprint = (String, String, String, usize, String);
+
+fn ckb_runtime_access_fingerprints<'a>(
+    accesses: impl Iterator<Item = &'a CkbRuntimeAccessMetadata>,
+) -> Vec<CkbRuntimeAccessFingerprint> {
+    accesses
+        .map(|access| (access.operation.clone(), access.syscall.clone(), access.source.clone(), access.index, access.binding.clone()))
+        .collect()
+}
+
+fn ckb_runtime_access_multiset_difference(
+    left: &[CkbRuntimeAccessFingerprint],
+    right: &[CkbRuntimeAccessFingerprint],
+) -> Vec<CkbRuntimeAccessFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
+}
+
+fn validate_ckb_runtime_access_list(scope: &str, name: &str, accesses: &[CkbRuntimeAccessMetadata]) -> Result<()> {
+    for (index, access) in accesses.iter().enumerate() {
+        let prefix = format!("metadata {} '{}' ckb_runtime_accesses[{}]", scope, name, index);
+        for (field, value) in [
+            ("operation", access.operation.as_str()),
+            ("syscall", access.syscall.as_str()),
+            ("source", access.source.as_str()),
+            ("binding", access.binding.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        if !is_known_ckb_runtime_source(&access.source) {
+            return Err(CompileError::without_span(format!(
+                "{}.source '{}' is not a known CKB runtime source",
+                prefix, access.source
+            )));
+        }
+        if !is_known_ckb_runtime_syscall(&access.syscall) {
+            return Err(CompileError::without_span(format!(
+                "{}.syscall '{}' is not a known CKB runtime syscall surface",
+                prefix, access.syscall
+            )));
+        }
+        if !ckb_runtime_syscall_allows_source(&access.syscall, &access.source) {
+            return Err(CompileError::without_span(format!(
+                "{} syscall '{}' does not allow source '{}'",
+                prefix, access.syscall, access.source
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_known_ckb_runtime_source(source: &str) -> bool {
+    matches!(
+        source,
+        "Input"
+            | "Output"
+            | "CellDep"
+            | "HeaderDep"
+            | "GroupInput"
+            | "GroupOutput"
+            | "GroupCellDep"
+            | "GroupHeaderDep"
+            | "Witness"
+            | "ScriptArgs"
+            | "Process"
+            | "Profile"
+    )
+}
+
+fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
+    matches!(
+        syscall,
+        "LOAD_CELL"
+            | "LOAD_CELL_BY_FIELD"
+            | "LOAD_INPUT_BY_FIELD"
+            | "LOAD_SCRIPT_ARGS"
+            | "SOURCE_VIEW"
+            | "LOAD_WITNESS"
+            | "LOAD_WITNESS_ARGS_LOCK"
+            | "LOAD_WITNESS_ARGS_INPUT_TYPE"
+            | "LOAD_WITNESS_ARGS_OUTPUT_TYPE"
+            | "CKB_SIGHASH_ALL"
+            | "CAPACITY_POLICY"
+            | "CKB_BLAKE2B"
+            | "SPAWN"
+            | "WAIT"
+            | "PROCESS_ID"
+            | "PIPE"
+            | "PIPE_WRITE"
+            | "PIPE_READ"
+            | "INHERITED_FD"
+            | "CLOSE"
+    )
+}
+
+fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
+    match syscall {
+        "LOAD_CELL" => matches!(source, "Input" | "Output" | "CellDep" | "GroupInput" | "GroupOutput"),
+        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput"),
+        "LOAD_INPUT_BY_FIELD" | "CKB_SIGHASH_ALL" => source == "GroupInput",
+        "LOAD_SCRIPT_ARGS" => source == "ScriptArgs",
+        "SOURCE_VIEW" => matches!(source, "Input" | "Output" | "CellDep" | "HeaderDep" | "GroupInput" | "GroupOutput"),
+        "LOAD_WITNESS" => source == "Witness",
+        "LOAD_WITNESS_ARGS_LOCK" | "LOAD_WITNESS_ARGS_INPUT_TYPE" => source == "GroupInput",
+        "LOAD_WITNESS_ARGS_OUTPUT_TYPE" => source == "GroupOutput",
+        "CAPACITY_POLICY" => source == "Output",
+        "CKB_BLAKE2B" => source == "Profile",
+        "SPAWN" => source == "CellDep",
+        "WAIT" | "PROCESS_ID" | "PIPE" | "PIPE_WRITE" | "PIPE_READ" | "INHERITED_FD" | "CLOSE" => source == "Process",
+        _ => false,
+    }
+}
+
+fn validate_ckb_script_group_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let target_profile = TargetProfile::from_name(&metadata.target_profile.name)?;
+    for action in &metadata.actions {
+        validate_ckb_entry_script_group_metadata(
+            "action",
+            &action.name,
+            &action.ckb_runtime_accesses,
+            action.ckb_script_group.as_ref(),
+            target_profile,
+        )?;
+    }
+    for lock in &metadata.locks {
+        validate_ckb_entry_script_group_metadata(
+            "lock",
+            &lock.name,
+            &lock.ckb_runtime_accesses,
+            lock.ckb_script_group.as_ref(),
+            target_profile,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_ckb_entry_script_group_metadata(
+    entry_kind: &str,
+    name: &str,
+    accesses: &[CkbRuntimeAccessMetadata],
+    actual: Option<&CkbScriptGroupMetadata>,
+    target_profile: TargetProfile,
+) -> Result<()> {
+    let expected = ckb_script_group_metadata(entry_kind, accesses, target_profile);
+    match (actual, expected) {
+        (None, None) => Ok(()),
+        (Some(_), None) => Err(CompileError::without_span(format!(
+            "metadata {} '{}' has ckb_script_group outside the ckb target profile",
+            entry_kind, name
+        ))),
+        (None, Some(_)) => {
+            Err(CompileError::without_span(format!("metadata {} '{}' is missing ckb_script_group metadata", entry_kind, name)))
+        }
+        (Some(actual), Some(expected)) if actual == &expected => Ok(()),
+        (Some(actual), Some(expected)) => Err(CompileError::without_span(format!(
+            "metadata {} '{}' ckb_script_group does not match runtime access metadata; expected={:?}; actual={:?}",
+            entry_kind, name, expected, actual
+        ))),
+    }
+}
+
+fn validate_ckb_script_reference_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let profile_is_ckb = TargetProfile::from_name(&metadata.target_profile.name)? == TargetProfile::Ckb;
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        return Ok(());
+    };
+
+    for (index, reference) in ckb_constraints.script_references.iter().enumerate() {
+        let prefix = format!("metadata constraints.ckb.script_references[{}]", index);
+        for (field, value) in [
+            ("scope", reference.scope.as_str()),
+            ("purpose", reference.purpose.as_str()),
+            ("name", reference.name.as_str()),
+            ("dep_source", reference.dep_source.as_str()),
+            ("profile", reference.profile.as_str()),
+            ("status", reference.status.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        if !profile_is_ckb {
+            return Err(CompileError::without_span(format!("{} is present outside the ckb target profile", prefix)));
+        }
+        if reference.profile != "ckb" {
+            return Err(CompileError::without_span(format!(
+                "{}.profile '{}' does not match expected 'ckb'",
+                prefix, reference.profile
+            )));
+        }
+
+        match reference.purpose.as_str() {
+            "type-id-create-output" => {
+                let Some(code_hash) = reference.code_hash.as_deref() else {
+                    return Err(CompileError::without_span(format!("{}.code_hash is required for TYPE_ID script references", prefix)));
+                };
+                if !is_canonical_hash_hex(code_hash) {
+                    return Err(CompileError::without_span(format!(
+                        "{}.code_hash '{}' is not a canonical 32-byte lowercase hex hash",
+                        prefix, code_hash
+                    )));
+                }
+                let expected_code_hash = hex_encode(&CKB_TYPE_ID_CODE_HASH);
+                if code_hash != expected_code_hash {
+                    return Err(CompileError::without_span(format!(
+                        "{}.code_hash '{}' does not match expected TYPE_ID code hash '{}'",
+                        prefix, code_hash, expected_code_hash
+                    )));
+                }
+                let Some(hash_type) = reference.hash_type.as_deref() else {
+                    return Err(CompileError::without_span(format!("{}.hash_type is required for TYPE_ID script references", prefix)));
+                };
+                validate_ckb_hash_type(hash_type)
+                    .map_err(|err| CompileError::without_span(format!("{}.hash_type is invalid: {}", prefix, err.message)))?;
+                if hash_type != CKB_TYPE_ID_HASH_TYPE {
+                    return Err(CompileError::without_span(format!(
+                        "{}.hash_type '{}' does not match expected '{}'",
+                        prefix, hash_type, CKB_TYPE_ID_HASH_TYPE
+                    )));
+                }
+                if reference.args.as_deref() != Some(CKB_TYPE_ID_ARGS_SOURCE) {
+                    return Err(CompileError::without_span(format!(
+                        "{}.args {:?} does not match expected '{}'",
+                        prefix, reference.args, CKB_TYPE_ID_ARGS_SOURCE
+                    )));
+                }
+                if reference.dep_source != CKB_TYPE_ID_OUTPUT_SOURCE {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' does not match expected '{}'",
+                        prefix, reference.dep_source, CKB_TYPE_ID_OUTPUT_SOURCE
+                    )));
+                }
+                if reference.status != "builder-must-install-type-id-script" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'builder-must-install-type-id-script'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            "spawn-target" => {
+                if reference.code_hash.is_some() || reference.hash_type.is_some() || reference.args.is_some() {
+                    return Err(CompileError::without_span(format!(
+                        "{} must leave code_hash/hash_type/args unset until the builder resolves the spawn target",
+                        prefix
+                    )));
+                }
+                if reference.dep_source != "CellDep-or-DepGroup" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' does not match expected 'CellDep-or-DepGroup'",
+                        prefix, reference.dep_source
+                    )));
+                }
+                if reference.status != "runtime-required-builder-resolved" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'runtime-required-builder-resolved'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            "read-ref-cell-dep" => {
+                if reference.code_hash.is_some() || reference.hash_type.is_some() || reference.args.is_some() {
+                    return Err(CompileError::without_span(format!(
+                        "{} must leave code_hash/hash_type/args unset for runtime CellDep reads",
+                        prefix
+                    )));
+                }
+                let Some(index_text) = reference.dep_source.strip_prefix("CellDep#") else {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' must use CellDep#<index>",
+                        prefix, reference.dep_source
+                    )));
+                };
+                if index_text.parse::<usize>().is_err() {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' has an invalid CellDep index",
+                        prefix, reference.dep_source
+                    )));
+                }
+                if reference.status != "checked-runtime-load-cell-dep" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'checked-runtime-load-cell-dep'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            other => {
+                return Err(CompileError::without_span(format!(
+                    "{}.purpose '{}' is not a known CKB script-reference purpose",
+                    prefix, other
+                )));
+            }
+        }
+    }
+
+    let mut expected_refs = ckb_script_reference_fingerprints(ckb_script_reference_metadata(metadata).iter());
+    let mut actual_refs = ckb_script_reference_fingerprints(ckb_constraints.script_references.iter());
+    expected_refs.sort();
+    actual_refs.sort();
+    if actual_refs != expected_refs {
+        let missing_refs = ckb_script_reference_multiset_difference(&expected_refs, &actual_refs);
+        let extra_refs = ckb_script_reference_multiset_difference(&actual_refs, &expected_refs);
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.script_references do not match the compiled CKB runtime metadata; missing={:?}; extra={:?}",
+            missing_refs, extra_refs
+        )));
+    }
+
+    Ok(())
+}
+
+type CkbScriptReferenceFingerprint = (String, String, String, Option<String>, Option<String>, Option<String>, String, String, String);
+
+fn ckb_script_reference_fingerprints<'a>(
+    refs: impl Iterator<Item = &'a CkbScriptReferenceMetadata>,
+) -> Vec<CkbScriptReferenceFingerprint> {
+    refs.map(|reference| {
+        (
+            reference.scope.clone(),
+            reference.purpose.clone(),
+            reference.name.clone(),
+            reference.code_hash.clone(),
+            reference.hash_type.clone(),
+            reference.args.clone(),
+            reference.dep_source.clone(),
+            reference.profile.clone(),
+            reference.status.clone(),
+        )
+    })
+    .collect()
+}
+
+fn ckb_script_reference_multiset_difference(
+    left: &[CkbScriptReferenceFingerprint],
+    right: &[CkbScriptReferenceFingerprint],
+) -> Vec<CkbScriptReferenceFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
 }
 
 fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
@@ -2202,7 +2784,7 @@ pub struct CkbRuntimeAccessMetadata {
     pub binding: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CkbScriptGroupMetadata {
     pub entry_kind: String,
     pub group_kind: String,
@@ -2324,8 +2906,10 @@ pub struct TypeMetadata {
     pub kind: String,
     pub capabilities: Vec<String>,
     pub claim_output: Option<String>,
-    pub lifecycle_states: Vec<String>,
-    pub lifecycle_transitions: Vec<LifecycleTransitionMetadata>,
+    pub flow_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_state_field: Option<String>,
+    pub flow_transitions: Vec<FlowTransitionMetadata>,
     pub encoded_size: Option<usize>,
     pub fields: Vec<FieldMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2358,7 +2942,7 @@ pub struct MoleculeSchemaMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LifecycleTransitionMetadata {
+pub struct FlowTransitionMetadata {
     pub from: String,
     pub to: String,
     pub from_index: usize,
@@ -2550,6 +3134,15 @@ pub fn encode_entry_witness_args_for_params_with_runtime_bound(
     args: &[EntryWitnessArg],
     runtime_bound_param_names: &BTreeSet<String>,
 ) -> Result<Vec<u8>> {
+    if !params.iter().any(|param| param_consumes_entry_witness_payload(param, runtime_bound_param_names)) {
+        if args.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(CompileError::without_span(format!(
+            "entry witness received {} payload args but this entry ABI consumes none",
+            args.len()
+        )));
+    }
     let payload_len = entry_witness_metadata_payload_len_with_runtime_bound(params, runtime_bound_param_names)?;
     let capacity = ENTRY_WITNESS_ABI_MAGIC.len().checked_add(payload_len).ok_or_else(|| {
         CompileError::without_span(format!("entry witness payload length exceeds addressable memory for {}", ENTRY_WITNESS_ABI))
@@ -3110,7 +3703,7 @@ pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileM
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
     let target_profile = TargetProfile::Ckb;
     types::check(&ast)?;
-    lifecycle::check(&ast)?;
+    flow::check(&ast)?;
     let ir = ir::generate(&ast)?;
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
@@ -3151,7 +3744,7 @@ fn compile_ast_with_build(
     } else {
         types::check(ast)?;
     }
-    lifecycle::check(ast)?;
+    flow::check(ast)?;
 
     let optimized_ast = if options.opt_level > 0 {
         let mut optimized = ast.clone();
@@ -3161,7 +3754,7 @@ fn compile_ast_with_build(
         } else {
             types::check(&optimized)?;
         }
-        lifecycle::check(&optimized)?;
+        flow::check(&optimized)?;
         Some(optimized)
     } else {
         None
@@ -3698,15 +4291,17 @@ fn metadata_output_path_from_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
 fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, target_profile: TargetProfile) -> CompileMetadata {
     let type_layouts = metadata_type_layouts(ir);
     let type_defs = metadata_type_defs_by_name(ir);
-    let lifecycle_states = metadata_lifecycle_states(ir);
+    let flow_states = metadata_flow_states(ir);
+    let flow_state_fields = metadata_flow_state_fields(ir);
     let cell_type_kinds = metadata_cell_type_kinds(ir);
     let pure_const_returns = metadata_pure_const_returns(ir);
     let fail_closed_runtime_features = module_fail_closed_runtime_features(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
     let ckb_runtime_features = module_ckb_runtime_features(ir, &cell_type_kinds, &type_layouts);
     let ckb_runtime_accesses = module_ckb_runtime_accesses(ir, &cell_type_kinds, &type_layouts);
     let verifier_obligations =
-        module_verifier_obligations(ir, &type_layouts, &lifecycle_states, &cell_type_kinds, &pure_const_returns);
-    let proof_plan = module_proof_plan_metadata(ir, &type_layouts, &lifecycle_states, &cell_type_kinds, &pure_const_returns);
+        module_verifier_obligations(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
+    let proof_plan =
+        module_proof_plan_metadata(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
     let collection_instantiations = module_collection_instantiation_metadata(ir, &type_layouts, &pure_const_returns);
     let transaction_runtime_input_requirements = transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
     let pool_primitives = module_pool_primitive_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
@@ -3806,7 +4401,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &action.params,
-                        &lifecycle_states,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         action.return_type.as_ref(),
                         &pure_const_returns,
@@ -3910,7 +4506,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &function.params,
-                        &lifecycle_states,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         function.return_type.as_ref(),
                         &pure_const_returns,
@@ -3982,7 +4579,8 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         &ckb_runtime_accesses,
                         &type_layouts,
                         &lock.params,
-                        &lifecycle_states,
+                        &flow_states,
+                        &flow_state_fields,
                         &cell_type_kinds,
                         None,
                         &pure_const_returns,
@@ -4252,10 +4850,7 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         | ir::IrInstruction::Index { dest, arr: operand, .. }
         | ir::IrInstruction::Length { dest, operand }
         | ir::IrInstruction::TypeHash { dest, operand }
-        | ir::IrInstruction::Move { dest, src: operand }
-        | ir::IrInstruction::Transfer { dest, operand, .. }
-        | ir::IrInstruction::Claim { dest, receipt: operand }
-        | ir::IrInstruction::Settle { dest, operand } => {
+        | ir::IrInstruction::Move { dest, src: operand } => {
             collect_ir_type_named_types(&dest.ty, used_types);
             collect_operand_named_types(operand, used_types);
         }
@@ -4334,6 +4929,23 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         }
         ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand, .. } => {
             collect_operand_named_types(operand, used_types);
+        }
+        ir::IrInstruction::Transfer { dest, operand, to } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(operand, used_types);
+            collect_operand_named_types(to, used_types);
+        }
+        ir::IrInstruction::Claim { dest, receipt } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(receipt, used_types);
+        }
+        ir::IrInstruction::Settle { dest, operand } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(operand, used_types);
+        }
+        ir::IrInstruction::CellMetadataEquality { left, right, .. } => {
+            collect_operand_named_types(left, used_types);
+            collect_operand_named_types(right, used_types);
         }
         ir::IrInstruction::Create { dest, pattern } => {
             collect_ir_type_named_types(&dest.ty, used_types);
@@ -4521,7 +5133,8 @@ fn module_ckb_runtime_features(
 fn module_verifier_obligations(
     ir: &ir::IrModule,
     type_layouts: &MetadataTypeLayouts,
-    lifecycle_states: &HashMap<String, Vec<String>>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<VerifierObligationMetadata> {
@@ -4556,7 +5169,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &action.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     action.return_type.as_ref(),
                     pure_const_returns,
@@ -4590,7 +5204,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &function.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     function.return_type.as_ref(),
                     pure_const_returns,
@@ -4624,7 +5239,8 @@ fn module_verifier_obligations(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &lock.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     None,
                     pure_const_returns,
@@ -4639,7 +5255,8 @@ fn module_verifier_obligations(
 fn module_proof_plan_metadata(
     ir: &ir::IrModule,
     type_layouts: &MetadataTypeLayouts,
-    lifecycle_states: &HashMap<String, Vec<String>>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<ProofPlanMetadata> {
@@ -4674,7 +5291,8 @@ fn module_proof_plan_metadata(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &action.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     action.return_type.as_ref(),
                     pure_const_returns,
@@ -4726,7 +5344,8 @@ fn module_proof_plan_metadata(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &function.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     function.return_type.as_ref(),
                     pure_const_returns,
@@ -4778,7 +5397,8 @@ fn module_proof_plan_metadata(
                     &ckb_runtime_accesses,
                     type_layouts,
                     &lock.params,
-                    lifecycle_states,
+                    flow_states,
+                    flow_state_fields,
                     cell_type_kinds,
                     None,
                     pure_const_returns,
@@ -5297,7 +5917,8 @@ fn body_verifier_obligations(
     ckb_runtime_accesses: &[CkbRuntimeAccessMetadata],
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
-    lifecycle_states: &HashMap<String, Vec<String>>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     return_type: Option<&ir::IrType>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
@@ -5353,9 +5974,16 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in
-        body_transaction_resource_obligations(name, body, type_layouts, params, lifecycle_states, cell_type_kinds, pure_const_returns)
-    {
+    for check in body_transaction_resource_obligations(
+        name,
+        body,
+        type_layouts,
+        params,
+        flow_states,
+        flow_state_fields,
+        cell_type_kinds,
+        pure_const_returns,
+    ) {
         push_verifier_obligation(&mut obligations, &mut seen, &scope, check.category, &check.feature, check.status, &check.detail);
     }
 
@@ -5385,13 +6013,13 @@ fn body_verifier_obligations(
         );
     }
 
-    for check in body_lifecycle_transition_checks(body, lifecycle_states, type_layouts, params, pure_const_returns) {
+    for check in body_state_transition_checks(body, flow_states, flow_state_fields, type_layouts, params, pure_const_returns) {
         push_verifier_obligation(
             &mut obligations,
             &mut seen,
             &scope,
-            "lifecycle-transition",
-            &format!("{}.state", check.feature),
+            "state-transition",
+            &format!("{}.{}", check.feature, check.field),
             &check.status,
             &check.detail,
         );
@@ -5417,23 +6045,12 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
-                ir::IrInstruction::Transfer { operand, .. } => {
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        checks.push(StaticResourceOperationCheck {
-                            feature: format!("transfer:{}", type_name),
-                            detail: format!(
-                                "Type checker verified '{}' declares transfer capability and the source value is linearly consumed; runtime output/lock verification remains a separate lowering obligation",
-                                type_name
-                            ),
-                        });
-                    }
-                }
                 ir::IrInstruction::Destroy { operand, .. } => {
                     if let Some(type_name) = operand_named_type_name(operand) {
                         checks.push(StaticResourceOperationCheck {
                             feature: format!("destroy:{}", type_name),
                             detail: format!(
-                                "Type checker verified '{}' declares destroy capability and the source value is marked destroyed; transaction-level absence of replacement outputs remains a runtime/protocol obligation",
+                                "Type checker verified '{}' declares destroy capability or consume+burn kernel effects and the source value is marked destroyed; transaction-level absence of replacement outputs remains a runtime/protocol obligation",
                                 type_name
                             ),
                         });
@@ -5445,6 +6062,17 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
                             feature: format!("claim:{}", type_name),
                             detail: format!(
                                 "Type checker verified '{}' is a receipt value and the receipt is linearly consumed; witness/time-lock claim conditions remain runtime/protocol obligations",
+                                type_name
+                            ),
+                        });
+                    }
+                }
+                ir::IrInstruction::Transfer { operand, .. } => {
+                    if let Some(type_name) = operand_named_type_name(operand) {
+                        checks.push(StaticResourceOperationCheck {
+                            feature: format!("transfer:{}", type_name),
+                            detail: format!(
+                                "Type checker verified '{}' declares transfer capability or replace+relock kernel effects and the source value is linearly transferred; output relation remains a runtime/protocol obligation",
                                 type_name
                             ),
                         });
@@ -5473,14 +6101,14 @@ fn body_transaction_resource_obligations(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
-    lifecycle_states: &HashMap<String, Vec<String>>,
+    _flow_states: &HashMap<String, Vec<String>>,
+    _flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<TransactionResourceObligation> {
     let param_schema_vars = schema_pointer_var_ids(body, params);
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
     let mut checks = Vec::new();
-    let mut output_index = 0usize;
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
@@ -5493,7 +6121,6 @@ fn body_transaction_resource_obligations(
                     if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
                         checks.push(check);
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::CreateUnique { pattern, identity, .. } => {
                     if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
@@ -5502,7 +6129,6 @@ fn body_transaction_resource_obligations(
                     if let Some(check) = unique_identity_obligation("create_unique", &pattern.ty, &pattern.binding, identity) {
                         checks.push(check);
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::ReplaceUnique { operand, pattern, identity, .. } => {
                     if let Some(check) = operation_input_data_obligation(body, "replace_unique", operand) {
@@ -5514,41 +6140,26 @@ fn body_transaction_resource_obligations(
                     if let Some(check) = unique_identity_obligation("replace_unique", &pattern.ty, &pattern.binding, identity) {
                         checks.push(check);
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::Transfer { operand, .. } => {
                     if let Some(check) = operation_input_data_obligation(body, "transfer", operand) {
                         checks.push(check);
                     }
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        let output_relation_checked =
-                            transfer_output_relation_is_checked(body, type_layouts, &availability, output_index, &type_name);
-                        let lock_rebinding_checked = transfer_lock_rebinding_is_checked(body, &availability, &type_name);
-                        let output_relation_detail =
-                            if output_relation_checked { "; transfer-output-relation=checked-runtime" } else { "" };
-                        let lock_rebinding_detail = if lock_rebinding_checked {
-                            "; transfer-lock-rebinding=checked-runtime; transfer-destination-address-binding=checked-runtime"
-                        } else {
-                            ""
-                        };
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("transfer-output:{}", type_name),
-                            status: if output_relation_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: if output_relation_checked {
-                                format!(
-                                    "Compiler-emitted runtime verifier checks the consumed '{}' cell data is preserved in the transfer-created output and that the output lock is rebound to the transfer destination{}{}",
-                                    type_name, output_relation_detail, lock_rebinding_detail
-                                )
-                            } else {
-                                format!(
-                                    "Runtime verifier must prove the consumed '{}' cell data is preserved in exactly the intended output and that the output lock is rebound to the transfer destination{}{}",
-                                    type_name, output_relation_detail, lock_rebinding_detail
-                                )
-                            },
-                        });
+                }
+                ir::IrInstruction::Claim { receipt, .. } => {
+                    if let Some(check) = operation_input_data_obligation(body, "claim", receipt) {
+                        checks.push(check);
                     }
-                    output_index += 1;
+                }
+                ir::IrInstruction::Settle { operand, .. } => {
+                    if let Some(check) = operation_input_data_obligation(body, "settle", operand) {
+                        checks.push(check);
+                    }
+                }
+                ir::IrInstruction::CellMetadataEquality { left, right, field } => {
+                    if let Some(check) = cell_metadata_equality_obligation(left, right, *field) {
+                        checks.push(check);
+                    }
                 }
                 ir::IrInstruction::Destroy { operand, .. } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
@@ -5572,105 +6183,19 @@ fn body_transaction_resource_obligations(
                         });
                     }
                 }
-                ir::IrInstruction::Claim { dest, receipt } => {
-                    if let Some(check) = operation_input_data_obligation(body, "claim", receipt) {
-                        checks.push(check);
-                    }
-                    if let Some(type_name) = operand_named_type_name(receipt) {
-                        let conditions_checked =
-                            claim_conditions_are_checked(name, body, type_layouts, cell_type_kinds, "claim", receipt, &type_name);
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("claim-conditions:{}", type_name),
-                            status: if conditions_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: transaction_claim_condition_detail(
-                                body,
-                                type_layouts,
-                                cell_type_kinds,
-                                name,
-                                "claim",
-                                receipt,
-                                &type_name,
-                                conditions_checked,
-                            ),
-                        });
-                    }
-                    if let Some(type_name) = named_type_name(&dest.ty) {
-                        checks.push(transaction_output_obligation(
-                            body,
-                            type_layouts,
-                            &availability,
-                            "claim",
-                            &dest.name,
-                            type_name,
-                            format!(
-                                "Compiler-emitted runtime verifier checks the claim-created '{}' output fields that are statically bound to the consumed receipt; claim-output-relation=checked-runtime; witness/time-lock claim conditions remain separate runtime obligations",
-                                type_name
-                            ),
-                            format!(
-                                "Runtime verifier must prove claim creates the declared '{}' output cell and binds its fields to the consumed receipt semantics; claim-output-relation=runtime-required",
-                                type_name
-                            ),
-                        ));
-                    }
-                    output_index += 1;
-                }
-                ir::IrInstruction::Settle { dest, operand } => {
-                    if let Some(check) = operation_input_data_obligation(body, "settle", operand) {
-                        checks.push(check);
-                    }
-                    if let Some(type_name) = operand_named_type_name(operand) {
-                        let finalization_checked = settle_finalization_is_checked(
-                            body,
-                            type_layouts,
-                            &availability,
-                            lifecycle_states,
-                            output_index,
-                            &type_name,
-                        );
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("settle-finalization:{}", type_name),
-                            status: if finalization_checked { "checked-runtime" } else { "runtime-required" },
-                            detail: transaction_condition_detail(
-                                body,
-                                type_layouts,
-                                &availability,
-                                lifecycle_states,
-                                "settle",
-                                operand,
-                                &type_name,
-                                finalization_checked,
-                            ),
-                        });
-                    }
-                    if let Some(type_name) = named_type_name(&dest.ty) {
-                        checks.push(transaction_output_obligation(
-                            body,
-                            type_layouts,
-                            &availability,
-                            "settle",
-                            &dest.name,
-                            type_name,
-                            format!(
-                                "Compiler-emitted runtime verifier checks the settle-created '{}' output fields that are statically bound to the consumed value; settle-output-relation=checked-runtime; finalization invariants remain separate runtime obligations",
-                                type_name
-                            ),
-                            format!(
-                                "Runtime verifier must prove settle creates the finalized '{}' output cell and binds verifier-covered fields to the consumed value semantics; settle-output-relation=runtime-required",
-                                type_name
-                            ),
-                        ));
-                    }
-                    output_index += 1;
-                }
                 _ => {}
+            }
+        }
+    }
+    for pattern in &body.create_set {
+        if matches!(pattern.operation.as_str(), "transfer" | "claim" | "settle") {
+            if let Some(check) = create_output_verification_obligation(pattern, type_layouts, &availability) {
+                checks.push(check);
             }
         }
     }
     checks.extend(read_ref_cell_dep_data_obligations(body));
     checks.extend(body_resource_conservation_obligations(name, body, type_layouts, &availability, params, cell_type_kinds));
-    checks.extend(body_receipt_claim_flow_obligations(name, body, type_layouts, cell_type_kinds));
     checks
 }
 
@@ -5696,6 +6221,40 @@ fn operation_input_data_obligation(
     })
 }
 
+fn cell_metadata_equality_obligation(
+    left: &ir::IrOperand,
+    right: &ir::IrOperand,
+    field: ir::CellMetadataField,
+) -> Option<TransactionResourceObligation> {
+    let left_binding = operand_var_name(left)?;
+    let right_binding = operand_var_name(right)?;
+    let field_name = cell_metadata_field_name(field);
+    Some(TransactionResourceObligation {
+        category: "transaction-invariant",
+        feature: format!("cell-metadata-equality:{}:{}:{}", field_name, left_binding, right_binding),
+        status: "checked-runtime",
+        detail: format!(
+            "Compiler-emitted runtime verifier compares cell metadata '{}' for '{}' and '{}'; cell-metadata-{}=checked-runtime",
+            field_name, left_binding, right_binding, field_name
+        ),
+    })
+}
+
+fn cell_metadata_field_name(field: ir::CellMetadataField) -> &'static str {
+    match field {
+        ir::CellMetadataField::LockHash => "lock_hash",
+        ir::CellMetadataField::Capacity => "capacity",
+    }
+}
+
+fn cell_metadata_field_byte_len(field_name: &str) -> Option<usize> {
+    match field_name {
+        "lock_hash" => Some(32),
+        "capacity" => Some(8),
+        _ => None,
+    }
+}
+
 fn read_ref_cell_dep_data_obligations(body: &ir::IrBody) -> Vec<TransactionResourceObligation> {
     body.read_refs
         .iter()
@@ -5718,7 +6277,10 @@ fn create_output_verification_obligation(
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
 ) -> Option<TransactionResourceObligation> {
-    if !matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
+    if !matches!(
+        pattern.operation.as_str(),
+        "create" | "output" | "create_unique" | "replace_unique" | "transfer" | "claim" | "settle"
+    ) {
         return None;
     }
     let fields_checked = metadata_can_verify_create_output_fields(pattern, type_layouts, availability);
@@ -5730,7 +6292,10 @@ fn create_output_verification_obligation(
         None => "not-required",
     };
     let status = if fields_checked && lock_checked { "checked-runtime" } else { "runtime-required" };
-    let operation_feature = pattern.operation.replace('_', "-");
+    let operation_feature = match pattern.operation.as_str() {
+        "output" => "create".to_string(),
+        operation => operation.replace('_', "-"),
+    };
     Some(TransactionResourceObligation {
         category: "transaction-invariant",
         feature: format!("{}-output:{}:{}", operation_feature, pattern.ty, pattern.binding),
@@ -6319,171 +6884,6 @@ fn metadata_u64_source_collect_amount_split_subtrahends(
     }
 }
 
-fn body_receipt_claim_flow_obligations(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-) -> Vec<TransactionResourceObligation> {
-    let mut obligations = Vec::new();
-    let source_invariant_count = body_assert_invariant_count(body);
-    for block in &body.blocks {
-        for instruction in &block.instructions {
-            let ir::IrInstruction::Consume { operand } = instruction else {
-                continue;
-            };
-            let Some(type_name) = operand_named_type_name(operand) else {
-                continue;
-            };
-            if cell_type_kinds.get(type_name.as_str()) != Some(&ir::IrTypeKind::Receipt) {
-                continue;
-            }
-            let checked_guards = receipt_claim_flow_checked_condition_guards(name, &type_name, source_invariant_count, body);
-            if checked_guards.is_empty() {
-                continue;
-            }
-            let binding = operand_var_name(operand).unwrap_or(type_name.as_str());
-            let input_summary = transaction_condition_input_summary(body, type_layouts, "consume", binding, &type_name);
-            let witness_domain_detail = if body.consume_set.iter().any(|pattern| {
-                pattern.operation == "consume"
-                    && pattern.binding == binding
-                    && is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts)
-            }) {
-                let mut detail = ", claim-witness-format=checked-runtime, claim-authorization-domain=checked-runtime".to_string();
-                if body.consume_set.iter().any(|pattern| {
-                    pattern.operation == "consume"
-                        && pattern.binding == binding
-                        && is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts)
-                }) {
-                    detail.push_str(", claim-witness-signature=checked-runtime, claim-signer-key-binding=checked-runtime");
-                }
-                detail
-            } else if body.consume_set.iter().any(|pattern| {
-                pattern.operation == "consume"
-                    && pattern.binding == binding
-                    && is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts)
-            }) {
-                ", claim-input-lock-hash=checked-runtime, claim-lock-hash-field-binding=checked-runtime".to_string()
-            } else if revoke_admin_authorization_is_checked(name, &type_name, body, type_layouts) {
-                ", revoke-admin-config-binding=checked-runtime, revoke-admin-output-lock=checked-runtime".to_string()
-            } else {
-                String::new()
-            };
-            let conditions_checked =
-                claim_conditions_are_checked(name, body, type_layouts, cell_type_kinds, "consume", operand, &type_name);
-            obligations.push(TransactionResourceObligation {
-                category: "transaction-invariant",
-                feature: format!("claim-conditions:{}", type_name),
-                status: if conditions_checked { "checked-runtime" } else { "runtime-required" },
-                detail: format!(
-                    "Source claim predicates are present in the fail-closed CFG as {}{}; runtime inputs: {}",
-                    checked_guards.iter().map(|guard| format!("{}=checked-runtime", guard)).collect::<Vec<_>>().join(", "),
-                    witness_domain_detail,
-                    input_summary
-                ),
-            });
-        }
-    }
-    obligations
-}
-
-fn claim_conditions_are_checked(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-) -> bool {
-    if !claim_source_predicates_are_checked(name, type_name, body) {
-        return false;
-    }
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    body.consume_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && (is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || revoke_admin_authorization_is_checked(name, type_name, body, type_layouts))
-    })
-}
-
-fn revoke_admin_authorization_is_checked(name: &str, type_name: &str, body: &ir::IrBody, type_layouts: &MetadataTypeLayouts) -> bool {
-    if name != "revoke_grant" || type_name != "VestingGrant" {
-        return false;
-    }
-    let Some(config_fields) = type_layouts.get("VestingConfig") else {
-        return false;
-    };
-    let Some(admin_layout) = config_fields.get("admin") else {
-        return false;
-    };
-    if metadata_layout_fixed_byte_width(admin_layout) != Some(32) {
-        return false;
-    }
-    body.read_refs.iter().any(|pattern| pattern.operation == "read_ref" && pattern.binding == "config")
-        && body_assert_invariant_count(body) >= 3
-}
-
-fn claim_body_has_source_predicates(body: &ir::IrBody) -> bool {
-    body_assert_invariant_count(body) > 0 || body_uses_current_timepoint(body)
-}
-
-fn claim_source_predicates_are_checked(name: &str, type_name: &str, body: &ir::IrBody) -> bool {
-    if !claim_body_has_source_predicates(body) {
-        return true;
-    }
-    let source_invariant_count = body_assert_invariant_count(body);
-    let uses_timepoint = body_uses_current_timepoint(body);
-    let checked_guards = receipt_claim_flow_checked_condition_guards(name, type_name, source_invariant_count, body);
-    if checked_guards.is_empty() {
-        return false;
-    }
-    if uses_timepoint && !checked_guards.contains(&"timepoint-check") {
-        return false;
-    }
-    if source_invariant_count > checked_guards.len() {
-        return false;
-    }
-    true
-}
-
-fn receipt_claim_flow_checked_condition_guards(
-    name: &str,
-    type_name: &str,
-    source_invariant_count: usize,
-    body: &ir::IrBody,
-) -> Vec<&'static str> {
-    if name == "claim_vested" && type_name == "VestingGrant" && source_invariant_count >= 3 && body_uses_current_timepoint(body) {
-        return vec!["timepoint-check", "state-not-fully-claimed", "positive-claimable"];
-    }
-    // General case: any receipt claim that uses current_timepoint and has
-    // assert_invariant conditions gets timepoint-check=checked-runtime,
-    // because the codegen emits a real LOAD_HEADER_BY_FIELD + slt comparison.
-    if body_uses_current_timepoint(body) && source_invariant_count > 0 {
-        let mut guards = vec!["timepoint-check"];
-        // Additional source invariants beyond the timepoint check are
-        // also checked-runtime when the codegen emits them as Branch conditions.
-        guards.extend(std::iter::repeat_n("source-invariant", source_invariant_count.saturating_sub(1)));
-        return guards;
-    }
-    Vec::new()
-}
-
-fn body_uses_current_timepoint(body: &ir::IrBody) -> bool {
-    body.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
-        matches!(
-            instruction,
-            ir::IrInstruction::Call {
-                func,
-                args,
-                ..
-            } if matches!(func.as_str(), "__env_current_timepoint") && args.is_empty()
-        )
-    })
-}
-
 fn operation_input_feature(feature: &str) -> Option<(&'static str, &str)> {
     if let Some(binding) = feature.strip_prefix("consume-input:") {
         Some(("consume", binding))
@@ -6493,21 +6893,18 @@ fn operation_input_feature(feature: &str) -> Option<(&'static str, &str)> {
         Some(("destroy", binding))
     } else if let Some(binding) = feature.strip_prefix("claim-input:") {
         Some(("claim", binding))
+    } else if let Some(binding) = feature.strip_prefix("settle-input:") {
+        Some(("settle", binding))
     } else if let Some(binding) = feature.strip_prefix("replace-unique-input:") {
         Some(("replace_unique", binding))
     } else {
-        feature.strip_prefix("settle-input:").map(|binding| ("settle", binding))
+        feature.strip_prefix("destroy-input:").map(|binding| ("destroy", binding))
     }
 }
 
 fn transaction_runtime_input_requirements_from_obligations(
     obligations: &[VerifierObligationMetadata],
 ) -> Vec<TransactionRuntimeInputRequirementMetadata> {
-    let checked_transaction_invariants = obligations
-        .iter()
-        .filter(|obligation| obligation.category == "transaction-invariant" && obligation.status == "checked-runtime")
-        .map(|obligation| format!("{}:{}", obligation.scope, obligation.feature))
-        .collect::<BTreeSet<_>>();
     let mut requirements = Vec::new();
     for obligation in obligations {
         if obligation.category == "spawn-target" && obligation.status == "runtime-required" {
@@ -6565,14 +6962,12 @@ fn transaction_runtime_input_requirements_from_obligations(
 
         let include_checked_destroy_scan =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-output-scan:");
-        let include_checked_transfer_output =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("transfer-output:");
-        let include_checked_claim_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("claim-output:");
-        let include_checked_settle_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("settle-output:");
         let include_checked_operation_input =
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
         let include_checked_create_output = obligation.status == "checked-runtime" && obligation.feature.starts_with("create-output:");
+        let include_checked_cell_metadata =
+            obligation.status == "checked-runtime" && obligation.feature.starts_with("cell-metadata-equality:");
         let include_checked_unique_output = obligation.status == "checked-runtime"
             && (obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("replace-unique-output:"));
         let include_checked_unique_identity = obligation.status == "checked-runtime"
@@ -6580,85 +6975,20 @@ fn transaction_runtime_input_requirements_from_obligations(
                 || obligation.feature.starts_with("replace-unique-identity:"));
         let include_checked_resource_conservation =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("resource-conservation:");
-        let include_checked_claim_conditions =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("claim-conditions:");
-        let include_checked_settle_finalization =
-            obligation.status == "checked-runtime" && obligation.feature.starts_with("settle-finalization:");
         if obligation.category != "transaction-invariant"
             || (obligation.status != "runtime-required"
                 && !include_checked_destroy_scan
-                && !include_checked_transfer_output
-                && !include_checked_claim_output
-                && !include_checked_settle_output
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
+                && !include_checked_cell_metadata
                 && !include_checked_unique_output
                 && !include_checked_unique_identity
-                && !include_checked_resource_conservation
-                && !include_checked_claim_conditions
-                && !include_checked_settle_finalization)
+                && !include_checked_resource_conservation)
         {
             continue;
         }
-        if let Some(binding) = obligation.feature.strip_prefix("transfer-output:") {
-            let transfer_output_relation_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "transfer-output-relation") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            let transfer_lock_status = if transaction_obligation_has_checked_subcondition(obligation, "transfer-lock-rebinding") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let transfer_destination_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "transfer-destination-address-binding") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-output-relation",
-                transfer_output_relation_status,
-                (transfer_output_relation_status == "runtime-required")
-                    .then_some("transfer-created output relation is not fully verifier-covered"),
-                (transfer_output_relation_status == "runtime-required").then_some("transfer-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "transfer-output-relation-consume-create-accounting",
-                None,
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-destination-lock",
-                transfer_lock_status,
-                (transfer_lock_status == "runtime-required")
-                    .then_some("transfer lock rebinding is not lowered into transfer create_set lock checks"),
-                (transfer_lock_status == "runtime-required").then_some("lock-rebinding-lowering-gap"),
-                "Output",
-                binding,
-                Some("lock_hash"),
-                "transfer-destination-lock-hash-32",
-                Some(32),
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "transfer-destination-address",
-                transfer_destination_status,
-                (transfer_destination_status == "runtime-required")
-                    .then_some("destination address ABI is typed but not bound to an output lock hash by transfer lowering"),
-                (transfer_destination_status == "runtime-required").then_some("destination-address-binding-gap"),
-                "Param",
-                binding,
-                Some("destination"),
-                "transfer-destination-address-32",
-                Some(32),
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("destroy-output-scan:") {
+        if let Some(binding) = obligation.feature.strip_prefix("destroy-output-scan:") {
             let absence_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-output-absence") {
                 "checked-runtime"
             } else {
@@ -6692,32 +7022,6 @@ fn transaction_runtime_input_requirements_from_obligations(
                 binding,
                 Some("outputs"),
                 "destroy-output-scan-transaction-boundary",
-                None,
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("claim-output:") {
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "claim-output-relation",
-                obligation.status.as_str(),
-                (obligation.status == "runtime-required").then_some("claim-created output relation is not fully verifier-covered"),
-                (obligation.status == "runtime-required").then_some("claim-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "claim-output-relation-consume-create-accounting",
-                None,
-            ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("settle-output:") {
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-output-relation",
-                obligation.status.as_str(),
-                (obligation.status == "runtime-required").then_some("settle-created output relation is not fully verifier-covered"),
-                (obligation.status == "runtime-required").then_some("settle-output-relation-gap"),
-                "Transaction",
-                binding,
-                Some("output-relation"),
-                "settle-output-relation-consume-create-accounting",
                 None,
             ));
         } else if let Some((operation, binding)) = operation_input_feature(obligation.feature.as_str()) {
@@ -6783,6 +7087,29 @@ fn transaction_runtime_input_requirements_from_obligations(
                 }
                 _ => {}
             }
+        } else if let Some(rest) = obligation.feature.strip_prefix("cell-metadata-equality:") {
+            let Some((field_name, bindings)) = rest.split_once(':') else {
+                continue;
+            };
+            let binding = bindings.to_string();
+            let component = format!("cell-metadata-{}", field_name);
+            let abi = format!(
+                "cell-metadata-{}-equality-{}",
+                field_name.replace('_', "-"),
+                cell_metadata_field_byte_len(field_name).unwrap_or(0)
+            );
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                &component,
+                "checked-runtime",
+                None,
+                None,
+                "InputOutput",
+                &binding,
+                Some(field_name),
+                &abi,
+                cell_metadata_field_byte_len(field_name),
+            ));
         } else if let Some((operation, binding)) = obligation
             .feature
             .strip_prefix("create-unique-output:")
@@ -6852,157 +7179,6 @@ fn transaction_runtime_input_requirements_from_obligations(
                 "cell-backed-collection-linear-ownership-model",
                 None,
             ));
-        } else if let Some(binding) = obligation.feature.strip_prefix("claim-conditions:") {
-            let claim_time_status = if transaction_obligation_has_checked_subcondition(obligation, "timepoint-check") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let claim_authorization_domain_status =
-                if transaction_obligation_has_checked_subcondition(obligation, "claim-authorization-domain") {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            let claim_signature_status = if transaction_obligation_has_checked_subcondition(obligation, "claim-witness-signature") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            if transaction_obligation_has_checked_subcondition(obligation, "claim-input-lock-hash") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-input-lock-hash",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "Input",
-                    binding,
-                    Some("lock_hash"),
-                    "claim-input-lock-hash-32",
-                    Some(32),
-                ));
-            } else if transaction_obligation_has_checked_subcondition(obligation, "revoke-admin-config-binding") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "revoke-admin-config-binding",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "CellDep",
-                    binding,
-                    Some("config.admin"),
-                    "revoke-admin-config-admin-32",
-                    Some(32),
-                ));
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "revoke-admin-output-lock",
-                    "checked-runtime",
-                    None,
-                    None,
-                    "Output",
-                    binding,
-                    Some("lock_hash"),
-                    "revoke-admin-output-lock-hash-32",
-                    Some(32),
-                ));
-            } else {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-witness-signature",
-                    claim_signature_status,
-                    (claim_signature_status == "runtime-required")
-                        .then_some("claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"),
-                    (claim_signature_status == "runtime-required").then_some("witness-verification-gap"),
-                    "Witness",
-                    binding,
-                    Some("signature"),
-                    "claim-witness-signature-65",
-                    Some(65),
-                ));
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-authorization-domain",
-                    claim_authorization_domain_status,
-                    (claim_authorization_domain_status == "runtime-required")
-                        .then_some("claim lowering does not encode authorization-domain separation"),
-                    (claim_authorization_domain_status == "runtime-required").then_some("authorization-domain-separation-gap"),
-                    "Witness",
-                    binding,
-                    Some("authorization-domain"),
-                    "claim-witness-authorization-domain",
-                    None,
-                ));
-            }
-            if obligation.status == "runtime-required"
-                || transaction_obligation_has_checked_subcondition(obligation, "timepoint-check")
-            {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-time-context",
-                    claim_time_status,
-                    (claim_time_status == "runtime-required")
-                        .then_some("claim lowering has no checked source timepoint predicate for this receipt"),
-                    (claim_time_status == "runtime-required").then_some("time-context-predicate-gap"),
-                    "Header",
-                    binding,
-                    Some("timepoint"),
-                    "claim-time-timepoint-u64",
-                    Some(8),
-                ));
-            }
-            if obligation.detail.contains("source-predicate=runtime-required") {
-                requirements.push(transaction_runtime_input_requirement(
-                    obligation,
-                    "claim-source-predicate",
-                    "runtime-required",
-                    Some("claim source-level predicates are not fully verifier-covered"),
-                    Some("claim-source-predicate-gap"),
-                    "Transaction",
-                    binding,
-                    Some("source-predicate"),
-                    "claim-source-predicate-cfg",
-                    None,
-                ));
-            }
-        } else if let Some(binding) = obligation.feature.strip_prefix("settle-finalization:") {
-            let settle_final_state_status = if transaction_obligation_has_checked_subcondition(obligation, "settle-final-state") {
-                "checked-runtime"
-            } else {
-                "runtime-required"
-            };
-            let settle_output_status =
-                if checked_transaction_invariants.contains(&format!("{}:settle-output:{}", obligation.scope, binding)) {
-                    "checked-runtime"
-                } else {
-                    "runtime-required"
-                };
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-final-state-context",
-                settle_final_state_status,
-                (settle_final_state_status == "runtime-required")
-                    .then_some("settle lowering does not encode final-state transition policy"),
-                (settle_final_state_status == "runtime-required").then_some("finalization-policy-gap"),
-                "Transaction",
-                binding,
-                Some("pending-to-final-state"),
-                "settle-finalization-state-context",
-                None,
-            ));
-            requirements.push(transaction_runtime_input_requirement(
-                obligation,
-                "settle-output-admission",
-                settle_output_status,
-                (settle_output_status == "runtime-required").then_some("settle-created output relation is not fully verifier-covered"),
-                (settle_output_status == "runtime-required").then_some("settle-output-admission-gap"),
-                "Transaction",
-                binding,
-                Some("grouped-output-admission"),
-                "settle-finalization-output-admission",
-                None,
-            ));
         } else if let Some(binding) = obligation.feature.strip_prefix("resource-conservation:") {
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
@@ -7069,305 +7245,8 @@ fn transaction_runtime_input_requirement(
     }
 }
 
-fn transaction_condition_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-    checked: bool,
-) -> String {
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    let input_summary = transaction_condition_input_summary(body, type_layouts, operation, binding, type_name);
-    match (operation, checked) {
-        ("settle", true) => format!(
-            "Compiler-emitted runtime verifier proves '{}' lifecycle final-state invariants and admits the settle-created output{}; settle-output-admission=checked-runtime; runtime inputs: {}",
-            type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, type_name),
-            input_summary
-        ),
-        ("settle", false) => format!(
-            "Runtime verifier must prove '{}' finalization invariants and reject invalid pending-to-final state transitions{}; runtime inputs: {}",
-            type_name,
-            settle_final_state_detail(body, type_layouts, availability, lifecycle_states, type_name),
-            input_summary
-        ),
-        _ => format!("Runtime verifier must prove '{}' transaction conditions; runtime inputs: {}", type_name, input_summary),
-    }
-}
-
-fn transaction_claim_condition_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    name: &str,
-    operation: &str,
-    operand: &ir::IrOperand,
-    type_name: &str,
-    checked: bool,
-) -> String {
-    let binding = operand_var_name(operand).unwrap_or(type_name);
-    let input_summary = transaction_condition_input_summary(body, type_layouts, operation, binding, type_name);
-    let witness_detail = claim_witness_authorization_domain_detail(body, type_layouts, operation, binding, type_name);
-    if checked {
-        let signer_field = metadata_claim_signer_pubkey_hash_field(type_name, type_layouts);
-        let lock_hash_field = metadata_claim_auth_lock_hash_field(type_name, type_layouts);
-        let mut checked_parts = Vec::new();
-        if signer_field.is_some() {
-            checked_parts.extend([
-                "claim-witness-format=checked-runtime".to_string(),
-                "claim-authorization-domain=checked-runtime".to_string(),
-                "claim-witness-signature=checked-runtime".to_string(),
-                "claim-signer-key-binding=checked-runtime".to_string(),
-            ]);
-        } else if lock_hash_field.is_some() {
-            checked_parts.extend([
-                "claim-input-lock-hash=checked-runtime".to_string(),
-                "claim-lock-hash-field-binding=checked-runtime".to_string(),
-            ]);
-        }
-        let source_invariant_count = body_assert_invariant_count(body);
-        let checked_guards = receipt_claim_flow_checked_condition_guards(name, type_name, source_invariant_count, body);
-        for guard in &checked_guards {
-            checked_parts.push(format!("{}=checked-runtime", guard));
-        }
-        if let Some(signer_field) = signer_field {
-            return format!(
-                "Compiler-emitted runtime verifier checks '{}' claim witness format, authorization-domain separation, secp256k1 signature verification, and signer-key binding via '{}.{}'; {}; claimed output relation is tracked by claim-output obligations; runtime inputs: {}",
-                type_name,
-                type_name,
-                signer_field,
-                checked_parts.join("; "),
-                input_summary
-            );
-        }
-        if let Some(lock_hash_field) = lock_hash_field {
-            return format!(
-                "Compiler-emitted runtime verifier checks '{}' claim authorization by binding Input lock_hash to '{}.{}'; {}; claimed output relation is tracked by claim-output obligations; runtime inputs: {}",
-                type_name,
-                type_name,
-                lock_hash_field,
-                checked_parts.join("; "),
-                input_summary
-            );
-        }
-    }
-    format!(
-        "Runtime verifier must bind '{}' claim conditions to witness/signature/time context and verify the claimed output relation{}{}{}; runtime inputs: {}",
-        type_name,
-        claim_unchecked_source_predicate_detail(name, type_name, body),
-        claim_runtime_gap_detail(name, body, type_layouts, cell_type_kinds, operation, binding),
-        witness_detail,
-        input_summary
-    )
-}
-
-fn claim_runtime_gap_detail(
-    name: &str,
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    operation: &str,
-    binding: &str,
-) -> &'static str {
-    if body.consume_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && (is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts)
-                || is_claim_input_lock_hash_binding_check_target(name, pattern, cell_type_kinds, type_layouts))
-    }) || revoke_admin_authorization_is_checked(name, "VestingGrant", body, type_layouts)
-    {
-        ""
-    } else {
-        "; claim witness binding is not verifier-covered"
-    }
-}
-
-fn claim_unchecked_source_predicate_detail(name: &str, type_name: &str, body: &ir::IrBody) -> &'static str {
-    if claim_body_has_source_predicates(body) && !claim_source_predicates_are_checked(name, type_name, body) {
-        "; source-predicate=runtime-required"
-    } else {
-        ""
-    }
-}
-
-fn settle_final_state_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    type_name: &str,
-) -> String {
-    if settle_final_state_is_checked(body, type_layouts, availability, lifecycle_states, type_name) {
-        "; settle-final-state=checked-runtime; settle-state-policy=lifecycle-final-state".to_string()
-    } else {
-        String::new()
-    }
-}
-
-fn claim_witness_authorization_domain_detail(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-) -> String {
-    if !body.consume_set.iter().any(|pattern| pattern.operation == operation && pattern.binding == binding) {
-        return String::new();
-    }
-    if metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_none()
-        && metadata_claim_auth_lock_hash_field(type_name, type_layouts).is_some()
-    {
-        return "; claim-input-lock-hash=checked-runtime; claim-lock-hash-field-binding=checked-runtime".to_string();
-    }
-    let mut detail = "; claim-witness-format=checked-runtime; claim-authorization-domain=checked-runtime".to_string();
-    if metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some() {
-        detail.push_str("; claim-witness-signature=checked-runtime; claim-signer-key-binding=checked-runtime");
-    }
-    detail
-}
-
-fn transaction_condition_input_summary(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-) -> String {
-    let Some((input_index, _)) =
-        body.consume_set.iter().enumerate().find(|(_, pattern)| pattern.operation == operation && pattern.binding == binding)
-    else {
-        return "unresolved consumed input binding".to_string();
-    };
-    let mut field_requirements = type_layouts
-        .get(type_name)
-        .map(|fields| {
-            fields
-                .iter()
-                .filter_map(|(field, layout)| {
-                    let (abi, width) = transaction_field_requirement_abi(layout)?;
-                    Some((layout.offset, format!("Input#{}:{}.{}={}[{}]", input_index, binding, field, abi, width)))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    field_requirements.sort_by_key(|(offset, requirement)| (*offset, requirement.clone()));
-
-    if field_requirements.is_empty() {
-        format!("Input#{}:{}=input-cell[untyped]", input_index, binding)
-    } else {
-        field_requirements.into_iter().map(|(_, requirement)| requirement).collect::<Vec<_>>().join(", ")
-    }
-}
-
-fn transaction_field_requirement_abi(layout: &MetadataFieldLayout) -> Option<(String, usize)> {
-    if let Some(width) = metadata_layout_fixed_scalar_width(layout) {
-        let scalar = match width {
-            1 => "u8",
-            2 => "u16",
-            4 => "u32",
-            8 => "u64",
-            16 => "u128",
-            _ => return None,
-        };
-        return Some((format!("input-cell-field-{}", scalar), width));
-    }
-    metadata_layout_fixed_byte_width(layout).map(|width| (format!("input-cell-field-bytes-{}", width), width))
-}
-
-fn transaction_output_obligation(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    operation: &str,
-    binding: &str,
-    type_name: &str,
-    checked_detail: String,
-    runtime_detail: String,
-) -> TransactionResourceObligation {
-    let output_covered = body.create_set.iter().any(|pattern| {
-        pattern.operation == operation
-            && pattern.binding == binding
-            && pattern.ty == type_name
-            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
-    });
-    TransactionResourceObligation {
-        category: "transaction-invariant",
-        feature: format!("{}-output:{}", operation, type_name),
-        status: if output_covered { "checked-runtime" } else { "runtime-required" },
-        detail: if output_covered { checked_detail } else { runtime_detail },
-    }
-}
-
-fn transfer_lock_rebinding_is_checked(body: &ir::IrBody, availability: &MetadataPreludeAvailability, type_name: &str) -> bool {
-    body.create_set.iter().any(|pattern| {
-        pattern.operation == "transfer"
-            && pattern.ty == type_name
-            && pattern.lock.as_ref().is_some_and(|_| metadata_can_verify_output_lock(pattern, availability))
-    })
-}
-
-fn transfer_output_relation_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    output_index: usize,
-    type_name: &str,
-) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
-        pattern.operation == "transfer"
-            && pattern.ty == type_name
-            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
-            && metadata_can_verify_output_lock(pattern, availability)
-    })
-}
-
 fn destroy_group_output_absence_scan_is_checked(body: &ir::IrBody, _type_name: &str, binding: &str) -> bool {
     body.consume_set.iter().any(|pattern| pattern.operation == "destroy" && pattern.binding == binding && pattern.type_hash.is_some())
-}
-
-fn settle_final_state_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    type_name: &str,
-) -> bool {
-    body.create_set.iter().any(|pattern| {
-        pattern.operation == "settle"
-            && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states)
-    })
-}
-
-fn settle_finalization_is_checked(
-    body: &ir::IrBody,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-    output_index: usize,
-    type_name: &str,
-) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
-        pattern.operation == "settle"
-            && pattern.ty == type_name
-            && metadata_can_verify_settle_final_state(pattern, type_layouts, availability, lifecycle_states)
-    })
-}
-
-fn metadata_can_verify_settle_final_state(
-    pattern: &ir::CreatePattern,
-    type_layouts: &MetadataTypeLayouts,
-    availability: &MetadataPreludeAvailability,
-    lifecycle_states: &HashMap<String, Vec<String>>,
-) -> bool {
-    lifecycle_states.get(&pattern.ty).is_some_and(|states| states.len() >= 2)
-        && type_layouts
-            .get(&pattern.ty)
-            .is_some_and(|layouts| layouts.get("state").and_then(metadata_layout_fixed_scalar_width).is_some())
-        && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
 
 fn body_mutable_cell_state_obligations(
@@ -7392,7 +7271,7 @@ fn body_mutable_cell_state_obligations(
                 feature: format!("shared-mutation:{}", type_name),
                 status: obligation_status,
                 detail: format!(
-                    "Runtime verifier must bind mutable shared parameter '{}' to the consumed '{}' cell and replacement output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes scheduler contention and mutate_set field summary ({})",
+                    "Runtime verifier must bind mutable shared parameter '{}' to the consumed '{}' cell and proposed output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes scheduler contention and mutate_set field summary ({})",
                     param.name, type_name, mutated_fields
                 ),
             }),
@@ -7401,7 +7280,7 @@ fn body_mutable_cell_state_obligations(
                 feature: format!("mutable-cell:{}", type_name),
                 status: obligation_status,
                 detail: format!(
-                    "Runtime verifier must bind mutable cell parameter '{}' to the consumed '{}' cell and replacement output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes mutate_set field summary ({})",
+                    "Runtime verifier must bind mutable cell parameter '{}' to the consumed '{}' cell and proposed output, preserve type/lock identity, and prove the allowed field transition; current lowering exposes mutate_set field summary ({})",
                     param.name, type_name, mutated_fields
                 ),
             }),
@@ -7748,7 +7627,7 @@ fn pool_checked_invariant_guard_names(name: &str, operation: &str, source_invari
     }
 
     let named_guards = match (operation, name) {
-        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound"][..],
+        ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound", "token-pair-identity-distinct"][..],
         ("mutation-invariants", "swap_a_for_b") => &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
         ("mutation-invariants", "add_liquidity") => &["deposit-token-a-match", "deposit-token-b-match"][..],
         ("mutation-invariants", "remove_liquidity") => &["lp-receipt-pool-id-match"][..],
@@ -8257,7 +8136,84 @@ fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrB
     if name != "seed_pool" || pool_pattern.ty != "Pool" {
         return false;
     }
-    consumed_input_pattern(body, "token_a").is_some() && consumed_input_pattern(body, "token_b").is_some()
+    consumed_input_pattern(body, "token_a").is_some()
+        && consumed_input_pattern(body, "token_b").is_some()
+        && body_has_asserted_type_hash_inequality(body, "token_a", "token_b")
+}
+
+fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str, right_binding: &str) -> bool {
+    let assertion_failed_code = runtime_errors::CellScriptRuntimeError::AssertionFailed.code();
+    let assert_fail_blocks = body
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
+            )
+        })
+        .map(|block| block.id)
+        .collect::<HashSet<_>>();
+    let mut type_hash_sources = HashMap::<usize, String>::new();
+    let mut named_type_hash_sources = HashMap::<String, String>::new();
+    let mut checked_inequality_vars = HashSet::<usize>::new();
+
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::TypeHash { dest, operand: ir::IrOperand::Var(var) } => {
+                    if var.name == left_binding || var.name == right_binding {
+                        type_hash_sources.insert(dest.id, var.name.clone());
+                    }
+                }
+                ir::IrInstruction::Move { dest, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(source) = type_hash_source(src, &type_hash_sources) {
+                        named_type_hash_sources.insert(name.clone(), source);
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } => {
+                    if let Some(source) = named_type_hash_sources.get(name).cloned() {
+                        type_hash_sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Ne, left, right } => {
+                    let Some(left_source) = type_hash_source(left, &type_hash_sources) else {
+                        continue;
+                    };
+                    let Some(right_source) = type_hash_source(right, &type_hash_sources) else {
+                        continue;
+                    };
+                    if type_hash_sources_are_pair(&left_source, &right_source, left_binding, right_binding) {
+                        checked_inequality_vars.insert(dest.id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    body.blocks.iter().any(|block| {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            return false;
+        };
+        checked_inequality_vars.contains(&cond.id) && assert_fail_blocks.contains(else_block)
+    })
+}
+
+fn type_hash_source(operand: &ir::IrOperand, type_hash_sources: &HashMap<usize, String>) -> Option<String> {
+    let ir::IrOperand::Var(var) = operand else {
+        return None;
+    };
+    type_hash_sources.get(&var.id).cloned()
+}
+
+fn type_hash_sources_are_pair(left: &str, right: &str, left_binding: &str, right_binding: &str) -> bool {
+    (left == left_binding && right == right_binding) || (left == right_binding && right == left_binding)
 }
 
 fn pool_seed_lp_supply_invariant_is_checked(
@@ -9554,7 +9510,7 @@ fn pool_invariant_families(
 
 fn pool_checked_protocol_component_source(component: &str) -> &'static str {
     match component {
-        "token-pair-identity-admission" => "input-type-id-abi+load-cell-by-field",
+        "token-pair-identity-admission" => "assert-invariant-cfg+input-type-id-abi",
         "token-pair-symbol-admission" => "assert-invariant-cfg+create-output-symbol-fields",
         "lp-supply-invariant" => "create-output-field-coupling",
         "lp-supply-consistency" => "mutate-preserved-field-equality",
@@ -9671,7 +9627,7 @@ fn pool_primitive_obligation_detail(primitive: &PoolPrimitiveMetadata) -> String
             primitive.ty, unresolved_detail
         ),
         "mutation-invariants" => format!(
-            "Generic shared mutation checks for '{}' prove replacement identity and source-level field transitions; {}",
+            "Generic shared mutation checks for '{}' prove input/output identity and source-level field transitions; {}",
             primitive.ty, unresolved_detail
         ),
         "composition" => format!(
@@ -9685,6 +9641,7 @@ fn pool_primitive_obligation_detail(primitive: &PoolPrimitiveMetadata) -> String
 }
 
 fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
+    let assertion_failed_code = runtime_errors::CellScriptRuntimeError::AssertionFailed.code();
     body.blocks
         .iter()
         .filter(|block| {
@@ -9692,7 +9649,10 @@ fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
                 return false;
             };
             body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| {
-                matches!(candidate.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(7)))))
+                matches!(
+                    candidate.terminator,
+                    ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
+                )
             })
         })
         .count()
@@ -9750,20 +9710,28 @@ fn push_verifier_obligation(
     }
 }
 
-struct LifecycleTransitionCheck {
+struct StateTransitionCheck {
     feature: String,
+    field: String,
     status: String,
     detail: String,
 }
 
-fn body_lifecycle_transition_checks(
+fn body_state_transition_checks(
     body: &ir::IrBody,
-    lifecycle_states: &HashMap<String, Vec<String>>,
+    flow_states: &HashMap<String, Vec<String>>,
+    flow_state_fields: &HashMap<String, String>,
     type_layouts: &MetadataTypeLayouts,
     params: &[ir::IrParam],
     pure_const_returns: &HashMap<String, ir::IrConst>,
-) -> Vec<LifecycleTransitionCheck> {
-    let consumed_types = body_consumed_named_types(body);
+) -> Vec<StateTransitionCheck> {
+    let mut consumed_types = body_consumed_named_types(body);
+    for pattern in &body.consume_set {
+        if let Some(type_name) = params.iter().find(|param| param.name == pattern.binding).and_then(|param| named_type_name(&param.ty))
+        {
+            consumed_types.insert(type_name.to_string());
+        }
+    }
     let param_schema_vars = schema_pointer_var_ids(body, params);
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
     let mut checks = Vec::new();
@@ -9772,21 +9740,24 @@ fn body_lifecycle_transition_checks(
         if pattern.operation == "settle" {
             continue;
         }
-        if !lifecycle_states.contains_key(&pattern.ty) || !consumed_types.contains(&pattern.ty) {
+        if !flow_states.contains_key(&pattern.ty) || !consumed_types.contains(&pattern.ty) {
             continue;
         }
+        let state_field = flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| flow::FLOW_STATE_FIELD_NAME.to_string());
         if !seen.insert(pattern.ty.clone()) {
             continue;
         }
-        if metadata_can_verify_lifecycle_transition(pattern, type_layouts, &availability) {
-            checks.push(LifecycleTransitionCheck {
+        if metadata_can_verify_state_transition(pattern, type_layouts, flow_state_fields, &availability) {
+            checks.push(StateTransitionCheck {
                 feature: pattern.ty.clone(),
+                field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime old_state + 1 and old/new state range checks, and the lifecycle output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
             });
         } else {
-            checks.push(LifecycleTransitionCheck {
+            checks.push(StateTransitionCheck {
                 feature: pattern.ty.clone(),
+                field: state_field,
                 status: "checked-partial".to_string(),
                 detail: "Compiler emits declaration/static checks, but this transition still lacks a complete fixed-field runtime verifier path".to_string(),
             });
@@ -9795,9 +9766,10 @@ fn body_lifecycle_transition_checks(
     checks
 }
 
-fn metadata_can_verify_lifecycle_transition(
+fn metadata_can_verify_state_transition(
     pattern: &ir::CreatePattern,
     type_layouts: &MetadataTypeLayouts,
+    flow_state_fields: &HashMap<String, String>,
     availability: &MetadataPreludeAvailability,
 ) -> bool {
     let Some(layouts) = type_layouts.get(&pattern.ty) else {
@@ -9806,11 +9778,15 @@ fn metadata_can_verify_lifecycle_transition(
     if metadata_type_encoded_size_from_layouts(layouts).is_none() {
         return false;
     }
-    let Some(state_layout) = layouts.get("state") else {
+    let state_field = flow_state_fields.get(&pattern.ty).map_or(flow::FLOW_STATE_FIELD_NAME, String::as_str);
+    let Some(state_layout) = layouts.get(state_field) else {
         return false;
     };
     if metadata_layout_fixed_scalar_width(state_layout).is_none() {
         return false;
+    }
+    if pattern.operation == "output" {
+        return true;
     }
     metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
 }
@@ -9827,7 +9803,8 @@ fn body_consumed_named_types(body: &ir::IrBody) -> BTreeSet<String> {
                 ir::IrInstruction::Consume { operand }
                 | ir::IrInstruction::Transfer { operand, .. }
                 | ir::IrInstruction::Destroy { operand, .. }
-                | ir::IrInstruction::Settle { operand, .. } => Some(operand),
+                | ir::IrInstruction::Settle { operand, .. }
+                | ir::IrInstruction::ReplaceUnique { operand, .. } => Some(operand),
                 ir::IrInstruction::Claim { receipt, .. } => Some(receipt),
                 _ => None,
             };
@@ -9930,13 +9907,18 @@ fn body_fail_closed_runtime_features(
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
     let prelude_availability = metadata_prelude_availability(body, param_schema_vars, type_layouts, params, pure_const_returns);
-    if body.create_set.iter().any(|pattern| !metadata_can_verify_create_output_fields(pattern, type_layouts, &prelude_availability)) {
+    if body.create_set.iter().any(|pattern| {
+        pattern.operation != "output" && !metadata_can_verify_create_output_fields(pattern, type_layouts, &prelude_availability)
+    }) {
         features.insert("output-verification-incomplete".to_string());
     }
-    if body.create_set.iter().any(|pattern| !metadata_can_verify_output_lock(pattern, &prelude_availability)) {
+    if body
+        .create_set
+        .iter()
+        .any(|pattern| pattern.operation != "output" && !metadata_can_verify_output_lock(pattern, &prelude_availability))
+    {
         features.insert("output-lock-verification-incomplete".to_string());
     }
-    let mut output_index = 0usize;
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
@@ -10139,27 +10121,17 @@ fn body_fail_closed_runtime_features(
                         features.insert("non-cell-consume".to_string());
                     }
                 }
-                ir::IrInstruction::Create { .. } => {
-                    output_index += 1;
-                }
+                ir::IrInstruction::Create { .. } => {}
                 ir::IrInstruction::CreateUnique { dest, pattern, identity } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "create_unique",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                    if !metadata_output_operation_is_verifier_covered(body, "create_unique", dest, type_layouts, &prelude_availability)
+                        || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
                     {
                         features.insert("create-unique-expression".to_string());
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::ReplaceUnique { dest, pattern, identity, .. } => {
                     if !metadata_output_operation_is_verifier_covered(
                         body,
-                        output_index,
                         "replace_unique",
                         dest,
                         type_layouts,
@@ -10168,20 +10140,11 @@ fn body_fail_closed_runtime_features(
                     {
                         features.insert("replace-unique-expression".to_string());
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::Transfer { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "transfer",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
+                    if !metadata_output_operation_is_verifier_covered(body, "transfer", dest, type_layouts, &prelude_availability) {
                         features.insert("transfer-expression".to_string());
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::Destroy { operand, .. } => {
                     if !is_executable_destroy(operand) {
@@ -10189,30 +10152,14 @@ fn body_fail_closed_runtime_features(
                     }
                 }
                 ir::IrInstruction::Claim { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "claim",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
+                    if !metadata_output_operation_is_verifier_covered(body, "claim", dest, type_layouts, &prelude_availability) {
                         features.insert("claim-expression".to_string());
                     }
-                    output_index += 1;
                 }
                 ir::IrInstruction::Settle { dest, .. } => {
-                    if !metadata_output_operation_is_verifier_covered(
-                        body,
-                        output_index,
-                        "settle",
-                        dest,
-                        type_layouts,
-                        &prelude_availability,
-                    ) {
+                    if !metadata_output_operation_is_verifier_covered(body, "settle", dest, type_layouts, &prelude_availability) {
                         features.insert("settle-expression".to_string());
                     }
-                    output_index += 1;
                 }
                 _ => {}
             }
@@ -10228,15 +10175,18 @@ fn body_fail_closed_runtime_features(
 
 fn metadata_output_operation_is_verifier_covered(
     body: &ir::IrBody,
-    output_index: usize,
     operation: &str,
     dest: &ir::IrVar,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
 ) -> bool {
-    body.create_set.get(output_index).is_some_and(|pattern| {
+    let Some(dest_ty) = named_type_name(&dest.ty) else {
+        return false;
+    };
+    body.create_set.iter().any(|pattern| {
         pattern.operation == operation
-            && named_type_name(&dest.ty).is_some_and(|type_name| type_name == pattern.ty.as_str())
+            && pattern.binding == dest.name
+            && pattern.ty == dest_ty
             && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
             && metadata_can_verify_output_lock(pattern, availability)
     })
@@ -11402,10 +11352,10 @@ fn metadata_fixed_scalar_const_value(value: &ir::IrConst) -> Option<u64> {
 }
 
 fn body_ckb_runtime_features(
-    name: &str,
+    _name: &str,
     body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
+    _cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    _type_layouts: &MetadataTypeLayouts,
 ) -> Vec<String> {
     let mut features = BTreeSet::new();
     if !body.consume_set.is_empty() {
@@ -11433,13 +11383,6 @@ fn body_ckb_runtime_features(
     if !body.mutate_set.is_empty() {
         features.insert("mutate-input-cell".to_string());
         features.insert("verify-mutate-output-cell".to_string());
-    }
-    if body_has_claim_witness_authorization_domain_check(name, body, cell_type_kinds, type_layouts) {
-        features.insert("load-claim-witness".to_string());
-        features.insert("load-claim-ecdsa-signature-hash".to_string());
-    }
-    if body_has_claim_witness_signature_verification_check(name, body, cell_type_kinds, type_layouts) {
-        features.insert("verify-claim-secp256k1-signature".to_string());
     }
     for block in &body.blocks {
         for instruction in &block.instructions {
@@ -11493,6 +11436,9 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_chain" => {
                     features.insert("profile-hash-chain".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
+                    features.insert("ckb-blake2b".to_string());
                 }
                 _ => {}
             }
@@ -11594,102 +11540,6 @@ fn is_executable_destroy(operand: &ir::IrOperand) -> bool {
     operand_named_type_name(operand).is_some()
 }
 
-fn body_has_claim_witness_authorization_domain_check(
-    name: &str,
-    body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    body.consume_set
-        .iter()
-        .any(|pattern| is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts))
-}
-
-fn body_has_claim_witness_signature_verification_check(
-    name: &str,
-    body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    body.consume_set
-        .iter()
-        .any(|pattern| is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts))
-}
-
-fn is_claim_witness_authorization_domain_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if pattern.operation == "claim" {
-        return true;
-    }
-    if pattern.operation != "consume" || !name.starts_with("claim") {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some()
-}
-
-fn is_claim_witness_signature_verification_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if !is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts) {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_signer_pubkey_hash_field(type_name, type_layouts).is_some()
-}
-
-fn is_claim_input_lock_hash_binding_check_target(
-    name: &str,
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
-) -> bool {
-    if pattern.operation != "consume" || !name.starts_with("claim") {
-        return false;
-    }
-    let Some(type_name) = cell_pattern_receipt_type_name(pattern, cell_type_kinds) else {
-        return false;
-    };
-    metadata_claim_auth_lock_hash_field(type_name, type_layouts).is_some()
-}
-
-fn cell_pattern_receipt_type_name<'a>(
-    pattern: &ir::CellPattern,
-    cell_type_kinds: &'a HashMap<String, ir::IrTypeKind>,
-) -> Option<&'a str> {
-    let type_hash = pattern.type_hash?;
-    cell_type_kinds.iter().find_map(|(type_name, kind)| {
-        (*kind == ir::IrTypeKind::Receipt && ir::type_hash_for_name(type_name) == type_hash).then_some(type_name.as_str())
-    })
-}
-
-fn metadata_claim_signer_pubkey_hash_field<'a>(type_name: &str, type_layouts: &'a MetadataTypeLayouts) -> Option<&'a str> {
-    let fields = type_layouts.get(type_name)?;
-    CLAIM_SIGNER_PUBKEY_HASH_FIELDS.iter().find_map(|field| {
-        let layout = fields.get(*field)?;
-        (metadata_layout_fixed_byte_width(layout) == Some(20)).then_some(*field)
-    })
-}
-
-fn metadata_claim_auth_lock_hash_field<'a>(type_name: &str, type_layouts: &'a MetadataTypeLayouts) -> Option<&'a str> {
-    let fields = type_layouts.get(type_name)?;
-    CLAIM_AUTH_LOCK_HASH_FIELDS.iter().find_map(|field| {
-        let layout = fields.get(*field)?;
-        (metadata_layout_fixed_byte_width(layout) == Some(32)).then_some(*field)
-    })
-}
-
 fn schema_pointer_var_ids(body: &ir::IrBody, params: &[ir::IrParam]) -> BTreeSet<usize> {
     let mut vars =
         params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
@@ -11713,7 +11563,8 @@ fn consumed_schema_var_id(instruction: &ir::IrInstruction) -> Option<usize> {
         ir::IrInstruction::Consume { operand }
         | ir::IrInstruction::Transfer { operand, .. }
         | ir::IrInstruction::Destroy { operand, .. }
-        | ir::IrInstruction::Settle { operand, .. } => operand,
+        | ir::IrInstruction::Settle { operand, .. }
+        | ir::IrInstruction::ReplaceUnique { operand, .. } => operand,
         ir::IrInstruction::Claim { receipt, .. } => receipt,
         _ => return None,
     };
@@ -11724,10 +11575,10 @@ fn consumed_schema_var_id(instruction: &ir::IrInstruction) -> Option<usize> {
 }
 
 fn body_ckb_runtime_accesses(
-    name: &str,
+    _name: &str,
     body: &ir::IrBody,
-    cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
-    type_layouts: &MetadataTypeLayouts,
+    _cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    _type_layouts: &MetadataTypeLayouts,
 ) -> Vec<CkbRuntimeAccessMetadata> {
     let mut accesses = Vec::new();
     for (index, pattern) in body.consume_set.iter().enumerate() {
@@ -11738,31 +11589,6 @@ fn body_ckb_runtime_accesses(
             index,
             binding: pattern.binding.clone(),
         });
-        if is_claim_witness_authorization_domain_check_target(name, pattern, cell_type_kinds, type_layouts) {
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-witness".to_string(),
-                syscall: "LOAD_WITNESS".to_string(),
-                source: "GroupInput".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-authorization-domain".to_string(),
-                syscall: "LOAD_ECDSA_SIGNATURE_HASH".to_string(),
-                source: "GroupInput".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-        }
-        if is_claim_witness_signature_verification_check_target(name, pattern, cell_type_kinds, type_layouts) {
-            accesses.push(CkbRuntimeAccessMetadata {
-                operation: "claim-signature".to_string(),
-                syscall: "SECP256K1_VERIFY".to_string(),
-                source: "Witness".to_string(),
-                index,
-                binding: pattern.binding.clone(),
-            });
-        }
     }
     for (index, pattern) in body.read_refs.iter().enumerate() {
         accesses.push(CkbRuntimeAccessMetadata {
@@ -11947,6 +11773,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_occupied_capacity" => Some(("occupied-capacity", "CAPACITY_POLICY", "Output", "occupied_capacity")),
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
+        "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
         _ => None,
     }
 }
@@ -12028,12 +11855,14 @@ fn scheduler_access_is_cell_state_access(access: &CkbRuntimeAccessMetadata) -> b
     matches!(access.source.as_str(), "Input" | "CellDep" | "Output")
         && matches!(
             access.operation.as_str(),
-            "consume"
+            "input"
+                | "consume"
                 | "transfer"
                 | "destroy"
                 | "claim"
                 | "settle"
                 | "read_ref"
+                | "output"
                 | "create"
                 | "create_unique"
                 | "replace_unique"
@@ -12088,22 +11917,40 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
     layouts
 }
 
-fn metadata_lifecycle_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> {
+fn metadata_flow_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> {
     let mut states = HashMap::new();
     for type_def in &ir.external_type_defs {
-        if let Some(lifecycle_states) = &type_def.lifecycle_states {
-            states.insert(type_def.name.clone(), lifecycle_states.clone());
+        if let Some(flow_states) = &type_def.flow_states {
+            states.insert(type_def.name.clone(), flow_states.clone());
         }
     }
     for item in &ir.items {
         let ir::IrItem::TypeDef(type_def) = item else {
             continue;
         };
-        if let Some(lifecycle_states) = &type_def.lifecycle_states {
-            states.insert(type_def.name.clone(), lifecycle_states.clone());
+        if let Some(flow_states) = &type_def.flow_states {
+            states.insert(type_def.name.clone(), flow_states.clone());
         }
     }
     states
+}
+
+fn metadata_flow_state_fields(ir: &ir::IrModule) -> HashMap<String, String> {
+    let mut fields = HashMap::new();
+    for type_def in &ir.external_type_defs {
+        if let Some(state_field) = &type_def.flow_state_field {
+            fields.insert(type_def.name.clone(), state_field.clone());
+        }
+    }
+    for item in &ir.items {
+        let ir::IrItem::TypeDef(type_def) = item else {
+            continue;
+        };
+        if let Some(state_field) = &type_def.flow_state_field {
+            fields.insert(type_def.name.clone(), state_field.clone());
+        }
+    }
+    fields
 }
 
 fn metadata_cell_type_kinds(ir: &ir::IrModule) -> HashMap<String, ir::IrTypeKind> {
@@ -12143,7 +11990,7 @@ fn type_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
     target_profile: TargetProfile,
 ) -> TypeMetadata {
-    let lifecycle_states = type_def.lifecycle_states.clone().unwrap_or_default();
+    let flow_states = type_def.flow_states.clone().unwrap_or_default();
     let type_id = type_def.type_id.clone();
     let type_id_hash = type_id.as_ref().map(|value| hex_encode(&ckb_blake2b256(value.as_bytes())));
     let ckb_type_id = ckb_type_id_metadata(type_def, target_profile);
@@ -12163,12 +12010,13 @@ fn type_metadata(
         kind: format!("{:?}", type_def.kind),
         capabilities: type_def.capabilities.iter().map(metadata_capability_name).collect(),
         claim_output: type_def.claim_output.as_ref().map(ir_type_to_string),
-        lifecycle_transitions: if type_def.lifecycle_rules.is_empty() {
-            lifecycle_transition_metadata(&lifecycle_states)
+        flow_state_field: type_def.flow_state_field.clone(),
+        flow_transitions: if type_def.flow_rules.is_empty() {
+            flow_transition_metadata(&flow_states)
         } else {
-            type_def.lifecycle_rules.iter().map(lifecycle_rule_metadata).collect()
+            type_def.flow_rules.iter().map(flow_rule_metadata).collect()
         },
-        lifecycle_states,
+        flow_states,
         encoded_size: type_encoded_size(type_def, type_defs),
         fields: type_def.fields.iter().map(|field| field_metadata(field, type_defs)).collect(),
         molecule_schema: type_molecule_schema_metadata(type_def, type_defs),
@@ -12623,11 +12471,11 @@ fn metadata_identity_policy(policy: &ir::IrIdentityPolicy) -> Option<String> {
     }
 }
 
-fn lifecycle_transition_metadata(states: &[String]) -> Vec<LifecycleTransitionMetadata> {
+fn flow_transition_metadata(states: &[String]) -> Vec<FlowTransitionMetadata> {
     states
         .windows(2)
         .enumerate()
-        .map(|(index, window)| LifecycleTransitionMetadata {
+        .map(|(index, window)| FlowTransitionMetadata {
             from: window[0].clone(),
             to: window[1].clone(),
             from_index: index,
@@ -12636,8 +12484,8 @@ fn lifecycle_transition_metadata(states: &[String]) -> Vec<LifecycleTransitionMe
         .collect()
 }
 
-fn lifecycle_rule_metadata(rule: &ir::IrLifecycleRule) -> LifecycleTransitionMetadata {
-    LifecycleTransitionMetadata { from: rule.from.clone(), to: rule.to.clone(), from_index: rule.from_index, to_index: rule.to_index }
+fn flow_rule_metadata(rule: &ir::IrFlowRule) -> FlowTransitionMetadata {
+    FlowTransitionMetadata { from: rule.from.clone(), to: rule.to.clone(), from_index: rule.from_index, to_index: rule.to_index }
 }
 
 fn field_metadata(field: &ir::IrField, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> FieldMetadata {
@@ -12975,7 +12823,7 @@ fn param_metadata(
         ty: ir_type_to_string(&param.ty),
         is_mut: param.is_mut,
         is_ref: param.is_ref,
-        source: param_source_metadata(param.source).to_string(),
+        source: if param.is_read_ref { "read" } else { param_source_metadata(param.source) }.to_string(),
         protected_spend_surface: param.source == ast::ParamSource::Protected,
         witness_data_source: param.source == ast::ParamSource::Witness,
         lock_args_data_source: param.source == ast::ParamSource::LockArgs,
@@ -12994,6 +12842,8 @@ fn param_metadata(
 fn param_source_metadata(source: ast::ParamSource) -> &'static str {
     match source {
         ast::ParamSource::Default => "default",
+        ast::ParamSource::Input => "input",
+        ast::ParamSource::Output => "output",
         ast::ParamSource::Protected => "protected",
         ast::ParamSource::Witness => "witness",
         ast::ParamSource::LockArgs => "lock_args",
@@ -13032,7 +12882,12 @@ fn ckb_output_data_binding_metadata(
     output_index: usize,
     target_profile: TargetProfile,
 ) -> Option<CkbOutputDataBindingMetadata> {
-    if target_profile != TargetProfile::Ckb || !matches!(pattern.operation.as_str(), "create" | "create_unique" | "replace_unique") {
+    if target_profile != TargetProfile::Ckb
+        || !matches!(
+            pattern.operation.as_str(),
+            "create" | "output" | "create_unique" | "replace_unique" | "transfer" | "claim" | "settle"
+        )
+    {
         return None;
     }
 
@@ -13052,7 +12907,7 @@ fn ckb_type_id_output_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
     target_profile: TargetProfile,
 ) -> Option<CkbTypeIdOutputMetadata> {
-    if target_profile != TargetProfile::Ckb || !matches!(pattern.operation.as_str(), "create" | "create_unique") {
+    if target_profile != TargetProfile::Ckb || !matches!(pattern.operation.as_str(), "create" | "output" | "create_unique") {
         return None;
     }
     if pattern.operation == "create_unique" && !matches!(pattern.identity, ir::IrIdentityPolicy::CkbTypeId) {
@@ -13142,16 +12997,17 @@ fn mutate_preserved_data_except_transition_is_verifier_coverable(
     let Some(fields) = type_layouts.get(&pattern.ty) else {
         return false;
     };
-    let dynamic_table = metadata_type_encoded_size_from_layouts(fields).is_none();
+    let Some(type_size) = metadata_type_encoded_size_from_layouts(fields) else {
+        return false;
+    };
+    if type_size > METADATA_MUTATE_CELL_BUFFER_SIZE {
+        return false;
+    }
     pattern.transitions.iter().all(|transition| {
         fields.get(&transition.field).is_some_and(|layout| {
-            if dynamic_table {
-                metadata_layout_fixed_byte_width(layout).is_some()
-            } else {
-                metadata_layout_fixed_byte_width(layout)
-                    .map(|width| layout.offset + width)
-                    .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
-            }
+            metadata_layout_fixed_byte_width(layout)
+                .map(|width| layout.offset + width)
+                .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
         })
     })
 }
@@ -13493,7 +13349,7 @@ mod tests {
     ) -> crate::CompileMetadata {
         let ast = parse_module_for_test(source);
         crate::types::check(&ast).unwrap();
-        crate::lifecycle::check(&ast).unwrap();
+        crate::flow::check(&ast).unwrap();
         let ir = ir::generate(&ast).unwrap();
         let metadata = crate::compile_metadata_from_ir(&ir, ArtifactFormat::RiscvAssembly, target_profile);
         crate::validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap();
@@ -13503,10 +13359,10 @@ mod tests {
     const SIMPLE_PROGRAM: &str = r#"
 module test
 
-action add(x: u64, y: u64) -> u64 {
+action add(x: u64, y: u64) -> u64
+where
     let z = x + y
     return z
-}
 "#;
 
     #[derive(Debug)]
@@ -13614,77 +13470,86 @@ action add(x: u64, y: u64) -> u64 {
     const OPTIMIZER_PROGRAM: &str = r#"
 module test
 
-action calc() -> u64 {
+action calc() -> u64
+where
     return (2 + 3) * 4
-}
 "#;
 
     const IF_PROGRAM: &str = r#"
 module test
 
-action increment_if(flag: bool, x: u64) -> u64 {
+action increment_if(flag: bool, x: u64) -> u64
+where
     if flag {
         let tmp = x + 1
     }
     return x
-}
 "#;
 
     const CALL_PROGRAM: &str = r#"
 module test
 
-action double(x: u64) -> u64 {
+action double(x: u64) -> u64
+where
     return x + x
-}
 
-action run(y: u64) -> u64 {
+action run(y: u64) -> u64
+where
     let z = double(y)
     return z
-}
 "#;
 
     const IF_EXPR_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool, x: u64) -> u64 {
+action choose(flag: bool, x: u64) -> u64
+where
     let y = if flag { x + 1 } else { x + 2 }
     return y
-}
+"#;
+
+    const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
+module test
+
+action choose_zero(flag: bool, target: Address) -> bool
+where
+    let selected = if flag { Address::zero() } else { Address::zero() }
+    return target == selected
 "#;
 
     const WHILE_PROGRAM: &str = r#"
 module test
 
-action spin(flag: bool, x: u64) -> u64 {
+action spin(flag: bool, x: u64) -> u64
+where
     while flag {
         let tmp = x + 1
     }
     return x
-}
 "#;
 
     const FOR_RANGE_PROGRAM: &str = r#"
 module test
 
-action visit(n: u64) -> u64 {
+action visit(n: u64) -> u64
+where
     for i in 0..n {
         let tmp = i + 1
     }
     return n
-}
 "#;
 
     const ASSIGN_PROGRAM: &str = r#"
 module test
 
-action countdown(n: u64) -> u64 {
+action countdown(n: u64) -> u64
+where
     let mut x: u64 = n
     while x > 0 {
         x = x - 1
     }
     x += 1
     return x
-}
 "#;
 
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
@@ -13694,14 +13559,14 @@ resource Token has destroy {
     amount: u64,
 }
 
-action ok(n: u64) {
+action ok(n: u64)
+where
     for i in 0..n {
         let out = create Token {
             amount: i
         }
         destroy out
     }
-}
 "#;
 
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
@@ -13711,13 +13576,13 @@ resource Token {
     amount: u64,
 }
 
-action bad(n: u64) {
+action bad(n: u64)
+where
     for i in 0..n {
         let out = create Token {
             amount: i
         }
     }
-}
 "#;
 
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -13727,12 +13592,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, n: u64) {
+action bad(token: Token, n: u64)
+where
     for i in 0..n {
         destroy token
     }
     destroy token
-}
 "#;
 
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -13742,12 +13607,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) {
+action bad(token: Token, flag: bool)
+where
     while flag {
         destroy token
     }
     destroy token
-}
 "#;
 
     const STRUCT_FIELD_PROGRAM: &str = r#"
@@ -13758,13 +13623,13 @@ struct Point {
     y: u64,
 }
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut p = Point { x: 1, y: 2 }
     let a = p.x
     p.x = a + 4
     p.x += 1
     return p.x
-}
 "#;
 
     const TEMPORARY_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -13779,10 +13644,10 @@ fn point() -> Point {
     return Point { x: 1, y: 2 }
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     point().x = 3
     return 0
-}
 "#;
 
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -13792,10 +13657,10 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     read_ref<Config>().threshold = 2
     return 0
-}
 "#;
 
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -13805,11 +13670,11 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut cfg = read_ref<Config>()
     cfg.threshold = 2
     return cfg.threshold
-}
 "#;
 
     const READ_ONLY_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -13819,12 +13684,12 @@ struct Point {
     x: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut point = Point { x: 1 }
     let mut view = &point
     view.x = 2
     return point.x
-}
 "#;
 
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
@@ -13834,9 +13699,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(mut token: Token) {
+action bad(mut token: Token)
+where
     consume token
-}
 "#;
 
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
@@ -13846,9 +13711,9 @@ shared Config {
     threshold: u64,
 }
 
-action bad(mut cfg: read_ref Config) -> u64 {
+action bad(mut read cfg: Config) -> u64
+where
     return cfg.threshold
-}
 "#;
 
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -13858,9 +13723,9 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(mut pool: &mut Pool) {
+action bad(mut pool: &mut Pool)
+where
     pool.reserve = pool.reserve + 1
-}
 "#;
 
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -13896,11 +13761,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let alias = pool
     alias.reserve = alias.reserve + 1
     return alias.reserve
-}
 "#;
 
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
@@ -13910,11 +13775,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let pair = (pool, 0)
     pair.0.reserve = pair.0.reserve + 1
     return pair.0.reserve
-}
 "#;
 
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
@@ -13924,11 +13789,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool, flag: bool) -> u64 {
+action bad(pool: &mut Pool, flag: bool) -> u64
+where
     let alias = if flag { pool } else { pool }
     alias.reserve = alias.reserve + 1
     return alias.reserve
-}
 "#;
 
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
@@ -13938,11 +13803,11 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64 {
+action bad(pool: &mut Pool) -> u64
+where
     let mut alias = read_ref<Pool>()
     alias = pool
     return alias.reserve
-}
 "#;
 
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -13952,11 +13817,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad() {
+action bad()
+where
     let mut token = create Token { amount: 1 }
     token.amount = 2
     destroy token
-}
 "#;
 
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -13966,11 +13831,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let view = &token
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -13980,11 +13845,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let amount = &token.amount
     destroy token
     return 0
-}
 "#;
 
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -13994,11 +13859,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let pair = (&token, 0)
     destroy token
     return pair.0.amount
-}
 "#;
 
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
@@ -14008,11 +13873,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let refs = [&token]
     destroy token
     return refs[0].amount
-}
 "#;
 
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
@@ -14022,11 +13887,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(token: Token, flag: bool) -> u64
+where
     let view = if flag { &token } else { &token }
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
@@ -14036,12 +13901,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut view = read_ref<Token>()
     view = &token
     destroy token
     return view.amount
-}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -14051,12 +13916,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut pair = (read_ref<Token>(), 0)
     pair = (&token, 0)
     destroy token
     return pair.0.amount
-}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
@@ -14066,12 +13931,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     let mut pair = (read_ref<Token>(), 0)
     pair.0 = &token
     destroy token
     return pair.0.amount
-}
 "#;
 
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
@@ -14081,9 +13946,9 @@ resource Token {
     amount: u64,
 }
 
-action leak(token: Token) -> &Token {
+action leak(token: Token) -> &Token
+where
     return &token
-}
 "#;
 
     const FUNCTION_RETURN_REF_PROGRAM: &str = r#"
@@ -14134,6 +13999,18 @@ resource Token {
     }
 "#;
 
+    const LOCK_BARE_REF_PARAM_PROGRAM: &str = r#"
+module test
+
+resource Token {
+    amount: u64,
+}
+
+lock bad(token: &Token) -> bool {
+    return token.amount > 0
+}
+"#;
+
     const CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
 module test
 
@@ -14153,9 +14030,9 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut (Pool, u64)) -> u64 {
+action bad(pool: &mut (Pool, u64)) -> u64
+where
     return 0
-}
 "#;
 
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
@@ -14189,11 +14066,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let points = Vec::new()
     points.push(&point)
     return 0
-}
 "#;
 
     const CALLABLE_TUPLE_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -14215,8 +14092,8 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pools: [&mut Pool; 1]) {
-}
+action bad(pools: [&mut Pool; 1])
+where
 "#;
 
     const CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -14238,9 +14115,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(ref token: Token) {
+action bad(ref token: Token)
+where
     consume token
-}
 "#;
 
     const FUNCTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
@@ -14291,10 +14168,10 @@ enum MaybeToken {
     const IF_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     let y = if flag { 1 } else { false }
     return 1
-}
 "#;
 
     const UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -14304,9 +14181,9 @@ struct Point {
     x: u64,
 }
 
-action read(p: Point) -> u64 {
+action read(p: Point) -> u64
+where
     return p.y
-}
 "#;
 
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
@@ -14347,9 +14224,9 @@ struct Point {
     const UNKNOWN_FUNCTION_PROGRAM: &str = r#"
 module test
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return missing(x)
-}
 "#;
 
     const CONSTANT_PROGRAM: &str = r#"
@@ -14357,26 +14234,26 @@ module test
 
 const STEP: u64 = 3;
 
-action bump(x: u64) -> u64 {
+action bump(x: u64) -> u64
+where
     return x + STEP
-}
 "#;
 
     const CAST_PROGRAM: &str = r#"
 module test
 
-action widen(x: u16) -> u64 {
+action widen(x: u16) -> u64
+where
     return x as u64
-}
 "#;
 
     const ASSERT_PROGRAM: &str = r#"
 module test
 
-action checked(x: u64) -> u64 {
+action checked(x: u64) -> u64
+where
     assert_invariant(x > 0, "x must be positive")
     return x
-}
 "#;
 
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
@@ -14399,9 +14276,9 @@ resource Token {
     owner: Address,
 }
 
-action bad(token: protected Token) -> u64 {
+action bad(protected token: Token) -> u64
+where
     return 0
-}
 "#;
 
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
@@ -14411,7 +14288,7 @@ resource Token {
     owner: Address,
 }
 
-lock bad(token: protected Token, owner: lock_args Address) -> bool {
+lock bad(protected token: Token, lock_args owner: Address) -> bool {
     require owner == token.owner
 }
 "#;
@@ -14435,9 +14312,25 @@ lock bad(token: protected Token, owner: lock_args Owner) -> bool {
     const ACTION_REQUIRE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool {
+action bad(x: u64) -> bool
+where
     require x > 0
-}
+"#;
+
+    const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
+module test
+
+action checked(x: u64) -> bool
+where
+    require x > 0, "x must be positive"
+"#;
+
+    const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
+module test
+
+action bad(x: u64, msg: String) -> bool
+where
+    require x > 0, msg
 "#;
 
     const FUNCTION_REQUIRE_PROGRAM: &str = r#"
@@ -14451,44 +14344,44 @@ fn bad(x: u64) -> bool {
     const ASSERT_NON_BOOL_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     assert_invariant(x, "x must be boolean")
     return x
-}
 "#;
 
     const ASSERT_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     assert_invariant(x > 0, x)
     return x
-}
 "#;
 
     const ASSERT_BINDING_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     let ok = assert_invariant(x > 0, "x must be positive")
     return x
-}
 "#;
 
     const ASSERT_TAIL_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool {
+action bad(x: u64) -> bool
+where
     assert_invariant(x > 0, "x must be positive")
-}
 "#;
 
     const STRING_VALUE_PROGRAM: &str = r#"
 module test
 
-action bad() -> String {
+action bad() -> String
+where
     return "not a lowered runtime value"
-}
 "#;
 
     const CREATE_PROGRAM: &str = r#"
@@ -14498,12 +14391,12 @@ resource Token {
     amount: u64,
 }
 
-action mint(owner: Address) -> Token {
+action mint(owner: Address) -> Token
+where
     let token = create Token {
         amount: 42
     } with_lock(owner)
     return token
-}
 "#;
 
     const CREATE_VERIFY_PROGRAM: &str = r#"
@@ -14513,12 +14406,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     let token = create Token {
         amount: 42
     }
     return token
-}
 "#;
 
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
@@ -14528,12 +14421,12 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let token = create Token {
         amount: amount * 2
     }
     return token
-}
 "#;
 
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
@@ -14543,12 +14436,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: 1,
         amount: 2,
     }
-}
 "#;
 
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
@@ -14559,11 +14452,11 @@ resource Token {
     owner: Address,
 }
 
-action issue(owner: Address) -> Token {
+action issue(owner: Address) -> Token
+where
     return create Token {
         amount: 1,
     }
-}
 "#;
 
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -14573,12 +14466,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: 1,
         owner: Address::zero(),
     }
-}
 "#;
 
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -14588,11 +14481,11 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token {
+action issue() -> Token
+where
     return create Token {
         amount: false,
     }
-}
 "#;
 
     const CREATE_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -14602,11 +14495,11 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> Snapshot {
+action bad() -> Snapshot
+where
     return create Snapshot {
         amount: 1,
     }
-}
 "#;
 
     const CONSUME_NON_CELL_PROGRAM: &str = r#"
@@ -14616,10 +14509,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad(snapshot: Snapshot) -> u64 {
+action bad(snapshot: Snapshot) -> u64
+where
     consume snapshot
     return 0
-}
 "#;
 
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
@@ -14629,49 +14522,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) -> u64 {
+action bad(token: Token) -> u64
+where
     consume if true { token } else { token }
     return 0
-}
-"#;
-
-    const TRANSFER_NON_NAMED_CELL_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer {
-    amount: u64,
-}
-
-action bad(owner: Address) -> Token {
-    return transfer create Token { amount: 1 } to owner
-}
-"#;
-
-    const LINEAR_LET_MOVE_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer {
-    amount: u64,
-}
-
-action move_alias(token: Token, owner: Address) -> Token {
-    let moved = token
-    return transfer moved to owner
-}
-"#;
-
-    const LINEAR_LET_COPY_PROGRAM: &str = r#"
-module test
-
-resource Token has transfer, destroy {
-    amount: u64,
-}
-
-action duplicate(token: Token, owner: Address) {
-    let copied = token
-    transfer token to owner
-    destroy copied
-}
 "#;
 
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
@@ -14681,13 +14535,13 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     } else {
         consume token
     }
-}
 "#;
 
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -14697,12 +14551,12 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     }
     consume token
-}
 "#;
 
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -14712,14 +14566,14 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) {
+action burn(token: Token, flag: bool)
+where
     if flag {
         consume token
     } else {
         let amount = token.amount
     }
     consume token
-}
 "#;
 
     const CONSUME_DESTROY_PROGRAM: &str = r#"
@@ -14729,10 +14583,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(a: Token, b: Token) {
+action burn(a: Token, b: Token)
+where
     consume a
     destroy b
-}
 "#;
 
     const PARAM_FIELD_PROGRAM: &str = r#"
@@ -14742,9 +14596,9 @@ struct Snapshot {
     amount: u64,
 }
 
-action inspect(snapshot: Snapshot) -> u64 {
+action inspect(snapshot: Snapshot) -> u64
+where
     return snapshot.amount
-}
 "#;
 
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
@@ -14754,12 +14608,12 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action same_symbol(left: Token, right: Token) -> bool {
+action same_symbol(left: Token, right: Token) -> bool
+where
     let same = left.symbol == right.symbol
     consume left
     consume right
     return same
-}
 "#;
 
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
@@ -14770,11 +14624,11 @@ shared Flags {
     nonce: u32,
 }
 
-action inspect() -> u32 {
+action inspect() -> u32
+where
     let flags = read_ref<Flags>()
     let enabled = flags.enabled
     return flags.nonce
-}
 "#;
 
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
@@ -14785,14 +14639,14 @@ resource Flags {
     nonce: u32,
 }
 
-action issue(nonce: u32) -> Flags {
+action issue(nonce: u32) -> Flags
+where
     let enabled = true
     let out = create Flags {
         enabled: enabled,
         nonce: nonce
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
@@ -14803,7 +14657,8 @@ resource Flags {
     nonce: u32,
 }
 
-action pass(flags: Flags) -> Flags {
+action pass(flags: Flags) -> Flags
+where
     let enabled = flags.enabled
     let nonce = flags.nonce
     consume flags
@@ -14812,7 +14667,6 @@ action pass(flags: Flags) -> Flags {
         nonce: nonce
     }
     return out
-}
 "#;
 
     const READ_REF_FIELD_PROGRAM: &str = r#"
@@ -14822,10 +14676,10 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let cfg = read_ref<Config>()
     return cfg.threshold
-}
 "#;
 
     const READ_REF_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -14835,10 +14689,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let snapshot = read_ref<Snapshot>()
     return snapshot.amount
-}
 "#;
 
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
@@ -14849,10 +14703,10 @@ shared Config {
 }
 
 #[effect(ReadOnly)]
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let cfg = read_ref<Config>()
     return cfg.threshold
-}
 "#;
 
     const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -14863,12 +14717,12 @@ resource Token {
 }
 
 #[effect(ReadOnly)]
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 "#;
 
     const IMPURE_FN_PROGRAM: &str = r#"
@@ -14891,13 +14745,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action issue(amount: u64) -> u64 {
+action issue(amount: u64) -> u64
+where
     let out = create Token {
         amount: amount
     }
     destroy out
     return amount
-}
 
 fn helper(amount: u64) -> u64 {
     return issue(amount)
@@ -14939,9 +14793,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add_one(x)
-}
 "#;
 
     const CALL_MISSING_ARGUMENT_PROGRAM: &str = r#"
@@ -14951,9 +14805,9 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add(x)
-}
 "#;
 
     const CALL_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -14963,9 +14817,9 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return add(x, false)
-}
 "#;
 
     const QUALIFIED_ACTION_CALLS_FN_PROGRAM: &str = r#"
@@ -14975,9 +14829,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return test::add_one(x)
-}
 "#;
 
     const QUALIFIED_CALL_EXTRA_ARGUMENT_PROGRAM: &str = r#"
@@ -14987,9 +14841,9 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     return test::add_one(x, 2)
-}
 "#;
 
     const BOOL_FN_CALL_PROGRAM: &str = r#"
@@ -14999,25 +14853,25 @@ fn ready() -> bool {
     return true
 }
 
-action run() -> bool {
+action run() -> bool
+where
     return test::ready()
-}
 "#;
 
     const DUPLICATE_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64, x: u64) -> u64 {
+action bad(x: u64, x: u64) -> u64
+where
     return x
-}
 "#;
 
     const WILDCARD_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(_: u64) -> u64 {
+action bad(_: u64) -> u64
+where
     return 1
-}
 "#;
 
     const DUPLICATE_FN_PARAM_PROGRAM: &str = r#"
@@ -15027,9 +14881,9 @@ fn bad(x: u64, x: u64) -> u64 {
     return x
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 1
-}
 "#;
 
     const WILDCARD_LOCK_PARAM_PROGRAM: &str = r#"
@@ -15043,33 +14897,33 @@ lock owned(_: Address) -> bool {
     const LOCAL_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
     let x = 2
     return x
-}
 "#;
 
     const TUPLE_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let (x, x) = (1, 2)
     return x
-}
 "#;
 
     const BLOCK_BINDING_SHADOW_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
     let y = {
         let x = 2
         x
     }
     return x + y
-}
 "#;
 
     const UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15079,10 +14933,10 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action run(x: u64) -> u64 {
+action run(x: u64) -> u64
+where
     note(x)
     return x
-}
 "#;
 
     const BIND_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15092,10 +14946,10 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     let y = note(x)
     return x
-}
 "#;
 
     const RETURN_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15105,33 +14959,33 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64 {
+action bad(x: u64) -> u64
+where
     return note(x)
-}
 "#;
 
     const RETURN_VALUE_FROM_UNIT_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad() {
+action bad()
+where
     return 1
-}
 "#;
 
     const BARE_RETURN_FROM_VALUE_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return
-}
 "#;
 
     const MISSING_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let x = 1
-}
 "#;
 
     const MISSING_FUNCTION_RETURN_PROGRAM: &str = r#"
@@ -15141,29 +14995,29 @@ fn bad() -> u64 {
     let x = 1
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 1
-}
 "#;
 
     const TAIL_EXPR_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     1
-}
 "#;
 
     const BRANCH_COMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         return 2
     }
-}
 "#;
 
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
@@ -15173,13 +15027,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     if flag {
         return token
     } else {
         return token
     }
-}
 "#;
 
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -15189,14 +15043,14 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64 {
+action bad(token: Token, flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         consume token
         return 2
     }
-}
 "#;
 
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
@@ -15206,9 +15060,9 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     if flag { token } else { token }
-}
 "#;
 
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -15218,9 +15072,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     if flag { left } else { right }
-}
 "#;
 
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -15230,10 +15084,10 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     let moved = if flag { token } else { token }
     return moved
-}
 "#;
 
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -15243,10 +15097,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     let moved = if flag { left } else { right }
     return moved
-}
 "#;
 
     const LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM: &str = r#"
@@ -15256,9 +15110,9 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) -> u64 {
+action burn(token: Token, flag: bool) -> u64
+where
     if flag { destroy token } else { destroy token }
-}
 "#;
 
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -15268,9 +15122,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let pair = (left, right)
-}
 "#;
 
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -15280,9 +15134,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let items = [left, right]
-}
 "#;
 
     const LINEAR_TUPLE_DESTRUCTURE_HANDLES_ITEMS_PROGRAM: &str = r#"
@@ -15292,11 +15146,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action choose(left: Token, right: Token) -> Token {
+action choose(left: Token, right: Token) -> Token
+where
     let (kept, burned) = (left, right)
     destroy burned
     return kept
-}
 "#;
 
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -15306,9 +15160,9 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) {
+action bad(token: Token)
+where
     let _ = token
-}
 "#;
 
     const LINEAR_TUPLE_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -15318,10 +15172,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let (_, kept) = (left, right)
     destroy kept
-}
 "#;
 
     const LINEAR_TUPLE_FIELD_PROJECTION_PROGRAM: &str = r#"
@@ -15331,12 +15185,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) -> (Token, Token) {
+action bad(left: Token, right: Token) -> (Token, Token)
+where
     let pair = (left, right)
     let first = pair.0
     destroy first
     pair
-}
 "#;
 
     const LINEAR_ARRAY_INDEX_PROJECTION_PROGRAM: &str = r#"
@@ -15346,11 +15200,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) {
+action bad(left: Token, right: Token)
+where
     let items = [left, right]
     let first = items[0]
     destroy first
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -15360,10 +15214,10 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(token: Token) -> Token
+where
     let moved = { token }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
@@ -15373,13 +15227,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token {
+action choose(token: Token) -> Token
+where
     let moved = {
         let inner = token
         inner
     }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM: &str = r#"
@@ -15389,9 +15243,9 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) -> u64 {
+action burn(token: Token) -> u64
+where
     { destroy token }
-}
 "#;
 
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
@@ -15401,20 +15255,21 @@ resource Token {
     amount: u64,
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     {
         let out = create Token {
             amount: 1
         }
         1
     }
-}
 "#;
 
     const BLOCK_TAIL_IF_VALUE_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     let value = {
         if flag {
             1
@@ -15423,7 +15278,6 @@ action choose(flag: bool) -> u64 {
         }
     }
     return value
-}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
@@ -15433,13 +15287,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token {
+action choose(token: Token, flag: bool) -> Token
+where
     let moved = {
         let inner = token
         if flag { inner } else { inner }
     }
     return moved
-}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
@@ -15449,98 +15303,98 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token {
+action bad(left: Token, right: Token, flag: bool) -> Token
+where
     let moved = {
         if flag { left } else { right }
     }
     return moved
-}
 "#;
 
     const TAIL_IF_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64 {
+action choose(flag: bool) -> u64
+where
     if flag { 1 } else { 2 }
-}
 "#;
 
     const BRANCH_INCOMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64 {
+action bad(flag: bool) -> u64
+where
     if flag {
         return 1
     }
     let x = 2
-}
 "#;
 
     const UNREACHABLE_AFTER_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return 1
     let x = 2
-}
 "#;
 
     const UNREACHABLE_AFTER_BRANCH_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64 {
+action bad(flag: bool) -> u64
+where
     if flag {
         return 1
     } else {
         return 2
     }
     let x = 3
-}
 "#;
 
     const CKB_HEADER_EPOCH_PROGRAM: &str = r#"
 module test
 
-action epoch() -> u64 {
+action epoch() -> u64
+where
     let number = ckb::header_epoch_number()
     let start = ckb::header_epoch_start_block_number()
     let length = ckb::header_epoch_length()
     let since = ckb::input_since()
     return number + start + length + since
-}
 "#;
 
     const BUILTIN_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action now(x: u64) -> u64 {
+action now(x: u64) -> u64
+where
     return env::current_timepoint(x)
-}
 "#;
 
     const NUMERIC_BUILTIN_TYPE_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     return min(1, false)
-}
 "#;
 
     const UNKNOWN_NAMESPACED_CONSTRUCTOR_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let value = Missing::new()
     return 0
-}
 "#;
 
     const METHOD_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64 {
+action count(items: [u64; 3]) -> u64
+where
     return items.len(1)
-}
 "#;
 
     const LOCK_CALLS_FN_PROGRAM: &str = r#"
@@ -15574,17 +15428,17 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token {
+action wrapper(amount: u64) -> Token
+where
     return issue(amount)
-}
 "#;
 
     const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -15594,17 +15448,17 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token {
+action issue(amount: u64) -> Token
+where
     let out = create Token {
         amount: amount
     }
     return out
-}
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token {
+action wrapper(amount: u64) -> Token
+where
     return test::issue(amount)
-}
 "#;
 
     const CONSUME_FIELD_PROGRAM: &str = r#"
@@ -15614,11 +15468,11 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64 {
+action inspect(token: Token) -> u64
+where
     let amount = token.amount
     consume token
     return amount
-}
 "#;
 
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
@@ -15628,14 +15482,14 @@ resource Token {
     amount: u64,
 }
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     let amount = token.amount
     consume token
     let out = create Token {
         amount: amount
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -15645,7 +15499,8 @@ resource Token {
     amount: u64,
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(left: Token, right: Token) -> Token
+where
     let left_amount = left.amount
     let right_amount = right.amount
     let total = left_amount + right_amount
@@ -15655,7 +15510,6 @@ action merge(left: Token, right: Token) -> Token {
         amount: total
     }
     return out
-}
 "#;
 
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
@@ -15665,7 +15519,8 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token) {
+action split(token: Token, fee: u64) -> (Token, Token)
+where
     let amount = token.amount
     let remaining = amount - fee
     consume token
@@ -15676,7 +15531,6 @@ action split(token: Token, fee: u64) -> (Token, Token) {
         amount: fee
     }
     return (change, paid_fee)
-}
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -15687,7 +15541,8 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action merge(left: Token, right: Token) -> Token {
+action merge(left: Token, right: Token) -> Token
+where
     assert_invariant(left.symbol == right.symbol, "symbol mismatch")
     let left_amount = left.amount
     let right_amount = right.amount
@@ -15700,7 +15555,6 @@ action merge(left: Token, right: Token) -> Token {
         symbol: symbol
     }
     return out
-}
 "#;
 
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
@@ -15710,125 +15564,125 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64 {
+action inspect() -> u64
+where
     let left = read_ref<Config>()
     let right = read_ref<Config>()
     return left.threshold + right.threshold
-}
 "#;
 
     const INDEXED_TUPLE_PROGRAM: &str = r#"
 module test
 
-action second(entries: [(Address, u64); 2]) -> u64 {
+action second(entries: [(Address, u64); 2]) -> u64
+where
     return entries[0].1
-}
 "#;
 
     const FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum(items: [u64; 3]) -> u64 {
+action sum(items: [u64; 3]) -> u64
+where
     let mut total: u64 = 0
     for item in items {
         total += item
     }
     return total
-}
 "#;
 
     const LOCAL_FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64 {
+action sum() -> u64
+where
     let items = [1, 2, 3]
     let mut total: u64 = 0
     for item in items {
         total += item
     }
     return total
-}
 "#;
 
     const LOCAL_FOREACH_ARRAY_OF_TUPLES_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64 {
+action sum() -> u64
+where
     let entries = [(Address::zero, 2), (Address::zero, 5)]
     let mut total: u64 = 0
     for (_, amount) in entries {
         total += amount
     }
     return total
-}
 "#;
 
     const LEN_METHOD_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64 {
+action count(items: [u64; 3]) -> u64
+where
     return items.len()
-}
 "#;
 
     const FORBIDDEN_UNWRAP_CALL_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return unwrap(value)
-}
 "#;
 
     const FORBIDDEN_EXPECT_METHOD_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return value.expect("checked")
-}
 "#;
 
     const FORBIDDEN_NAMESPACED_UNWRAP_OR_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     return Option::unwrap_or(value, 0)
-}
 "#;
 
     const LOCAL_ARRAY_LEN_PROGRAM: &str = r#"
 module test
 
-action count() -> u64 {
+action count() -> u64
+where
     let items = [1, 2, 3]
     return items.len()
-}
 "#;
 
     const TYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action count() -> u64 {
+action count() -> u64
+where
     let items: [u8; 0] = []
     return items.len()
-}
 "#;
 
     const UNTYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = []
     return 0
-}
 "#;
 
     const WRONG_LENGTH_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items: [u8; 1] = []
     return 0
-}
 "#;
 
     const EMPTY_LITERAL_NON_VEC_CONTEXT_PROGRAM: &str = r#"
@@ -15838,101 +15692,101 @@ struct Snapshot {
     values: [u8; 1],
 }
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let snapshot = Snapshot {
         values: [],
     }
     return 0
-}
 "#;
 
     const LOCAL_ARRAY_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut items = [1, 2, 3]
     items[1] += 5
     items[0] = 7
     return items[0] + items[1] + items[2]
-}
 "#;
 
     const IMMUTABLE_ARRAY_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, 2]
     items[0] = 3
     return items[0]
-}
 "#;
 
     const HETEROGENEOUS_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, false]
     return 1
-}
 "#;
 
     const LOCAL_ARRAY_OOB_READ_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let items = [1, 2]
     return items[2]
-}
 "#;
 
     const LOCAL_ARRAY_OOB_WRITE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let mut items = [1, 2]
     items[2] = 3
     return items[0]
-}
 "#;
 
     const LOCAL_TUPLE_STATIC_FIELD_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64 {
+action tweak() -> u64
+where
     let mut pair = (1, 2)
     pair.1 += 5
     pair.0 = 7
     return pair.0 + pair.1
-}
 "#;
 
     const ARRAY_OF_TUPLES_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action pick() -> u64 {
+action pick() -> u64
+where
     let entries = [(Address::zero, 2), (Address::zero, 5)]
     return entries[1].1
-}
 "#;
 
     const IMMUTABLE_TUPLE_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let pair = (1, 2)
     pair.1 = 3
     return pair.1
-}
 "#;
 
     const LOCAL_TUPLE_DESTRUCTURE_PROGRAM: &str = r#"
 module test
 
-action split() -> u64 {
+action split() -> u64
+where
     let pair = (1, 2)
     let (a, b) = pair
     return a + b
-}
 "#;
 
     const MATCH_PROGRAM: &str = r#"
@@ -15943,12 +15797,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        _ => 2,
+        Flag::On => { 1 }
+        _ => { 2 }
     }
-}
 "#;
 
     const EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -15959,12 +15813,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        Flag::Off => 2,
+        Flag::On => { 1 }
+        Flag::Off => { 2 }
     }
-}
 "#;
 
     const LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -15979,13 +15833,13 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: Flag) -> Token {
+action choose(token: Token, flag: Flag) -> Token
+where
     let moved = match flag {
-        Flag::On => token,
-        Flag::Off => token,
+        Flag::On => { token }
+        Flag::Off => { token }
     }
     return moved
-}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -16000,13 +15854,13 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: Flag) -> Token {
+action bad(left: Token, right: Token, flag: Flag) -> Token
+where
     let moved = match flag {
-        Flag::On => left,
-        Flag::Off => right,
+        Flag::On => { left }
+        Flag::Off => { right }
     }
     return moved
-}
 "#;
 
     const LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -16021,12 +15875,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: Flag) {
+action burn(token: Token, flag: Flag)
+where
     match flag {
-        Flag::On => destroy token,
-        Flag::Off => destroy token,
+        Flag::On => { destroy token }
+        Flag::Off => { destroy token }
     }
-}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -16041,12 +15895,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: Flag) {
+action bad(token: Token, flag: Flag)
+where
     match flag {
-        Flag::On => destroy token,
-        Flag::Off => 0,
+        Flag::On => { destroy token }
+        Flag::Off => { 0 }
     }
-}
 "#;
 
     const UNKNOWN_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -16057,12 +15911,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::Maybe => 1,
-        _ => 2,
+        Flag::Maybe => { 1 }
+        _ => { 2 }
     }
-}
 "#;
 
     const DUPLICATE_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -16073,13 +15927,13 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
-        On => 2,
-        _ => 3,
+        Flag::On => { 1 }
+        On => { 2 }
+        _ => { 3 }
     }
-}
 "#;
 
     const NON_EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -16090,11 +15944,11 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64 {
+action select(flag: Flag) -> u64
+where
     return match flag {
-        Flag::On => 1,
+        Flag::On => { 1 }
     }
-}
 "#;
 
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
@@ -16105,12 +15959,12 @@ enum MaybeAmount {
     None,
 }
 
-action select(value: MaybeAmount) -> u64 {
+action select(value: MaybeAmount) -> u64
+where
     return match value {
-        MaybeAmount::Some => 1,
-        _ => 0,
+        MaybeAmount::Some => { 1 }
+        _ => { 0 }
     }
-}
 "#;
 
     const ENUM_PAYLOAD_VALUE_PROGRAM: &str = r#"
@@ -16121,9 +15975,9 @@ enum AssetType {
     Token(Hash),
 }
 
-action bad() -> AssetType {
+action bad() -> AssetType
+where
     return AssetType::Token
-}
 "#;
 
     const UNKNOWN_ENUM_VALUE_PROGRAM: &str = r#"
@@ -16134,9 +15988,9 @@ enum Flag {
     Off,
 }
 
-action bad() -> Flag {
+action bad() -> Flag
+where
     return Flag::Maybe
-}
 "#;
 
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
@@ -16146,18 +16000,18 @@ resource Bad {
     missing: MissingType,
 }
 
-action run(value: Bad) -> u64 {
+action run(value: Bad) -> u64
+where
     destroy value
     return 0
-}
 "#;
 
     const RESERVED_OPTION_TYPE_PROGRAM: &str = r#"
 module test
 
-action bad(value: Option<u64>) -> u64 {
+action bad(value: Option<u64>) -> u64
+where
     return 0
-}
 "#;
 
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
@@ -16171,9 +16025,9 @@ resource Vault has store {
     amount: u64,
 }
 
-action bad(input: Vault<Token>) -> u64 {
+action bad(input: Vault<Token>) -> u64
+where
     return 0
-}
 "#;
 
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
@@ -16183,20 +16037,20 @@ resource Token {
     amount: u64,
 }
 
-action Token() -> u64 {
+action Token() -> u64
+where
     return 0
-}
 "#;
 
     const VEC_BUILTIN_PROGRAM: &str = r#"
 module test
 
-action pack(bytes: [u8; 3]) -> u64 {
+action pack(bytes: [u8; 3]) -> u64
+where
     let mut data = Vec::new()
-    data.push(1)
+    data.push(bytes[0])
     data.extend_from_slice(bytes)
     return data.len()
-}
 "#;
 
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
@@ -16207,7 +16061,8 @@ resource Group {
     anchors: Vec<Hash>,
 }
 
-action create_group(owner: Address, seed: Hash) -> Group {
+action create_group(owner: Address, seed: Hash) -> Group
+where
     let mut members = Vec::new()
     members.push(owner)
     let mut anchors = Vec::new()
@@ -16216,47 +16071,46 @@ action create_group(owner: Address, seed: Hash) -> Group {
         members: members,
         anchors: anchors,
     }
-}
 "#;
 
     const STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_sum() -> u64 {
+action stack_vec_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     return values.len() + values[1]
-}
 "#;
 
     const STACK_VEC_WITH_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_with_capacity_sum() -> u64 {
+action stack_vec_with_capacity_sum() -> u64
+where
     let mut values = Vec::with_capacity(2)
     values.push(7)
     values.push(9)
     return values.len() + values[1]
-}
 "#;
 
     const BOUNDED_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action bounded_vec_literal_sum() -> u64 {
+action bounded_vec_literal_sum() -> u64
+where
     let mut values: Vec<u64> = [7, 9]
     return values.len() + values[1]
-}
 "#;
 
     const EMPTY_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action empty_vec_literal_capacity() -> u64 {
+action empty_vec_literal_capacity() -> u64
+where
     let values: Vec<Address> = []
     return values.capacity()
-}
 "#;
 
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
@@ -16267,51 +16121,52 @@ resource Group has store {
     labels: Vec<u8>,
 }
 
-action create_group(owner: Address) -> Group {
+action create_group(owner: Address) -> Group
+where
     return create Group {
         members: [owner],
         labels: [],
     }
-}
 "#;
 
     const STACK_VEC_CAPACITY_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_capacity_value() -> u64 {
+action stack_vec_capacity_value() -> u64
+where
     let mut values = Vec::with_capacity(2)
     values.push(7)
     return values.capacity()
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_capacity(owner: Address) -> u64 {
+action stack_vec_address_capacity(owner: Address) -> u64
+where
     let mut owners = Vec::with_capacity(2)
     owners.push(owner)
     return owners.capacity()
-}
 "#;
 
     const STACK_VEC_REMOVE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_remove_middle() -> u64 {
+action stack_vec_remove_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     let removed = values.remove(1)
     return removed + values.len() + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REMOVE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_remove(first: Address, second: Address) -> bool {
+action stack_vec_address_remove(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -16320,48 +16175,48 @@ action stack_vec_address_remove(first: Address, second: Address) -> bool {
         return owners[0] == second
     }
     return false
-}
 "#;
 
     const STACK_VEC_POP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_pop_last() -> u64 {
+action stack_vec_pop_last() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     let popped = values.pop()
     return popped + values.len() + values[0]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_POP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_pop(owner: Address) -> bool {
+action stack_vec_address_pop(owner: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     let popped = owners.pop()
     return popped == owner
-}
 "#;
 
     const STACK_VEC_INSERT_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_insert_middle() -> u64 {
+action stack_vec_insert_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     values.insert(1, 9)
     return values.len() + values[1] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_INSERT_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_insert(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     owners.insert(0, candidate)
@@ -16369,25 +16224,25 @@ action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
         return owners[1] == owner
     }
     return false
-}
 "#;
 
     const STACK_VEC_SET_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_set_middle() -> u64 {
+action stack_vec_set_middle() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(11)
     values.set(1, 9)
     return values.len() + values[0] + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SET_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_set(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     owners.push(owner)
@@ -16396,26 +16251,26 @@ action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
         return owners[1] == candidate
     }
     return false
-}
 "#;
 
     const STACK_VEC_REVERSE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_reverse_sum() -> u64 {
+action stack_vec_reverse_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.reverse()
     return values[0] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REVERSE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_reverse(first: Address, second: Address) -> bool {
+action stack_vec_address_reverse(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -16424,26 +16279,26 @@ action stack_vec_address_reverse(first: Address, second: Address) -> bool {
         return owners[1] == first
     }
     return false
-}
 "#;
 
     const STACK_VEC_SWAP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_swap_sum() -> u64 {
+action stack_vec_swap_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.swap(0, 2)
     return values[0] + values[2]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SWAP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_swap(first: Address, second: Address) -> bool {
+action stack_vec_address_swap(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -16452,25 +16307,25 @@ action stack_vec_address_swap(first: Address, second: Address) -> bool {
         return owners[1] == first
     }
     return false
-}
 "#;
 
     const STACK_VEC_FIRST_LAST_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_first_last_sum() -> u64 {
+action stack_vec_first_last_sum() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     return values.first() + values.last()
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_FIRST_LAST_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_first_last(first: Address, second: Address) -> bool {
+action stack_vec_address_first_last(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -16478,26 +16333,26 @@ action stack_vec_address_first_last(first: Address, second: Address) -> bool {
         return owners.last() == second
     }
     return false
-}
 "#;
 
     const STACK_VEC_TRUNCATE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_truncate_len() -> u64 {
+action stack_vec_truncate_len() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
     values.push(11)
     values.truncate(2)
     return values.len() + values[1]
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_TRUNCATE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_truncate(first: Address, second: Address) -> bool {
+action stack_vec_address_truncate(first: Address, second: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(first)
     owners.push(second)
@@ -16506,33 +16361,33 @@ action stack_vec_address_truncate(first: Address, second: Address) -> bool {
         return owners[0] == first
     }
     return false
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_roundtrip(owner: Address) -> bool {
+action stack_vec_address_roundtrip(owner: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     return owners[0] == owner
-}
 "#;
 
     const STACK_VEC_EXTEND_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_extend_len(seed: [u8; 3]) -> u64 {
+action stack_vec_extend_len(seed: [u8; 3]) -> u64
+where
     let mut bytes = Vec::new()
     bytes.extend_from_slice(seed)
     return bytes.len()
-}
 "#;
 
     const STACK_VEC_CLEAR_IS_EMPTY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_clear_len() -> u64 {
+action stack_vec_clear_len() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.clear()
@@ -16540,13 +16395,13 @@ action stack_vec_clear_len() -> u64 {
         return values.len()
     }
     return 99
-}
 "#;
 
     const STACK_VEC_CONTAINS_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_contains_hit() -> u64 {
+action stack_vec_contains_hit() -> u64
+where
     let mut values = Vec::new()
     values.push(7)
     values.push(9)
@@ -16554,17 +16409,16 @@ action stack_vec_contains_hit() -> u64 {
         return 1
     }
     return 0
-}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CONTAINS_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_contains(owner: Address, candidate: Address) -> bool {
+action stack_vec_address_contains(owner: Address, candidate: Address) -> bool
+where
     let mut owners = Vec::new()
     owners.push(owner)
     return owners.contains(candidate)
-}
 "#;
 
     const FIXED_SCHEMA_STACK_VEC_PROGRAM: &str = r#"
@@ -16575,7 +16429,8 @@ struct Snapshot {
     amount: u64,
 }
 
-action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool {
+action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool
+where
     let mut snapshots = Vec::with_capacity(3)
     snapshots.push(first)
     snapshots.insert(0, second)
@@ -16596,9 +16451,9 @@ action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Sn
     }
 
     return false
-}
 
-action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool {
+action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool
+where
     let mut snapshots = Vec::new()
     snapshots.push(first)
     snapshots.push(second)
@@ -16608,9 +16463,9 @@ action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool 
     }
 
     return false
-}
 
-action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
+action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64
+where
     let mut snapshots = Vec::new()
     snapshots.push(snapshot)
     snapshots.clear()
@@ -16620,9 +16475,9 @@ action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
     }
 
     return 99
-}
 
-action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
+action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool
+where
     let mut snapshots = Vec::new()
     snapshots.push(snapshot)
 
@@ -16634,7 +16489,6 @@ action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
     }
 
     return false
-}
 "#;
 
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
@@ -16645,7 +16499,8 @@ resource NFT {
     owner: Address,
 }
 
-action batch_mint(owner: Address) -> Vec<NFT> {
+action batch_mint(owner: Address) -> Vec<NFT>
+where
     let mut nfts = Vec::new()
     let nft = create NFT {
         token_id: 1,
@@ -16653,7 +16508,6 @@ action batch_mint(owner: Address) -> Vec<NFT> {
     }
     nfts.push(nft)
     return nfts
-}
 "#;
 
     const TYPE_HASH_PROGRAM: &str = r#"
@@ -16663,17 +16517,62 @@ struct Pool {
     amount: u64,
 }
 
-action pool_id(pool: Pool) -> Hash {
+action pool_id(pool: Pool) -> Hash
+where
     return pool.type_hash()
-}
 "#;
 
     const ZERO_PROGRAM: &str = r#"
 module test
 
-action is_zero(target: Address) -> bool {
+action is_zero(target: Address) -> bool
+where
     return target == Address::zero()
+"#;
+
+    const LOCAL_ZERO_PROGRAM: &str = r#"
+module test
+
+action is_zero(target: Address) -> bool
+where
+    let zero = Address::zero()
+    return target == zero
+"#;
+
+    const U128_EQ_PROGRAM: &str = r#"
+module test
+
+action eq128(left: u128, right: u128) -> bool
+where
+    return left == right
+"#;
+
+    const U128_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared Ledger has store {
+    balance: u128,
+    owner: Address,
 }
+
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
+where
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
+"#;
+
+    const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
+module test
+
+shared BigState has store {
+    balance: u64,
+    pad: [u8; 600],
+}
+
+action update(state_before: BigState, delta: u64) -> state_after: BigState
+where
+    require state_after.balance == state_before.balance + delta
+    require state_after.pad == state_before.pad
 "#;
 
     const SUMMARY_PROGRAM: &str = r#"
@@ -16687,12 +16586,12 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action update(amount: u64) -> u64 {
+action update(amount: u64) -> u64
+where
     let cfg = read_ref<Config>()
     let token = create Token { amount: amount }
     consume token
     return cfg.threshold
-}
 "#;
 
     const BAD_LOCK_PROGRAM: &str = r#"
@@ -16738,62 +16637,6 @@ lock guard() -> bool {
 }
 "#;
 
-    const TRANSFER_CLAIM_SETTLE_PROGRAM: &str = r#"
-module test
-
-resource Token has store, transfer, destroy {
-    amount: u64,
-}
-
-receipt VestingReceipt -> Token {
-    amount: u64,
-}
-
-action move_token(token: Token, to: Address) -> Token {
-    return transfer token to to
-}
-
-action redeem(receipt: VestingReceipt) -> Token {
-    return claim receipt
-}
-
-    action finalize(token: Token) -> Token {
-        return settle token
-    }
-"#;
-
-    const SETTLE_LIFECYCLE_FINAL_STATE_PROGRAM: &str = r#"
-module test
-
-#[lifecycle(Pending -> Settled)]
-receipt Settlement has store {
-    state: u8,
-    amount: u64,
-}
-
-action finalize(settlement: Settlement) -> Settlement {
-    return settle settlement
-}
-"#;
-
-    const CLAIM_SIGNER_PUBKEY_HASH_PROGRAM: &str = r#"
-module test
-
-resource Token has store {
-    amount: u64,
-    signer_pubkey_hash: [u8; 20],
-}
-
-receipt SignedReceipt -> Token {
-    amount: u64,
-    signer_pubkey_hash: [u8; 20],
-}
-
-action redeem_signed(receipt: SignedReceipt) -> Token {
-    return claim receipt
-}
-"#;
-
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
 module test
 
@@ -16805,17 +16648,17 @@ resource Fingerprint has store {
     digest: Hash,
 }
 
-action make_config(symbol: [u8; 8]) -> Config {
+action make_config(symbol: [u8; 8]) -> Config
+where
     create Config {
         symbol: symbol
     }
-}
 
-action make_fingerprint() -> Fingerprint {
+action make_fingerprint() -> Fingerprint
+where
     create Fingerprint {
         digest: Hash::zero()
     }
-}
 "#;
 
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
@@ -16825,23 +16668,11 @@ resource Token has store {
     amount: u64,
 }
 
-action mint() -> Token {
+action mint() -> Token
+where
     create Token {
         amount: 42
     } with_lock(Address::zero())
-}
-"#;
-
-    const MISSING_TRANSFER_CAPABILITY_PROGRAM: &str = r#"
-module test
-
-resource Token has store {
-    amount: u64,
-}
-
-action move_token(token: Token, to: Address) -> Token {
-    return transfer token to to
-}
 "#;
 
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
@@ -16851,193 +16682,252 @@ resource Token has store {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     destroy token
-}
 "#;
 
-    const CLAIM_NON_RECEIPT_PROGRAM: &str = r#"
+    const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
-    amount: u64,
-}
-
-action redeem(token: Token) -> u64 {
-    return claim token
-}
-"#;
-
-    const CLAIM_OUTPUT_NON_CELL_PROGRAM: &str = r#"
-module test
-
-receipt VestingReceipt -> u64 {
-    amount: u64,
-}
-
-action redeem(receipt: VestingReceipt) -> u64 {
-    return claim receipt
-}
-"#;
-
-    const CLAIM_OUTPUT_RECEIPT_PROGRAM: &str = r#"
-module test
-
-receipt OtherReceipt {
-    amount: u64,
-}
-
-receipt VestingReceipt -> OtherReceipt {
-    amount: u64,
-}
-
-action redeem(receipt: VestingReceipt) -> OtherReceipt {
-    return claim receipt
-}
-"#;
-
-    const SETTLE_NON_CELL_PROGRAM: &str = r#"
-module test
-
-struct Snapshot {
-    amount: u64,
-}
-
-action finalize(snapshot: Snapshot) -> Snapshot {
-    return settle snapshot
-}
-"#;
-
-    const LIFECYCLE_DUPLICATE_STATE_PROGRAM: &str = r#"
-module test
-
-#[lifecycle(Created -> Created)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action noop() -> u64 {
+flow Ticket.state {
+    Created -> Created;
+}
+
+action noop() -> u64
+where
     return 0
-}
 "#;
 
-    const LIFECYCLE_MISSING_STATE_CREATE_PROGRAM: &str = r#"
+    const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action make() -> Ticket {
+flow Ticket.state {
+    Created -> Active;
+}
+
+action make() -> Ticket
+where
     return create Ticket {
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_BAD_STATE_TYPE_PROGRAM: &str = r#"
+    const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
+receipt Ticket has store {
+    id: u64,
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action noop() -> u64
+where
+    return 0
+"#;
+
+    const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
+module test
+
 receipt Ticket has store {
     state: bool,
     id: u64,
 }
 
-action noop() -> u64 {
-    return 0
+flow Ticket.state {
+    Created -> Active;
 }
+
+action noop() -> u64
+where
+    return 0
 "#;
 
-    const LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
+    const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action make() -> Ticket {
+flow Ticket.state {
+    Created -> Active;
+}
+
+action make() -> Ticket
+where
     return create Ticket {
         state: 2,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_NON_INITIAL_CREATE_PROGRAM: &str = r#"
+    const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action make() -> Ticket {
+flow Ticket.state {
+    Created -> Active;
+}
+
+action make() -> Ticket
+where
     return create Ticket {
         state: 1,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
+    const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action make(state: u8) -> Ticket {
+flow Ticket.state {
+    Created -> Active;
+}
+
+action make(state: u8) -> Ticket
+where
     return create Ticket {
         state: state,
         id: 1,
     }
-}
 "#;
 
-    const LIFECYCLE_RESET_UPDATE_PROGRAM: &str = r#"
+    const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action reset(ticket: Ticket) -> Ticket {
+flow Ticket.state {
+    Created -> Active;
+}
+
+action reset(ticket: Ticket) -> Ticket
+where
     consume ticket
     return create Ticket {
         state: 0,
         id: ticket.id,
     }
-}
 "#;
 
-    const LIFECYCLE_STATIC_UPDATE_PROGRAM: &str = r#"
+    const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
 module test
 
-#[lifecycle(Created -> Active)]
 receipt Ticket has store {
     state: u8,
     id: u64,
 }
 
-action activate(ticket: Ticket) -> Ticket {
-    let active: u8 = 1
-    consume ticket
-    return create Ticket {
-        state: active,
+flow Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket) -> output: Ticket
+    transition ticket.state: Created -> output.state: Active
+where
+    create output = Ticket {
+        state: Active,
         id: ticket.id,
     }
+"#;
+
+    const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
+module test
+
+receipt Ticket has store {
+    state: u8,
+    id: u64,
 }
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action make() -> Ticket
+where
+    return create Ticket {
+        state: Created,
+        id: 1,
+    }
+"#;
+
+    const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
+module test
+
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket) -> output: Ticket
+    transition ticket.state: Created -> output.state: Active
+where
+    assert_invariant(ticket.state < Ticket::Active, "already active")
+    create output = Ticket {
+        state: Ticket::Active,
+        id: ticket.id,
+    }
+"#;
+
+    const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
+module test
+
+receipt Ticket has store {
+    state: u8,
+    id: u64,
+}
+
+receipt OtherTicket has store {
+    state: u8,
+    id: u64,
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+flow OtherTicket.state {
+    Draft -> Live;
+}
+
+action activate(ticket: Ticket) -> Ticket
+where
+    consume ticket
+    return create Ticket {
+        state: OtherTicket::Live,
+        id: ticket.id,
+    }
 "#;
 
     #[test]
@@ -17094,6 +16984,18 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains("beqz t0, .Lchoose_block_2"), "missing conditional branch for if expression:\n{}", asm);
         assert!(asm.contains(".Lchoose_block_3:"), "missing join block for if expression:\n{}", asm);
         assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_if_expression_fixed_byte_const_join_move() {
+        let result = compile(IF_EXPR_FIXED_BYTE_CONST_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("la t0, __cellscript_const_data_"),
+            "fixed-byte constant move must materialize a rodata pointer instead of a null pointer:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -17208,48 +17110,44 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(err.message.contains("parameter 'cfg' is a read-only reference"), "unexpected error: {}", err.message);
 
         let err = compile(REDUNDANT_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("parameter 'pool' is already an '&mut' reference"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
 
         let err = compile(FUNCTION_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("function 'bad' parameter 'pool' cannot use mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
 
         let err = compile(LOCK_MUT_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("lock 'bad' parameter 'pool' cannot use mutable reference type &mut Pool"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`&mut` Cell parameters are not valid"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_local_mutable_reference_aliases() {
         let err = compile(MUT_REF_LOCAL_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("local binding cannot store mutable reference type &mut Pool"),
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_TUPLE_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("local binding cannot store mutable reference type (&mut Pool, u64)"),
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_IF_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("local binding cannot store mutable reference type &mut Pool"),
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
             "unexpected error: {}",
             err.message
         );
 
         let err = compile(MUT_REF_ASSIGN_ALIAS_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("assignment cannot store mutable reference type &mut Pool"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("signature-direction outputs") || err.message.contains("`&mut` Cell parameters are not valid"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -17346,6 +17244,13 @@ action activate(ticket: Ticket) -> Ticket {
             err.message
         );
 
+        let err = compile(LOCK_BARE_REF_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            err.message.contains("lock 'bad' parameter 'token' cannot use bare `&T` at the verifier boundary"),
+            "unexpected error: {}",
+            err.message
+        );
+
         let err = compile(CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
             err.message.contains(
@@ -17357,9 +17262,10 @@ action activate(ticket: Ticket) -> Ticket {
 
         let err = compile(CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains(
-                "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
-            ),
+            err.message.contains("`&mut` Cell parameters are not valid")
+                || err.message.contains(
+                    "parameter 'pool' in action 'bad' cannot use reference to aggregate containing cell-backed values &mut (Pool, u64)"
+                ),
             "unexpected error: {}",
             err.message
         );
@@ -17392,11 +17298,7 @@ action activate(ticket: Ticket) -> Ticket {
         );
 
         let err = compile(CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("parameter 'view' in function 'bad' cannot contain nested reference type &&Point"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("`read_ref` is not a type qualifier"), "unexpected error: {}", err.message);
 
         let err = compile(ACTION_REF_PARAM_MODIFIER_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("parameter modifier 'ref' is reserved but unsupported"), "unexpected error: {}", err.message);
@@ -17480,7 +17382,7 @@ action activate(ticket: Ticket) -> Ticket {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
-        assert!(asm.contains("li a0, 7"), "assert failure path did not return a non-zero failure code:\n{}", asm);
+        assert!(asm.contains("li a0, 5"), "assert failure path did not return assertion-failed code:\n{}", asm);
         assert!(!asm.contains("assert_invariant"), "assert was not lowered out of source form:\n{}", asm);
     }
 
@@ -17529,12 +17431,13 @@ action activate(ticket: Ticket) -> Ticket {
     fn compile_rejects_lock_boundary_sources_outside_supported_scope() {
         let action_err = compile(ACTION_PROTECTED_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            action_err.message.contains("protected/witness/lock_args are lock-boundary syntax"),
+            action_err.message.contains("protected and lock_args are lock parameter source syntax"),
             "unexpected error: {}",
             action_err.message
         );
 
-        compile(LOCK_ARGS_PARAM_PROGRAM, CompileOptions::default()).unwrap();
+        compile(ACTION_REQUIRE_PROGRAM, CompileOptions::default()).expect("actions may use require for verifier guards");
+        compile(ACTION_REQUIRE_MESSAGE_PROGRAM, CompileOptions::default()).expect("require may carry a static review message");
 
         let lock_args_err = compile(LOCK_ARGS_DYNAMIC_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -17543,19 +17446,45 @@ action activate(ticket: Ticket) -> Ticket {
             lock_args_err.message
         );
 
-        let action_require_err = compile(ACTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            action_require_err.message.contains("require is lock-boundary syntax"),
-            "unexpected error: {}",
-            action_require_err.message
-        );
-
         let function_require_err = compile(FUNCTION_REQUIRE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            function_require_err.message.contains("require is lock-boundary syntax"),
+            function_require_err.message.contains("require/preserve is verifier-boundary syntax"),
             "unexpected error: {}",
             function_require_err.message
         );
+    }
+
+    #[test]
+    fn compile_rejects_dynamic_require_messages() {
+        let err = compile(REQUIRE_DYNAMIC_MESSAGE_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("require message must be a string literal"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_lock_args_script_args_binding() {
+        let result = compile(LOCK_ARGS_PARAM_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: LOAD_SCRIPT reason=entry_lock_args"),
+            "lock_args entry wrapper must load the executing Script.args:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)"),
+            "lock_args Address should consume exactly 32 script arg bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args"),
+            "lock_args-only wrapper should not require a witness payload:\n{}",
+            asm
+        );
+
+        let lock = result.metadata.locks.iter().find(|lock| lock.name == "bad").expect("lock metadata");
+        let owner = lock.params.iter().find(|param| param.name == "owner").expect("owner param");
+        assert_eq!(owner.source, "lock_args");
+        assert!(owner.lock_args_data_source);
+        assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
     }
 
     #[test]
@@ -17596,6 +17525,27 @@ action activate(ticket: Ticket) -> Ticket {
     }
 
     #[test]
+    fn compile_rejects_cell_metadata_stdlib_on_non_cell_args() {
+        let source = r#"
+module test
+
+resource Coin has store {
+    amount: u64
+}
+
+action bad(amount: u64) -> out: Coin
+where
+    std::cell::preserve_capacity(out, amount)
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(
+            err.message.contains("std::cell::preserve_capacity input must be a cell-backed value"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn compile_preserves_create_instructions_in_assembly() {
         let result = compile(CREATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -17609,7 +17559,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output field verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: field verification incomplete for this create pattern"),
             "locked create with coverable fields should not conflate lock verification with field verification:\n{}",
             asm
         );
@@ -17629,7 +17579,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output lock verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: lock verification incomplete for this create pattern"),
             "Address lock parameter should no longer fail closed as incomplete:\n{}",
             asm
         );
@@ -17699,7 +17649,7 @@ action activate(ticket: Ticket) -> Ticket {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output field verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: field verification incomplete for this create pattern"),
             "fully verified create output was incorrectly marked incomplete:\n{}",
             asm
         );
@@ -17805,21 +17755,6 @@ action activate(ticket: Ticket) -> Ticket {
             "unexpected error: {}",
             non_named_consume.message
         );
-
-        let non_named_transfer = compile(TRANSFER_NON_NAMED_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            non_named_transfer.message.contains("transfer requires a named cell-backed value"),
-            "unexpected error: {}",
-            non_named_transfer.message
-        );
-    }
-
-    #[test]
-    fn compile_moves_linear_values_through_let_bindings() {
-        compile(LINEAR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-
-        let copied = compile(LINEAR_LET_COPY_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(copied.message.contains("resource 'token' already Consumed"), "unexpected error: {}", copied.message);
     }
 
     #[test]
@@ -18002,7 +17937,7 @@ action activate(ticket: Ticket) -> Ticket {
     }
 
     #[test]
-    fn compile_binds_readonly_schema_entry_params_to_input_cells() {
+    fn compile_binds_read_action_schema_params_to_cell_deps() {
         let program = r#"
 module entry_read_ref
 
@@ -18017,26 +17952,26 @@ receipt Listing has destroy {
     price: u64,
 }
 
-action create_listing(nft: &NFT, price: u64) -> Listing {
-    create Listing {
+action create_listing(read nft: NFT, price: u64) -> listing: Listing
+where
+    create listing = Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
     }
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("# cellscript abi: bind read-only param nft to Input#0 cell data"),
-            "read-only schema entry parameter was not bound to an input cell:\n{}",
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_dep source=CellDep index=0"),
+            "explicit read schema entry parameter did not use the CellDep LOAD_CELL ABI:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_input source=Input index=0"),
-            "read-only schema entry parameter did not use the Input LOAD_CELL ABI:\n{}",
+            !asm.contains("# cellscript abi: bind read-only param nft to Input#0 cell data"),
+            "explicit read schema entry parameter regressed to implicit Input binding:\n{}",
             asm
         );
         assert!(
@@ -18079,13 +18014,13 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(config: read_ref Config, token: Token) -> Grant {
+action grant(read config: Config, token: Token) -> Grant
+where
     consume token
     create Grant {
         admin: config.admin,
         amount: token.amount,
     } with_lock(config.admin)
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -18816,7 +18751,7 @@ action grant(config: read_ref Config, token: Token) -> Grant {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_match_expressions() {
+    fn compile_merges_linear_transfers_inside_match_expressions() {
         compile(LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap();
 
@@ -18916,9 +18851,15 @@ action grant(config: read_ref Config, token: Token) -> Grant {
         );
         assert!(asm.contains("# length"), "len() did not stay on builtin length path:\n{}", asm);
         assert!(
-            asm.contains("# cellscript abi: collection push is not needed for verifier execution")
-                || asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
-            "collection push/extend fail-closed comment not found:\n{}",
+            asm.contains("# cellscript abi: stack collection push element_size=1")
+                && asm.contains("# cellscript abi: stack collection extend bytes=3 elements=3 element_size=1"),
+            "collection push/extend did not use stack-backed Vec<u8> paths:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: collection push is not needed for verifier execution")
+                && !asm.contains("# cellscript abi: collection extend is not needed for verifier execution"),
+            "collection push/extend should not hit old fail-closed comments:\n{}",
             asm
         );
         assert!(!asm.contains("# call push"), "push() leaked through generic call path:\n{}", asm);
@@ -18933,10 +18874,72 @@ action grant(config: read_ref Config, token: Token) -> Grant {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
+    let value = 7
+    return value.len()
+"#,
+                "len is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> bool
+where
+    let value = 7
+    return value.is_empty()
+"#,
+                "is_empty is only supported on array or Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64
+where
+    let value = 7
+    value.extend_from_slice([1, 2])
+    return value
+"#,
+                "extend_from_slice is only supported on Vec values",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64
+where
+    let mut values: Vec<u64> = []
+    values.extend_from_slice([true])
+    return values.len()
+"#,
+                "Vec.extend_from_slice type mismatch",
+            ),
+            (
+                r#"
+module test
+
+struct Point {
+    x: u64,
+}
+
+action bad(point: Point) -> u64
+where
+    let mut points = Vec::new()
+    points.extend_from_slice([&point])
+    return 0
+"#,
+                "Vec.extend_from_slice cannot store reference type &Point",
+            ),
+            (
+                r#"
+module test
+
+action bad() -> u64
+where
     let values = Vec::new()
     return values.capacity()
-}
 "#,
                 "Vec.capacity requires a typed Vec<T>",
             ),
@@ -18944,10 +18947,10 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values = Vec::new()
     return values.remove(0)
-}
 "#,
                 "Vec.remove requires a typed Vec<T>",
             ),
@@ -18955,10 +18958,10 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values = Vec::new()
     return values.first()
-}
 "#,
                 "Vec.first requires a typed Vec<T>",
             ),
@@ -18966,11 +18969,11 @@ action bad() -> u64 {
                 r#"
 module test
 
-action bad(owner: Address) -> bool {
+action bad(owner: Address) -> bool
+where
     let mut values = Vec::new()
     values.push(1)
     return values.contains(owner)
-}
 "#,
                 "Vec.contains type mismatch",
             ),
@@ -18978,12 +18981,12 @@ action bad(owner: Address) -> bool {
                 r#"
 module test
 
-action bad(owner: Address) -> u64 {
+action bad(owner: Address) -> u64
+where
     let mut values = Vec::new()
     values.push(1)
     values.insert(0, owner)
     return 0
-}
 "#,
                 "Vec.insert type mismatch",
             ),
@@ -18991,12 +18994,12 @@ action bad(owner: Address) -> u64 {
                 r#"
 module test
 
-action bad(owner: Address) -> u64 {
+action bad(owner: Address) -> u64
+where
     let mut values = Vec::new()
     values.push(1)
     values.set(0, owner)
     return 0
-}
 "#,
                 "Vec.set type mismatch",
             ),
@@ -19008,11 +19011,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let mut points = Vec::new()
     points.insert(0, &point)
     return 0
-}
 "#,
                 "Vec.insert cannot store reference type &Point",
             ),
@@ -19024,11 +19027,11 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64 {
+action bad(point: Point) -> u64
+where
     let mut points = Vec::new()
     points.set(0, &point)
     return 0
-}
 "#,
                 "Vec.set cannot store reference type &Point",
             ),
@@ -19241,10 +19244,10 @@ action bad(point: Point) -> u64 {
             r#"
 module test
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let values: Vec<Address> = [1]
     return values.len()
-}
 "#,
             CompileOptions::default(),
         )
@@ -20235,15 +20238,16 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection: &mut Collection, recipients: Vec<Address>) {
-    collection.total_supply += recipients.len() as u64
-}
+action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection
+where
+    require collection_after.name == collection_before.name
+    require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "batch").expect("batch metadata");
-        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "Collection").expect("Collection mutation");
 
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "collection_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "collection_after"));
         assert!(
             !action
                 .transaction_runtime_input_requirements
@@ -20308,6 +20312,79 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
     }
 
     #[test]
+    fn compile_materializes_local_fixed_byte_constants_into_rodata() {
+        let result = compile(LOCAL_ZERO_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("__const_data"), "undefined const label leaked into assembly:\n{}", asm);
+        assert!(asm.contains("__cellscript_const_data_0:"), "local fixed-byte constant should have a concrete rodata label:\n{}", asm);
+
+        compile(LOCAL_ZERO_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+    }
+
+    #[test]
+    fn compile_lowers_u128_equality_as_fixed_byte_comparison() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=16"),
+            "u128 equality should compare all 16 bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 equality should not fall through to the generic fail-closed path:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_lowers_u128_mutate_delta_with_carry_arithmetic() {
+        let result = compile(U128_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: u128 Add with u64 delta"),
+            "u128 mutate expression should lower through the 128-bit carry path:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("unsupported u128 operand shape"),
+            "u128 mutate expression should not fail through generic u128 handling:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_entry_witness_rejects_payloads_larger_than_buffer() {
+        let result = compile(U128_EQ_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript entry abi: reject witnesses larger than the local entry buffer"),
+            "entry witness wrapper should reject sizes above its local buffer:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t1, 1025"), "entry witness wrapper should enforce ENTRY_WITNESS_BUFFER_SIZE=1024:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_verifies_large_output_field_requirements_without_partial_fallback() {
+        let result = compile(LARGE_PRESERVED_MUTATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=600"),
+            "large explicit output field requirements should use the fixed-byte verifier path:\n{}",
+            asm
+        );
+        let action = result.metadata.actions.iter().find(|action| action.name == "update").expect("update metadata");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "state_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "state_after"));
+    }
+
+    #[test]
     fn compile_result_writes_artifact_to_disk() {
         let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         let dir = tempdir().unwrap();
@@ -20329,6 +20406,99 @@ action batch(collection: &mut Collection, recipients: Vec<Address>) {
         assert!(!result.artifact_bytes.is_empty());
         // CKB profile does not embed VM ABI trailer
         assert!(!result.metadata.runtime.vm_abi.embedded_in_artifact);
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_full_width_u64_literals() {
+        let program = r#"
+module vm::u64_literals
+
+action high_bit() -> u64
+where
+    return 9223372036854775808
+
+action max_value() -> u64
+where
+    return 18446744073709551615
+"#;
+
+        let result =
+            compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+
+        assert_eq!(result.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_large_stack_offsets() {
+        let mut program = String::from("module vm::large_stack\n\naction main() -> u64\nwhere\n");
+        for index in 0..260 {
+            program.push_str(&format!("    let x{} = {}\n", index, index));
+        }
+        program.push_str("    return x259\n");
+
+        let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(asm.artifact_bytes).unwrap();
+        assert!(!asm.contains("2048(sp)") && !asm.contains("2072(sp)"), "large stack offsets should be expanded:\n{}", asm);
+
+        let elf = compile(&program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(elf.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn compile_riscv_elf_accepts_large_schema_field_offsets() {
+        let scalar_program = r#"
+module vm::large_schema_scalar
+
+struct Big {
+    pad: [u8; 2048],
+    amount: u64,
+}
+
+action inspect(snapshot: Big) -> u64
+where
+    return snapshot.amount
+"#;
+
+        let scalar_asm =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let scalar_asm = String::from_utf8(scalar_asm.artifact_bytes).unwrap();
+        assert!(
+            !scalar_asm.contains("lbu t2, 2048(t4)"),
+            "large schema scalar field offset should be expanded before assembly:\n{}",
+            scalar_asm
+        );
+        let scalar_elf =
+            compile(scalar_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(scalar_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(scalar_elf.artifact_bytes.starts_with(b"\x7fELF"));
+
+        let bytes_program = r#"
+module vm::large_schema_bytes
+
+struct Big {
+    pad: [u8; 2048],
+    marker: [u8; 1],
+}
+
+action get_marker(snapshot: Big) -> [u8; 1]
+where
+    return snapshot.marker
+"#;
+
+        let bytes_asm =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
+        let bytes_asm = String::from_utf8(bytes_asm.artifact_bytes).unwrap();
+        assert!(
+            !bytes_asm.contains("addi t0, t4, 2048"),
+            "large schema fixed-byte field pointer offset should be expanded before assembly:\n{}",
+            bytes_asm
+        );
+        let bytes_elf =
+            compile(bytes_program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        assert_eq!(bytes_elf.artifact_format, ArtifactFormat::RiscvElf);
+        assert!(bytes_elf.artifact_bytes.starts_with(b"\x7fELF"));
     }
 
     #[test]
@@ -20419,12 +20589,12 @@ shared Config has store {
     enabled: bool,
 }
 
-action create_config(admin: Address, enabled: bool) -> Config {
+action create_config(admin: Address, enabled: bool) -> Config
+where
     create Config {
         admin: admin,
         enabled: enabled,
     } with_lock(admin)
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -20452,9 +20622,9 @@ action create_config(admin: Address, enabled: bool) -> Config {
             r#"
 module test::timepoint
 
-action now() -> u64 {
+action now() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20472,9 +20642,9 @@ action now() -> u64 {
             r#"
 module test::timepoint
 
-action now() -> u64 {
+action now() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20554,12 +20724,12 @@ resource Receipt {
     amount: u64,
 }
 
-action mint(amount: u64) -> Receipt {
+action mint(amount: u64) -> Receipt
+where
     let receipt = create Receipt {
         amount: amount,
     };
     receipt
-}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints metadata");
@@ -20614,9 +20784,9 @@ hash_type = "type"
             r#"
 module deploy_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20657,9 +20827,9 @@ with_default_hash_type(Data1)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount }
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20700,9 +20870,9 @@ dep_type = "dep_group"
             r#"
 module conflicting_cell_dep_location
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20743,9 +20913,9 @@ dep_type = "dep_group"
             r#"
 module incomplete_cell_dep_location
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20784,9 +20954,9 @@ dep_type = "unknown"
             r#"
 module bad_deploy_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20821,9 +20991,9 @@ hash_type = "unsupported"
             r#"
 module bad_hash_type_manifest
 
-action add(a: u64, b: u64) -> u64 {
+action add(a: u64, b: u64) -> u64
+where
     a + b
-}
 "#,
         )
         .unwrap();
@@ -20856,9 +21026,9 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 module test
 
-action main() -> u64 {
+action main() -> u64
+where
     return env::current_timepoint()
-}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -20874,13 +21044,13 @@ action main() -> u64 {
             r#"
 module test
 
-action needs_arg(value: u64) -> u64 {
+action needs_arg(value: u64) -> u64
+where
     value
-}
 
-action main() -> u64 {
+action main() -> u64
+where
     0
-}
 "#,
             CompileOptions::default(),
         )
@@ -21419,12 +21589,12 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
+action mint(amount: u64, symbol: [u8; 8]) -> Token
+where
     create Token {
         amount,
         symbol,
     }
-}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         assert_eq!(result.metadata.actions.len(), 1);
@@ -21464,7 +21634,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_if_expressions() {
+    fn compile_merges_linear_transfers_inside_if_expressions() {
         compile(LINEAR_IF_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap();
 
@@ -21517,7 +21687,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_block_expressions() {
+    fn compile_merges_linear_transfers_inside_block_expressions() {
         compile(LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM, CompileOptions::default()).unwrap();
         compile(LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM, CompileOptions::default()).unwrap();
@@ -21535,7 +21705,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_merges_linear_moves_inside_block_tail_if_expressions() {
+    fn compile_merges_linear_transfers_inside_block_tail_if_expressions() {
         compile(LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM, CompileOptions::default()).unwrap();
 
         let err = compile(LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
@@ -21603,118 +21773,869 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     }
 
     #[test]
-    fn compile_rejects_duplicate_lifecycle_states_on_main_path() {
-        let err = compile(LIFECYCLE_DUPLICATE_STATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_noop_flow_transition_on_main_path() {
+        let err = compile(STATE_MACHINE_NOOP_TRANSITION_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("duplicate lifecycle state: Created"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("flow must mention at least two states"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn compile_rejects_missing_lifecycle_state_create_on_main_path() {
-        let err = compile(LIFECYCLE_MISSING_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_missing_flow_state_create_on_main_path() {
+        let err = compile(FLOW_MISSING_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("create for 'Ticket' is missing field(s): state"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_flow_receipt_without_state_field() {
+        let err = compile(FLOW_MISSING_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("flow target field 'Ticket.state' is not defined"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_bad_flow_state_field_type_on_main_path() {
+        let err = compile(FLOW_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("create of lifecycle receipt 'Ticket' must set its state field"),
+            err.message.contains("flow field 'Ticket.state' must be an unsigned integer or no-payload enum"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_bad_lifecycle_state_field_type_on_main_path() {
-        let err = compile(LIFECYCLE_BAD_STATE_TYPE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_rejects_out_of_range_flow_state_create_on_main_path() {
+        let err = compile(FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("lifecycle receipt 'Ticket' state field must be an unsigned integer type"),
+            err.message.contains("flow state index 2 is out of range for 'Ticket' with 2 states"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_out_of_range_lifecycle_state_create_on_main_path() {
-        let err = compile(LIFECYCLE_OUT_OF_RANGE_STATE_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_accepts_non_initial_flow_create_without_consumed_prior_state() {
+        compile(FLOW_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_rejects_dynamic_initial_flow_create_state() {
+        let err = compile(FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
 
         assert!(
-            err.message.contains("lifecycle state index 2 is out of range for 'Ticket' with 2 states"),
+            err.message.contains("initial create of flow type 'Ticket' must use a statically known declared state"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_non_initial_lifecycle_create_without_consumed_prior_state() {
-        let err = compile(LIFECYCLE_NON_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_allows_flow_update_to_declared_initial_state_at_type_check() {
+        compile(FLOW_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_accepts_flow_state_name_initializers() {
+        let result = compile(FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
 
         assert!(
-            err.message.contains("initial create of lifecycle receipt 'Ticket' must use initial state index 0, got 1"),
+            asm.contains("# cellscript abi: verify output field Ticket.state offset=0 size=1"),
+            "state-name initializer should still verify the explicit state field:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_accepts_qualified_flow_state_names() {
+        let result = compile(FLOW_QUALIFIED_STATE_NAME_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
+
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
+        }));
+        assert!(asm.contains("state_count=2"), "qualified flow state names should preserve verifier metadata:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_wrong_qualified_flow_state_field_initializer() {
+        let err = compile(FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM, CompileOptions::default()).unwrap_err();
+
+        assert!(
+            err.message.contains("flow field 'Ticket.state' cannot be initialized with 'OtherTicket::Live'"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_dynamic_initial_lifecycle_create_state() {
-        let err = compile(LIFECYCLE_DYNAMIC_INITIAL_CREATE_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(
-            err.message.contains("initial create of lifecycle receipt 'Ticket' must use statically known initial state index 0"),
-            "unexpected error: {}",
-            err.message
-        );
-    }
-
-    #[test]
-    fn compile_rejects_static_lifecycle_update_reset_to_initial_state() {
-        let err = compile(LIFECYCLE_RESET_UPDATE_PROGRAM, CompileOptions::default()).unwrap_err();
-
-        assert!(
-            err.message.contains("lifecycle update of 'Ticket' cannot reset to initial state index 0"),
-            "unexpected error: {}",
-            err.message
-        );
-    }
-
-    #[test]
-    fn compile_accepts_static_lifecycle_update_to_non_initial_state() {
-        let result = compile(LIFECYCLE_STATIC_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
+    fn compile_accepts_static_flow_update_to_non_initial_state() {
+        let result = compile(FLOW_STATIC_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let ticket = result.metadata.types.iter().find(|ty| ty.name == "Ticket").expect("Ticket type metadata");
         let action = result.metadata.actions.iter().find(|action| action.name == "activate").expect("activate metadata");
 
         assert_eq!(result.metadata.module, "test");
-        assert_eq!(ticket.lifecycle_states, vec!["Created".to_string(), "Active".to_string()]);
-        assert_eq!(ticket.lifecycle_transitions.len(), 1);
-        assert_eq!(ticket.lifecycle_transitions[0].from, "Created");
-        assert_eq!(ticket.lifecycle_transitions[0].to, "Active");
-        assert_eq!(ticket.lifecycle_transitions[0].from_index, 0);
-        assert_eq!(ticket.lifecycle_transitions[0].to_index, 1);
+        assert_eq!(ticket.flow_states, vec!["Created".to_string(), "Active".to_string()]);
+        assert_eq!(ticket.flow_transitions.len(), 1);
+        assert_eq!(ticket.flow_transitions[0].from, "Created");
+        assert_eq!(ticket.flow_transitions[0].to, "Active");
+        assert_eq!(ticket.flow_transitions[0].from_index, 0);
+        assert_eq!(ticket.flow_transitions[0].to_index, 1);
         assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
-                && obligation.feature == "Ticket.state"
-                && obligation.status == "checked-runtime"
+            obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
         assert!(result.metadata.runtime.verifier_obligations.iter().any(|obligation| {
             obligation.scope == "action:activate"
-                && obligation.category == "lifecycle-transition"
+                && obligation.category == "state-transition"
                 && obligation.feature == "Ticket.state"
                 && obligation.status == "checked-runtime"
         }));
         assert!(
-            asm.contains("# cellscript abi: lifecycle transition Ticket.state old+1"),
-            "missing lifecycle runtime transition verifier:\n{}",
+            asm.contains("# cellscript abi: state transition Ticket.state state_count=2"),
+            "missing flow runtime transition verifier:\n{}",
             asm
         );
-        assert!(asm.contains("li a0, 7"), "missing lifecycle transition failure code in verifier:\n{}", asm);
-        assert!(asm.contains("state_count=2"), "missing lifecycle state-count marker in verifier:\n{}", asm);
-        assert!(asm.contains("li a0, 9"), "missing lifecycle old-state range failure code:\n{}", asm);
-        assert!(asm.contains("li t3, 2"), "missing lifecycle output state range check:\n{}", asm);
-        assert!(asm.contains("li a0, 8"), "missing lifecycle output state range failure code:\n{}", asm);
+        assert!(asm.contains("li a0, 7"), "missing state transition failure code in verifier:\n{}", asm);
+        assert!(asm.contains("state_count=2"), "missing state-count marker in verifier:\n{}", asm);
+        assert!(asm.contains("li a0, 9"), "missing old-state range failure code:\n{}", asm);
+        assert!(asm.contains("li t3, 2"), "missing output state range check:\n{}", asm);
+        assert!(asm.contains("li a0, 8"), "missing output state range failure code:\n{}", asm);
     }
 
     #[test]
-    fn ir_carries_lifecycle_rules() {
-        let tokens = lexer::lex(LIFECYCLE_STATIC_UPDATE_PROGRAM).unwrap();
+    fn compile_accepts_explicit_flow_action_edges() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow OfferFlow for Offer.state {
+    Created -> Live;
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    let amount = input.amount
+    create output = Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert_eq!(offer.flow_states, vec!["Created", "Live", "Filled", "Cancelled"]);
+        assert_eq!(offer.flow_state_field.as_deref(), Some("state"));
+        assert!(offer.flow_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: state transition Offer.state state_count=4"),
+            "missing explicit flow runtime transition marker:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t3, 1"), "action transition should check source state Live=1:\n{}", asm);
+        assert!(asm.contains("li t3, 2"), "action transition should check target state Filled=2:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_accepts_core_input_output_state_transition_edges() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Live -> Cancelled;
+}
+
+action accept(input input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    require input.amount == output.amount
+    create output = Offer {
+        state: OfferState::Filled,
+        amount: input.amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "input"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
+        assert!(action.params.iter().any(|param| param.name == "input" && param.source == "input"));
+        assert!(action.params.iter().any(|param| param.name == "output" && param.source == "output"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0"),
+            "core input parameter should bind deterministically to Input#0:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+            "core output parameter should bind deterministically to Output#0:\n{}",
+            asm
+        );
+        assert!(asm.contains("li t3, 0"), "core transition should check source state Live=0:\n{}", asm);
+        assert!(asm.contains("li t3, 1"), "core transition should check target state Filled=1:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_asymmetric_where_branch_output_constraints() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    price: u64
+    note: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    if input.price > 0 {
+        require output.price == input.price
+    } else {
+        require output.note == input.note
+    }
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("incomplete branch constraints"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("output."), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_symmetric_where_branch_output_constraints() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    price: u64
+    note: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    if input.price > 0 {
+        require output.price == input.price
+    } else {
+        require output.price == input.price + 1
+    }
+
+    require output.note == input.note
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_rejects_input_source_outside_action_cell_params() {
+        let function_source = r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+fn helper(input token: Token) -> u64 {
+    token.amount
+}
+"#;
+        let function_err = compile(function_source, CompileOptions::default()).unwrap_err();
+        assert!(function_err.message.contains("cannot use input source classification"), "unexpected error: {}", function_err.message);
+
+        let scalar_source = r#"
+module test
+
+action main(input amount: u64) -> u64
+where
+    amount
+"#;
+        let scalar_err = compile(scalar_source, CompileOptions::default()).unwrap_err();
+        assert!(
+            scalar_err.message.contains("must name a Cell-backed resource, shared cell, or receipt type"),
+            "unexpected error: {}",
+            scalar_err.message
+        );
+    }
+
+    #[test]
+    fn compile_rejects_core_state_transition_edge_not_in_graph() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action cancel(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Cancelled
+where
+    require input.amount == output.amount
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_duplicate_flow_for_same_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow OfferFlow for Offer.state {
+    Created -> Live;
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("duplicate flow for 'Offer.state'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_reports_equivalent_state_transition_obligation_for_sugar_and_core_forms() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action accept_sugar(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    let amount = input.amount
+    create output = Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+
+action accept_core(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    require input.amount == output.amount
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let sugar = result.metadata.actions.iter().find(|action| action.name == "accept_sugar").expect("sugar metadata");
+        let core = result.metadata.actions.iter().find(|action| action.name == "accept_core").expect("core metadata");
+        let sugar_obligations = sugar
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.category == "state-transition" && obligation.feature == "Offer.state")
+            .count();
+        let core_obligations = core
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.category == "state-transition" && obligation.feature == "Offer.state")
+            .count();
+
+        assert_eq!(sugar_obligations, 1);
+        assert_eq!(core_obligations, sugar_obligations);
+        assert!(sugar.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.ty == "Offer"));
+        assert!(core.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "output"));
+    }
+
+    #[test]
+    fn compile_accepts_named_action_output_and_create_binding() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled by accept;
+}
+
+action accept(old: Offer) -> new: Offer
+    transition old.state: Live -> new.state: Filled
+where
+    create new = Offer {
+        state: OfferState::Filled,
+        amount: old.amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "old"));
+        assert!(action.create_set.iter().any(|pattern| {
+            pattern.operation == "output"
+                && pattern.ty == "Offer"
+                && pattern.binding == "new"
+                && pattern.fields == vec!["state".to_string(), "amount".to_string()]
+        }));
+        assert!(action.params.iter().any(|param| param.name == "new" && param.source == "output"));
+    }
+
+    #[test]
+    fn named_action_output_create_binding_reuses_declared_output_index() {
+        let source = r#"
+module test
+
+resource Authority has store {
+    minted: u64
+}
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token)
+where
+    require next_auth.minted == auth.minted + amount
+
+    create token = Token {
+        amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let assembly = String::from_utf8(result.artifact_bytes).expect("assembly is utf8");
+        assert!(assembly.contains("LOAD_CELL_DATA reason=output_param source=Output index=0"));
+        assert!(assembly.contains("LOAD_CELL_DATA reason=output_param source=Output index=1"));
+        assert!(
+            !assembly.contains("source=Output index=2"),
+            "named output create must constrain its declared Output index instead of allocating a new output:\n{}",
+            assembly
+        );
+        assert!(assembly.contains("# constrain named output Token"));
+    }
+
+    #[test]
+    fn compile_rejects_flow_by_action_when_explicit_move_uses_different_edge() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(old: Offer) -> new: Offer
+    transition old.state: Live -> new.state: Cancelled
+where
+        require old.amount == new.amount
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_accepts_prefix_read_params_as_cell_dep_bindings() {
+        let source = r#"
+module test
+
+shared Config has store {
+    admin: Address,
+}
+
+resource Token has store {
+    amount: u64,
+}
+
+receipt Grant has store {
+    admin: Address,
+    amount: u64,
+}
+
+action grant(read config: Config, token: Token) -> grant: Grant
+where
+    consume token
+    create grant = Grant {
+        admin: config.admin,
+        amount: token.amount,
+    } with_lock(config.admin)
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: LOAD_CELL_DATA reason=read_ref_param_dep source=CellDep index=0"),
+            "read prefix parameter did not bind to CellDep:\n{}",
+            asm
+        );
+        let action = result.metadata.actions.iter().find(|action| action.name == "grant").expect("grant metadata");
+        let config_param = action.params.iter().find(|param| param.name == "config").expect("config param metadata");
+        assert_eq!(config_param.source, "read");
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "grant"));
+    }
+
+    #[test]
+    fn compile_accepts_action_witness_source_qualifier() {
+        let source = r#"
+module test
+
+resource Token has store {
+    amount: u64,
+}
+
+action mint(witness amount: u64) -> token: Token
+where
+    create token = Token {
+        amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
+        let amount = action.params.iter().find(|param| param.name == "amount").expect("amount metadata");
+        assert_eq!(amount.source, "witness");
+        assert!(amount.witness_data_source);
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "token"));
+    }
+
+    #[test]
+    fn compile_accepts_flow_on_custom_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    status: OfferState
+    amount: u64
+}
+
+flow OfferFlow for Offer.status {
+    Created -> Live;
+    Live -> Filled by accept;
+}
+
+action accept(input: Offer) -> output: Offer
+    transition input.status: Live -> output.status: Filled
+where
+    let amount = input.amount
+    create output = Offer {
+        status: OfferState::Filled,
+        amount,
+    }
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let offer = result.metadata.types.iter().find(|ty| ty.name == "Offer").expect("Offer type metadata");
+        let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
+
+        assert_eq!(offer.flow_state_field.as_deref(), Some("status"));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Offer.status" && obligation.status == "checked-runtime"
+        }));
+        assert!(
+            asm.contains("# cellscript abi: state transition Offer.status state_count=3"),
+            "custom state field should be used by runtime verifier:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_accepts_flow_initial_create_at_any_declared_state() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Created -> Live;
+    Live -> Filled;
+}
+
+action seed_live() -> Offer
+where
+    create Offer {
+        state: OfferState::Live,
+        amount: 1,
+    }
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_accepts_flow_edge_returning_to_first_state() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Created;
+}
+
+action reset(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Created
+where
+    let amount = input.amount
+    create output = Offer {
+        state: OfferState::Created,
+        amount,
+    }
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_rejects_state_edge_that_does_not_consume_binding() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action accept(input: &Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    create output = Offer {
+        state: OfferState::Filled,
+        amount: input.amount,
+    }
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("cannot use bare `&T` at the verifier boundary"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_flow_by_action_without_exact_move_clause() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow OfferFlow for Offer.state {
+    Live -> Filled by accept;
+    Live -> Cancelled;
+}
+
+action accept(input: Offer)
+where
+    let amount = input.amount
+    consume input
+    create Offer {
+        state: OfferState::Filled,
+        amount,
+    }
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_undeclared_action_state_edge() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+    Filled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Created -> Live;
+}
+
+action accept(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    create output = Offer {
+        state: OfferState::Filled,
+        amount: 1,
+    }
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_flow_payload_enum_state_field() {
+        let source = r#"
+module test
+
+enum OfferState {
+    Created,
+    Live(u64),
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Created -> Live;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must not have payload variants"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_flow_on_plain_struct() {
+        let source = r#"
+module test
+
+struct Offer {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Created -> Live;
+}
+"#;
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must be a resource, shared, or receipt Cell type"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn ir_carries_flow_rules() {
+        let tokens = lexer::lex(FLOW_STATIC_UPDATE_PROGRAM).unwrap();
         let ast = parser::parse(&tokens).unwrap();
         let module = ir::generate(&ast).unwrap();
         let ticket = module
@@ -21726,11 +22647,11 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
             })
             .expect("Ticket IR type");
 
-        assert_eq!(ticket.lifecycle_rules.len(), 1);
-        assert_eq!(ticket.lifecycle_rules[0].from, "Created");
-        assert_eq!(ticket.lifecycle_rules[0].to, "Active");
-        assert_eq!(ticket.lifecycle_rules[0].from_index, 0);
-        assert_eq!(ticket.lifecycle_rules[0].to_index, 1);
+        assert_eq!(ticket.flow_rules.len(), 1);
+        assert_eq!(ticket.flow_rules[0].from, "Created");
+        assert_eq!(ticket.flow_rules[0].to, "Active");
+        assert_eq!(ticket.flow_rules[0].from_index, 0);
+        assert_eq!(ticket.flow_rules[0].to_index, 1);
     }
 
     #[test]
@@ -21749,7 +22670,7 @@ source_roots = ["src", "shared"]
 "#,
         )
         .unwrap();
-        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64 { 1 }\n").unwrap();
+        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64\nwhere\n    1\n").unwrap();
         std::fs::write(root.join("shared/types.cell"), "module demo::types\nstruct Pair { left: u64, right: u64 }\n").unwrap();
 
         let modules = load_modules_for_input(root).unwrap();
@@ -21797,144 +22718,6 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
-    fn settle_lifecycle_final_state_field_is_checked_runtime() {
-        let result = compile(SETTLE_LIFECYCLE_FINAL_STATE_PROGRAM, CompileOptions::default()).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
-        assert!(
-            asm.contains("# cellscript abi: settle final-state Settlement.state final_state=1 state_count=2"),
-            "settle did not emit the lifecycle final-state verifier check:\n{}",
-            asm
-        );
-
-        let finalize = result.metadata.actions.iter().find(|action| action.name == "finalize").expect("finalize metadata");
-        let settle_finalization = finalize
-            .verifier_obligations
-            .iter()
-            .find(|obligation| obligation.feature == "settle-finalization:Settlement")
-            .expect("settle finalization obligation");
-        assert_eq!(
-            settle_finalization.status, "checked-runtime",
-            "fully verifier-covered lifecycle settle finalization should be checked: {}",
-            settle_finalization.detail
-        );
-        assert!(
-            settle_finalization.detail.contains("settle-final-state=checked-runtime")
-                && settle_finalization.detail.contains("settle-state-policy=lifecycle-final-state")
-                && settle_finalization.detail.contains("settle-output-admission=checked-runtime"),
-            "settle finalization should expose checked lifecycle final-state and output admission policy: {}",
-            settle_finalization.detail
-        );
-        assert!(finalize.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "settle-finalization:Settlement"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "settle-final-state-context"
-                && requirement.source == "Transaction"
-                && requirement.field.as_deref() == Some("pending-to-final-state")
-                && requirement.abi == "settle-finalization-state-context"
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }));
-        assert!(finalize.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "settle-finalization:Settlement"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "settle-output-admission"
-                && requirement.source == "Transaction"
-                && requirement.field.as_deref() == Some("grouped-output-admission")
-                && requirement.abi == "settle-finalization-output-admission"
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }));
-    }
-
-    #[test]
-    fn compile_rejects_claim_signature_helpers_under_ckb_profile() {
-        let err = compile(
-            CLAIM_SIGNER_PUBKEY_HASH_PROGRAM,
-            CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-        )
-        .unwrap_err();
-
-        assert!(err.message.contains("target profile policy failed for 'ckb'"), "unexpected error: {}", err.message);
-        assert!(
-            err.message.contains("Claim helper syscall features not supported in CKB profile"),
-            "unexpected error: {}",
-            err.message
-        );
-        assert!(err.message.contains("load-claim-ecdsa-signature-hash"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("verify-claim-secp256k1-signature"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn ir_summary_captures_transfer_and_claim_consumes() {
-        let tokens = lexer::lex(TRANSFER_CLAIM_SETTLE_PROGRAM).unwrap();
-        let module = parser::parse(&tokens).unwrap();
-        let ir = ir::generate(&module).unwrap();
-
-        let transfer_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "move_token" => Some(action),
-                _ => None,
-            })
-            .expect("move_token action");
-        assert_eq!(transfer_action.body.consume_set.len(), 1);
-        assert_eq!(transfer_action.body.create_set.len(), 1);
-        assert_eq!(transfer_action.body.consume_set[0].binding, "token");
-        assert_eq!(transfer_action.body.consume_set[0].operation, "transfer");
-        assert_eq!(transfer_action.body.create_set[0].ty, "Token");
-        assert_eq!(transfer_action.body.create_set[0].operation, "transfer");
-        assert_eq!(transfer_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(transfer_action.body.create_set[0].fields[0].0, "amount");
-        assert!(
-            transfer_action.body.create_set[0].lock.is_some(),
-            "transfer-created output should carry the destination lock operand"
-        );
-        assert_eq!(transfer_action.body.write_intents.len(), 1);
-        assert_eq!(transfer_action.body.write_intents[0].operation, "transfer");
-        assert_eq!(transfer_action.body.write_intents[0].ty, "Token");
-        assert_eq!(transfer_action.body.write_intents[0].source, ir::WriteIntentSource::Output);
-
-        let claim_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "redeem" => Some(action),
-                _ => None,
-            })
-            .expect("redeem action");
-        assert_eq!(claim_action.body.consume_set.len(), 1);
-        assert_eq!(claim_action.body.consume_set[0].binding, "receipt");
-        assert_eq!(claim_action.body.consume_set[0].operation, "claim");
-        assert_eq!(claim_action.body.create_set.len(), 1);
-        assert_eq!(claim_action.body.create_set[0].ty, "Token");
-        assert_eq!(claim_action.body.create_set[0].operation, "claim");
-        assert_eq!(claim_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(claim_action.body.create_set[0].fields[0].0, "amount");
-        assert_eq!(claim_action.body.write_intents.len(), 1);
-        assert_eq!(claim_action.body.write_intents[0].operation, "claim");
-
-        let settle_action = ir
-            .items
-            .iter()
-            .find_map(|item| match item {
-                ir::IrItem::Action(action) if action.name == "finalize" => Some(action),
-                _ => None,
-            })
-            .expect("finalize action");
-        assert_eq!(settle_action.body.consume_set.len(), 1);
-        assert_eq!(settle_action.body.consume_set[0].binding, "token");
-        assert_eq!(settle_action.body.consume_set[0].operation, "settle");
-        assert_eq!(settle_action.body.create_set.len(), 1);
-        assert_eq!(settle_action.body.create_set[0].ty, "Token");
-        assert_eq!(settle_action.body.create_set[0].operation, "settle");
-        assert_eq!(settle_action.body.create_set[0].fields.len(), 1);
-        assert_eq!(settle_action.body.create_set[0].fields[0].0, "amount");
-        assert_eq!(settle_action.body.write_intents.len(), 1);
-        assert_eq!(settle_action.body.write_intents[0].operation, "settle");
-    }
-
-    #[test]
     fn compile_metadata_exposes_covenant_proof_plan_for_transfer() {
         let source = r#"
 module test
@@ -21943,9 +22726,9 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> Token
+where
     return transfer token to to
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -21954,7 +22737,7 @@ action transfer_token(token: Token, to: Address) -> Token {
             .runtime
             .proof_plan
             .iter()
-            .find(|plan| plan.feature == "transfer-output:Token")
+            .find(|plan| plan.feature.starts_with("transfer-output:Token"))
             .expect("transfer output ProofPlan record");
 
         assert_eq!(plan.trigger, "explicit_entry");
@@ -21976,7 +22759,7 @@ action transfer_token(token: Token, to: Address) -> Token {
                 .expect("action metadata")
                 .proof_plan
                 .iter()
-                .filter(|plan| plan.feature == "transfer-output:Token")
+                .filter(|plan| plan.feature.starts_with("transfer-output:Token"))
                 .count(),
             1
         );
@@ -22064,9 +22847,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -22105,9 +22888,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -22191,9 +22974,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -22237,9 +23020,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -22308,9 +23091,9 @@ resource Flag {
     enabled: bool,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -22332,9 +23115,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -22358,9 +23141,9 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -22384,9 +23167,9 @@ resource Config {
     digest: Hash,
 }
 
-action run() -> u64 {
+action run() -> u64
+where
     return 0
-}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -22452,16 +23235,10 @@ action run() -> u64 {
             asm
         );
         assert!(
-            !asm.contains("# cellscript abi: output lock verification incomplete for this create pattern"),
+            !asm.contains("# cellscript output abi: lock verification incomplete for this create pattern"),
             "constant output lock should not fail closed as incomplete:\n{}",
             asm
         );
-    }
-
-    #[test]
-    fn compile_rejects_transfer_without_transfer_capability() {
-        let err = compile(MISSING_TRANSFER_CAPABILITY_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("does not declare 'transfer' capability"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -22471,31 +23248,37 @@ action run() -> u64 {
     }
 
     #[test]
-    fn compile_rejects_claim_on_non_receipt_values() {
-        let err = compile(CLAIM_NON_RECEIPT_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("claim requires a receipt value"), "unexpected error: {}", err.message);
+    fn compile_accepts_kernel_effect_capabilities_for_destroy() {
+        let source = r#"
+module test
+
+resource Token has store, consume, burn {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#;
+
+        compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
     }
 
     #[test]
-    fn compile_rejects_non_cell_receipt_claim_outputs() {
-        let err = compile(CLAIM_OUTPUT_NON_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(
-            err.message.contains("receipt claim output must be a cell-backed resource or shared type"),
-            "unexpected error: {}",
-            err.message
-        );
-    }
+    fn compile_accepts_kernel_effect_capabilities_for_transfer() {
+        let source = r#"
+module test
 
-    #[test]
-    fn compile_rejects_receipt_to_receipt_claim_outputs() {
-        let err = compile(CLAIM_OUTPUT_RECEIPT_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("receipt claim output must not be another receipt"), "unexpected error: {}", err.message);
-    }
+resource Token has store, replace, relock {
+    amount: u64,
+}
 
-    #[test]
-    fn compile_rejects_settle_on_non_cell_values() {
-        let err = compile(SETTLE_NON_CELL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("settle requires a cell-backed linear value"), "unexpected error: {}", err.message);
+action transfer_token(token: Token, to: Address) -> Token
+where
+    return transfer token to to
+"#;
+
+        compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
     }
 
     #[test]
@@ -22606,37 +23389,20 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
-}
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
+where
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "credit").expect("credit metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Ledger" && mutation.binding == "ledger")
-            .expect("credit should expose Ledger mutate_set metadata");
 
         assert_eq!(action.effect_class, "Mutating");
         assert!(!action.parallelizable, "generic shared mutation must not default to parallel execution");
         assert!(!action.touches_shared.is_empty(), "generic shared mutation must expose scheduler-visible shared type hash");
-        assert_eq!(mutation.fields, vec!["balance".to_string()]);
-        assert_eq!(mutation.preserved_fields, vec!["owner".to_string()]);
-        assert_eq!(mutation.input_source, "Input");
-        assert_eq!(mutation.input_index, 0);
-        assert_eq!(mutation.output_source, "Output");
-        assert_eq!(mutation.output_index, 0);
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "shared-state"
-                && obligation.feature == "shared-mutation:Ledger"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "ledger_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "ledger_after"));
         assert!(
             action.pool_primitives.is_empty(),
             "generic shared mutation must not emit Pool pattern metadata: {:?}",
@@ -22664,28 +23430,17 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger: &mut Ledger, delta: u64) {
-    ledger.balance = ledger.balance + delta
-}
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
+where
+    require ledger_after.owner == ledger_before.owner
+    require ledger_after.balance == ledger_before.balance + delta
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "credit").expect("credit metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Ledger" && mutation.binding == "ledger")
-            .expect("credit should expose Ledger mutate_set metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "shared-state"
-                && obligation.feature == "shared-mutation:Ledger"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "ledger_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "ledger_after"));
         assert!(!action.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "shared-mutation:Ledger" && requirement.component == "mutate-field-transition"
         }));
@@ -22694,7 +23449,7 @@ action credit(ledger: &mut Ledger, delta: u64) {
     #[test]
     fn fixed_byte_mutable_state_set_transition_is_checked_under_ckb_profile() {
         let source = r#"
-module test
+	module test
 
 resource NFT has store, destroy {
     token_id: u64
@@ -22704,31 +23459,30 @@ resource NFT has store, destroy {
     royalty_bps: u16
 }
 
-action transfer(nft: &mut NFT, to: Address) {
-    assert_invariant(nft.owner != to, "cannot transfer to self")
-    nft.owner = to
-}
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
+where
+    assert(nft_before.owner != to, "cannot transfer to self")
+    require nft_after.token_id == nft_before.token_id
+    require nft_after.owner == to
+    require nft_after.metadata_hash == nft_before.metadata_hash
+    require nft_after.royalty_recipient == nft_before.royalty_recipient
+    require nft_after.royalty_bps == nft_before.royalty_bps
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "transfer").expect("transfer metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "NFT" && mutation.binding == "nft")
-            .expect("transfer should expose NFT mutate_set metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "nft_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "nft_after"));
         assert!(
-            asm.contains("# cellscript abi: verify mutate set transition field NFT.owner Output#0 offset=8 size=32"),
-            "fixed-byte set transition should be checked against the replacement output:\n{}",
+            asm.contains("# cellscript abi: schema field NFT.owner offset=8 size=32"),
+            "fixed-byte output owner requirement should read the proposed output field:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: verify output bytes field NFT set.owner offset=8 size=32 against pointer var"),
-            "fixed-byte set transition should compare the output field to the Address pointer source:\n{}",
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=32"),
+            "fixed-byte output requirements should compare address/hash fields:\n{}",
             asm
         );
         assert!(
@@ -22736,17 +23490,176 @@ action transfer(nft: &mut NFT, to: Address) {
             "void action success path must clear a0 before returning to ckb-vm:\n{}",
             asm
         );
-        assert!(action.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "cell-state"
-                && obligation.feature == "mutable-cell:NFT"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-        }));
         assert!(!action
             .transaction_runtime_input_requirements
             .iter()
             .any(|requirement| { requirement.feature == "mutable-cell:NFT" && requirement.component == "mutate-field-transition" }));
+    }
+
+    #[test]
+    fn dynamic_named_output_constraints_are_proven_in_where_block() {
+        let source = r#"
+module test
+
+resource Collection has store {
+    name: String,
+    creator: Address,
+    total_supply: u64,
+    max_supply: u64,
+}
+
+action mint(collection_before: Collection) -> collection_after: Collection
+where
+    require collection_after.name == collection_before.name
+    require collection_after.creator == collection_before.creator
+    require collection_after.total_supply == collection_before.total_supply + 1
+    require collection_after.max_supply == collection_before.max_supply
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(
+            asm.contains("# cellscript abi: output field verification deferred to explicit where constraints"),
+            "dynamic named outputs should be bound in the prelude and proven by where constraints:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: fail closed because the output state is not fully verified"),
+            "signature output constraints should not fail closed before where requirements run:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: dynamic schema field Collection.name index=0 as Molecule vector bytes"),
+            "dynamic where constraint should still emit runtime Molecule field comparison:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# binary Eq over dynamic byte operands") && asm.contains("call __cellscript_memcmp_fixed"),
+            "dynamic String equality must compare field bytes, not pointer addresses:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn ordered_named_output_create_constraints_are_checked_in_body_order() {
+        let source = r#"
+module test
+
+resource NFT has store {
+    token_id: u64,
+    owner: Address,
+    metadata_hash: Hash,
+    royalty_recipient: Address,
+    royalty_bps: u16,
+}
+
+resource Collection has store {
+    creator: Address,
+    total_supply: u64,
+    max_supply: u64,
+}
+
+action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT)
+where
+    let first_token_id = collection_before.total_supply + 1
+    require collection_after.creator == collection_before.creator
+    require collection_after.total_supply == first_token_id
+    require collection_after.max_supply == collection_before.max_supply
+    create nft0 = NFT {
+        token_id: first_token_id,
+        owner: recipients[0],
+        metadata_hash: metadata_hashes[0],
+        royalty_recipient: collection_before.creator,
+        royalty_bps: 250,
+    }
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let body_start = asm.find(".Lbatch_block_0:").expect("batch body label");
+        let prelude = &asm[..body_start];
+        let ordered_create = asm.find("# constrain named output NFT").expect("ordered named output constraint");
+        let ordered_section = &asm[ordered_create..];
+
+        assert!(
+            prelude.contains("# cellscript abi: output field verification deferred to ordered create constraint"),
+            "prelude should bind named outputs but defer explicit create field checks:\n{}",
+            asm
+        );
+        assert!(
+            !prelude.contains("# cellscript abi: verify output bytes field NFT.owner"),
+            "prelude must not compare against recipients[0] before body temporaries are assigned:\n{}",
+            asm
+        );
+        assert!(ordered_create > body_start, "named output create check should stay in body order:\n{}", asm);
+        assert!(
+            ordered_section.contains("# cellscript abi: verify output bytes field NFT.owner")
+                && ordered_section.contains("# cellscript abi: verify output bytes field NFT.metadata_hash"),
+            "ordered create constraint must verify dynamic indexed expected byte fields after body lowering:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
+        let source = r#"
+module test
+
+resource Authority has store {
+    symbol: [u8; 8],
+    minted: u64,
+}
+
+resource Token has store {
+    amount: u64,
+    symbol: [u8; 8],
+}
+
+shared Pool has store {
+    symbol: [u8; 8],
+    reserve: u64,
+}
+
+receipt Receipt has store {
+    pool_id: Hash,
+    amount: u64,
+}
+
+action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt)
+where
+    create auth = Authority { symbol, minted: seed.amount }
+    if recipients[0].1 > 0 {
+        create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
+    }
+    if recipients[1].1 > 0 {
+        create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
+    }
+    consume seed
+    create pool = Pool { symbol, reserve: seed.amount }
+    create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+
+        assert!(
+            asm.contains("LOAD_CELL_DATA reason=create source=Output index=3")
+                && asm.contains("LOAD_CELL_DATA reason=create source=Output index=4"),
+            "distinct anonymous creates after three named outputs must bind Output#3 and Output#4:\n{}",
+            asm
+        );
+        assert_eq!(
+            asm.matches("LOAD_CELL_DATA reason=create source=Output index=3").count(),
+            1,
+            "anonymous creates must not all collapse to the first anonymous output index:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=1 field=5"),
+            "type_hash() of named output `pool` must read the signature-bound Pool output index:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -22784,13 +23697,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) {
+action burn(token: Token)
+where
     destroy token
-}
 
-action unsupported_timepoint() -> u64 {
+action unsupported_timepoint() -> u64
+where
     return env::current_timepoint()
-}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped.cell");
@@ -22834,12 +23747,12 @@ lock owner_lock(owner: Address) -> bool {
     true
 }
 
-action unsupported(name: String) -> DynamicCell {
+action unsupported(name: String) -> DynamicCell
+where
     let cell = create DynamicCell {
         name: name,
     };
     cell
-}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped_lock.cell");
@@ -22908,7 +23821,7 @@ receipt Proposal {
     expires_at: u64,
 }
 
-lock not_expired(proposal: &Proposal, now: u64) -> bool {
+lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
     now < proposal.expires_at
 }
 "#;
@@ -22948,14 +23861,14 @@ resource TimeLock {
     unlock_height: u64,
 }
 
-action create_lock(owner: Address) -> TimeLock {
+action create_lock(owner: Address) -> TimeLock
+where
     let lock = create TimeLock {
         owner: owner,
         lock_type: LockType::Absolute,
         unlock_height: 42,
     };
     lock
-}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let time_lock = result.metadata.types.iter().find(|ty| ty.name == "TimeLock").expect("TimeLock metadata");
@@ -22985,16 +23898,16 @@ resource LockedAsset {
     lock_hash: Hash,
 }
 
-action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
+action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset
+where
     let locked = create LockedAsset {
         asset_type: asset_type,
         amount: amount,
         lock_hash: Hash::zero(),
     };
     locked
-}
 
-lock asset_matches(locked_asset: &LockedAsset, expected: Hash) -> bool {
+lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) -> bool {
     locked_asset.lock_hash == expected
 }
 "#;
@@ -23044,7 +23957,7 @@ resource Collection {
     creator: Address,
 }
 
-lock collection_creator(collection: &Collection, claimed_creator: Address) -> bool {
+lock collection_creator(protected collection: Collection, witness claimed_creator: Address) -> bool {
     collection.creator == claimed_creator
 }
 "#;
@@ -23085,7 +23998,7 @@ receipt Emergency {
     approvers: Vec<Address>,
 }
 
-lock enough(emergency: &Emergency, required: u8) -> bool {
+lock enough(protected emergency: Emergency, witness required: u8) -> bool {
     emergency.approvers.len() >= required as usize
 }
 "#;
@@ -23134,7 +24047,7 @@ fn is_signer(wallet: &Wallet, addr: Address) -> bool {
     false
 }
 
-lock signer(wallet: &Wallet, addr: Address) -> bool {
+lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
     is_signer(wallet, addr)
 }
 "#;
@@ -23176,10 +24089,12 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection: &mut Collection) {
-    assert!(collection.total_supply < collection.max_supply, "max supply reached");
-    collection.total_supply = collection.total_supply + 1;
-}
+action mint(collection_before: Collection) -> collection_after: Collection
+where
+    assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
+    require collection_after.name == collection_before.name
+    require collection_after.max_supply == collection_before.max_supply
+    require collection_after.total_supply == collection_before.total_supply + 1
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let collection = result.metadata.types.iter().find(|ty| ty.name == "Collection").expect("Collection metadata");
@@ -23188,10 +24103,9 @@ action mint(collection: &mut Collection) {
         assert_eq!(schema.dynamic_fields, vec!["name".to_string()]);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
-        let mutation = action.mutate_set.iter().find(|mutation| mutation.ty == "Collection").expect("mutation metadata");
 
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
+        assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "collection_before"));
+        assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "collection_after"));
         assert!(!action.fail_closed_runtime_features.contains(&"field-access".to_string()));
         assert!(
             !action.transaction_runtime_input_requirements.iter().any(|requirement| {
@@ -23220,9 +24134,9 @@ resource Token has store {
     amount: u64,
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -23267,9 +24181,9 @@ resource Token has store {
     amount: u64
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result =
@@ -23302,13 +24216,13 @@ resource PlainToken has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     return create Token { amount: amount }
-}
 
-action mint_plain(amount: u64) -> PlainToken {
+action mint_plain(amount: u64) -> PlainToken
+where
     return create PlainToken { amount: amount }
-}
 "#;
 
         let ckb_metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -23342,9 +24256,9 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     return create Token { amount: amount }
-}
 "#;
 
         let mut metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -23367,9 +24281,9 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     return create Token { amount: amount }
-}
 "#;
 
         let mut metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -23393,9 +24307,9 @@ struct TokenSnapshot {
     amount: u64
 }
 
-action value() -> u64 {
+action value() -> u64
+where
     return 1
-}
 "#;
 
         let result =
@@ -23449,9 +24363,9 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount }
-}
 "#;
 
         let result =
@@ -23470,9 +24384,9 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount }
-}
 "#;
 
         let result =
@@ -23494,9 +24408,9 @@ resource NFT has store
     owner: Address
 }
 
-action mint(token_id: u64, owner: Address) -> NFT {
+action mint(token_id: u64, owner: Address) -> NFT
+where
     create NFT { token_id: token_id, owner: owner }
-}
 "#;
 
         let result =
@@ -23517,9 +24431,9 @@ resource Config has store
     value: u64
 }
 
-action init(value: u64) -> Config {
+action init(value: u64) -> Config
+where
     create Config { value: value }
-}
 "#;
 
         let result =
@@ -23540,9 +24454,9 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create Token { amount: amount }
-}
 "#;
 
         let result =
@@ -23564,9 +24478,9 @@ resource NFT has store
     owner: Address
 }
 
-action mint(token_id: u64, owner: Address) -> NFT {
+action mint(token_id: u64, owner: Address) -> NFT
+where
     create_unique<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
-}
 "#;
 
         let result =
@@ -23603,9 +24517,9 @@ resource NFT has store
     owner: Address
 }
 
-action rotate(old: NFT, owner: Address) -> NFT {
+action rotate(old: NFT, owner: Address) -> NFT
+where
     replace_unique<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
-}
 "#;
 
         let result =
@@ -23645,9 +24559,9 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token {
+action mint(amount: u64) -> Token
+where
     create_unique<Token>(identity = script_args) { amount: amount }
-}
 "#;
         let create_script_args = compile(
             create_script_args_program,
@@ -23679,9 +24593,9 @@ resource Token has store
     amount: u64
 }
 
-action replace(old: Token, amount: u64) -> Token {
+action replace(old: Token, amount: u64) -> Token
+where
     replace_unique<Token>(identity = script_args) old { amount: amount }
-}
 "#;
         let script_args =
             compile(script_args_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -23711,9 +24625,9 @@ resource Config has store
     value: u64
 }
 
-action replace(old: Config, value: u64) -> Config {
+action replace(old: Config, value: u64) -> Config
+where
     replace_unique<Config>(identity = singleton_type) old { value: value }
-}
 "#;
         let singleton =
             compile(singleton_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -23746,9 +24660,9 @@ resource Note has store
     memo: Vec<u8>
 }
 
-action mint(memo: Vec<u8>) -> Note {
+action mint(memo: Vec<u8>) -> Note
+where
     create_unique<Note>(identity = field(memo)) { memo: memo }
-}
 "#;
 
         let err =
@@ -23761,9 +24675,9 @@ action mint(memo: Vec<u8>) -> Note {
         let program = r#"
 module vm::minimal
 
-action main() -> u64 {
+action main() -> u64
+where
     return 0
-}
 "#;
 
         let result =
@@ -23782,9 +24696,9 @@ action main() -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64 {
+action spend(amount: u64) -> u64
+where
     return amount
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23806,6 +24720,11 @@ action spend(amount: u64) -> u64 {
             "entry wrapper did not lower u64 witness payload into the action ABI register:\n{}",
             asm
         );
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes"),
+            "entry wrapper should reject non-canonical trailing witness bytes:\n{}",
+            asm
+        );
         assert!(asm.contains("call spend"), "entry wrapper did not call the original action label:\n{}", asm);
         assert!(
             asm.contains("# cellscript entry abi: spend requires-explicit-parameter-abi"),
@@ -23822,9 +24741,9 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64 {
+action spend(amount: u64) -> u64
+where
     return amount
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23842,9 +24761,9 @@ action spend(amount: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action owned(owner: Address) -> u64 {
+action owned(owner: Address) -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23877,12 +24796,12 @@ resource C has store, destroy {
     value: u64,
 }
 
-action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
+action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64
+where
     destroy a
     destroy b
     destroy c
     return required
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -23893,11 +24812,12 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: scalar param required stored to caller stack +0"),
-            "entry wrapper did not store the stack scalar argument before calling the action:\n{}",
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
+                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, 0(sp)"), "entry wrapper did not emit the stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];
@@ -23914,24 +24834,30 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
         let program = r#"
 module vm::entry_abi
 
-action bad(items: Vec<Address>) -> u64 {
+action bad(items: Vec<Address>) -> u64
+where
     return 0
-}
 
-action hashes(items: Vec<Hash>) -> u64 {
+action hashes(items: Vec<Hash>) -> u64
+where
     return 0
-}
 
-action nested(items: Vec<Vec<u8>>) -> u64 {
+action nested(items: Vec<Vec<u8>>) -> u64
+where
     return 0
-}
 
-action raw(data: Vec<u8>) -> u64 {
+action raw(data: Vec<u8>) -> u64
+where
     return 0
-}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript entry abi: reject trailing witness payload bytes") && asm.contains("sub t2, t5, t6"),
+            "dynamic entry wrapper should reject non-canonical trailing witness bytes after consuming dynamic payload:\n{}",
+            asm
+        );
         let action = result.metadata.actions.iter().find(|action| action.name == "bad").unwrap();
         let schema_bytes = vec![1u8, 2, 3, 4];
         let mut expected = ENTRY_WITNESS_ABI_MAGIC.to_vec();
@@ -24015,9 +24941,9 @@ module app::main
 
 use dep::token::Token
 
-action pass_through(token: Token) -> Token {
+action pass_through(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -24053,9 +24979,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24085,9 +25011,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24118,9 +25044,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24157,9 +25083,9 @@ out_dir = "artifacts"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24193,9 +25119,9 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24229,9 +25155,9 @@ target_profile = "ckb"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24266,9 +25192,9 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24302,9 +25228,9 @@ token_std = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24337,9 +25263,9 @@ token_std = { path = "../missing_dep" }
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24370,9 +25296,9 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24417,9 +25343,9 @@ module demo::main
 
 use demo::helper::Token
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -24456,9 +25382,9 @@ app_pkg = { path = "../app_pkg" }
             r#"
 module dep::main
 
-action dep_ping() -> u64 {
+action dep_ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24480,9 +25406,9 @@ dep_pkg = { path = "../dep_pkg" }
             r#"
 module app::main
 
-action app_ping() -> u64 {
+action app_ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24527,9 +25453,9 @@ module demo::main
 
 use demo::token::Token
 
-action pass(token: Token) -> Token {
+action pass(token: Token) -> Token
+where
     token
-}
 "#,
         )
         .unwrap();
@@ -24561,9 +25487,9 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();
@@ -24596,9 +25522,9 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64 {
+action ping() -> u64
+where
     1
-}
 "#,
         )
         .unwrap();

@@ -5,26 +5,26 @@ const ICKB_SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000
 const CKB_MINIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT: u128 = 100000000000
 const CKB_MAXIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT: u128 = 100000000000000
 
-resource DaoDeposit has store, destroy {
+resource DaoDeposit has store, create, consume {
     unoccupied_capacity: u128
     occupied_capacity: u128
     deposit_accumulated_rate: u128
     logic_hash: Hash
 }
 
-receipt IckbReceipt has store, destroy {
+receipt IckbReceipt has store, create, consume {
     deposit_quantity: u128
     deposit_amount: u128
     deposit_accumulated_rate: u128
     logic_hash: Hash
 }
 
-resource IckbToken has store, transfer, destroy {
+resource IckbToken has store, create, consume, replace, burn, relock {
     amount: u128
     xudt_args_hash: Hash
 }
 
-receipt WithdrawalRequest has store {
+receipt WithdrawalRequest has store, create, consume {
     burned_ickb: u128
     deposit_unoccupied_capacity: u128
     deposit_accumulated_rate: u128
@@ -40,47 +40,46 @@ action deposit_phase_1(
     deposit_accumulated_rate: u128,
     logic_hash: Hash,
     depositor: Address
-) -> (DaoDeposit, IckbReceipt) {
-    assert_invariant(
+) -> (deposit: DaoDeposit, receipt: IckbReceipt)
+where
+    assert(
         deposit_amount >= CKB_MINIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT,
         "deposit too small"
     )
-    assert_invariant(
+    assert(
         deposit_amount <= CKB_MAXIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT,
         "deposit too big"
     )
-    assert_invariant(deposit_quantity > 0, "empty receipt")
-    assert_invariant(deposit_accumulated_rate > 0, "missing accumulated rate")
+    assert(deposit_quantity > 0, "empty receipt")
+    assert(deposit_accumulated_rate > 0, "missing accumulated rate")
 
-    let deposit = create DaoDeposit {
+    create deposit = DaoDeposit {
         unoccupied_capacity: deposit_amount,
         occupied_capacity,
         deposit_accumulated_rate,
         logic_hash
     } with_lock(depositor)
 
-    let receipt = create IckbReceipt {
+    create receipt = IckbReceipt {
         deposit_quantity,
         deposit_amount,
         deposit_accumulated_rate,
         logic_hash
     } with_lock(depositor)
 
-    (deposit, receipt)
-}
-
 action mint_from_receipt(
     receipt: IckbReceipt,
     existing_tokens: IckbToken,
     expected_xudt_args_hash: Hash,
     owner: Address
-) -> IckbToken {
-    assert_invariant(
+) -> minted_token: IckbToken
+where
+    assert(
         existing_tokens.xudt_args_hash == expected_xudt_args_hash,
         "wrong xudt binding"
     )
-    assert_invariant(receipt.deposit_quantity > 0, "empty receipt")
-    assert_invariant(receipt.deposit_accumulated_rate > 0, "missing accumulated rate")
+    assert(receipt.deposit_quantity > 0, "empty receipt")
+    assert(receipt.deposit_accumulated_rate > 0, "missing accumulated rate")
 
     let minted = receipt.deposit_quantity *
         discounted_ickb_value(receipt.deposit_amount, receipt.deposit_accumulated_rate)
@@ -88,22 +87,21 @@ action mint_from_receipt(
     consume receipt
     consume existing_tokens
 
-    create IckbToken {
+    create minted_token = IckbToken {
         amount: existing_tokens.amount + minted,
         xudt_args_hash: expected_xudt_args_hash
     } with_lock(owner)
-}
 
-action transfer_ickb(token: IckbToken, to: Address) -> IckbToken {
-    assert_invariant(token.amount > 0, "empty transfer")
+action transfer_ickb(token: IckbToken, to: Address) -> next_token: IckbToken
+where
+    assert(token.amount > 0, "empty transfer")
 
     consume token
 
-    create IckbToken {
+    create next_token = IckbToken {
         amount: token.amount,
         xudt_args_hash: token.xudt_args_hash
     } with_lock(to)
-}
 
 action request_withdrawal(
     token: IckbToken,
@@ -111,19 +109,20 @@ action request_withdrawal(
     request_epoch: u64,
     maturity_epoch: u64,
     owner: Address
-) -> WithdrawalRequest {
+) -> request: WithdrawalRequest
+where
     let deposit_ickb = discounted_ickb_value(
         deposit.unoccupied_capacity,
         deposit.deposit_accumulated_rate
     )
 
-    assert_invariant(token.amount == deposit_ickb, "amount mismatch")
-    assert_invariant(maturity_epoch > request_epoch, "invalid maturity")
+    assert(token.amount == deposit_ickb, "amount mismatch")
+    assert(maturity_epoch > request_epoch, "invalid maturity")
 
     consume token
     consume deposit
 
-    create WithdrawalRequest {
+    create request = WithdrawalRequest {
         burned_ickb: token.amount,
         deposit_unoccupied_capacity: deposit.unoccupied_capacity,
         deposit_accumulated_rate: deposit.deposit_accumulated_rate,
@@ -131,26 +130,25 @@ action request_withdrawal(
         maturity_epoch,
         owner
     } with_lock(owner)
-}
 
-action redeem_mature(request: WithdrawalRequest, current_epoch: u64, owner: Address) {
-    assert_invariant(current_epoch >= request.maturity_epoch, "immature redeem")
-    assert_invariant(owner == request.owner, "wrong owner")
+action redeem_mature(request: WithdrawalRequest, current_epoch: u64, owner: Address)
+where
+    assert(current_epoch >= request.maturity_epoch, "immature redeem")
+    assert(owner == request.owner, "wrong owner")
 
     consume request
-}
 
 fn discounted_ickb_value(unoccupied_capacity: u128, accumulated_rate: u128) -> u128 {
     let raw = unoccupied_capacity * GENESIS_ACCUMULATED_RATE / accumulated_rate
     return raw
 }
 
-lock receipt_owner(receipt: protected IckbReceipt, claimed_owner: witness Address) -> bool {
+lock receipt_owner(protected receipt: IckbReceipt, witness claimed_owner: Address) -> bool {
     require receipt.deposit_quantity > 0
     require claimed_owner == claimed_owner
 }
 
-lock withdrawal_owner(request: protected WithdrawalRequest, claimed_owner: witness Address) -> bool {
+lock withdrawal_owner(protected request: WithdrawalRequest, witness claimed_owner: Address) -> bool {
     require request.owner == claimed_owner
 }
 

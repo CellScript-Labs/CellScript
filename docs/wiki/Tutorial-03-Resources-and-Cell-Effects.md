@@ -1,7 +1,7 @@
 CellScript is built around explicit Cell movement. An effect is not just a
-helper call. It is a statement about the transaction you expect to build: which
-inputs are consumed, which outputs are created, which dependencies are read, and
-which state transition is being proved.
+helper call. It is a statement about the transaction you expect to validate:
+which inputs are consumed, which outputs are proposed, which dependencies are
+read, and which state transition is being proved.
 
 If you come from account-style smart contracts, this is the chapter where the
 mental model changes. In CellScript, persistent state does not quietly update in
@@ -10,31 +10,38 @@ place. A transaction spends Cells and creates new Cells.
 ## What You Will Learn
 
 - how linear resources move through an action;
-- why `create`, `consume`, `destroy`, `claim`, and `settle` are explicit;
+- why `create`, `consume`, `destroy`, and stdlib lifecycle patterns are explicit;
+- how `action(before: T) -> after: T` expresses the verifier core for
+  input-to-output transitions;
 - how `create_unique` and `replace_unique` preserve declared identity;
 - why v0.15 uses explicit destruction policy forms;
-- how `&mut` source syntax still maps to replacement-output style transitions;
 - why unsupported CKB runtime behavior should fail closed.
 
 ## The Main Effects
 
 | Effect | Read it as |
 |---|---|
+| `input param: T` | Explicit consumed input Cell parameter. Equivalent to `param: T` for Cell-backed action parameters. |
+| `-> output: T` | Named proposed output Cell binding. |
 | `consume value` | Spend an input-backed linear value. |
-| `create T { ... }` | Create a typed output Cell. |
+| `create output = T { ... }` | Sugar for validating a typed proposed output Cell. |
+| `read param: T` | Read dependency-backed state without consuming it. |
+| `read_ref<T>()` | Read dependency-backed state from an expression. |
+| `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
 | `create_unique<T>(identity = policy) { ... }` | Create a typed output and anchor its declared identity. |
 | `replace_unique<T>(identity = policy) input { ... }` | Consume one input-backed value and create a replacement that preserves identity. |
-| `read_ref T` | Read dependency-backed state without consuming it. |
-| `transfer value to` | Move a value to a new lock or owner. |
 | `destroy_singleton_type(value)` | Consume a singleton and prove no same-TypeHash output continues it. |
 | `destroy_unique(value, identity = type_id)` | Consume a TYPE_ID-backed unique value without replacement. |
 | `destroy_instance(value, identity_field = id)` | Consume one field-identified instance while allowing unrelated same-type outputs. |
 | `burn_amount(value, field = amount)` | Prove a quantity burn rather than output absence. |
-| `claim receipt` | Consume a receipt and materialize the claim path. |
-| `settle receipt` | Finalize a receipt-backed process. |
+| `std::lifecycle::transfer(input, output, to) { ... }` | Expand to consume plus a locked output and explicit preservation checks. |
+| `std::receipt::claim(receipt, output, to) { ... }` | Consume a receipt and materialize the claim output. |
+| `std::lifecycle::settle(receipt, output, to) { ... }` | Finalize a receipt-backed process with an explicit output. |
 
 The effects are deliberately visible. They make the source read like a
-transaction plan instead of a hidden storage mutation.
+transaction plan instead of a hidden storage mutation. The core verifier form
+can also name proposed Cells directly as action parameters; `consume` and
+`create` remain convenient source syntax over that transaction evidence.
 
 ## Linear Values
 
@@ -42,64 +49,143 @@ Resources are linear. In plain terms: if an action receives a resource, the
 action must say where it goes.
 
 ```cellscript
-action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+action burn(token: Token)
+where
+    assert(token.amount > 0, "cannot burn zero")
     burn_amount(token, field = amount)
+```
+
+The `Token` cannot simply disappear. It must be consumed, returned, destroyed,
+validated as a named successor output, or handled by an explicit stdlib
+lifecycle pattern. Silent loss is rejected because silent loss would make Cell
+movement unclear.
+
+## Flows Use Explicit State Fields
+
+State is ordinary schema data. Declare the state field yourself, usually as a
+no-payload enum so SDKs, indexers, and explorers can decode the layout without
+knowing compiler magic:
+
+```cellscript
+enum GrantState {
+    Granted,
+    Claimable,
+    FullyClaimed,
+}
+
+receipt VestingGrant has store {
+    state: GrantState,
+    beneficiary: Address,
+    total_amount: u64,
+    claimed_amount: u64
 }
 ```
 
-The `Token` cannot simply disappear. It must be consumed, returned, transferred,
-claimed, settled, or destroyed. Silent loss is rejected because silent loss would
-make the Cell lifecycle unclear.
+Then declare the allowed transition graph separately:
 
-Bare `destroy token` remains a compatibility form for older sources. In
-`--primitive-strict=0.15` mode, choose a policy-specific destruction form so
-reviewers can see whether the contract proves singleton absence, TYPE_ID
-consumption, field-identified instance consumption, or amount burn.
+```cellscript
+flow GrantFlow for VestingGrant.state {
+    Granted -> Claimable by unlock_grant;
+    Claimable -> FullyClaimed by claim_all;
+}
+```
+
+Bind each action to the transition it is allowed to prove. The semantic core is
+an input-to-output verifier signature: the left side names consumed input Cell
+views, the right side names proposed output Cell bindings, and `transition`
+names both state fields explicitly.
+
+```cellscript
+action unlock_grant(input: VestingGrant) -> output: VestingGrant
+    transition input.state: Granted -> output.state: Claimable
+where
+    require input.beneficiary == output.beneficiary
+    require input.total_amount == output.total_amount
+    require input.claimed_amount == output.claimed_amount
+```
+
+`flow Type.field { ... }` is the compact form when the flow does not
+need a separate name. The compiler keeps the state field explicit in Molecule
+layout, lowers enum states to their ordinal values, verifies old/new state at
+runtime, and rejects action `transition` clauses that are not declared in the state graph. A
+state field may have only one flow declaration, so keep all legal edges for
+that field in one named or compact flow block.
+
+Output binding is deterministic. Named action outputs are bound to transaction
+outputs in signature order, starting at `Output#0`. A field-to-field transition such as
+`transition input.state: A -> output.state: B` names both the input and proposed output
+directly. Existing `consume input` plus `create output = T { ... }` remains
+accepted as front-end sugar for the same verifier shape.
+
+Action proof logic is scoped by `where`. Put `transition` clauses before `where` and
+keep proof obligations below it:
+
+```cellscript
+action fill_offer(input: Offer) -> output: Offer
+    transition input.state: Live -> output.state: Filled
+where
+    require output.price == input.price
+    require output.seller == input.seller
+```
+
+Inside `where`, conditional proof branches must constrain output fields
+symmetrically. If one branch requires `output.claimable`, sibling branches must
+also constrain `output.claimable` unless it was already constrained in the
+surrounding proof scope.
+
+Bare `destroy token` remains available. In `--primitive-strict=0.15` mode, it
+must be authorized by the `consume + burn` kernel effects instead of legacy
+`has destroy`. Choose a policy-specific destruction form when reviewers need to
+see whether the contract proves singleton absence, TYPE_ID consumption,
+field-identified instance consumption, or amount burn.
 
 ## Creating Output Cells
 
-`create` constructs typed output data and a corresponding Cell output:
+`create` describes typed output data and a corresponding Cell output. In the
+verifier model this is sugar for selecting and checking a proposed transaction
+output; the script still validates an existing transaction, it does not allocate
+Cells inside CKB-VM.
 
 ```cellscript
-create Token {
+create token = Token {
     amount,
     symbol: auth.token_symbol
 } with_lock(to)
 ```
 
-Persistent state is created only by explicit `create`. Local variables are just
-local variables. They do not become on-chain storage unless they are placed into
-a created Cell.
+Persistent state enters the transaction output set only through explicit output
+evidence: either a named action output or a `create output = T { ... }` sugar
+expression. Local variables are just local variables. They do not become
+on-chain storage unless they are tied to a proposed output Cell.
 
 The `with_lock(to)` part matters. It says which lock will guard the newly
 created Cell. If a later transaction wants to spend that Cell, the lock must
 accept the spend.
 
-## Consuming And Replacing State
+## Consuming And Updating State
 
-A common CellScript pattern is:
+A common CellScript sugar pattern is:
 
 1. read or consume an input Cell;
 2. check the transition;
-3. create a replacement output Cell.
+3. validate a proposed output Cell.
 
-For example, a transfer consumes one token and creates a replacement token under
-a different lock:
+For example, a transfer consumes one token and validates a proposed token
+under a different lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
 This is closer to CKB than an account-style assignment. The old Cell is spent;
-the new Cell is created.
+the new Cell is a proposed output that the verifier checks.
 
 ## Identity-Aware Creation And Replacement
 
@@ -114,19 +200,19 @@ resource NFT has store, create, replace
     owner: Address
 }
 
-action mint_nft(token_id: [u8; 32], owner: Address) -> NFT {
+action mint_nft(token_id: [u8; 32], owner: Address) -> NFT
+where
     create_unique<NFT>(identity = field(token_id)) {
         token_id,
         owner
     } with_lock(owner)
-}
 
-action move_nft(nft: NFT, new_owner: Address) -> NFT {
-    replace_unique<NFT>(identity = field(token_id)) nft {
-        token_id: nft.token_id,
+action move_nft(nft_before: NFT, new_owner: Address) -> NFT
+where
+    replace_unique<NFT>(identity = field(token_id)) nft_before {
+        token_id: nft_before.token_id,
         owner: new_owner
     }
-}
 ```
 
 `replace_unique<T>(identity = policy) input { ... }` always names the consumed
@@ -155,29 +241,28 @@ absence proof. Destroying a TYPE_ID value is identity consumption. Destroying an
 instance by field still allows unrelated same-type outputs. Burning an amount is
 a quantity relation, not an output absence claim.
 
-## Mutating Existing State
+## Updating Existing State
 
-CellScript also supports mutable references for readable source code:
+For one-to-one state updates, make both cells visible:
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
-    auth.minted = auth.minted + amount
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+where
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    create Token {
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
+
+    create token = Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
-The source says `auth.minted = ...`, but the CKB-facing model still needs an
-input Cell and a replacement output Cell for `MintAuthority`. Metadata records
-the runtime requirements and checked subconditions so reviewers can see that the
-mutation is not pretending CKB has account storage.
-
-When you read `&mut` in examples, translate it mentally as "this state must be
-replaced consistently."
+This is intentionally explicit: `auth_before` is the existing state Cell,
+`auth_after` is the proposed output, and the `require` guards prove
+which fields may change. There is no hidden account-style mutation.
 
 ## Read-Only Dependencies
 
@@ -197,8 +282,9 @@ action creates a right, and another action later consumes it.
 For example:
 
 - a vesting action creates a claimable grant;
-- a later claim action consumes the grant;
-- a settlement action consumes proof that a process completed.
+- a later claim action consumes the grant and explicitly creates its output;
+- a settlement action consumes proof that a process completed and explicitly
+  creates its output.
 
 This makes intermediate protocol state explicit instead of hiding it in a
 generic event log.
@@ -224,5 +310,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes) for small copyable patterns, then move
-on to [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow).
+[Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+for a deeper walkthrough of signature-direction actions, then use
+[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes)
+for small copyable patterns.

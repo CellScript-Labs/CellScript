@@ -1888,7 +1888,7 @@ impl CommandExecutor {
                 "script references keep code_hash, hash_type, and args visible",
                 "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
                 "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
-                "Dynamic hash_blake2b is unavailable until a real linked RISC-V implementation is selected"
+                "hash_blake2b(input: Hash) uses CKB Blake2b-256; wider byte serialization hashing remains out of scope"
             ],
         });
         if args.json {
@@ -3665,23 +3665,8 @@ fn target_profile_policy_violations(
     }
 }
 
-fn ckb_target_profile_policy_violations(metadata: &crate::CompileMetadata, _artifact_format: ArtifactFormat) -> Vec<String> {
-    // CKB is the only target profile; keep these checks focused on CKB-specific unsupported features.
-    let mut violations = Vec::new();
-
-    let unsupported_claim_features = metadata
-        .runtime
-        .ckb_runtime_features
-        .iter()
-        .filter(|feature| matches!(feature.as_str(), "load-claim-ecdsa-signature-hash" | "verify-claim-secp256k1-signature"))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !unsupported_claim_features.is_empty() {
-        violations
-            .push(format!("Claim helper syscall features not supported in CKB profile: {}", unsupported_claim_features.join(", ")));
-    }
-
-    violations
+fn ckb_target_profile_policy_violations(_metadata: &crate::CompileMetadata, _artifact_format: ArtifactFormat) -> Vec<String> {
+    Vec::new()
 }
 
 fn runtime_required_obligation_count(metadata: &crate::CompileMetadata) -> usize {

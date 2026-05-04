@@ -12,25 +12,23 @@ example.
 |---|---|
 | `examples/token.cell` | Minting, transfer, burn, and guarded token merge. |
 | `examples/nft.cell` | Unique assets, metadata, ownership transitions, and owner locks. |
-| `examples/timelock.cell` | Time-gated state transitions, release requests, and approval flow. |
-| `examples/multisig.cell` | Threshold policy, proposals, signatures-as-data, and lock-boundary predicates. |
-| `examples/vesting.cell` | Vesting grants, receipts, claim lifecycle, and admin-boundary comments. |
+| `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
+| `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
+| `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
 | `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
 | `examples/launch.cell` | Launch/pool composition patterns. |
 
-The top-level `examples/*.cell` files are the clean business reading surface.
-`examples/business/*.cell` mirrors that clean surface explicitly.
-`examples/acceptance/*.cell` carries production/profile metadata such as
-`#[effect(...)]` and `#[scheduler_hint(...)]`; the CKB acceptance script uses
-those profiled copies when generating release evidence.
+The top-level `examples/*.cell` files are the canonical bundled business
+source. They are both the clean reading surface and the source compiled by the
+CKB acceptance runner. There are no checked-in `examples/business` or
+`examples/acceptance` mirrors; acceptance-only profile/effect/scheduler
+metadata belongs in runner configuration or generated files under `target/`.
 
-Subdirectory copies use `cellscript::business::*` and
-`cellscript::acceptance::*` module namespaces so they can coexist with the
-top-level examples during module loading.
-
-`examples/registry.cell` is intentionally outside the bundled production matrix.
-It is a bounded-collection language example for local `Vec<Address>` and
-`Vec<Hash>` helpers, covered by compiler/tooling tests rather than CKB
+`examples/registry.cell` and every checked-in `examples/language/*.cell` file
+are intentionally outside the bundled production matrix. They are language
+examples for compiler/tooling surfaces such as local stack-backed `Vec<T>`,
+stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and
+dynamic BLAKE2b. They are covered by compiler/tooling tests rather than CKB
 production action acceptance.
 
 For a visual business-flow map of every bundled example, see
@@ -43,10 +41,10 @@ For small reusable patterns drawn from the same ideas, see
 If you are learning the language, read them in this order:
 
 1. `token.cell`: start here. It is the smallest example with a clear resource
-   lifecycle.
+   flow.
 2. `nft.cell`: learn unique assets and ownership-style locks.
-3. `timelock.cell`: learn time guards and replacement state.
-4. `multisig.cell`: learn proposal lifecycle and threshold logic.
+3. `timelock.cell`: learn time guards and release evidence.
+4. `multisig.cell`: learn proposal records and threshold logic.
 5. `vesting.cell`: learn receipt-style claim flows.
 6. `amm_pool.cell`: learn shared pool state after you understand resources.
 7. `launch.cell`: read this last because it composes multiple patterns.
@@ -61,7 +59,7 @@ From the repository root:
 ```bash
 for f in examples/*.cell; do
   echo "==> $f"
-  cellc "$f" --target riscv64-elf --target-profile ckb -o "/tmp/$(basename "$f" .cell).elf"
+  cellc "$f" --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o "/tmp/$(basename "$f" .cell).elf"
 done
 ```
 
@@ -75,7 +73,7 @@ Start with the token example. It is small enough to keep in your head.
 The token example declares two resources:
 
 ```cellscript
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -90,49 +88,52 @@ resource MintAuthority has store {
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
 minted.
 
-`mint` mutates authority state and creates a new token:
+`mint` updates authority state and validates a proposed new token output:
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+where
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    auth.minted = auth.minted + amount
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
-Read `auth: &mut MintAuthority` as a replacement-output obligation. The source
-is pleasant to read, but CKB still needs an input state Cell and a replacement
-state Cell.
+Read `auth_before` as the existing authority Cell and `auth_after` as the
+proposed output. The action signature names the input/output topology; the
+`require` guards are the field-level proof.
 
-`transfer_token` consumes an input token and creates a replacement output under
-a new lock:
+`transfer_token` consumes an input token and validates a proposed output
+under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
 `burn` consumes the token and destroys it:
 
 ```cellscript
-action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+action burn(token: Token)
+where
+    assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 ```
 
-These three actions show the basic resource lifecycle: create, replace, destroy.
+These three actions show the basic resource effect flow: propose an output,
+update state, destroy state.
 
 ## Locks In The Examples
 
@@ -143,7 +144,7 @@ markers do not make an `Address` a signer proof.
 When you see a lock like this:
 
 ```cellscript
-lock owner_only(asset: protected NFT, claimed_owner: witness Address) -> bool {
+lock owner_only(protected asset: NFT, witness claimed_owner: Address) -> bool {
     require asset.owner == claimed_owner
 }
 ```
@@ -164,7 +165,7 @@ script-args data comes from, but it does not turn an `Address` into a signer.
 The CKB profile is strict, and the bundled suite has a defined production
 boundary:
 
-- bundled examples strict-admit under the CKB profile;
+- bundled examples compile under the CKB profile with `--primitive-strict=0.15`;
 - bundled business actions have scoped CKB production harnesses;
 - bundled locks have builder-backed valid-spend and invalid-spend matrices;
 - valid CKB transactions are builder-generated and dry-run;
@@ -185,19 +186,21 @@ checks:
 ```bash
 cellc fmt --check
 cellc check --target-profile ckb --production
-cellc build --target riscv64-elf --target-profile ckb --production
+cellc build --target riscv64-elf --target-profile ckb --production --primitive-strict 0.15
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb --production
-cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --production
+cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.15 --production
 # --entry-action selects a single action entry point for targeted inspection
 ```
 
 For release-facing CKB evidence, run the CellScript acceptance gate:
 
 ```bash
-./scripts/ckb_cellscript_acceptance.sh --production
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+./scripts/cellscript_ckb_release_gate.sh full
 ```
+
+This wrapper runs the syntax-combination CI preflight before the builder-backed
+CKB acceptance script, so bundled examples cannot become release evidence if a
+new syntax/lowering combination is failing.
 
 Do not use compile-only or bounded diagnostic runs as production release
 evidence. They are helpful during development, but they do not replace the chain

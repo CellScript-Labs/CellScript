@@ -13,12 +13,12 @@ resource Badge has store, create, replace
     owner: Address
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge
+where
     create_unique<Badge>(identity = field(badge_id)) {
         badge_id,
         owner
     } with_lock(owner)
-}
 "#;
 
 const METADATA_ONLY_INVARIANT: &str = r#"
@@ -35,9 +35,9 @@ resource Token {
     amount: u64
 }
 
-action noop() -> u64 {
+action noop() -> u64
+where
     0
-}
 "#;
 
 fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {

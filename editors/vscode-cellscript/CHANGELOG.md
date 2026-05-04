@@ -6,8 +6,31 @@
   `protected`, `lock_args`, `witness`, and `require`.
 - Added LSP completions for `lock_args`, CKB source views, witness fields,
   `env::sighash_all`, and CKB epoch/since helpers.
-- Extended syntax highlighting for `source::`, `witness::`, and `ckb::`
-  namespace builtins.
+- Extended syntax highlighting for `source::`, `witness::`, `ckb::`, and
+  nested `std::...` namespace builtins.
+
+## 0.13.2
+
+- Updated extension package metadata for the CellScript 0.13.2 release.
+- Added release-blocking validation for stdlib lifecycle and cell metadata
+  snippets: `std::lifecycle::transfer`, `std::receipt::claim`,
+  `std::lifecycle::settle`, `std::cell::same_lock`,
+  `std::cell::preserve_lock`, and `std::cell::preserve_capacity`.
+- Highlight `std::...` namespaces as builtin support namespaces.
+- Fixed the publish dry-run script so it performs a local VSIX packaging check
+  with a pinned `@vscode/vsce` dependency instead of invoking an unsupported
+  Marketplace publish flag.
+
+## 0.13.0
+
+- Updated extension package metadata for the CellScript 0.13 release.
+- Added editor completion coverage for the 0.13 Vec helper surface.
+- Updated TextMate grammar and snippets for the 0.13 action model:
+  signature-direction outputs, `where` proof blocks, colon state transitions,
+  `flow`, named output `create out = T { ... }`, and prefix source
+  qualifiers (`read`, `protected`, `witness`, `lock_args`).
+- Tightened extension validation so stale brace-body action snippets and
+  missing 0.13 syntax keywords are release blockers.
 
 ## 0.12.0
 

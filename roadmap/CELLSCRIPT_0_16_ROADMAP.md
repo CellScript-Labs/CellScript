@@ -81,6 +81,23 @@ Do not re-plan v0.15:
 - identity lifecycle primitives
 - explicit destroy policies
 
+The v0.15 hardening backlog is still tracked here, but the 0.16 assurance
+branch treats it as a scoped metadata/tooling release rather than a full
+production-equivalence release. Concretely:
+
+| Deferred v0.15 hardening track | 0.16 assurance status | Full production target |
+|---|---|---|
+| Executable verifier lowering for aggregate invariants | ProofPlan soundness can fail closed on metadata-only aggregate obligations | 0.17 executable aggregate lowering |
+| Full ProofPlan soundness checker | Metadata consistency checker implemented for strict mode | formal source-to-code proof coverage |
+| Full macro-only lowering with no protocol-name recognizers | macro provenance and descriptor boundaries documented | removal of all stable protocol recognizers from core/codegen |
+| Covenant helper stdlib | protocol descriptors exist as `schema-stub` only | stable audited protocol stdlib modules |
+| `Address` / `LockScript` / `LockHash` split | builder/schema evidence records distinguish lock-facing fields | strict type-system split |
+| Explicit `#[entry(lock)]` / `#[entry(type)]` roles | entry kind is exposed through metadata and validation reports | mandatory role annotations for ambiguous entries |
+| Versioned data-layout preserve/migrate policies | deployment diff and layout evidence are surfaced | strict replacement/migration policy syntax |
+| Full `cellc explain-macro` source maps | macro provenance appears in ProofPlan/audit bundle records | source-to-expansion-to-code mapping |
+| Non-TYPE-ID global uniqueness proof | local anchors and builder/indexer assumptions are explicit | global uniqueness certification where possible |
+| Standard CKB compatibility fixtures | descriptive accepted/rejected fixture suite | executable CKB VM fixture runner |
+
 ---
 
 ## P0: 0.16 Release Scope
@@ -192,6 +209,8 @@ Each descriptive suite must cover:
 - script args layout
 - witness layout
 - Molecule data layout
+- ScriptGroup and `outputs` / `outputs_data` positive and negative transaction
+  shape matrices
 - error behavior
 - accepted/rejected transaction fixtures
 - cycle envelope
@@ -208,7 +227,8 @@ Each descriptive suite must cover:
 
 - manifest names accepted and rejected fixtures for each suite
 - fixture files parse and expose transaction shape, expected behavior,
-  script args, witness, Molecule data, metadata, cycle, and capacity fields
+  script args, witness, Molecule data, ScriptGroup, `outputs_data`, metadata,
+  cycle, and capacity fields
 - no behavioural equivalence is claimed until 0.17 executable runner coverage
 
 ---
@@ -469,7 +489,12 @@ The following are deliberately not 0.16 release gates. They move to
 - ABI-compatible CKB protocol stdlib implementations;
 - source-to-RISC-V/assembly source maps;
 - on-chain deployment verification;
-- executable aggregate invariant lowering.
+- executable aggregate invariant lowering;
+- full macro-only protocol lowering;
+- strict `Address` / `LockScript` / `LockHash` type separation;
+- explicit entry-role syntax gates;
+- versioned data-layout preserve/migrate policies;
+- non-TYPE-ID global uniqueness certification.
 
 ---
 
@@ -481,7 +506,7 @@ v0.16 can ship when the scoped metadata/tooling release satisfies:
 - ProofPlan soundness checker is mandatory in strict mode and rejects
   local/runtime ProofPlan drift
 - standard CKB compatibility suites provide descriptive accepted/rejected
-  fixture shapes
+  fixture shapes, including ScriptGroup and `outputs_data` matrices
 - builder assumption schema is stable and `validate-tx` rejects missing,
   bare, or malformed schema-bound evidence
 - `solve-tx` emits a deterministic template with explicit limitations and

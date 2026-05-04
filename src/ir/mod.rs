@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
+use crate::runtime_errors::CellScriptRuntimeError;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -38,8 +39,9 @@ pub struct IrTypeDef {
     pub fields: Vec<IrField>,
     pub capabilities: Vec<Capability>,
     pub claim_output: Option<IrType>,
-    pub lifecycle_states: Option<Vec<String>>,
-    pub lifecycle_rules: Vec<IrLifecycleRule>,
+    pub flow_states: Option<Vec<String>>,
+    pub flow_state_field: Option<String>,
+    pub flow_rules: Vec<IrFlowRule>,
     /// Identity policy for v0.15 cell identity system
     pub identity: IrIdentityPolicy,
 }
@@ -67,7 +69,19 @@ pub struct IrAggregateInvariant {
 }
 
 #[derive(Debug, Clone)]
-pub struct IrLifecycleRule {
+pub struct IrFlowRule {
+    pub from: String,
+    pub to: String,
+    pub from_index: usize,
+    pub to_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrStateTransitionEdge {
+    pub input_binding: Option<String>,
+    pub output_binding: Option<String>,
+    pub type_name: String,
+    pub field_name: String,
     pub from: String,
     pub to: String,
     pub from_index: usize,
@@ -146,6 +160,7 @@ pub struct IrAction {
     pub name: String,
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
+    pub state_transition_edges: Vec<IrStateTransitionEdge>,
     pub body: IrBody,
     pub effect_class: EffectClass,
     pub scheduler_hints: SchedulerHints,
@@ -226,15 +241,8 @@ pub struct WriteIntent {
     pub operation: String,
     pub ty: String,
     pub binding: String,
-    pub source: WriteIntentSource,
     pub index: usize,
     pub fields: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteIntentSource {
-    Output,
-    ReplacementOutput,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +260,12 @@ pub enum MutateTransitionOp {
     Append,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellMetadataField {
+    LockHash,
+    Capacity,
+}
+
 #[derive(Debug, Clone)]
 pub struct IrBlock {
     pub id: BlockId,
@@ -264,158 +278,41 @@ pub struct BlockId(pub usize);
 
 #[derive(Debug, Clone)]
 pub enum IrInstruction {
-    LoadConst {
-        dest: IrVar,
-        value: IrConst,
-    },
-    LoadVar {
-        dest: IrVar,
-        name: String,
-    },
-    StoreVar {
-        name: String,
-        src: IrOperand,
-    },
-    Binary {
-        dest: IrVar,
-        op: BinaryOp,
-        left: IrOperand,
-        right: IrOperand,
-    },
-    Unary {
-        dest: IrVar,
-        op: UnaryOp,
-        operand: IrOperand,
-    },
-    FieldAccess {
-        dest: IrVar,
-        obj: IrOperand,
-        field: String,
-    },
-    Index {
-        dest: IrVar,
-        arr: IrOperand,
-        idx: IrOperand,
-    },
-    Length {
-        dest: IrVar,
-        operand: IrOperand,
-    },
-    TypeHash {
-        dest: IrVar,
-        operand: IrOperand,
-    },
-    CollectionNew {
-        dest: IrVar,
-        ty: String,
-        capacity: Option<IrOperand>,
-    },
-    CollectionCapacity {
-        dest: IrVar,
-        collection: IrOperand,
-    },
-    CollectionPush {
-        collection: IrOperand,
-        value: IrOperand,
-    },
-    CollectionExtend {
-        collection: IrOperand,
-        slice: IrOperand,
-    },
-    CollectionClear {
-        collection: IrOperand,
-    },
-    CollectionContains {
-        dest: IrVar,
-        collection: IrOperand,
-        value: IrOperand,
-    },
-    CollectionRemove {
-        dest: IrVar,
-        collection: IrOperand,
-        index: IrOperand,
-    },
-    CollectionInsert {
-        collection: IrOperand,
-        index: IrOperand,
-        value: IrOperand,
-    },
-    CollectionSet {
-        collection: IrOperand,
-        index: IrOperand,
-        value: IrOperand,
-    },
-    CollectionPop {
-        dest: IrVar,
-        collection: IrOperand,
-    },
-    CollectionReverse {
-        collection: IrOperand,
-    },
-    CollectionTruncate {
-        collection: IrOperand,
-        len: IrOperand,
-    },
-    CollectionSwap {
-        collection: IrOperand,
-        left: IrOperand,
-        right: IrOperand,
-    },
-    Call {
-        dest: Option<IrVar>,
-        func: String,
-        args: Vec<IrOperand>,
-    },
-    ReadRef {
-        dest: IrVar,
-        ty: String,
-    },
-    Move {
-        dest: IrVar,
-        src: IrOperand,
-    },
-    Tuple {
-        dest: IrVar,
-        fields: Vec<IrOperand>,
-    },
-    Consume {
-        operand: IrOperand,
-    },
-    Create {
-        dest: IrVar,
-        pattern: CreatePattern,
-    },
-    Transfer {
-        dest: IrVar,
-        operand: IrOperand,
-        to: IrOperand,
-    },
-    Destroy {
-        operand: IrOperand,
-        policy: IrDestructionPolicy,
-    },
-    Claim {
-        dest: IrVar,
-        receipt: IrOperand,
-    },
-    Settle {
-        dest: IrVar,
-        operand: IrOperand,
-    },
-    /// Identity-aware cell creation: create_unique<T>(identity = ...) { ... } with_lock(...)
-    CreateUnique {
-        dest: IrVar,
-        pattern: CreatePattern,
-        identity: IrIdentityPolicy,
-    },
-    /// Identity-aware cell replacement: replace_unique<T>(identity = ...) { ... }
-    /// Consumes the input cell and creates a new output with identity preservation.
-    ReplaceUnique {
-        dest: IrVar,
-        operand: IrOperand,
-        pattern: CreatePattern,
-        identity: IrIdentityPolicy,
-    },
+    LoadConst { dest: IrVar, value: IrConst },
+    LoadVar { dest: IrVar, name: String },
+    StoreVar { name: String, src: IrOperand },
+    Binary { dest: IrVar, op: BinaryOp, left: IrOperand, right: IrOperand },
+    Unary { dest: IrVar, op: UnaryOp, operand: IrOperand },
+    FieldAccess { dest: IrVar, obj: IrOperand, field: String },
+    Index { dest: IrVar, arr: IrOperand, idx: IrOperand },
+    Length { dest: IrVar, operand: IrOperand },
+    TypeHash { dest: IrVar, operand: IrOperand },
+    CollectionNew { dest: IrVar, ty: String, capacity: Option<IrOperand> },
+    CollectionCapacity { dest: IrVar, collection: IrOperand },
+    CollectionPush { collection: IrOperand, value: IrOperand },
+    CollectionExtend { collection: IrOperand, slice: IrOperand },
+    CollectionClear { collection: IrOperand },
+    CollectionContains { dest: IrVar, collection: IrOperand, value: IrOperand },
+    CollectionRemove { dest: IrVar, collection: IrOperand, index: IrOperand },
+    CollectionInsert { collection: IrOperand, index: IrOperand, value: IrOperand },
+    CollectionSet { collection: IrOperand, index: IrOperand, value: IrOperand },
+    CollectionPop { dest: IrVar, collection: IrOperand },
+    CollectionReverse { collection: IrOperand },
+    CollectionTruncate { collection: IrOperand, len: IrOperand },
+    CollectionSwap { collection: IrOperand, left: IrOperand, right: IrOperand },
+    Call { dest: Option<IrVar>, func: String, args: Vec<IrOperand> },
+    ReadRef { dest: IrVar, ty: String },
+    Move { dest: IrVar, src: IrOperand },
+    Tuple { dest: IrVar, fields: Vec<IrOperand> },
+    Consume { operand: IrOperand },
+    Create { dest: IrVar, pattern: CreatePattern },
+    Transfer { dest: IrVar, operand: IrOperand, to: IrOperand },
+    Destroy { operand: IrOperand, policy: IrDestructionPolicy },
+    Claim { dest: IrVar, receipt: IrOperand },
+    Settle { dest: IrVar, operand: IrOperand },
+    CreateUnique { dest: IrVar, pattern: CreatePattern, identity: IrIdentityPolicy },
+    ReplaceUnique { dest: IrVar, operand: IrOperand, pattern: CreatePattern, identity: IrIdentityPolicy },
+    CellMetadataEquality { left: IrOperand, right: IrOperand, field: CellMetadataField },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -495,6 +392,9 @@ pub struct IrGenerator {
     type_fields: HashMap<String, HashMap<String, IrType>>,
     type_kinds: HashMap<String, IrTypeKind>,
     receipt_claim_outputs: HashMap<String, Option<IrType>>,
+    flow_states: HashMap<String, Vec<String>>,
+    flow_state_fields: HashMap<String, String>,
+    flow_rules: HashMap<String, Vec<IrFlowRule>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, Expr>,
     function_effects: HashMap<String, EffectClass>,
@@ -532,6 +432,9 @@ impl IrGenerator {
             type_fields: HashMap::new(),
             type_kinds: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
+            flow_states: HashMap::new(),
+            flow_state_fields: HashMap::new(),
+            flow_rules: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -554,12 +457,14 @@ impl IrGenerator {
         type_fields: HashMap<String, HashMap<String, IrType>>,
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
+        flow_states: HashMap<String, Vec<String>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_return_types: HashMap<String, Option<IrType>>,
     ) -> Self {
         let mut generator = Self::with_type_fields(module_name, type_fields);
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
+        generator.flow_states.extend(flow_states);
         generator.external_function_effects = external_function_effects;
         generator.external_function_return_types = external_function_return_types;
         generator
@@ -623,10 +528,12 @@ impl IrGenerator {
                     self.function_return_types.insert(lock.name.clone(), Some(IrType::Bool));
                     self.function_return_types.insert(format!("{}::{}", self.module.name, lock.name), Some(IrType::Bool));
                 }
+                Item::Flow(_) => {}
                 _ => {}
             }
         }
 
+        self.register_flows(&ast.items);
         self.infer_module_function_effects(&ast.items);
 
         for item in &ast.items {
@@ -668,6 +575,7 @@ impl IrGenerator {
                     let ir_item = IrItem::Lock(self.gen_lock(l));
                     self.module.items.push(ir_item);
                 }
+                Item::Flow(_) => {}
                 Item::Use(_) => {}
             }
         }
@@ -676,6 +584,59 @@ impl IrGenerator {
         } else {
             Ok(self.module)
         }
+    }
+
+    fn register_flows(&mut self, items: &[Item]) {
+        for item in items {
+            let Item::Flow(machine) = item else {
+                continue;
+            };
+            let type_name = machine.target.base.clone();
+            let field_name = machine.target.field.clone();
+            let states = self.flow_states_for_decl(machine);
+            let rules = machine
+                .transitions
+                .iter()
+                .filter_map(|transition| {
+                    let from = self.canonical_state_name(&type_name, &transition.from);
+                    let to = self.canonical_state_name(&type_name, &transition.to);
+                    let from_index = states.iter().position(|state| state == &from)?;
+                    let to_index = states.iter().position(|state| state == &to)?;
+                    Some(IrFlowRule { from, to, from_index, to_index })
+                })
+                .collect::<Vec<_>>();
+
+            self.flow_states.insert(type_name.clone(), states);
+            self.flow_state_fields.insert(type_name.clone(), field_name);
+            self.flow_rules.insert(type_name, rules);
+        }
+    }
+
+    fn flow_states_for_decl(&self, machine: &FlowDef) -> Vec<String> {
+        if let Some(fields) = self.type_fields.get(&machine.target.base) {
+            if let Some(IrType::Named(enum_name)) = fields.get(&machine.target.field) {
+                if let Some(variants) = self.enum_variants.get(enum_name) {
+                    let mut ordered = variants.iter().map(|(name, ordinal)| (*ordinal, name.clone())).collect::<Vec<_>>();
+                    ordered.sort_by_key(|(ordinal, _)| *ordinal);
+                    return ordered.into_iter().map(|(_, name)| name).collect();
+                }
+            }
+        }
+
+        let mut states = Vec::new();
+        for transition in &machine.transitions {
+            for raw in [&transition.from, &transition.to] {
+                let state = self.canonical_state_name(&machine.target.base, raw);
+                if !states.iter().any(|existing| existing == &state) {
+                    states.push(state);
+                }
+            }
+        }
+        states
+    }
+
+    fn canonical_state_name(&self, _type_name: &str, raw: &str) -> String {
+        raw.rsplit_once("::").map_or(raw, |(_, state)| state).to_string()
     }
 
     fn gen_resource(&mut self, resource: &ResourceDef) -> IrTypeDef {
@@ -688,8 +649,9 @@ impl IrGenerator {
             fields: self.layout_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: self.flow_states.get(&resource.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&resource.name).cloned(),
+            flow_rules: self.flow_rules.get(&resource.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&resource.identity),
         }
     }
@@ -704,8 +666,9 @@ impl IrGenerator {
             fields: self.layout_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: self.flow_states.get(&shared.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&shared.name).cloned(),
+            flow_rules: self.flow_rules.get(&shared.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&shared.identity),
         }
     }
@@ -720,12 +683,9 @@ impl IrGenerator {
             fields: self.layout_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(Self::convert_type),
-            lifecycle_states: receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone()),
-            lifecycle_rules: receipt
-                .lifecycle
-                .as_ref()
-                .map(|lifecycle| Self::lifecycle_rules_from_states(&lifecycle.states))
-                .unwrap_or_default(),
+            flow_states: self.flow_states.get(&receipt.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
+            flow_rules: self.flow_rules.get(&receipt.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&receipt.identity),
         }
     }
@@ -740,8 +700,9 @@ impl IrGenerator {
             fields: self.layout_fields(&struct_def.fields),
             capabilities: Vec::new(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: self.flow_states.get(&struct_def.name).cloned(),
+            flow_state_field: self.flow_state_fields.get(&struct_def.name).cloned(),
+            flow_rules: self.flow_rules.get(&struct_def.name).cloned().unwrap_or_default(),
             identity: IrIdentityPolicy::None,
         }
     }
@@ -768,19 +729,6 @@ impl IrGenerator {
             assert_count: invariant.asserts.len(),
             span: invariant.span,
         }
-    }
-
-    fn lifecycle_rules_from_states(states: &[String]) -> Vec<IrLifecycleRule> {
-        states
-            .windows(2)
-            .enumerate()
-            .map(|(index, window)| IrLifecycleRule {
-                from: window[0].clone(),
-                to: window[1].clone(),
-                from_index: index,
-                to_index: index + 1,
-            })
-            .collect()
     }
 
     fn infer_module_function_effects(&mut self, items: &[Item]) {
@@ -840,7 +788,8 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) = self.lower_signature_and_body(&function.params, &function.body, function.return_type.is_some());
+        let (params, body) =
+            self.lower_signature_and_body(&function.params, &[], &function.body, function.return_type.is_some(), &HashSet::new());
 
         IrPureFn { name: function.name.clone(), params, return_type: function.return_type.as_ref().map(Self::convert_type), body }
     }
@@ -908,7 +857,14 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) = self.lower_signature_and_body(&action.params, &action.body, action.return_type.is_some());
+        let core_input_bindings = action_core_input_binding_names(action);
+        let (params, body) = self.lower_signature_and_body(
+            &action.params,
+            &action.outputs,
+            &action.body,
+            action.return_type.is_some(),
+            &core_input_bindings,
+        );
 
         let mut effect_class = self.analyze_effect_class(action);
         if params.iter().any(|param| param.is_read_ref) && effect_class == EffectClass::Pure {
@@ -934,6 +890,7 @@ impl IrGenerator {
             name: action.name.clone(),
             params,
             return_type: action.return_type.as_ref().map(Self::convert_type),
+            state_transition_edges: self.action_state_transition_edges(action),
             body,
             effect_class: if action.effect_declared { declared_effect_class } else { effect_class },
             scheduler_hints: action
@@ -948,6 +905,60 @@ impl IrGenerator {
         }
     }
 
+    fn action_state_transition_edges(&self, action: &ActionDef) -> Vec<IrStateTransitionEdge> {
+        let mut edges = Vec::new();
+        for state_edge in &action.state_edges {
+            let path = &state_edge.path;
+            let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
+                continue;
+            };
+            let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
+                continue;
+            };
+            if let Some(mut lowered) = self.state_transition_edge_for(type_name, &path.field, &state_edge.from, &state_edge.to) {
+                lowered.input_binding = Some(path.base.clone());
+                lowered.output_binding = Some(state_edge.to_path.base.clone());
+                edges.push(lowered);
+            }
+        }
+
+        let mut unique = Vec::new();
+        for state_edge in edges {
+            if !unique.iter().any(|existing: &IrStateTransitionEdge| {
+                existing.type_name == state_edge.type_name
+                    && existing.field_name == state_edge.field_name
+                    && existing.input_binding == state_edge.input_binding
+                    && existing.output_binding == state_edge.output_binding
+                    && existing.from_index == state_edge.from_index
+                    && existing.to_index == state_edge.to_index
+            }) {
+                unique.push(state_edge);
+            }
+        }
+        unique
+    }
+
+    fn state_transition_edge_for(&self, type_name: &str, field_name: &str, from: &str, to: &str) -> Option<IrStateTransitionEdge> {
+        if self.flow_state_fields.get(type_name).is_some_and(|field| field != field_name) {
+            return None;
+        }
+        let states = self.flow_states.get(type_name)?;
+        let from = self.canonical_state_name(type_name, from);
+        let to = self.canonical_state_name(type_name, to);
+        let from_index = states.iter().position(|state| state == &from)?;
+        let to_index = states.iter().position(|state| state == &to)?;
+        Some(IrStateTransitionEdge {
+            input_binding: None,
+            output_binding: None,
+            type_name: type_name.to_string(),
+            field_name: field_name.to_string(),
+            from,
+            to,
+            from_index,
+            to_index,
+        })
+    }
+
     fn gen_lock(&mut self, lock: &LockDef) -> IrLock {
         self.var_counter = 0;
         self.block_counter = 0;
@@ -960,7 +971,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
-        let (params, body) = self.lower_signature_and_body(&lock.params, &lock.body, true);
+        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, true, &HashSet::new());
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
@@ -986,6 +997,9 @@ impl IrGenerator {
     }
 
     fn analyze_effect_class(&self, action: &ActionDef) -> EffectClass {
+        if !action_core_input_binding_names(action).is_empty() {
+            return EffectClass::Mutating;
+        }
         self.analyze_body_effect_class(&action.body)
     }
 
@@ -1066,12 +1080,6 @@ impl IrGenerator {
                     self.check_expr_effects(lock, footprint);
                 }
             }
-            Expr::Transfer(transfer) => {
-                footprint.has_consume = true;
-                footprint.has_create = true;
-                self.check_expr_effects(&transfer.expr, footprint);
-                self.check_expr_effects(&transfer.to, footprint);
-            }
             Expr::Destroy(destroy) => {
                 footprint.has_consume = true;
                 self.check_expr_effects(&destroy.expr, footprint);
@@ -1079,21 +1087,36 @@ impl IrGenerator {
             Expr::ReadRef(_) => {
                 footprint.has_read_ref = true;
             }
-            Expr::Claim(claim) => {
-                footprint.has_consume = true;
-                footprint.has_create = true;
-                self.check_expr_effects(&claim.receipt, footprint);
-            }
-            Expr::Settle(settle) => {
-                footprint.has_consume = true;
-                footprint.has_create = true;
-                self.check_expr_effects(&settle.expr, footprint);
-            }
             Expr::Assert(assert_expr) => {
                 self.check_expr_effects(&assert_expr.condition, footprint);
             }
             Expr::Require(require_expr) => {
                 self.check_expr_effects(&require_expr.condition, footprint);
+                if let Some(message) = &require_expr.message {
+                    self.check_expr_effects(message, footprint);
+                }
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.check_expr_effects(expr, footprint);
+                }
+            }
+            Expr::Preserve(_) => {
+                // preserve is pure sugar; desugared requires carry no side effects beyond verification
+            }
+            Expr::StdlibCall(call) => {
+                let qualified = format!("std::{}::{}", call.namespace, call.name);
+                match qualified.as_str() {
+                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                        self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
+                    }
+                    _ => {
+                        // constraint patterns are verification-only
+                    }
+                }
+                for arg in &call.args {
+                    self.check_expr_effects(arg, footprint);
+                }
             }
             Expr::Assign(assign) => {
                 self.check_expr_effects(&assign.target, footprint);
@@ -1185,9 +1208,16 @@ impl IrGenerator {
         }
     }
 
-    fn lower_signature_and_body(&mut self, params: &[Param], stmts: &[Stmt], tail_expr_returns: bool) -> (Vec<IrParam>, IrBody) {
+    fn lower_signature_and_body(
+        &mut self,
+        params: &[Param],
+        outputs: &[crate::ast::ActionOutput],
+        stmts: &[Stmt],
+        tail_expr_returns: bool,
+        core_input_bindings: &HashSet<String>,
+    ) -> (Vec<IrParam>, IrBody) {
         let mut vars = HashMap::new();
-        let ir_params = params
+        let mut ir_params = params
             .iter()
             .map(|param| {
                 let binding = self.new_var(param.name.clone(), Self::convert_type(&param.ty));
@@ -1203,14 +1233,27 @@ impl IrGenerator {
                 }
             })
             .collect::<Vec<_>>();
+        for output in outputs {
+            let binding = self.new_var(output.name.clone(), Self::convert_type(&output.ty));
+            vars.insert(output.name.clone(), binding.clone());
+            ir_params.push(IrParam {
+                name: output.name.clone(),
+                ty: Self::convert_type(&output.ty),
+                is_mut: false,
+                is_ref: false,
+                is_read_ref: false,
+                source: ParamSource::Output,
+                binding,
+            });
+        }
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
         let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_expr_returns);
-        let consume_set = self.collect_consume_patterns(&blocks);
+        let consume_set = self.collect_consume_patterns(&blocks, &ir_params, core_input_bindings);
         let mut read_refs = self.collect_read_ref_param_patterns(&ir_params);
         read_refs.extend(self.collect_read_ref_patterns(&blocks));
-        let create_set = self.collect_create_patterns(&blocks);
+        let create_set = self.collect_create_patterns(&blocks, &ir_params);
         let mutate_set = self.collect_mutate_param_patterns(&ir_params, consume_set.len(), create_set.len());
         let write_intents = Self::collect_write_intents(&create_set, &mutate_set);
         self.transition_param_ids.clear();
@@ -1224,7 +1267,6 @@ impl IrGenerator {
             operation: pattern.operation.clone(),
             ty: pattern.ty.clone(),
             binding: pattern.binding.clone(),
-            source: WriteIntentSource::Output,
             index,
             fields: pattern.fields.iter().map(|(field, _)| field.clone()).collect(),
         });
@@ -1232,7 +1274,6 @@ impl IrGenerator {
             operation: pattern.operation.clone(),
             ty: pattern.ty.clone(),
             binding: pattern.binding.clone(),
-            source: WriteIntentSource::ReplacementOutput,
             index: pattern.output_index,
             fields: pattern.fields.clone(),
         });
@@ -1240,8 +1281,17 @@ impl IrGenerator {
         create_intents.chain(mutate_intents).collect()
     }
 
-    fn collect_consume_patterns(&self, blocks: &[IrBlock]) -> Vec<CellPattern> {
-        let mut patterns = Vec::new();
+    fn collect_consume_patterns(
+        &self,
+        blocks: &[IrBlock],
+        params: &[IrParam],
+        core_input_bindings: &HashSet<String>,
+    ) -> Vec<CellPattern> {
+        let mut patterns = params
+            .iter()
+            .filter(|param| core_input_bindings.contains(param.name.as_str()))
+            .filter_map(|param| self.cell_pattern_from_var(&param.binding, "input"))
+            .collect::<Vec<_>>();
         for block in blocks {
             for instruction in &block.instructions {
                 if let IrInstruction::Consume { operand } = instruction {
@@ -1306,12 +1356,26 @@ impl IrGenerator {
             .collect()
     }
 
-    fn collect_create_patterns(&self, blocks: &[IrBlock]) -> Vec<CreatePattern> {
-        let mut patterns = Vec::new();
+    fn collect_create_patterns(&self, blocks: &[IrBlock], params: &[IrParam]) -> Vec<CreatePattern> {
+        let output_bindings =
+            params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()).collect::<HashSet<_>>();
+        let mut patterns = params
+            .iter()
+            .filter(|param| param.source == ParamSource::Output)
+            .filter_map(|param| self.create_pattern_from_var(&param.binding, "output"))
+            .collect::<Vec<_>>();
         for block in blocks {
             for instruction in &block.instructions {
                 if let IrInstruction::Create { pattern, .. } = instruction {
-                    patterns.push(pattern.clone());
+                    if pattern.operation == "output" && output_bindings.contains(&pattern.binding) {
+                        if let Some(existing) = patterns.iter_mut().find(|existing| existing.binding == pattern.binding) {
+                            *existing = pattern.clone();
+                        } else {
+                            patterns.push(pattern.clone());
+                        }
+                    } else {
+                        patterns.push(pattern.clone());
+                    }
                 } else if let IrInstruction::CreateUnique { pattern, .. } = instruction {
                     patterns.push(pattern.clone());
                 } else if let IrInstruction::ReplaceUnique { pattern, .. } = instruction {
@@ -1391,6 +1455,10 @@ impl IrGenerator {
         let IrOperand::Var(var) = operand else {
             return None;
         };
+        self.cell_pattern_from_var(var, operation)
+    }
+
+    fn cell_pattern_from_var(&self, var: &IrVar, operation: &str) -> Option<CellPattern> {
         let type_name = match &var.ty {
             IrType::Named(name) => Some(name.as_str()),
             IrType::Ref(inner) | IrType::MutRef(inner) => match inner.as_ref() {
@@ -1480,10 +1548,7 @@ impl IrGenerator {
             let Some(source_field_ty) = self.lookup_field_ir_type(&source_var.ty, &field_name) else {
                 continue;
             };
-            if &source_field_ty != output_field_ty {
-                continue;
-            }
-            if !is_verifier_coverable_output_field_type(output_field_ty) {
+            if &source_field_ty != output_field_ty || !is_verifier_coverable_output_field_type(output_field_ty) {
                 continue;
             }
             if let Some(field_var) = self.materialize_schema_field(source_var, &field_name, active, blocks) {
@@ -1491,6 +1556,14 @@ impl IrGenerator {
             }
         }
         field_vars
+    }
+
+    fn named_type_name_from_ast_type(ty: &Type) -> Option<&str> {
+        match ty {
+            Type::Named(name) => Some(name.as_str()),
+            Type::Ref(inner) | Type::MutRef(inner) => Self::named_type_name_from_ast_type(inner),
+            _ => None,
+        }
     }
 
     fn infer_touches_shared(&self, params: &[IrParam], body: &IrBody) -> Vec<[u8; 32]> {
@@ -1782,6 +1855,8 @@ impl IrGenerator {
                     LoweredExpr { operand: zero, current: Some(current) }
                 } else if let Some(enum_variant) = self.lower_enum_variant(name) {
                     LoweredExpr { operand: enum_variant, current: Some(current) }
+                } else if let Some(flow_state) = self.lower_flow_state_name(name) {
+                    LoweredExpr { operand: flow_state, current: Some(current) }
                 } else {
                     self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), Span::default());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -1797,7 +1872,7 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
-                let dest = self.new_var("tmp", self.binary_result_type(binary.op));
+                let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left.operand, &right.operand));
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Binary {
                     dest: dest.clone(),
@@ -1868,6 +1943,8 @@ impl IrGenerator {
             Expr::ReplaceUnique(ru) => self.lower_replace_unique_expr(ru, current, blocks, vars),
             Expr::Assert(assert_expr) => self.lower_assert_expr(assert_expr, current, blocks, vars),
             Expr::Require(require_expr) => self.lower_require_expr(require_expr, current, blocks, vars),
+            Expr::RequireBlock(require_block) => self.lower_require_block_expr(require_block, current, blocks, vars),
+            Expr::Preserve(preserve_expr) => self.lower_preserve_expr(preserve_expr, current, blocks, vars),
             Expr::StructInit(init) => self.lower_struct_init(init, current, blocks, vars),
             Expr::FieldAccess(field) => self.lower_field_access(field, current, blocks, vars),
             Expr::Index(index) => self.lower_index_expr(index, current, blocks, vars),
@@ -1889,6 +1966,7 @@ impl IrGenerator {
                 self.record_error("range expressions are only supported as for-loop iterables", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
+            Expr::StdlibCall(call) => self.lower_stdlib_call(call, current, blocks, vars),
         }
     }
 
@@ -1936,12 +2014,19 @@ impl IrGenerator {
         }
     }
 
-    fn binary_result_type(&self, op: BinaryOp) -> IrType {
+    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::And | BinaryOp::Or => {
-                IrType::U64
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty == IrType::U128 || right_ty == IrType::U128 {
+                    IrType::U128
+                } else {
+                    IrType::U64
+                }
             }
+            BinaryOp::And | BinaryOp::Or => IrType::Bool,
         }
     }
 
@@ -2352,7 +2437,438 @@ impl IrGenerator {
         if self.lowering_lock_entry {
             IrOperand::Const(IrConst::Bool(false))
         } else {
-            IrOperand::Const(IrConst::U64(7))
+            IrOperand::Const(IrConst::U64(CellScriptRuntimeError::AssertionFailed.code()))
+        }
+    }
+
+    /// Lower `require { expr1, expr2, ... }` — desugar into independent atomic `require` statements.
+    fn lower_require_block_expr(
+        &mut self,
+        require_block: &RequireBlockExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let mut active = current;
+        for expr in &require_block.expressions {
+            // Each expression in a require block is treated as a require condition:
+            // require_block { expr1, expr2 } desugars to require expr1; require expr2;
+            let lowered = self.lower_expr(expr, active, blocks, vars);
+            let Some(next) = lowered.current else {
+                return lowered;
+            };
+            let cond = lowered.operand;
+
+            let ok_block = self.push_block(blocks);
+            let fail_block = self.push_block(blocks);
+            self.block_mut(blocks, next).terminator = IrTerminator::Branch { cond, then_block: ok_block, else_block: fail_block };
+            self.block_mut(blocks, fail_block).terminator = IrTerminator::Return(Some(self.fail_closed_return_operand()));
+            active = ok_block;
+        }
+        LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+    }
+
+    /// Lower `preserve output from input { field1, field2, ... }` — desugar into
+    /// `require output.field1 == input.field1; require output.field2 == input.field2; ...`
+    fn lower_preserve_expr(
+        &mut self,
+        preserve: &PreserveExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let mut active = current;
+        for field_name in &preserve.fields {
+            let output_field = Expr::FieldAccess(FieldAccessExpr {
+                expr: Box::new(Expr::Identifier(preserve.output_name.clone())),
+                field: field_name.clone(),
+                span: preserve.span,
+            });
+            let input_field = Expr::FieldAccess(FieldAccessExpr {
+                expr: Box::new(Expr::Identifier(preserve.input_name.clone())),
+                field: field_name.clone(),
+                span: preserve.span,
+            });
+            let equality = Expr::Binary(BinaryExpr {
+                op: BinaryOp::Eq,
+                left: Box::new(output_field),
+                right: Box::new(input_field),
+                span: preserve.span,
+            });
+            let require_expr = RequireExpr { condition: Box::new(equality), message: None, span: preserve.span };
+            let lowered = self.lower_require_expr(&require_expr, active, blocks, vars);
+            let Some(next) = lowered.current else {
+                return lowered;
+            };
+            active = next;
+        }
+        LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+    }
+
+    fn lower_cell_metadata_equality_call(
+        &mut self,
+        qualified: &str,
+        call: &StdlibCallExpr,
+        field: CellMetadataField,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        if call.args.len() != 2 {
+            self.record_error(format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()), call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(current) };
+        }
+
+        let left = self.lower_expr(&call.args[0], current, blocks, vars);
+        let Some(active) = left.current else {
+            return left;
+        };
+        let right = self.lower_expr(&call.args[1], active, blocks, vars);
+        let Some(active) = right.current else {
+            return right;
+        };
+
+        self.block_mut(blocks, active).instructions.push(IrInstruction::CellMetadataEquality {
+            left: left.operand,
+            right: right.operand,
+            field,
+        });
+        LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+    }
+
+    fn lower_stdlib_output_create_and_preserve(
+        &mut self,
+        qualified: &str,
+        input_role: &str,
+        input: &Expr,
+        output: &Expr,
+        lock: Option<&Expr>,
+        preserve_fields: &[String],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<BlockId> {
+        let output_name = match output {
+            Expr::Identifier(name) => name.clone(),
+            _ => {
+                self.record_error(format!("{} output must be a named Cell output binding", qualified), output.span());
+                return None;
+            }
+        };
+        let input_name = match input {
+            Expr::Identifier(name) => name.clone(),
+            _ => {
+                self.record_error(format!("{} {} must be a named Cell input binding", qualified, input_role), input.span());
+                return None;
+            }
+        };
+        let Some(output_ty) = vars.get(&output_name).and_then(|var| Self::named_type_name_from_ir_type(&var.ty).map(str::to_string))
+        else {
+            self.record_error(format!("{} output must be a named Cell output binding", qualified), output.span());
+            return None;
+        };
+
+        let create_fields = preserve_fields
+            .iter()
+            .map(|field| {
+                (
+                    field.clone(),
+                    Expr::FieldAccess(FieldAccessExpr { expr: Box::new(input.clone()), field: field.clone(), span: input.span() }),
+                )
+            })
+            .collect::<Vec<_>>();
+        let create_expr = CreateExpr {
+            target: Some(output_name.clone()),
+            ty: output_ty,
+            fields: create_fields,
+            lock: lock.cloned().map(Box::new),
+            span: output.span(),
+        };
+        let lowered = self.lower_create_expr(&create_expr, current, blocks, vars);
+        let mut active = lowered.current?;
+
+        if !preserve_fields.is_empty() {
+            let preserve = PreserveExpr { output_name, input_name, fields: preserve_fields.to_vec(), span: input.span() };
+            let lowered = self.lower_preserve_expr(&preserve, active, blocks, vars);
+            active = lowered.current?;
+        }
+
+        Some(active)
+    }
+
+    /// Lower a stdlib call expression by expanding it into core IR instructions.
+    ///
+    /// Constraint patterns expand into `require` constraints or canonical
+    /// verifier metadata checks.
+    ///
+    /// Lifecycle patterns expand into `consume` plus explicit output and verifier constraints.
+    fn lower_stdlib_call(
+        &mut self,
+        call: &StdlibCallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let qualified = format!("std::{}::{}", call.namespace, call.name);
+        let mut active = current;
+
+        match qualified.as_str() {
+            // Constraint patterns — expand to canonical verifier constraints
+            "std::cell::same_lock" | "std::cell::preserve_lock" => {
+                self.lower_cell_metadata_equality_call(&qualified, call, CellMetadataField::LockHash, active, blocks, vars)
+            }
+            "std::cell::same_type" | "std::cell::preserve_type" => {
+                if call.args.len() != 2 {
+                    self.record_error(
+                        format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
+                        call.span,
+                    );
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
+                let output = &call.args[0];
+                let input = &call.args[1];
+                let output_type_hash = Expr::Call(CallExpr {
+                    func: Box::new(Expr::FieldAccess(FieldAccessExpr {
+                        expr: Box::new(output.clone()),
+                        field: "type_hash".to_string(),
+                        span: call.span,
+                    })),
+                    args: vec![],
+                    span: call.span,
+                });
+                let input_type_hash = Expr::Call(CallExpr {
+                    func: Box::new(Expr::FieldAccess(FieldAccessExpr {
+                        expr: Box::new(input.clone()),
+                        field: "type_hash".to_string(),
+                        span: call.span,
+                    })),
+                    args: vec![],
+                    span: call.span,
+                });
+                let equality = Expr::Binary(BinaryExpr {
+                    op: BinaryOp::Eq,
+                    left: Box::new(output_type_hash),
+                    right: Box::new(input_type_hash),
+                    span: call.span,
+                });
+                let require_expr = RequireExpr { condition: Box::new(equality), message: None, span: call.span };
+                self.lower_require_expr(&require_expr, active, blocks, vars)
+            }
+            "std::cell::preserve_capacity" => {
+                self.lower_cell_metadata_equality_call(&qualified, call, CellMetadataField::Capacity, active, blocks, vars)
+            }
+            "std::accounting::conserved" => {
+                if call.args.len() != 2 {
+                    self.record_error(
+                        format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
+                        call.span,
+                    );
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
+                let output = &call.args[0];
+                let input = &call.args[1];
+                let output_amount = Expr::FieldAccess(FieldAccessExpr {
+                    expr: Box::new(output.clone()),
+                    field: "amount".to_string(),
+                    span: call.span,
+                });
+                let input_amount =
+                    Expr::FieldAccess(FieldAccessExpr { expr: Box::new(input.clone()), field: "amount".to_string(), span: call.span });
+                let equality = Expr::Binary(BinaryExpr {
+                    op: BinaryOp::Eq,
+                    left: Box::new(output_amount),
+                    right: Box::new(input_amount),
+                    span: call.span,
+                });
+                let require_expr = RequireExpr { condition: Box::new(equality), message: None, span: call.span };
+                self.lower_require_expr(&require_expr, active, blocks, vars)
+            }
+
+            // Lifecycle patterns — consume + explicit output and verifier constraints
+            "std::lifecycle::transfer" => {
+                if call.args.len() != 3 {
+                    self.record_error(
+                        format!("std::lifecycle::transfer expects 3 arguments (input, output, to), got {}", call.args.len()),
+                        call.span,
+                    );
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
+                let input = &call.args[0];
+                let output = &call.args[1];
+                let lock = &call.args[2];
+
+                // 1. consume input
+                let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
+                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 2. constrain the proposed output binding and lock target
+                let output_name = match output {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => {
+                        self.record_error("std::lifecycle::transfer output must be a named Cell output binding", call.span);
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    }
+                };
+                let output_ty = vars
+                    .get(&output_name)
+                    .and_then(|var| Self::named_type_name_from_ir_type(&var.ty).map(str::to_string))
+                    .unwrap_or_else(|| "output".to_string());
+                let create_fields = call
+                    .preserve_fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.clone(),
+                            Expr::FieldAccess(FieldAccessExpr {
+                                expr: Box::new(input.clone()),
+                                field: field.clone(),
+                                span: call.span,
+                            }),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let create_expr = CreateExpr {
+                    target: Some(output_name.clone()),
+                    ty: output_ty,
+                    fields: create_fields,
+                    lock: Some(Box::new(lock.clone())),
+                    span: call.span,
+                };
+                let lowered = self.lower_create_expr(&create_expr, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 3. require output.type_hash == input.type_hash
+                let output_type_hash = Expr::Call(CallExpr {
+                    func: Box::new(Expr::FieldAccess(FieldAccessExpr {
+                        expr: Box::new(output.clone()),
+                        field: "type_hash".to_string(),
+                        span: call.span,
+                    })),
+                    args: vec![],
+                    span: call.span,
+                });
+                let input_type_hash = Expr::Call(CallExpr {
+                    func: Box::new(Expr::FieldAccess(FieldAccessExpr {
+                        expr: Box::new(input.clone()),
+                        field: "type_hash".to_string(),
+                        span: call.span,
+                    })),
+                    args: vec![],
+                    span: call.span,
+                });
+                let type_eq = Expr::Binary(BinaryExpr {
+                    op: BinaryOp::Eq,
+                    left: Box::new(output_type_hash),
+                    right: Box::new(input_type_hash),
+                    span: call.span,
+                });
+                let require_type = RequireExpr { condition: Box::new(type_eq), message: None, span: call.span };
+                let lowered = self.lower_require_expr(&require_type, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 4. preserve listed fields from input to output
+                if !call.preserve_fields.is_empty() {
+                    let input_name = match input {
+                        Expr::Identifier(name) => name.clone(),
+                        _ => "input".to_string(),
+                    };
+                    let preserve = PreserveExpr { output_name, input_name, fields: call.preserve_fields.clone(), span: call.span };
+                    let lowered = self.lower_preserve_expr(&preserve, active, blocks, vars);
+                    let Some(next) = lowered.current else {
+                        return lowered;
+                    };
+                    active = next;
+                }
+
+                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+            }
+            "std::receipt::claim" => {
+                if call.args.len() != 3 {
+                    self.record_error(format!("std::receipt::claim expects 3 arguments, got {}", call.args.len()), call.span);
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
+                let receipt = &call.args[0];
+
+                // 1. consume receipt
+                let consume_expr = ConsumeExpr { expr: Box::new(receipt.clone()), span: call.span };
+                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 2. canonical output construction from receipt fields with an explicit lock target.
+                let Some(next) = self.lower_stdlib_output_create_and_preserve(
+                    "std::receipt::claim",
+                    "receipt",
+                    receipt,
+                    &call.args[1],
+                    call.args.get(2),
+                    &call.preserve_fields,
+                    active,
+                    blocks,
+                    vars,
+                ) else {
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                };
+                active = next;
+
+                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+            }
+            "std::lifecycle::settle" => {
+                if call.args.len() != 3 {
+                    self.record_error(format!("std::lifecycle::settle expects 3 arguments, got {}", call.args.len()), call.span);
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
+                let input = &call.args[0];
+
+                // 1. consume input
+                let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
+                let lowered = self.lower_consume_expr(&consume_expr, active, blocks, vars);
+                let Some(next) = lowered.current else {
+                    return lowered;
+                };
+                active = next;
+
+                // 2. canonical output construction from settled fields with an explicit lock target.
+                let Some(next) = self.lower_stdlib_output_create_and_preserve(
+                    "std::lifecycle::settle",
+                    "input",
+                    input,
+                    &call.args[1],
+                    call.args.get(2),
+                    &call.preserve_fields,
+                    active,
+                    blocks,
+                    vars,
+                ) else {
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                };
+                active = next;
+
+                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+            }
+
+            _ => {
+                self.record_error(
+                    format!(
+                        "unknown stdlib pattern '{}' — each stdlib primitive must have a canonical expansion into core CellScript",
+                        qualified
+                    ),
+                    call.span,
+                );
+                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+            }
         }
     }
 
@@ -2412,14 +2928,20 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
-        let dest = self.new_var(format!("create_{}", create.ty), IrType::Named(create.ty.clone()));
+        let dest = if let Some(target) = &create.target {
+            vars.get(target).cloned().unwrap_or_else(|| self.new_var(target.clone(), IrType::Named(create.ty.clone())))
+        } else {
+            self.new_var(format!("create_{}", create.ty), IrType::Named(create.ty.clone()))
+        };
         let mut active = current;
         let mut lowered_fields = Vec::with_capacity(create.fields.len());
         let mut field_vars = HashMap::new();
 
         for (field_name, field_expr) in &create.fields {
             let expected_ty = self.type_fields.get(&create.ty).and_then(|fields| fields.get(field_name)).cloned();
-            let lowered = if let Some(expected_ty) = expected_ty {
+            let lowered = if let Some(state_operand) = self.lower_flow_state_initializer(&create.ty, field_name, field_expr) {
+                LoweredExpr { operand: state_operand, current: Some(active) }
+            } else if let Some(expected_ty) = expected_ty {
                 self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
             } else {
                 self.lower_expr(field_expr, active, blocks, vars)
@@ -2451,7 +2973,7 @@ impl IrGenerator {
         };
 
         let pattern = CreatePattern {
-            operation: "create".to_string(),
+            operation: if create.target.is_some() { "output".to_string() } else { "create".to_string() },
             ty: create.ty.clone(),
             binding: dest.name.clone(),
             fields: lowered_fields,
@@ -2461,6 +2983,17 @@ impl IrGenerator {
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_flow_state_initializer(&self, type_name: &str, field_name: &str, expr: &Expr) -> Option<IrOperand> {
+        if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
+            return None;
+        }
+        let Expr::Identifier(state_name) = expr else {
+            return None;
+        };
+        let index = self.flow_state_index(type_name, state_name)?;
+        Some(IrOperand::Const(IrConst::U64(index as u64)))
     }
 
     fn lower_consume_expr(
@@ -3613,6 +4146,15 @@ impl IrGenerator {
                 "hash_chain" if call.args.len() == 1 => {
                     self.lower_simple_runtime_call("__ckb_hash_chain", "hash_chain", IrType::Hash, &call.args, current, blocks, vars)
                 }
+                "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_blake2b",
+                    "hash_blake2b",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "Vec::new" if call.args.is_empty() => {
                     let dest = self.new_var("vec_new_tmp", IrType::Named("Vec".to_string()));
                     self.block_mut(blocks, current).instructions.push(IrInstruction::CollectionNew {
@@ -4046,6 +4588,24 @@ impl IrGenerator {
         Some(IrOperand::Const(IrConst::U64(ordinal)))
     }
 
+    fn lower_flow_state_name(&self, name: &str) -> Option<IrOperand> {
+        let (type_name, _) = name.rsplit_once("::")?;
+        let index = self.flow_state_index(type_name, name)?;
+        Some(IrOperand::Const(IrConst::U64(index as u64)))
+    }
+
+    fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.flow_states.get(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
+    }
+
     fn lookup_field_ir_type(&self, ty: &IrType, field: &str) -> Option<IrType> {
         match ty {
             IrType::Tuple(items) => field.parse::<usize>().ok().and_then(|index| items.get(index)).cloned(),
@@ -4208,6 +4768,7 @@ fn generate_with_resolver_inner(
     let mut type_fields = HashMap::new();
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
+    let mut flow_states = HashMap::new();
     let mut external_type_defs = Vec::new();
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
@@ -4228,6 +4789,9 @@ fn generate_with_resolver_inner(
                 }
                 if let Some(output) = resolver_receipt_claim_output_to_ir(&type_def) {
                     receipt_claim_outputs.insert(local_name.clone(), output);
+                }
+                if let Some(states) = resolver_flow_states_to_ir(&type_def) {
+                    flow_states.insert(local_name.clone(), states);
                 }
                 if let Some(fields) = resolver_type_fields_to_ir(&type_def) {
                     type_fields.insert(local_name.clone(), fields);
@@ -4258,6 +4822,7 @@ fn generate_with_resolver_inner(
         type_fields,
         type_kinds,
         receipt_claim_outputs,
+        flow_states,
         external_function_effects,
         external_function_return_types,
     );
@@ -4511,7 +5076,16 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
         }
         Expr::Require(require_expr) => {
             collect_call_names_from_expr(&require_expr.condition, names);
+            if let Some(message) = &require_expr.message {
+                collect_call_names_from_expr(message, names);
+            }
         }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_call_names_from_expr(expr, names);
+            }
+        }
+        Expr::Preserve(_) => {}
         Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
@@ -4539,7 +5113,13 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_call_names_from_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => {}
     }
 }
 
@@ -4585,6 +5165,9 @@ fn ast_type_to_ir(ty: &Type) -> IrType {
 }
 
 fn infer_action_effect_without_call_graph(action: &ActionDef) -> EffectClass {
+    if !action_core_input_binding_names(action).is_empty() {
+        return EffectClass::Mutating;
+    }
     let mut footprint = EffectFootprint::default();
     for stmt in &action.body {
         collect_ast_stmt_effects(stmt, &mut footprint);
@@ -4647,33 +5230,26 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
                 collect_ast_expr_effects(lock, footprint);
             }
         }
-        Expr::Transfer(transfer) => {
-            footprint.has_consume = true;
-            footprint.has_create = true;
-            collect_ast_expr_effects(&transfer.expr, footprint);
-            collect_ast_expr_effects(&transfer.to, footprint);
-        }
         Expr::Destroy(destroy) => {
             footprint.has_consume = true;
             collect_ast_expr_effects(&destroy.expr, footprint);
         }
         Expr::ReadRef(_) => footprint.has_read_ref = true,
-        Expr::Claim(claim) => {
-            footprint.has_consume = true;
-            footprint.has_create = true;
-            collect_ast_expr_effects(&claim.receipt, footprint);
-        }
-        Expr::Settle(settle) => {
-            footprint.has_consume = true;
-            footprint.has_create = true;
-            collect_ast_expr_effects(&settle.expr, footprint);
-        }
         Expr::Assert(assert_expr) => {
             collect_ast_expr_effects(&assert_expr.condition, footprint);
         }
         Expr::Require(require_expr) => {
             collect_ast_expr_effects(&require_expr.condition, footprint);
+            if let Some(message) = &require_expr.message {
+                collect_ast_expr_effects(message, footprint);
+            }
         }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_ast_expr_effects(expr, footprint);
+            }
+        }
+        Expr::Preserve(_) => {}
         Expr::Assign(assign) => {
             collect_ast_expr_effects(&assign.target, footprint);
             collect_ast_expr_effects(&assign.value, footprint);
@@ -4760,19 +5336,6 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
     Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
 }
 
-fn lifecycle_states_to_rules(states: &[String]) -> Vec<IrLifecycleRule> {
-    states
-        .windows(2)
-        .enumerate()
-        .map(|(index, window)| IrLifecycleRule {
-            from: window[0].clone(),
-            to: window[1].clone(),
-            from_index: index,
-            to_index: index + 1,
-        })
-        .collect()
-}
-
 fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTypeDef> {
     match type_def {
         TypeDef::Resource(resource) => Some(IrTypeDef {
@@ -4784,8 +5347,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&resource.fields),
             capabilities: resource.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
             identity: lower_identity_policy_ast(&resource.identity),
         }),
         TypeDef::Shared(shared) => Some(IrTypeDef {
@@ -4797,8 +5361,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&shared.fields),
             capabilities: shared.capabilities.clone(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
             identity: lower_identity_policy_ast(&shared.identity),
         }),
         TypeDef::Receipt(receipt) => Some(IrTypeDef {
@@ -4810,12 +5375,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&receipt.fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
-            lifecycle_states: receipt.lifecycle.as_ref().map(|lifecycle| lifecycle.states.clone()),
-            lifecycle_rules: receipt
-                .lifecycle
-                .as_ref()
-                .map(|lifecycle| lifecycle_states_to_rules(&lifecycle.states))
-                .unwrap_or_default(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
             identity: lower_identity_policy_ast(&receipt.identity),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
@@ -4827,8 +5389,9 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             fields: layout_resolver_fields(&struct_def.fields),
             capabilities: Vec::new(),
             claim_output: None,
-            lifecycle_states: None,
-            lifecycle_rules: Vec::new(),
+            flow_states: None,
+            flow_state_field: None,
+            flow_rules: Vec::new(),
             identity: IrIdentityPolicy::None,
         }),
         TypeDef::Enum(_) => None,
@@ -4893,6 +5456,13 @@ fn resolver_receipt_claim_output_to_ir(type_def: &TypeDef) -> Option<Option<IrTy
     }
 }
 
+fn resolver_flow_states_to_ir(type_def: &TypeDef) -> Option<Vec<String>> {
+    match type_def {
+        TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
+        TypeDef::Receipt(_) => None,
+    }
+}
+
 fn ast_type_to_ir_type(ty: &Type) -> IrType {
     match ty {
         Type::U8 => IrType::U8,
@@ -4909,6 +5479,247 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
         Type::Named(name) => IrType::Named(name.clone()),
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir_type(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir_type(inner))),
+    }
+}
+
+fn action_core_input_binding_names(action: &ActionDef) -> HashSet<String> {
+    action_inferred_lineage_bindings(action).keys().cloned().collect()
+}
+
+fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    let consumed = action_consumed_bindings(action);
+    for state_edge in &action.state_edges {
+        if consumed.contains(&state_edge.path.base) {
+            continue;
+        }
+        bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
+    }
+
+    let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, type_name) in action_output_binding_types(action) {
+        if bindings.values().any(|bound_output| bound_output == &name) {
+            continue;
+        }
+        outputs_by_type.entry(type_name).or_default().push(name);
+    }
+
+    let mut inputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for param in &action.params {
+        if consumed.contains(&param.name) || bindings.contains_key(&param.name) {
+            continue;
+        }
+        let Some(type_name) = ast_named_cell_type_name(&param.ty) else {
+            continue;
+        };
+        if param.source != ParamSource::Default && param.source != ParamSource::Input {
+            continue;
+        }
+        if param.is_ref || param.is_mut || param.is_read_ref {
+            continue;
+        }
+        inputs_by_type.entry(type_name.to_string()).or_default().push(param.name.clone());
+    }
+
+    for (type_name, inputs) in inputs_by_type {
+        let Some(outputs) = outputs_by_type.get(&type_name) else {
+            continue;
+        };
+        if inputs.len() == 1 && outputs.len() == 1 {
+            bindings.insert(inputs[0].clone(), outputs[0].clone());
+        }
+    }
+
+    bindings
+}
+
+fn action_output_binding_types(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    for output in &action.outputs {
+        if let Some(type_name) = ast_named_cell_type_name(&output.ty) {
+            bindings.insert(output.name.clone(), type_name.to_string());
+        }
+    }
+    bindings
+}
+
+fn ast_named_cell_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) => Some(name.split('<').next().unwrap_or(name.as_str())),
+        _ => None,
+    }
+}
+
+fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    collect_consumed_bindings_from_stmts(&action.body, &mut bindings);
+    bindings
+}
+
+fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_consumed_bindings_from_stmts(else_branch, bindings);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_consumed_bindings_from_expr(&for_stmt.iterable, bindings);
+                collect_consumed_bindings_from_stmts(&for_stmt.body, bindings);
+            }
+            Stmt::While(while_stmt) => {
+                collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
+            }
+        }
+    }
+}
+
+fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
+    match expr {
+        Expr::Consume(consume) => {
+            if let Expr::Identifier(name) = consume.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&consume.expr, bindings);
+        }
+        Expr::Assign(assign) => {
+            collect_consumed_bindings_from_expr(&assign.target, bindings);
+            collect_consumed_bindings_from_expr(&assign.value, bindings);
+        }
+        Expr::Binary(binary) => {
+            collect_consumed_bindings_from_expr(&binary.left, bindings);
+            collect_consumed_bindings_from_expr(&binary.right, bindings);
+        }
+        Expr::Unary(unary) => collect_consumed_bindings_from_expr(&unary.expr, bindings),
+        Expr::Call(call) => {
+            collect_consumed_bindings_from_expr(&call.func, bindings);
+            for arg in &call.args {
+                collect_consumed_bindings_from_expr(arg, bindings);
+            }
+        }
+        Expr::FieldAccess(field) => collect_consumed_bindings_from_expr(&field.expr, bindings),
+        Expr::Index(index) => {
+            collect_consumed_bindings_from_expr(&index.expr, bindings);
+            collect_consumed_bindings_from_expr(&index.index, bindings);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::Destroy(destroy) => {
+            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&destroy.expr, bindings);
+        }
+        Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            if let Expr::Identifier(name) = replace.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&replace.expr, bindings);
+            for (_, value) in &replace.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::ReadRef(_) => {}
+        Expr::Assert(assert_expr) => {
+            collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
+        }
+        Expr::Require(require_expr) => {
+            collect_consumed_bindings_from_expr(&require_expr.condition, bindings);
+            if let Some(message) = &require_expr.message {
+                collect_consumed_bindings_from_expr(message, bindings);
+            }
+        }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_consumed_bindings_from_expr(expr, bindings);
+            }
+        }
+        Expr::Preserve(_) => {}
+        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_consumed_bindings_from_expr(item, bindings);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_consumed_bindings_from_expr(&if_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.then_branch, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.else_branch, bindings);
+        }
+        Expr::Cast(cast) => collect_consumed_bindings_from_expr(&cast.expr, bindings),
+        Expr::Range(range) => {
+            collect_consumed_bindings_from_expr(&range.start, bindings);
+            collect_consumed_bindings_from_expr(&range.end, bindings);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
+            for arm in &match_expr.arms {
+                collect_consumed_bindings_from_expr(&arm.value, bindings);
+            }
+        }
+        Expr::StdlibCall(call) => {
+            if let Some(name) = stdlib_lifecycle_consumed_binding(call) {
+                bindings.insert(name);
+            }
+        }
+        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
+    }
+}
+
+fn stdlib_lifecycle_consumed_binding(call: &StdlibCallExpr) -> Option<String> {
+    let qualified = format!("std::{}::{}", call.namespace, call.name);
+    match qualified.as_str() {
+        "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => match call.args.first() {
+            Some(Expr::Identifier(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -4959,4 +5770,225 @@ pub(crate) fn type_hash_for_name(name: &str) -> [u8; 32] {
 
 fn stable_u64_tag(value: &str) -> u64 {
     value.bytes().fold(0xcbf2_9ce4_8422_2325u64, |acc, byte| acc.wrapping_mul(0x100_0000_01b3).wrapping_add(byte as u64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+    use crate::parser::parse;
+
+    fn parse_and_lower(source: &str) -> IrModule {
+        let tokens = lex(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        crate::types::check(&ast).unwrap();
+        crate::flow::check(&ast).unwrap();
+        generate(&ast).unwrap()
+    }
+
+    #[test]
+    fn preserve_sugar_populates_preserved_fields() {
+        let source = r#"
+module test
+
+resource Offer has store {
+    seller: u64
+    price: u64
+    payment_symbol: u64
+    state: u8
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> (output: Offer)
+    transition input.state: Live -> output.state: Filled
+where
+    preserve output from input {
+        seller
+        price
+    }
+    require output.payment_symbol == input.payment_symbol
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "fill" => Some(a.clone()),
+                _ => None,
+            })
+            .expect("expected fill action");
+        // Find the mutate for the output binding
+        let mutate = action.body.mutate_set.iter().find(|m| m.binding == "output");
+        if let Some(mutate) = mutate {
+            assert!(
+                mutate.preserved_fields.contains(&"seller".to_string()),
+                "preserved_fields should contain 'seller', got {:?}",
+                mutate.preserved_fields
+            );
+            assert!(
+                mutate.preserved_fields.contains(&"price".to_string()),
+                "preserved_fields should contain 'price', got {:?}",
+                mutate.preserved_fields
+            );
+        }
+    }
+
+    #[test]
+    fn require_block_lowers_to_atomic_requires() {
+        let source = r#"
+module test
+
+action check(x: u64, y: u64) -> u64
+where
+    require {
+        x > 0
+        y > 0
+    }
+    return x + y
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "check" => Some(a.clone()),
+                _ => None,
+            })
+            .expect("expected check action");
+        // The require block should produce multiple basic blocks due to conditional branching.
+        // Each require produces a Branch terminator (cond ? ok : fail) in the IR CFG.
+        // With 2 require expressions + return, we expect at least 5 blocks
+        // (entry, require1_ok, require2_ok, return_block, fail_block).
+        assert!(
+            action.body.blocks.len() >= 3,
+            "expected at least 3 basic blocks from 2 require expressions, found {} blocks",
+            action.body.blocks.len()
+        );
+        // Count the Branch terminators which represent require conditionals
+        let branch_count = action.body.blocks.iter().filter(|b| matches!(b.terminator, IrTerminator::Branch { .. })).count();
+        assert!(
+            branch_count >= 2,
+            "expected at least 2 branch terminators from require block, found {} out of {} blocks",
+            branch_count,
+            action.body.blocks.len()
+        );
+    }
+
+    #[test]
+    fn stdlib_transfer_lowers_to_single_consumed_input_and_locked_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action transfer_only(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "transfer_only" => Some(a),
+                _ => None,
+            })
+            .expect("expected transfer_only action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib transfer should not also infer an input lineage consume");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "coin");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "next_coin");
+        assert!(output.lock.is_some(), "stdlib transfer must bind the output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+    }
+
+    #[test]
+    fn stdlib_claim_lowers_to_consumed_receipt_and_locked_declared_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+    holder: Address
+}
+
+action claim_only(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.holder) { amount }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "claim_only" => Some(a),
+                _ => None,
+            })
+            .expect("expected claim_only action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib claim should consume exactly the receipt");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "voucher");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "coin");
+        assert!(output.lock.is_some(), "stdlib claim must bind the explicit output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+    }
+
+    #[test]
+    fn stdlib_settle_lowers_to_consumed_input_and_locked_output() {
+        let source = r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+action settle_coin(coin: Coin) -> next_coin: Coin
+where
+    std::lifecycle::settle(coin, next_coin, coin.owner) {
+        amount
+        owner
+    }
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "settle_coin" => Some(a),
+                _ => None,
+            })
+            .expect("expected settle_coin action");
+
+        assert_eq!(action.body.consume_set.len(), 1, "stdlib settle should consume exactly the input");
+        assert_eq!(action.body.consume_set[0].operation, "consume");
+        assert_eq!(action.body.consume_set[0].binding, "coin");
+
+        assert_eq!(action.body.create_set.len(), 1);
+        let output = &action.body.create_set[0];
+        assert_eq!(output.operation, "output");
+        assert_eq!(output.binding, "next_coin");
+        assert!(output.lock.is_some(), "stdlib settle must bind the explicit output lock target");
+        assert!(output.fields.iter().any(|(field, _)| field == "amount"));
+        assert!(output.fields.iter().any(|(field, _)| field == "owner"));
+    }
 }

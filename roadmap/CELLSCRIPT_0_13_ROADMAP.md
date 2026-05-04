@@ -1,12 +1,47 @@
 # CellScript v0.13 Roadmap
 
-**Status**: Beta released; implementation scope closed
-**Updated**: 2026-04-28
-**Scope**: Zero-cost Abstractions, Bounded Collection Runtime Gaps, CLI Ergonomics
+**Status**: Historical planning draft with final 0.13.2 release snapshot;
+authoritative 0.13 release scope lives in
+`../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md`, and final release notes live in
+`../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md`.
+**Scope**: Expanded design notes for zero-cost abstractions, bounded collection
+runtime gaps, and CLI ergonomics. Quantified performance claims and future
+examples are evidence-gated ideas, not 0.13 release promises.
 **Dependencies**: v0.12 released (CKB production closure)
-**Live TODO**: [CELLSCRIPT_0_13_TODOLIST.md](../docs/CELLSCRIPT_0_13_TODOLIST.md)
+**Release tracker**: [CELLSCRIPT_0_13_TODOLIST.md](CELLSCRIPT_0_13_TODOLIST.md)
 
 ---
+
+## Final 0.13.2 Release Snapshot
+
+The 0.13 implementation scope is closed for the stable `v0.13.2` line. The
+final release gate is:
+
+```bash
+./scripts/cellscript_ckb_release_gate.sh full
+```
+
+That gate now includes:
+
+- Rust formatting, check, test, and clippy;
+- syntax-combination quick and CI audits;
+- VS Code extension validation and VSIX dry-run packaging;
+- documentation-boundary checks;
+- builder-backed local CKB production acceptance;
+- strict stateful CKB scenario/action coverage.
+
+The stateful acceptance layer is the final business-flow evidence for this
+line: 7 end-to-end scenarios plus 20 action-branch scenarios cover all 43
+production acceptance actions with no missing action IDs. This is the release
+claim for the bundled production examples; it does not promote
+`examples/language/registry.cell` or other language examples into the CKB
+production matrix.
+
+0.13.2 also closes the syntax-governance pass: stdlib lifecycle and Cell
+metadata helpers lower to explicit verifier obligations, `preserve` is
+type-equivalent to its canonical `require` expansion, `require` blocks remain
+pure boolean grouping, and compiler behavior no longer derives protocol
+semantics from action names.
 
 ## 📊 v0.12 Achievements
 
@@ -31,7 +66,7 @@ From "can run" to "runs well", from "feature-complete" to "excellent UX".
 
 ### Three Pillars
 
-1. **Zero-Cost Abstractions** - Eliminate known runtime overhead (30-40% perf improvement)
+1. **Zero-Cost Abstractions** - Eliminate known runtime overhead where the compiler can prove the optimization and the release evidence supports it
 2. **Bounded Collections** - Ship stack-backed fixed-width `Vec<T>` helpers while keeping maps and cell-backed ownership explicit/fail-closed
 3. **Developer Experience** - CLI ergonomics, diagnostic presentation, and DSL features
 
@@ -387,10 +422,13 @@ schema layouts are built during lowering/metadata generation and codegen uses
 those offsets for field access and verifier prelude emission; generic runtime
 deserializer helper calls remain absent from the supported path.
 
-**Expected Benefits**:
-- 20-30% instruction reduction
-- 10-15% ELF size reduction
-- 15-25% cycle reduction
+**Evidence to collect before claiming release benefits**:
+- Backend shape deltas against a tagged v0.12 baseline
+- CKB measured cycles for representative action paths
+- ELF/text-size deltas under the same target profile and build flags
+
+No percentage reduction is a 0.13 release target until that benchmark evidence
+exists and is published with the release.
 
 **Risk**: Low (compile-time optimization only)
 
@@ -418,7 +456,7 @@ let opt_level = if args.release { 3 } else { 0 };  // O0 default
 let opt_level = if args.release { 3 } else { 1 };  // O1 default
 ```
 
-**Impact**: Potentially more representative dev builds. The previous 30-40% speedup claim needs benchmark evidence before it is used as a release target.
+**Impact**: Potentially more representative dev builds. Broad speedup claims need benchmark evidence before they are used as release targets.
 
 ---
 
@@ -444,7 +482,7 @@ error: fixed-byte comparison unresolved
 error[E0018]: fixed-byte comparison unresolved
    --> examples/token.cell:15:5
     |
-15  |     assert_invariant(a.symbol == b.symbol, "symbol mismatch")
+15  |     assert(a.symbol == b.symbol, "symbol mismatch")
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     |
     = help: use schema-backed parameters or fixed-byte values that the verifier can address
@@ -596,15 +634,19 @@ release gate.
 
 ## 🎯 Success Metrics
 
-### Performance Metrics (vs v0.12)
+### Performance Evidence
 
-| Metric | v0.12 Baseline | v0.13 Target | Improvement |
-|--------|---------------|--------------|-------------|
-| Token ELF Size | ~15 KB | ~12 KB | **-20%** |
-| AMM ELF Size | ~25 KB | ~18 KB | **-28%** |
-| Token Instructions | ~500 | ~350 | **-30%** |
-| AMM `swap` Cycles | ~10,000 | ~7,000 | **-30%** |
-| Debug Time | 1 hour | 5 minutes | **-92%** |
+The 0.13 release should avoid broad speedup claims unless they are backed by a
+repeatable benchmark harness and a tagged v0.12 comparison point. Current
+release evidence is regression-oriented rather than a quantified performance
+promise.
+
+| Area | Acceptable 0.13 Evidence | Not Claimed for 0.13 |
+|------|--------------------------|----------------------|
+| ELF/text size | Existing example size budgets and backend shape baselines | Fixed percentage reduction versus v0.12 |
+| Cycle cost | CKB production acceptance measurements for supported action paths | A universal cycle-reduction target |
+| Instruction count | Backend shape and assembly reports when generated by the release gate | A published instruction-count benchmark |
+| Debug time | CLI diagnostics and `cellc explain` behavior | A measured time-to-debug percentage |
 
 ---
 
@@ -677,9 +719,11 @@ v0.13 **does not reopen** the CKB production boundary, only enhances it:
 
 **v0.13 New Deliverables**:
 - `examples/registry.cell` - Exercises executable address membership/mapping beyond the 0.12 schema-vector boundary
-- `examples/order_book.cell` - Uses explicit map-like representations until full `HashMap<K, V>` has verifier-backed runtime support
-- Performance benchmark reports
 - CLI diagnostic presentation backed by existing runtime error documentation
+
+**Future / evidence-gated deliverables, not 0.13 release promises**:
+- Order-book-style or other proof-backed map-like examples, only after the ownership/proof model is explicit
+- Comparative performance benchmark reports, only after the benchmark harness and v0.12 comparison baseline are defined
 
 ---
 
@@ -705,7 +749,7 @@ All audit findings integrated into v0.13 roadmap:
 
 1. **Bounded Collections** - Review `stdlib/collections.rs`, contribute fixed-width `Vec<T>` helper coverage and fail-closed ownership checks
 2. **CLI Improvements** - Add `cellc new`, integrate `codespan-reporting`
-3. **Performance Benchmarks** - Run `scripts/benchmark_cellscript.sh` (TBD)
+3. **Evidence Checks** - Run the documented release-gate checks and inspect backend shape output when generated
 4. **New Examples** - Extend `examples/registry.cell` to test bounded executable collection patterns (`Vec<Address>`/`Vec<Hash>` helpers and explicit map-like representations)
 
 ### Test Commands
@@ -713,9 +757,6 @@ All audit findings integrated into v0.13 roadmap:
 ```bash
 # Run all tests
 cargo test -p cellscript -- --test-threads=1
-
-# Run performance benchmarks
-cargo bench -p cellscript
 
 # Compile all examples through the top-level file workflow
 for file in examples/*.cell; do
@@ -735,18 +776,17 @@ cargo run -p cellscript -- ckb-hash --hex 00
 
 v0.13 goal: Evolve CellScript from "**can run in production**" to "**excellent in production**":
 
-- **Faster**: 30-40% performance improvement (zero-cost abstractions)
+- **Faster**: fewer avoidable runtime paths where optimizations are implemented and covered by release evidence
 - **Stronger**: bounded value-vector helpers make simple registries, whitelists, and fixed membership sets easier to write without hiding ownership semantics
 - **More Usable**: CLI ergonomics + error codes + declarative syntax
 
 **Expected Outcomes**:
-- Developer experience improved 50% (debug time 1 hour → 5 minutes)
-- Execution cost reduced 30% (cycle consumption)
-- Deployment cost reduced 20% (ELF size)
+- Developer experience improved through CLI ergonomics, error codes, and explain output
+- Execution cost and deployment size remain regression-gated; percentage reductions require a separate benchmark report
 - Improve simple registry, whitelist, AMM helper, and fixed membership patterns; proof-backed maps and order books remain explicit future work
 
 **v0.12 proved CellScript can run on both chains.**  
-**v0.13 will prove CellScript is the best production-grade smart contract language.**
+**v0.13 will tighten CellScript's production UX, helper boundaries, and release evidence.**
 
 ---
 
@@ -806,7 +846,7 @@ From `CELLSCRIPT_0_12_COMPREHENSIVE_PLAN.md` Section 6:
 
 ---
 
-*Document End.*  
-*Author: AI Code Audit Assistant*  
-*Status: Beta released; implementation scope closed*
+*Document End.*
+*Author: AI Code Audit Assistant*
+*Status: Draft (Pending Team Review)*
 *Audit Sources*: CLI_ERGONOMICS_AND_BLAKE2B_AUDIT.md, CELLSCRIPT_0_12_COMPREHENSIVE_PLAN.md

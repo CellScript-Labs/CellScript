@@ -354,12 +354,12 @@ impl StdLib {
     fn generate_env(target_profile: TargetProfile) -> String {
         let mut asm = String::new();
 
-        asm.push_str("# Env: current_timepoint\n");
+        asm.push_str("# Env: current_timepoint (CKB epoch number, not Unix timestamp)\n");
         asm.push_str(".global __env_current_timepoint\n");
         asm.push_str("__env_current_timepoint:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        // All profiles use CKB epoch number
+        // All profiles use CKB epoch number.
         asm.push_str("    # Load CKB epoch number from header dep\n");
         asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
         asm.push_str("    li a0, 0     # header index\n");

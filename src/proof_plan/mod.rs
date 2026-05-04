@@ -336,6 +336,8 @@ fn trigger_for_scope_kind(scope_kind: &str) -> &'static str {
 fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata, reads: &'a [String]) -> &'static str {
     if obligation.category == "transaction-invariant"
         || obligation.feature.contains("transfer-output")
+        || obligation.feature.contains("claim-output")
+        || obligation.feature.contains("settle-output")
         || obligation.feature.contains("destroy-output-scan")
         || obligation.feature.contains("resource-conservation")
     {
@@ -392,6 +394,12 @@ fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[Ckb
             }
             ParamSource::LockArgs => {
                 reads.insert("lock_args".to_string());
+            }
+            ParamSource::Input => {
+                reads.insert("input".to_string());
+            }
+            ParamSource::Output => {
+                reads.insert("output".to_string());
             }
             ParamSource::Default => {}
         }
@@ -497,7 +505,7 @@ fn witness_fields(params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccessMe
     for param in params {
         match param.source {
             ParamSource::Witness => fields.push(format!("witness.{}", param.name)),
-            ParamSource::Default | ParamSource::Protected | ParamSource::LockArgs => {}
+            ParamSource::Default | ParamSource::Protected | ParamSource::LockArgs | ParamSource::Input | ParamSource::Output => {}
         }
     }
     for access in runtime_accesses {

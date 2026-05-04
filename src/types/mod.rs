@@ -17,6 +17,20 @@ struct FunctionSignature {
     kind: CallableKind,
 }
 
+#[derive(Debug, Clone)]
+struct FlowSpec {
+    type_name: String,
+    field_name: String,
+    field_enum_type: Option<String>,
+    states: Vec<String>,
+    transitions: Vec<StateTransition>,
+}
+
+#[derive(Debug, Clone)]
+struct ActionOutputBinding {
+    type_name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellTypeKind {
     Resource,
@@ -269,7 +283,9 @@ pub struct TypeChecker<'a> {
     cell_type_kinds: HashMap<String, CellTypeKind>,
     type_capabilities: HashMap<String, HashSet<Capability>>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
-    lifecycle_receipts: HashSet<String>,
+    flow_states: HashMap<String, Vec<String>>,
+    flow_state_fields: HashMap<String, String>,
+    flows: HashMap<String, FlowSpec>,
     constants: HashMap<String, ConstDef>,
     resolver: Option<&'a ModuleResolver>,
     current_module: Option<String>,
@@ -322,6 +338,8 @@ fn type_repr(ty: &Type) -> String {
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
         ParamSource::Default => "default",
+        ParamSource::Input => "input",
+        ParamSource::Output => "output",
         ParamSource::Protected => "protected",
         ParamSource::Witness => "witness",
         ParamSource::LockArgs => "lock_args",
@@ -370,7 +388,9 @@ impl<'a> TypeChecker<'a> {
             cell_type_kinds: HashMap::new(),
             type_capabilities: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
-            lifecycle_receipts: HashSet::new(),
+            flow_states: HashMap::new(),
+            flow_state_fields: HashMap::new(),
+            flows: HashMap::new(),
             constants: HashMap::new(),
             resolver: None,
             current_module: None,
@@ -430,9 +450,6 @@ impl<'a> TypeChecker<'a> {
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
-                    if receipt.lifecycle.is_some() {
-                        self.lifecycle_receipts.insert(receipt.name.clone());
-                    }
                     self.type_fields.insert(
                         receipt.name.clone(),
                         receipt.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
@@ -489,11 +506,14 @@ impl<'a> TypeChecker<'a> {
                         },
                     );
                 }
+                Item::Flow(_) => {}
                 Item::Use(_) => {}
             }
         }
 
         self.register_imported_type_ids(&mut seen_type_ids)?;
+        self.register_flows(module)?;
+        self.validate_flow_action_edges(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
@@ -519,12 +539,247 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn register_flows(&mut self, module: &Module) -> Result<()> {
+        let mut seen_targets = HashSet::new();
+        for item in &module.items {
+            let Item::Flow(machine) = item else {
+                continue;
+            };
+            if machine.transitions.is_empty() {
+                return Err(CompileError::new("flow must declare at least one transition", machine.span));
+            }
+            let type_name = machine.target.base.clone();
+            let field_name = machine.target.field.clone();
+            let target_key = format!("{}.{}", type_name, field_name);
+            if !seen_targets.insert(target_key.clone()) {
+                return Err(CompileError::new(format!("duplicate flow for '{}'", target_key), machine.target.span));
+            }
+            if self.flow_states.contains_key(&type_name) {
+                return Err(CompileError::new(
+                    format!(
+                        "type '{}' already has flow policy; this release supports one flow-backed state field per Cell type",
+                        type_name
+                    ),
+                    machine.target.span,
+                ));
+            }
+            if self.resolve_cell_type_kind(&type_name).is_none() {
+                return Err(CompileError::new(
+                    format!("flow target type '{}' must be a resource, shared, or receipt Cell type", type_name),
+                    machine.target.span,
+                ));
+            }
+
+            let fields = self
+                .resolve_named_type_fields(&type_name)
+                .ok_or_else(|| CompileError::new(format!("flow target type '{}' is not defined", type_name), machine.target.span))?;
+            let field_ty = fields.get(&field_name).ok_or_else(|| {
+                CompileError::new(format!("flow target field '{}.{}' is not defined", type_name, field_name), machine.target.span)
+            })?;
+
+            let (states, field_enum_type) = self.flow_states_for_decl(machine, field_ty)?;
+            let mut seen_transitions = HashSet::new();
+            let mut normalized_transitions = Vec::new();
+            for transition in &machine.transitions {
+                let from = self.canonical_state_name_for_flow(
+                    &type_name,
+                    field_enum_type.as_deref(),
+                    &states,
+                    &transition.from,
+                    transition.span,
+                )?;
+                let to = self.canonical_state_name_for_flow(
+                    &type_name,
+                    field_enum_type.as_deref(),
+                    &states,
+                    &transition.to,
+                    transition.span,
+                )?;
+                if from == to {
+                    return Err(CompileError::new(format!("state transition '{} -> {}' is a no-op", from, to), transition.span));
+                }
+                if !seen_transitions.insert((from.clone(), to.clone())) {
+                    return Err(CompileError::new(format!("duplicate state transition '{} -> {}'", from, to), transition.span));
+                }
+                if let Some(action) = &transition.action {
+                    match self.functions.get(action) {
+                        Some(signature) if signature.kind == CallableKind::Action => {}
+                        Some(_) => {
+                            return Err(CompileError::new(
+                                format!("state transition action '{}' is not an action", action),
+                                transition.span,
+                            ))
+                        }
+                        None => {
+                            return Err(CompileError::new(
+                                format!("state transition action '{}' is not defined", action),
+                                transition.span,
+                            ))
+                        }
+                    }
+                }
+                normalized_transitions.push(StateTransition { from, to, action: transition.action.clone(), span: transition.span });
+            }
+
+            self.flow_states.insert(type_name.clone(), states.clone());
+            self.flow_state_fields.insert(type_name.clone(), field_name.clone());
+            self.flows.insert(
+                type_name.clone(),
+                FlowSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn validate_flow_action_edges(&self, module: &Module) -> Result<()> {
+        let actions = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Action(action) => Some((action.name.as_str(), action)),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+
+        for spec in self.flows.values() {
+            for transition in &spec.transitions {
+                let Some(action_name) = &transition.action else {
+                    continue;
+                };
+                let Some(action) = actions.get(action_name.as_str()).copied() else {
+                    continue;
+                };
+                let has_exact_move = action.state_edges.iter().any(|state_edge| {
+                    let from_path = &state_edge.path;
+                    let to_path = &state_edge.to_path;
+                    from_path.field == spec.field_name
+                        && to_path.field == spec.field_name
+                        && action_param_owned_named_type(action, &from_path.base).is_some_and(|ty| ty == spec.type_name)
+                        && action_param_output_named_type(action, &to_path.base).is_some_and(|ty| ty == spec.type_name)
+                        && self
+                            .canonical_state_name_for_flow(
+                                &spec.type_name,
+                                spec.field_enum_type.as_deref(),
+                                &spec.states,
+                                &state_edge.from,
+                                state_edge.span,
+                            )
+                            .ok()
+                            .is_some_and(|from| from == transition.from)
+                        && self
+                            .canonical_state_name_for_flow(
+                                &spec.type_name,
+                                spec.field_enum_type.as_deref(),
+                                &spec.states,
+                                &state_edge.to,
+                                state_edge.span,
+                            )
+                            .ok()
+                            .is_some_and(|to| to == transition.to)
+                });
+                if !has_exact_move {
+                    return Err(CompileError::new(
+                        format!(
+                            "state transition action '{}' is bound to '{}.{} {} -> {}' and must declare the exact field-to-field transition",
+                            action.name, spec.type_name, spec.field_name, transition.from, transition.to
+                        ),
+                        transition.span,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn flow_states_for_decl(&self, machine: &FlowDef, field_ty: &Type) -> Result<(Vec<String>, Option<String>)> {
+        if let Type::Named(enum_name) = field_ty {
+            if let Some(variants) = self.resolve_enum_variants(enum_name) {
+                if variants.iter().any(|variant| self.enum_variant_has_payload(enum_name, variant)) {
+                    return Err(CompileError::new(
+                        format!(
+                            "flow field '{}.{}' enum '{}' must not have payload variants",
+                            machine.target.base, machine.target.field, enum_name
+                        ),
+                        machine.target.span,
+                    ));
+                }
+                for transition in &machine.transitions {
+                    self.canonical_state_name_for_flow(
+                        &machine.target.base,
+                        Some(enum_name),
+                        &variants,
+                        &transition.from,
+                        transition.span,
+                    )?;
+                    self.canonical_state_name_for_flow(
+                        &machine.target.base,
+                        Some(enum_name),
+                        &variants,
+                        &transition.to,
+                        transition.span,
+                    )?;
+                }
+                return Ok((variants, Some(enum_name.clone())));
+            }
+        }
+
+        if !is_state_storage_type(field_ty) {
+            return Err(CompileError::new(
+                format!(
+                    "flow field '{}.{}' must be an unsigned integer or no-payload enum",
+                    machine.target.base, machine.target.field
+                ),
+                machine.target.span,
+            ));
+        }
+
+        let mut states = Vec::new();
+        for transition in &machine.transitions {
+            for raw in [&transition.from, &transition.to] {
+                let state = raw.rsplit_once("::").map_or(raw.as_str(), |(_, state)| state).to_string();
+                if !states.iter().any(|existing| existing == &state) {
+                    states.push(state);
+                }
+            }
+        }
+        if states.len() < 2 {
+            return Err(CompileError::new("flow must mention at least two states", machine.span));
+        }
+        Ok((states, None))
+    }
+
+    fn canonical_state_name_for_flow(
+        &self,
+        type_name: &str,
+        enum_name: Option<&str>,
+        states: &[String],
+        raw: &str,
+        span: Span,
+    ) -> Result<String> {
+        let state = if let Some((qualifier, state)) = raw.rsplit_once("::") {
+            if qualifier != type_name && Some(qualifier) != enum_name {
+                return Err(CompileError::new(format!("state '{}' does not belong to '{}'", raw, type_name), span));
+            }
+            state
+        } else {
+            raw
+        };
+        if states.iter().any(|candidate| candidate == state) {
+            Ok(state.to_string())
+        } else {
+            Err(CompileError::new(format!("unknown state '{}::{}'", type_name, state), span))
+        }
+    }
+
     fn check_item(&mut self, item: &Item) -> Result<()> {
         match item {
             Item::Resource(r) => self.check_resource(r),
             Item::Shared(s) => self.check_shared(s),
             Item::Receipt(r) => self.check_receipt(r),
             Item::Struct(s) => self.check_struct(s),
+            Item::Flow(_) => Ok(()),
             Item::Invariant(i) => self.check_invariant(i),
             Item::Const(c) => self.check_const(c),
             Item::Enum(e) => self.check_enum(e),
@@ -814,8 +1069,13 @@ impl<'a> TypeChecker<'a> {
         let previous_return_type = self.current_return_type.replace(action.return_type.clone());
         let result = (|| {
             let mut env = self.env.child();
+            let core_evidence_bindings = action_core_evidence_binding_names(action);
 
-            self.bind_callable_params(&mut env, &action.params, "action", &action.name)?;
+            self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings)?;
+            self.bind_action_outputs(&mut env, action)?;
+            self.validate_action_state_edges(action, &env)?;
+            self.validate_action_create_targets(action)?;
+            self.validate_action_branch_obligations(action)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -838,6 +1098,549 @@ impl<'a> TypeChecker<'a> {
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
         result
+    }
+
+    fn bind_action_outputs(&self, env: &mut TypeEnv, action: &ActionDef) -> Result<()> {
+        let mut seen = action.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
+        for output in &action.outputs {
+            if output.name == "_" {
+                return Err(CompileError::new(
+                    format!("action '{}' output binding must have a stable name", action.name),
+                    output.span,
+                ));
+            }
+            if !seen.insert(output.name.clone()) {
+                return Err(CompileError::new(
+                    format!("duplicate action binding '{}' in action '{}'", output.name, action.name),
+                    output.span,
+                ));
+            }
+            self.validate_type(&output.ty)?;
+            let Some(type_name) = Self::base_type_name(&output.ty) else {
+                return Err(CompileError::new(
+                    format!("action output '{}' must name a Cell-backed resource, shared cell, or receipt type", output.name),
+                    output.span,
+                ));
+            };
+            if self.resolve_cell_type_kind(type_name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "action output '{}' references non-Cell type {}; action outputs are proposed transaction output Cells",
+                        output.name,
+                        type_repr(&output.ty)
+                    ),
+                    output.span,
+                ));
+            }
+            env.bind_new(output.name.clone(), output.ty.clone(), false, false, output.span)?;
+        }
+        Ok(())
+    }
+
+    fn validate_action_create_targets(&self, action: &ActionDef) -> Result<()> {
+        let outputs = action_output_binding_names(action);
+        self.validate_create_targets_in_stmts(&action.body, &outputs)
+    }
+
+    fn validate_action_branch_obligations(&self, action: &ActionDef) -> Result<()> {
+        let outputs = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
+        if outputs.is_empty() {
+            return Ok(());
+        }
+
+        self.validate_branch_obligations_in_stmts(&action.body, &outputs, HashSet::new())?;
+        Ok(())
+    }
+
+    fn validate_branch_obligations_in_stmts(
+        &self,
+        stmts: &[Stmt],
+        outputs: &HashSet<String>,
+        mut guaranteed: HashSet<String>,
+    ) -> Result<HashSet<String>> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => {
+                    guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
+                }
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                    guaranteed = self.validate_branch_obligations_in_expr(expr, outputs, guaranteed)?;
+                }
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed.clone())?;
+                    let then_guaranteed =
+                        self.validate_branch_obligations_in_stmts(&if_stmt.then_branch, outputs, guaranteed.clone())?;
+                    let else_guaranteed = if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_branch_obligations_in_stmts(else_branch, outputs, guaranteed.clone())?
+                    } else {
+                        guaranteed.clone()
+                    };
+                    self.reject_asymmetric_branch_constraints(
+                        &guaranteed,
+                        &[then_guaranteed.clone(), else_guaranteed.clone()],
+                        if_stmt.span,
+                    )?;
+                    guaranteed = then_guaranteed.intersection(&else_guaranteed).cloned().collect();
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_branch_obligations_in_expr(&for_stmt.iterable, outputs, guaranteed.clone())?;
+                    self.validate_branch_obligations_in_stmts(&for_stmt.body, outputs, guaranteed.clone())?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_branch_obligations_in_expr(&while_stmt.condition, outputs, guaranteed.clone())?;
+                    self.validate_branch_obligations_in_stmts(&while_stmt.body, outputs, guaranteed.clone())?;
+                }
+            }
+        }
+
+        Ok(guaranteed)
+    }
+
+    fn validate_branch_obligations_in_expr(
+        &self,
+        expr: &Expr,
+        outputs: &HashSet<String>,
+        mut guaranteed: HashSet<String>,
+    ) -> Result<HashSet<String>> {
+        match expr {
+            Expr::Require(require_expr) => {
+                collect_required_output_fields(&require_expr.condition, outputs, &mut guaranteed);
+                self.validate_branch_obligations_in_expr(&require_expr.condition, outputs, guaranteed.clone())?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_branch_obligations_in_expr(message, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::If(if_expr) => {
+                self.validate_branch_obligations_in_expr(&if_expr.condition, outputs, guaranteed.clone())?;
+                let then_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.then_branch, outputs, guaranteed.clone())?;
+                let else_guaranteed = self.validate_branch_obligations_in_expr(&if_expr.else_branch, outputs, guaranteed.clone())?;
+                self.reject_asymmetric_branch_constraints(
+                    &guaranteed,
+                    &[then_guaranteed.clone(), else_guaranteed.clone()],
+                    if_expr.span,
+                )?;
+                Ok(then_guaranteed.intersection(&else_guaranteed).cloned().collect())
+            }
+            Expr::Match(match_expr) => {
+                self.validate_branch_obligations_in_expr(&match_expr.expr, outputs, guaranteed.clone())?;
+                let mut arm_sets = Vec::with_capacity(match_expr.arms.len());
+                for arm in &match_expr.arms {
+                    arm_sets.push(self.validate_branch_obligations_in_expr(&arm.value, outputs, guaranteed.clone())?);
+                }
+                self.reject_asymmetric_branch_constraints(&guaranteed, &arm_sets, match_expr.span)?;
+                let mut iter = arm_sets.into_iter();
+                let Some(first) = iter.next() else {
+                    return Ok(guaranteed);
+                };
+                Ok(iter.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect()))
+            }
+            Expr::Block(stmts) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
+            Expr::Assign(assign) => {
+                self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)
+            }
+            Expr::Binary(binary) => {
+                self.validate_branch_obligations_in_expr(&binary.left, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&binary.right, outputs, guaranteed)
+            }
+            Expr::Unary(unary) => self.validate_branch_obligations_in_expr(&unary.expr, outputs, guaranteed),
+            Expr::Call(call) => {
+                self.validate_branch_obligations_in_expr(&call.func, outputs, guaranteed.clone())?;
+                for arg in &call.args {
+                    self.validate_branch_obligations_in_expr(arg, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::FieldAccess(field) => self.validate_branch_obligations_in_expr(&field.expr, outputs, guaranteed),
+            Expr::Index(index) => {
+                self.validate_branch_obligations_in_expr(&index.expr, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&index.index, outputs, guaranteed)
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Consume(consume) => self.validate_branch_obligations_in_expr(&consume.expr, outputs, guaranteed),
+            Expr::Transfer(transfer) => {
+                self.validate_branch_obligations_in_expr(&transfer.expr, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&transfer.to, outputs, guaranteed)
+            }
+            Expr::Destroy(destroy) => self.validate_branch_obligations_in_expr(&destroy.expr, outputs, guaranteed),
+            Expr::Claim(claim) => self.validate_branch_obligations_in_expr(&claim.receipt, outputs, guaranteed),
+            Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_branch_obligations_in_expr(lock, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_branch_obligations_in_expr(&replace.expr, outputs, guaranteed.clone())?;
+                for (_, value) in &replace.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Assert(assert_expr) => {
+                self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
+            }
+            Expr::Tuple(elems) | Expr::Array(elems) => {
+                for elem in elems {
+                    self.validate_branch_obligations_in_expr(elem, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Cast(cast) => self.validate_branch_obligations_in_expr(&cast.expr, outputs, guaranteed),
+            Expr::Range(range) => {
+                self.validate_branch_obligations_in_expr(&range.start, outputs, guaranteed.clone())?;
+                self.validate_branch_obligations_in_expr(&range.end, outputs, guaranteed)
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_branch_obligations_in_expr(value, outputs, guaranteed.clone())?;
+                }
+                Ok(guaranteed)
+            }
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::StdlibCall(_) => Ok(guaranteed),
+            Expr::RequireBlock(require_block) => {
+                let mut current = guaranteed;
+                for expr in &require_block.expressions {
+                    current = self.validate_branch_obligations_in_expr(expr, outputs, current)?;
+                }
+                Ok(current)
+            }
+            Expr::Preserve(preserve) => {
+                for field in &preserve.fields {
+                    guaranteed.insert(field.clone());
+                }
+                Ok(guaranteed)
+            }
+        }
+    }
+
+    fn reject_asymmetric_branch_constraints(&self, base: &HashSet<String>, branches: &[HashSet<String>], span: Span) -> Result<()> {
+        if branches.len() < 2 {
+            return Ok(());
+        }
+
+        let mut union = HashSet::new();
+        for branch in branches {
+            for field in branch {
+                if !base.contains(field) {
+                    union.insert(field.clone());
+                }
+            }
+        }
+
+        let mut asymmetric = union
+            .into_iter()
+            .filter(|field| {
+                branches.iter().any(|branch| branch.contains(field)) && branches.iter().any(|branch| !branch.contains(field))
+            })
+            .collect::<Vec<_>>();
+        asymmetric.sort();
+
+        if let Some(field) = asymmetric.into_iter().next() {
+            return Err(CompileError::new(
+                format!("incomplete branch constraints: field '{}' is constrained in one branch but not all branches", field),
+                span,
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_create_targets_in_stmts(&self, stmts: &[Stmt], outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.validate_create_targets_in_expr(expr, outputs)?,
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_create_targets_in_expr(&if_stmt.condition, outputs)?;
+                    self.validate_create_targets_in_stmts(&if_stmt.then_branch, outputs)?;
+                    if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_create_targets_in_stmts(else_branch, outputs)?;
+                    }
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_create_targets_in_expr(&for_stmt.iterable, outputs)?;
+                    self.validate_create_targets_in_stmts(&for_stmt.body, outputs)?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_create_targets_in_expr(&while_stmt.condition, outputs)?;
+                    self.validate_create_targets_in_stmts(&while_stmt.body, outputs)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_create_targets_in_expr(&self, expr: &Expr, outputs: &HashMap<String, ActionOutputBinding>) -> Result<()> {
+        match expr {
+            Expr::Create(create) => {
+                if let Some(target) = &create.target {
+                    let Some(binding) = outputs.get(target) else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' must be declared as an action output binding", target),
+                            create.span,
+                        ));
+                    };
+                    if binding.type_name != create.ty {
+                        return Err(CompileError::new(
+                            format!(
+                                "create target '{}' has type '{}', but initializer constructs '{}'",
+                                target, binding.type_name, create.ty
+                            ),
+                            create.span,
+                        ));
+                    }
+                }
+                for (_, value) in &create.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_create_targets_in_expr(lock, outputs)?;
+                }
+            }
+            Expr::Assign(assign) => {
+                self.validate_create_targets_in_expr(&assign.target, outputs)?;
+                self.validate_create_targets_in_expr(&assign.value, outputs)?;
+            }
+            Expr::Binary(binary) => {
+                self.validate_create_targets_in_expr(&binary.left, outputs)?;
+                self.validate_create_targets_in_expr(&binary.right, outputs)?;
+            }
+            Expr::Unary(unary) => self.validate_create_targets_in_expr(&unary.expr, outputs)?,
+            Expr::Call(call) => {
+                self.validate_create_targets_in_expr(&call.func, outputs)?;
+                for arg in &call.args {
+                    self.validate_create_targets_in_expr(arg, outputs)?;
+                }
+            }
+            Expr::FieldAccess(field) => self.validate_create_targets_in_expr(&field.expr, outputs)?,
+            Expr::Index(index) => {
+                self.validate_create_targets_in_expr(&index.expr, outputs)?;
+                self.validate_create_targets_in_expr(&index.index, outputs)?;
+            }
+            Expr::Consume(consume) => self.validate_create_targets_in_expr(&consume.expr, outputs)?,
+            Expr::Transfer(transfer) => {
+                self.validate_create_targets_in_expr(&transfer.expr, outputs)?;
+                self.validate_create_targets_in_expr(&transfer.to, outputs)?;
+            }
+            Expr::Destroy(destroy) => self.validate_create_targets_in_expr(&destroy.expr, outputs)?,
+            Expr::Claim(claim) => self.validate_create_targets_in_expr(&claim.receipt, outputs)?,
+            Expr::Settle(settle) => self.validate_create_targets_in_expr(&settle.expr, outputs)?,
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_create_targets_in_expr(lock, outputs)?;
+                }
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_create_targets_in_expr(&replace.expr, outputs)?;
+                for (_, value) in &replace.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+            }
+            Expr::Assert(assert_expr) => {
+                self.validate_create_targets_in_expr(&assert_expr.condition, outputs)?;
+                self.validate_create_targets_in_expr(&assert_expr.message, outputs)?;
+            }
+            Expr::Require(require_expr) => {
+                self.validate_create_targets_in_expr(&require_expr.condition, outputs)?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_create_targets_in_expr(message, outputs)?;
+                }
+            }
+            Expr::Block(stmts) => self.validate_create_targets_in_stmts(stmts, outputs)?,
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    self.validate_create_targets_in_expr(item, outputs)?;
+                }
+            }
+            Expr::If(if_expr) => {
+                self.validate_create_targets_in_expr(&if_expr.condition, outputs)?;
+                self.validate_create_targets_in_expr(&if_expr.then_branch, outputs)?;
+                self.validate_create_targets_in_expr(&if_expr.else_branch, outputs)?;
+            }
+            Expr::Cast(cast) => self.validate_create_targets_in_expr(&cast.expr, outputs)?,
+            Expr::Range(range) => {
+                self.validate_create_targets_in_expr(&range.start, outputs)?;
+                self.validate_create_targets_in_expr(&range.end, outputs)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_create_targets_in_expr(value, outputs)?;
+                }
+            }
+            Expr::Match(match_expr) => {
+                self.validate_create_targets_in_expr(&match_expr.expr, outputs)?;
+                for arm in &match_expr.arms {
+                    self.validate_create_targets_in_expr(&arm.value, outputs)?;
+                }
+            }
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::StdlibCall(_) => {}
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.validate_create_targets_in_expr(expr, outputs)?;
+                }
+            }
+            Expr::Preserve(_) => {}
+        }
+        Ok(())
+    }
+
+    fn validate_action_state_edges(&self, action: &ActionDef, env: &TypeEnv) -> Result<()> {
+        let output_bindings = action_output_binding_names(action);
+        let mut lineage_inputs = HashMap::new();
+        let mut lineage_outputs = HashMap::new();
+        for state_edge in &action.state_edges {
+            let from_path = &state_edge.path;
+            let to_path = &state_edge.to_path;
+            if let Some(previous_output) = lineage_inputs.insert(from_path.base.clone(), to_path.base.clone()) {
+                if previous_output != to_path.base {
+                    return Err(CompileError::new(
+                        format!(
+                            "state transition binding '{}' points to both '{}' and '{}'; split/merge lineage is not supported",
+                            from_path.base, previous_output, to_path.base
+                        ),
+                        state_edge.span,
+                    ));
+                }
+            }
+            if let Some(previous_input) = lineage_outputs.insert(to_path.base.clone(), from_path.base.clone()) {
+                if previous_input != from_path.base {
+                    return Err(CompileError::new(
+                        format!(
+                            "state transition output '{}' is reached from both '{}' and '{}'; split/merge lineage is not supported",
+                            to_path.base, previous_input, from_path.base
+                        ),
+                        state_edge.span,
+                    ));
+                }
+            }
+        }
+
+        for state_edge in &action.state_edges {
+            let path = &state_edge.path;
+            let to_path = &state_edge.to_path;
+            let ty = env
+                .lookup(&path.base)
+                .ok_or_else(|| CompileError::new(format!("unknown state transition binding '{}'", path.base), path.span))?;
+            let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
+                return Err(CompileError::new(
+                    format!("state transition binding '{}' must name an action input parameter", path.base),
+                    path.span,
+                ));
+            };
+            if !matches!(param.source, ParamSource::Default | ParamSource::Input)
+                || param.is_read_ref
+                || !matches!(param.ty, Type::Named(_))
+            {
+                return Err(CompileError::new(
+                    format!(
+                        "state transition binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, output, or read parameter",
+                        path.base
+                    ),
+                    path.span,
+                ));
+            }
+            let type_name = Self::base_type_name(ty)
+                .ok_or_else(|| {
+                    CompileError::new(format!("state transition binding '{}' is not a named state type", path.base), path.span)
+                })?
+                .to_string();
+            let Some(output_binding) = output_bindings.get(&to_path.base) else {
+                return Err(CompileError::new(
+                    format!("state transition output binding '{}' must be a named action return", to_path.base),
+                    to_path.span,
+                ));
+            };
+            if output_binding.type_name != type_name {
+                return Err(CompileError::new(
+                    format!(
+                        "state transition input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
+                        path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
+                    ),
+                    state_edge.span,
+                ));
+            }
+            let spec = self
+                .flows
+                .get(&type_name)
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), path.span))?;
+            if spec.field_name != path.field {
+                return Err(CompileError::new(
+                    format!(
+                        "state transition field '{}.{}' does not match declared flow field '{}.{}'",
+                        path.base, path.field, type_name, spec.field_name
+                    ),
+                    path.span,
+                ));
+            }
+            if spec.field_name != to_path.field {
+                return Err(CompileError::new(
+                    format!(
+                        "state transition output field '{}.{}' does not match declared flow field '{}.{}'",
+                        to_path.base, to_path.field, type_name, spec.field_name
+                    ),
+                    to_path.span,
+                ));
+            }
+
+            let states = self
+                .flow_states
+                .get(&type_name)
+                .ok_or_else(|| CompileError::new(format!("type '{}' has no declared flow", type_name), state_edge.span))?;
+            let from = self.canonical_state_name_for_flow(
+                &type_name,
+                spec.field_enum_type.as_deref(),
+                states,
+                &state_edge.from,
+                state_edge.span,
+            )?;
+            let to = self.canonical_state_name_for_flow(
+                &type_name,
+                spec.field_enum_type.as_deref(),
+                states,
+                &state_edge.to,
+                state_edge.span,
+            )?;
+            if !spec.transitions.iter().any(|transition| transition.from == from && transition.to == to) {
+                return Err(CompileError::new(
+                    format!("state transition '{}.{} {} -> {}' is not declared", type_name, spec.field_name, from, to),
+                    state_edge.span,
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn check_function(&mut self, function: &FnDef) -> Result<()> {
@@ -1023,6 +1826,17 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn bind_callable_params(&self, env: &mut TypeEnv, params: &[Param], callable_kind: &str, callable_name: &str) -> Result<()> {
+        self.bind_callable_params_with_non_linear(env, params, callable_kind, callable_name, &HashSet::new())
+    }
+
+    fn bind_callable_params_with_non_linear(
+        &self,
+        env: &mut TypeEnv,
+        params: &[Param],
+        callable_kind: &str,
+        callable_name: &str,
+        non_linear_params: &HashSet<String>,
+    ) -> Result<()> {
         let mut seen = HashSet::new();
         for param in params {
             if param.name == "_" {
@@ -1045,7 +1859,7 @@ impl<'a> TypeChecker<'a> {
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
             self.validate_callable_param_mutability(param)?;
-            let is_linear = self.is_linear_type(&param.ty);
+            let is_linear = self.is_linear_type(&param.ty) && !non_linear_params.contains(param.name.as_str());
             env.bind_new(param.name.clone(), param.ty.clone(), is_linear, param.is_mut, param.span)?;
         }
         Ok(())
@@ -1055,10 +1869,63 @@ impl<'a> TypeChecker<'a> {
         if param.source == ParamSource::Default {
             return Ok(());
         }
-        if callable_kind != "lock" {
+        if param.source == ParamSource::Input {
+            if callable_kind != "action" {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot use input source classification; input parameters are action verifier bindings",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
+            if param.is_mut || param.is_ref || param.is_read_ref || matches!(param.ty, Type::Ref(_) | Type::MutRef(_)) {
+                return Err(CompileError::new(
+                    format!("input action parameter '{}' must use 'input name: T' without mut/ref/read_ref modifiers", param.name),
+                    param.span,
+                ));
+            }
+            let Some(name) = Self::base_type_name(&param.ty) else {
+                return Err(CompileError::new(
+                    format!("input action parameter '{}' must name a Cell-backed resource, shared cell, or receipt type", param.name),
+                    param.span,
+                ));
+            };
+            if self.resolve_cell_type_kind(name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "input action parameter '{}' references non-Cell type {}; input only marks a consumed transaction input Cell",
+                        param.name,
+                        type_repr(&param.ty)
+                    ),
+                    param.span,
+                ));
+            }
+            return Ok(());
+        }
+        if param.source == ParamSource::Output {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use {} source classification; protected/witness/lock_args are lock-boundary syntax",
+                    "{} '{}' parameter '{}' cannot use output source classification; bind transaction outputs on the action return side (`action f(...) -> name: T`)",
+                    callable_kind, callable_name, param.name
+                ),
+                param.span,
+            ));
+        }
+        if param.source == ParamSource::Witness {
+            if callable_kind != "action" && callable_kind != "lock" {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot use witness source classification; witness parameters are action or lock verifier bindings",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
+        } else if callable_kind != "lock" {
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' parameter '{}' cannot use {} source classification; protected and lock_args are lock parameter source syntax",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1073,7 +1940,7 @@ impl<'a> TypeChecker<'a> {
                 if param.is_mut || param.is_read_ref || param.is_ref {
                     return Err(CompileError::new(
                         format!(
-                            "protected lock parameter '{}' must use 'name: protected T' without mut/ref/read_ref modifiers",
+                            "protected lock parameter '{}' must use 'protected name: T' without mut/ref/read_ref modifiers",
                             param.name
                         ),
                         param.span,
@@ -1126,7 +1993,7 @@ impl<'a> TypeChecker<'a> {
                         param.span,
                     ));
                 }
-                if Self::lock_args_static_width(&param.ty).is_none() {
+                if lock_args_static_type_len(&param.ty).is_none() {
                     return Err(CompileError::new(
                         format!(
                             "lock_args lock parameter '{}' must use a fixed-width script-args type such as Address, Hash, integer, bool, or [u8; N]",
@@ -1136,29 +2003,43 @@ impl<'a> TypeChecker<'a> {
                     ));
                 }
             }
-            ParamSource::Default => {}
+            ParamSource::Default | ParamSource::Input | ParamSource::Output => {}
         }
         Ok(())
     }
 
-    fn lock_args_static_width(ty: &Type) -> Option<usize> {
-        match ty {
-            Type::Bool | Type::U8 => Some(1),
-            Type::U16 => Some(2),
-            Type::U32 => Some(4),
-            Type::U64 => Some(8),
-            Type::U128 => Some(16),
-            Type::Address | Type::Hash => Some(32),
-            Type::Array(inner, size) => Self::lock_args_static_width(inner).map(|width| width * size),
-            _ => None,
-        }
-    }
-
     fn identity_static_width(ty: &Type) -> Option<usize> {
-        Self::lock_args_static_width(ty)
+        lock_args_static_type_len(ty)
     }
 
     fn validate_callable_param_reference_shape(&self, param: &Param, callable_kind: &str, callable_name: &str) -> Result<()> {
+        if matches!(param.ty, Type::MutRef(_)) {
+            return Err(CompileError::new(
+                format!(
+                    "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `transition` and `require` constraints in {} '{}'",
+                    callable_kind, callable_name
+                ),
+                param.span,
+            ));
+        }
+        if matches!(callable_kind, "action" | "lock")
+            && matches!(param.ty, Type::Ref(_))
+            && !param.is_read_ref
+            && param.source != ParamSource::Protected
+        {
+            let help = if callable_kind == "lock" {
+                "use `protected name: T` for the guarded lock cell or `read name: T` for a read-only referenced cell"
+            } else {
+                "use `read name: T` for a read-only referenced cell, or a signature input/output binding for consumed/proposed cells"
+            };
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' parameter '{}' cannot use bare `&T` at the verifier boundary; {}",
+                    callable_kind, callable_name, param.name, help
+                ),
+                param.span,
+            ));
+        }
         let nested_reference = match &param.ty {
             Type::Ref(inner) | Type::MutRef(inner) => self.type_contains_reference(inner),
             ty => self.type_contains_reference(ty),
@@ -1179,7 +2060,7 @@ impl<'a> TypeChecker<'a> {
             if self.reference_target_is_cell_backed_aggregate(inner) {
                 return Err(CompileError::new(
                     format!(
-                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' or '&mut T' Cell view instead",
+                        "parameter '{}' in {} '{}' cannot use reference to aggregate containing cell-backed values {}; use a direct '&T' helper view or named action outputs instead",
                         param.name,
                         callable_kind,
                         callable_name,
@@ -1196,7 +2077,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "action" && matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use mutable reference type {}; only actions may receive mutable Cell state authority",
+                    "{} '{}' parameter '{}' cannot use mutable reference type {}; use signature-direction outputs for Cell updates",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1208,7 +2089,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "action" && self.type_contains_cell_backed_value(&param.ty) {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use owned cell-backed type {}; use a read-only '&T' parameter for predicate/helper reads or move ownership transitions into an action",
+                    "{} '{}' parameter '{}' cannot use owned cell-backed type {}; use a read-only '&T' parameter for predicate/helper reads or transition ownership in an action",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1226,21 +2107,28 @@ impl<'a> TypeChecker<'a> {
         }
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
-                format!("parameter '{}' is a read-only reference; use '&mut T' for writable reference parameters", param.name),
+                format!(
+                    "parameter '{}' is a read-only reference; Cell state updates must be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints",
+                    param.name
+                ),
                 param.span,
             ));
         }
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
-                format!("parameter '{}' is already an '&mut' reference; remove the leading 'mut' modifier", param.name),
+                format!(
+                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(before: T) -> after: T` plus `transition` and `require` constraints",
+                    param.name
+                ),
                 param.span,
             ));
         }
         if Self::base_type_name(&param.ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some() {
             return Err(CompileError::new(
                 format!(
-                    "cell-backed parameter '{}' cannot use leading 'mut'; use '&mut {}' for mutable cell state or consume/create for ownership transitions",
+                    "cell-backed parameter '{}' cannot use leading 'mut'; use named action outputs (`action(before: {}) -> after: {}`) or consume/create sugar",
                     param.name,
+                    type_repr(&param.ty),
                     type_repr(&param.ty)
                 ),
                 param.span,
@@ -1375,7 +2263,12 @@ impl<'a> TypeChecker<'a> {
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.condition, state)?;
                 self.validate_spawn_ipc_fd_usage_expr(&assert_expr.message, state)?;
             }
-            Expr::Require(require_expr) => self.validate_spawn_ipc_fd_usage_expr(&require_expr.condition, state)?,
+            Expr::Require(require_expr) => {
+                self.validate_spawn_ipc_fd_usage_expr(&require_expr.condition, state)?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_spawn_ipc_fd_usage_expr(message, state)?;
+                }
+            }
             Expr::Block(stmts) => {
                 let mut block_state = state.clone();
                 self.validate_spawn_ipc_fd_usage_statements(stmts, &mut block_state)?;
@@ -1427,7 +2320,23 @@ impl<'a> TypeChecker<'a> {
                     state.closed.extend(closed_on_all_arms);
                 }
             }
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+            Expr::StdlibCall(call) => {
+                for arg in &call.args {
+                    self.validate_spawn_ipc_fd_usage_expr(arg, state)?;
+                }
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.validate_spawn_ipc_fd_usage_expr(expr, state)?;
+                }
+            }
+            Expr::Preserve(_)
+            | Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_) => {}
         }
         Ok(())
     }
@@ -1757,6 +2666,8 @@ impl<'a> TypeChecker<'a> {
                     Ok(constant.ty)
                 } else if let Some(ty) = self.enum_variant_expr_type(name, expr_span(expr))? {
                     Ok(ty)
+                } else if let Some(ty) = self.flow_state_expr_type(name, expr_span(expr))? {
+                    Ok(ty)
                 } else if let Some((prefix, _)) = name.split_once("::") {
                     Ok(Type::Named(prefix.to_string()))
                 } else {
@@ -1859,6 +2770,29 @@ impl<'a> TypeChecker<'a> {
             Expr::Create(create) => {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
+                if let Some(target) = &create.target {
+                    let Some(target_ty) = env.lookup(target).cloned() else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' is not declared as an action output binding", target),
+                            create.span,
+                        ));
+                    };
+                    let Type::Named(target_type_name) = target_ty else {
+                        return Err(CompileError::new(
+                            format!("create target '{}' must be a named Cell output binding", target),
+                            create.span,
+                        ));
+                    };
+                    if target_type_name.split('<').next().unwrap_or(target_type_name.as_str()) != create.ty {
+                        return Err(CompileError::new(
+                            format!(
+                                "create target '{}' has type '{}', but initializer constructs '{}'",
+                                target, target_type_name, create.ty
+                            ),
+                            create.span,
+                        ));
+                    }
+                }
                 Ok(Type::Named(create.ty.clone()))
             }
             Expr::Consume(consume) => {
@@ -1872,13 +2806,25 @@ impl<'a> TypeChecker<'a> {
                 if !Self::is_address_like_type(&to_ty) {
                     return Err(CompileError::new("transfer destination must be address-like", transfer.span));
                 }
-                self.require_capability(&expr_ty, Capability::Transfer, "transfer", transfer.span)?;
+                self.require_capability_or_kernel_effects(
+                    &expr_ty,
+                    Capability::Transfer,
+                    &[Capability::Replace, Capability::Relock],
+                    "transfer",
+                    transfer.span,
+                )?;
                 env.transfer(&name)?;
                 Ok(expr_ty)
             }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
-                self.require_capability(&destroy_ty, Capability::Destroy, "destroy", destroy.span)?;
+                self.require_capability_or_kernel_effects(
+                    &destroy_ty,
+                    Capability::Destroy,
+                    &[Capability::Consume, Capability::Burn],
+                    "destroy",
+                    destroy.span,
+                )?;
                 env.destroy(&name)?;
                 Ok(Type::U64)
             }
@@ -1892,7 +2838,8 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("claim requires a receipt value", claim.span));
                 }
                 env.consume(&name)?;
-                Ok(self.resolve_receipt_claim_output(&receipt_ty).unwrap_or(Type::U64))
+                let receipt_name = Self::base_type_name(&receipt_ty).unwrap_or_default();
+                Ok(self.resolve_receipt_claim_output(receipt_name).flatten().unwrap_or(Type::U64))
             }
             Expr::Settle(settle) => {
                 let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
@@ -1936,9 +2883,15 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Unit)
             }
             Expr::Require(require_expr) => {
+                Self::validate_require_condition_is_pure(&require_expr.condition, "require condition")?;
                 let cond_ty = self.infer_expr(env, &require_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
+                }
+                if let Some(message) = &require_expr.message {
+                    if !matches!(message.as_ref(), Expr::String(_)) {
+                        return Err(CompileError::new("require message must be a string literal", expr_span(message)));
+                    }
                 }
                 Ok(Type::Bool)
             }
@@ -2019,6 +2972,300 @@ impl<'a> TypeChecker<'a> {
                 env.merge_match_linear_states(&arm_envs, match_expr.span)?;
                 arm_ty.ok_or_else(|| CompileError::new("match expression must contain at least one arm", match_expr.span))
             }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    Self::validate_require_condition_is_pure(expr, "require block")?;
+                    let ty = self.infer_expr(env, expr)?;
+                    if !self.is_bool_type(&ty) {
+                        return Err(CompileError::new("require block expressions must be boolean", expr_span(expr)).with_code("E1004"));
+                    }
+                }
+                Ok(Type::Unit)
+            }
+            Expr::Preserve(preserve) => {
+                let output_ty = env.lookup(&preserve.output_name).cloned().ok_or_else(|| {
+                    CompileError::new(format!("preserve: undefined output binding '{}'", preserve.output_name), preserve.span)
+                })?;
+                let input_ty = env.lookup(&preserve.input_name).cloned().ok_or_else(|| {
+                    CompileError::new(format!("preserve: undefined input binding '{}'", preserve.input_name), preserve.span)
+                })?;
+                if preserve.fields.is_empty() {
+                    return Err(CompileError::new("preserve block must list at least one field", preserve.span));
+                }
+                for field in &preserve.fields {
+                    let output_field_ty = self.lookup_field_type(&output_ty, field, preserve.span).map_err(|_| {
+                        CompileError::new(format!("field '{}' does not exist on output type '{:?}'", field, output_ty), preserve.span)
+                            .with_code("E1002")
+                    })?;
+                    let input_field_ty = self.lookup_field_type(&input_ty, field, preserve.span).map_err(|_| {
+                        CompileError::new(format!("field '{}' does not exist on input type '{:?}'", field, input_ty), preserve.span)
+                            .with_code("E1003")
+                    })?;
+                    if !self.types_equal(&output_field_ty, &input_field_ty) {
+                        return Err(CompileError::new(
+                            format!(
+                                "preserve field '{}' type mismatch: output has {}, input has {}",
+                                field,
+                                type_repr(&output_field_ty),
+                                type_repr(&input_field_ty)
+                            ),
+                            preserve.span,
+                        )
+                        .with_code("E1004"));
+                    }
+                }
+                Ok(Type::Bool)
+            }
+            Expr::StdlibCall(call) => self.infer_stdlib_call(env, call),
+        }
+    }
+
+    fn validate_require_condition_is_pure(expr: &Expr, context: &str) -> Result<()> {
+        match expr {
+            Expr::Create(_)
+            | Expr::Consume(_)
+            | Expr::Transfer(_)
+            | Expr::Destroy(_)
+            | Expr::ReadRef(_)
+            | Expr::Claim(_)
+            | Expr::Settle(_)
+            | Expr::CreateUnique(_)
+            | Expr::ReplaceUnique(_) => {
+                return Err(CompileError::new(
+                    format!(
+                        "{} contains cell/runtime operation; move state transition logic into a separate action statement",
+                        context
+                    ),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_) | Expr::StdlibCall(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains verifier-boundary syntax; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::If(_) | Expr::Match(_) | Expr::Block(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains control flow; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1006"));
+            }
+            Expr::Assign(_) => {
+                return Err(CompileError::new(
+                    format!("{} contains assignment; require expressions must be pure boolean constraints", context),
+                    expr_span(expr),
+                )
+                .with_code("E1005"));
+            }
+            Expr::Binary(binary) => {
+                Self::validate_require_condition_is_pure(&binary.left, context)?;
+                Self::validate_require_condition_is_pure(&binary.right, context)?;
+            }
+            Expr::Unary(unary) => Self::validate_require_condition_is_pure(&unary.expr, context)?,
+            Expr::Call(call) => {
+                Self::validate_require_condition_is_pure(&call.func, context)?;
+                for arg in &call.args {
+                    Self::validate_require_condition_is_pure(arg, context)?;
+                }
+            }
+            Expr::FieldAccess(field) => Self::validate_require_condition_is_pure(&field.expr, context)?,
+            Expr::Index(index) => {
+                Self::validate_require_condition_is_pure(&index.expr, context)?;
+                Self::validate_require_condition_is_pure(&index.index, context)?;
+            }
+            Expr::Assert(assert_expr) => {
+                Self::validate_require_condition_is_pure(&assert_expr.condition, context)?;
+                Self::validate_require_condition_is_pure(&assert_expr.message, context)?;
+            }
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    Self::validate_require_condition_is_pure(item, context)?;
+                }
+            }
+            Expr::Cast(cast) => Self::validate_require_condition_is_pure(&cast.expr, context)?,
+            Expr::Range(range) => {
+                Self::validate_require_condition_is_pure(&range.start, context)?;
+                Self::validate_require_condition_is_pure(&range.end, context)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    Self::validate_require_condition_is_pure(value, context)?;
+                }
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
+        }
+        Ok(())
+    }
+
+    fn infer_stdlib_call(&mut self, env: &mut TypeEnv, call: &StdlibCallExpr) -> Result<Type> {
+        let qualified = format!("std::{}::{}", call.namespace, call.name);
+        match qualified.as_str() {
+            "std::cell::same_lock" | "std::cell::preserve_lock" | "std::cell::preserve_capacity" => {
+                self.validate_stdlib_arity(&qualified, call, 2)?;
+                self.require_named_cell_identifier(env, &call.args[0], &qualified, "output")?;
+                self.require_named_cell_identifier(env, &call.args[1], &qualified, "input")?;
+                Ok(Type::Bool)
+            }
+            "std::cell::same_type" | "std::cell::preserve_type" | "std::accounting::conserved" => {
+                self.validate_stdlib_arity(&qualified, call, 2)?;
+                let left_ty = self.infer_expr(env, &call.args[0])?;
+                let right_ty = self.infer_expr(env, &call.args[1])?;
+                if qualified == "std::accounting::conserved" {
+                    let left_amount = self.lookup_field_type(&left_ty, "amount", call.span)?;
+                    let right_amount = self.lookup_field_type(&right_ty, "amount", call.span)?;
+                    if !self.types_equal(&left_amount, &right_amount) {
+                        return Err(CompileError::new("std::accounting::conserved requires matching amount field types", call.span));
+                    }
+                }
+                Ok(Type::Bool)
+            }
+            "std::lifecycle::transfer" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                let lock_ty = self.infer_expr(env, &call.args[2])?;
+                if !matches!(lock_ty, Type::Address | Type::Hash) {
+                    return Err(CompileError::new("std::lifecycle::transfer lock target must be Address or Hash", call.span));
+                }
+                if !self.types_equal(&input_ty, &output_ty) {
+                    return Err(CompileError::new(
+                        "std::lifecycle::transfer input and output must have the same Cell type",
+                        call.span,
+                    ));
+                }
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            "std::receipt::claim" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                self.validate_receipt_claim_pattern(&input_ty, &output_ty, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            "std::lifecycle::settle" => {
+                self.validate_stdlib_arity(&qualified, call, 3)?;
+                let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
+                let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
+                self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
+                self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
+                self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                env.consume(&input_name)?;
+                Ok(Type::Bool)
+            }
+            _ => Err(CompileError::new(
+                format!("unknown stdlib pattern '{}' — each stdlib primitive must have a canonical expansion", qualified),
+                call.span,
+            )),
+        }
+    }
+
+    fn validate_stdlib_arity(&self, qualified: &str, call: &StdlibCallExpr, expected: usize) -> Result<()> {
+        if call.args.len() == expected {
+            Ok(())
+        } else {
+            Err(CompileError::new(format!("{} expects {} arguments, got {}", qualified, expected, call.args.len()), call.span))
+        }
+    }
+
+    fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
+        let ty = self.infer_expr(env, expr)?;
+        if !self.is_linear_type(&ty) {
+            return Err(CompileError::new(format!("{} {} must be a cell-backed value", operation, role), expr_span(expr)));
+        }
+        if !matches!(expr, Expr::Identifier(_)) {
+            return Err(CompileError::new(format!("{} {} must be a named cell-backed binding", operation, role), expr_span(expr)));
+        }
+        Ok(ty)
+    }
+
+    fn validate_preserve_field_types(&self, output_ty: &Type, input_ty: &Type, fields: &[String], span: Span) -> Result<()> {
+        for field in fields {
+            let output_field_ty = self.lookup_field_type(output_ty, field, span)?;
+            let input_field_ty = self.lookup_field_type(input_ty, field, span)?;
+            if !self.types_equal(&output_field_ty, &input_field_ty) {
+                return Err(CompileError::new(
+                    format!(
+                        "preserve field '{}' type mismatch: output has {}, input has {}",
+                        field,
+                        type_repr(&output_field_ty),
+                        type_repr(&input_field_ty)
+                    ),
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_stdlib_output_field_coverage(&self, qualified: &str, output_ty: &Type, fields: &[String], span: Span) -> Result<()> {
+        let Some(output_type_name) = Self::base_type_name(output_ty) else {
+            return Err(CompileError::new(format!("{} output must be a named cell-backed type", qualified), span));
+        };
+        let Some(output_fields) = self.resolve_named_type_fields(output_type_name) else {
+            return Err(CompileError::new(format!("{} output type '{}' has no known fields", qualified, output_type_name), span));
+        };
+        let preserved = fields.iter().map(String::as_str).collect::<HashSet<_>>();
+        let missing = output_fields.keys().filter(|field| !preserved.contains(field.as_str())).cloned().collect::<Vec<_>>();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                format!(
+                    "{} output construction must cover every '{}' field; missing {}",
+                    qualified,
+                    output_type_name,
+                    missing.join(", ")
+                ),
+                span,
+            ))
+        }
+    }
+
+    fn validate_stdlib_lock_arg(&mut self, qualified: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
+        let lock_ty = self.infer_expr(env, lock)?;
+        if matches!(lock_ty, Type::Address | Type::Hash) {
+            Ok(())
+        } else {
+            Err(CompileError::new(format!("{} lock target must be Address or Hash", qualified), expr_span(lock)))
+        }
+    }
+
+    fn validate_receipt_claim_pattern(&self, receipt_ty: &Type, output_ty: &Type, span: Span) -> Result<()> {
+        let Some(receipt_name) = Self::base_type_name(receipt_ty) else {
+            return Err(CompileError::new("std::receipt::claim requires a receipt cell input", span));
+        };
+        if self.resolve_cell_type_kind(receipt_name) != Some(CellTypeKind::Receipt) {
+            return Err(CompileError::new("std::receipt::claim requires a receipt cell input", span));
+        }
+        let Some(Some(declared_output)) = self.resolve_receipt_claim_output(receipt_name) else {
+            return Err(CompileError::new(
+                format!("std::receipt::claim with an output requires receipt '{}' to declare a claim output type", receipt_name),
+                span,
+            ));
+        };
+        if self.types_equal(output_ty, &declared_output) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                format!(
+                    "std::receipt::claim output type mismatch: receipt '{}' declares {}, got {}",
+                    receipt_name,
+                    type_repr(&declared_output),
+                    type_repr(output_ty)
+                ),
+                span,
+            ))
         }
     }
 
@@ -2159,7 +3406,11 @@ impl<'a> TypeChecker<'a> {
             let Some(expected_ty) = expected_fields.get(field_name) else {
                 return Err(CompileError::new(format!("unknown field '{}' in {} for '{}'", field_name, context, type_name), span));
             };
-            let actual_ty = self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?;
+            let actual_ty = if let Some(flow_ty) = self.flow_state_initializer_type(type_name, field_name, value, expected_ty)? {
+                flow_ty
+            } else {
+                self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
+            };
             if !self.initializer_types_equal(&actual_ty, expected_ty) {
                 return Err(CompileError::new(
                     format!(
@@ -2174,7 +3425,11 @@ impl<'a> TypeChecker<'a> {
         let missing = expected_fields
             .keys()
             .filter(|field_name| !seen.contains(*field_name))
-            .filter(|field_name| !(self.lifecycle_receipts.contains(type_name) && field_name.as_str() == "state"))
+            .filter(|field_name| {
+                !(self.resolve_flow_states(type_name).is_some()
+                    && !self.flows.contains_key(type_name)
+                    && self.flow_state_fields.get(type_name).is_some_and(|state_field| state_field == field_name.as_str()))
+            })
             .cloned()
             .collect::<Vec<_>>();
         if !missing.is_empty() {
@@ -2185,6 +3440,81 @@ impl<'a> TypeChecker<'a> {
         }
 
         Ok(())
+    }
+
+    fn flow_state_initializer_type(
+        &self,
+        type_name: &str,
+        field_name: &str,
+        value: &Expr,
+        expected_ty: &Type,
+    ) -> Result<Option<Type>> {
+        if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
+            return Ok(None);
+        }
+        let Expr::Identifier(state_name) = value else {
+            return Ok(None);
+        };
+        if let Type::Named(enum_name) = expected_ty {
+            if self.enum_variant_expr_type(state_name, expr_span(value))?.is_some_and(|ty| self.types_equal(&ty, expected_ty)) {
+                return Ok(Some(expected_ty.clone()));
+            }
+            let Some(states) = self.resolve_flow_states(type_name) else {
+                return Ok(None);
+            };
+            if self.canonical_state_name_for_flow(type_name, Some(enum_name), &states, state_name, expr_span(value)).is_ok() {
+                return Ok(Some(expected_ty.clone()));
+            }
+        } else if !is_state_storage_type(expected_ty) {
+            return Ok(None);
+        }
+        let Some((qualified_type, qualified_state)) = state_name.rsplit_once("::") else {
+            return Ok(self.flow_state_index(type_name, state_name).map(|_| expected_ty.clone()));
+        };
+        if qualified_type == type_name {
+            if self.flow_state_index(type_name, state_name).is_some() {
+                return Ok(Some(expected_ty.clone()));
+            }
+            return Err(CompileError::new(format!("unknown flow state '{}::{}'", qualified_type, qualified_state), expr_span(value)));
+        }
+        if self.resolve_flow_states(qualified_type).is_some() {
+            return Err(CompileError::new(
+                format!(
+                    "flow field '{}.{}' cannot be initialized with '{}::{}'",
+                    type_name, field_name, qualified_type, qualified_state
+                ),
+                expr_span(value),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn flow_state_expr_type(&self, name: &str, span: Span) -> Result<Option<Type>> {
+        let Some((type_name, state_name)) = name.rsplit_once("::") else {
+            return Ok(None);
+        };
+        let Some(states) = self.resolve_flow_states(type_name) else {
+            return Ok(None);
+        };
+        if states.iter().any(|state| state == state_name) {
+            if let Some(spec) = self.flows.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
+                return Ok(Some(Type::Named(spec.clone())));
+            }
+            return Ok(Some(Type::U64));
+        }
+        Err(CompileError::new(format!("unknown flow state '{}::{}'", type_name, state_name), span))
+    }
+
+    fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
+        let states = self.resolve_flow_states(type_name)?;
+        if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
+            if qualified_type != type_name {
+                return None;
+            }
+            states.iter().position(|state| state == state_name)
+        } else {
+            states.iter().position(|state| state == name)
+        }
     }
 
     fn validate_unique_identity_policy(&self, type_name: &str, identity: &IdentityPolicy, span: Span, operation: &str) -> Result<()> {
@@ -2275,9 +3605,11 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_expr_allowed_in_current_callable(&self, expr: &Expr) -> Result<()> {
-        if matches!(expr, Expr::Require(_)) && self.current_callable != Some(CallableKind::Lock) {
+        if matches!(expr, Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_))
+            && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock))
+        {
             return Err(CompileError::new(
-                "require is lock-boundary syntax; use assert_invariant inside actions and ordinary boolean expressions inside pure functions",
+                "require/preserve is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside pure functions",
                 expr_span(expr),
             ));
         }
@@ -2288,6 +3620,13 @@ impl<'a> TypeChecker<'a> {
             Expr::Transfer(_) => Some("transfer"),
             Expr::Destroy(_) => Some("destroy"),
             Expr::ReadRef(_) => Some("read_ref"),
+            Expr::StdlibCall(call) => {
+                let qualified = format!("std::{}::{}", call.namespace, call.name);
+                match qualified.as_str() {
+                    "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => Some("consume"),
+                    _ => None,
+                }
+            }
             Expr::Claim(_) => Some("claim"),
             Expr::Settle(_) => Some("settle"),
             Expr::CreateUnique(_) => Some("create_unique"),
@@ -2560,9 +3899,16 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Cast(cast) => self.mark_expr_as_moved(env, &cast.expr),
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
+            Expr::Preserve(_) => Ok(()),
             Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
-            Expr::Require(require_expr) => self.mark_expr_as_moved(env, &require_expr.condition),
+            Expr::Require(require_expr) => {
+                self.mark_expr_as_moved(env, &require_expr.condition)?;
+                if let Some(message) = &require_expr.message {
+                    self.mark_expr_as_moved(env, message)?;
+                }
+                Ok(())
+            }
             Expr::If(if_expr) => {
                 let mut then_env = env.child();
                 self.mark_expr_as_moved(&mut then_env, &if_expr.then_branch)?;
@@ -2665,7 +4011,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "local binding cannot store mutable reference type {}; pass the '&mut' parameter directly to a helper call or mutate its fields in place",
+                    "local binding cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
                     type_repr(ty)
                 ),
                 span,
@@ -2721,7 +4067,7 @@ impl<'a> TypeChecker<'a> {
                 if !root_is_mut_ref && self.is_linear_type(&root_ty) {
                     return Err(CompileError::new(
                         format!(
-                            "assignment target rooted at linear/resource value '{}' is not supported; use '&mut T' for mutable cell state or consume/create for ownership transitions",
+                            "assignment target rooted at linear/resource value '{}' is not supported; use explicit input/output parameters or consume/create sugar for ownership transitions",
                             root
                         ),
                         assign.span,
@@ -2757,7 +4103,7 @@ impl<'a> TypeChecker<'a> {
         if Self::type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
-                    "assignment cannot store mutable reference type {}; pass the '&mut' parameter directly to a helper call or mutate its fields in place",
+                    "assignment cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
                     type_repr(ty)
                 ),
                 span,
@@ -2795,6 +4141,23 @@ impl<'a> TypeChecker<'a> {
             return Some(self.parse_named_type_repr(inner));
         }
         None
+    }
+
+    fn supports_collection_len(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(_, _) => true,
+            Type::Ref(inner) | Type::MutRef(inner) => self.supports_collection_len(inner),
+            Type::Named(name) => name == "Vec" || self.parse_named_collection_item_type(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn slice_item_type(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(inner, _) => Some((**inner).clone()),
+            Type::Ref(inner) | Type::MutRef(inner) => Self::slice_item_type(inner),
+            _ => None,
+        }
     }
 
     fn parse_named_type_repr(&self, repr: &str) -> Type {
@@ -2851,6 +4214,14 @@ impl<'a> TypeChecker<'a> {
             .zip(self.current_module.as_deref())
             .and_then(|(resolver, module)| resolver.type_fields(module, base_name))
             .map(|fields| fields.into_iter().collect())
+    }
+
+    fn resolve_flow_states(&self, type_name: &str) -> Option<Vec<String>> {
+        let base_name = type_name.split('<').next().unwrap_or(type_name);
+        if let Some(states) = self.flow_states.get(base_name) {
+            return Some(states.clone());
+        }
+        None
     }
 
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
@@ -3003,10 +4374,11 @@ impl<'a> TypeChecker<'a> {
                         return Ok(Type::Hash);
                     }
                     "hash_blake2b" => {
-                        return Err(CompileError::new(
-                            "hash_blake2b is not available in on-chain CellScript until a real CKB-profile RISC-V implementation is linked; use hash_chain or builder-side ckb-hash tooling",
-                            call.span,
-                        ));
+                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                        if arg_types[0] != Type::Hash {
+                            return Err(CompileError::new("hash_blake2b expects Hash input", call.span));
+                        }
+                        return Ok(Type::Hash);
                     }
                     _ => {}
                 }
@@ -3021,11 +4393,19 @@ impl<'a> TypeChecker<'a> {
                     }
                     "len" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::U64)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::U64)
+                        } else {
+                            Err(CompileError::new("len is only supported on array or Vec values", call.span))
+                        }
                     }
                     "is_empty" => {
                         self.validate_builtin_arity(&field.field, 0, arg_types, call.span)?;
-                        Ok(Type::Bool)
+                        if self.supports_collection_len(&receiver_ty) {
+                            Ok(Type::Bool)
+                        } else {
+                            Err(CompileError::new("is_empty is only supported on array or Vec values", call.span))
+                        }
                     }
                     "capacity" => {
                         self.validate_builtin_arity("Vec.capacity", 0, arg_types, call.span)?;
@@ -3263,7 +4643,42 @@ impl<'a> TypeChecker<'a> {
                     }
                     "extend_from_slice" => {
                         self.validate_builtin_arity("Vec.extend_from_slice", 1, arg_types, call.span)?;
-                        Ok(Type::Unit)
+                        let Some(slice_item_ty) = Self::slice_item_type(&arg_types[0]) else {
+                            return Err(CompileError::new("Vec.extend_from_slice expects an array or byte-slice source", call.span));
+                        };
+                        if self.type_contains_reference(&slice_item_ty) {
+                            return Err(CompileError::new(
+                                format!(
+                                    "Vec.extend_from_slice cannot store reference type {}; Vec<T> values must use owned non-reference items",
+                                    type_repr(&slice_item_ty)
+                                ),
+                                call.span,
+                            ));
+                        }
+                        match &receiver_ty {
+                            Type::Named(name) if name == "Vec" => {
+                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                    env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            Type::Named(name) => {
+                                let Some(item_ty) = self.parse_named_collection_item_type(name) else {
+                                    return Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span));
+                                };
+                                if !self.types_equal(&item_ty, &slice_item_ty) {
+                                    return Err(CompileError::new(
+                                        format!(
+                                            "Vec.extend_from_slice type mismatch: expected {:?}, found {:?}",
+                                            item_ty, slice_item_ty
+                                        ),
+                                        call.span,
+                                    ));
+                                }
+                                Ok(Type::Unit)
+                            }
+                            _ => Err(CompileError::new("extend_from_slice is only supported on Vec values", call.span)),
+                        }
                     }
                     _ => self.lookup_field_type(&receiver_ty, &field.field, field.span),
                 }
@@ -3333,7 +4748,7 @@ impl<'a> TypeChecker<'a> {
                     if participates_in_mutable_alias || prior_participated {
                         return Err(CompileError::new(
                             format!(
-                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; pass distinct '&mut' roots or split the mutation",
+                                "function '{}' cannot receive mutable reference root '{}' more than once in one call; use signature-direction outputs for Cell updates",
                                 callee_name, root
                             ),
                             span,
@@ -3539,6 +4954,14 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn is_address_like_type(ty: &Type) -> bool {
+        matches!(ty, Type::Address | Type::Hash)
+    }
+
+    fn is_receipt_type(&self, ty: &Type) -> bool {
+        Self::base_type_name(ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some_and(|kind| kind == CellTypeKind::Receipt)
+    }
+
     fn resolve_cell_type_kind(&self, name: &str) -> Option<CellTypeKind> {
         if let Some(kind) = self.cell_type_kinds.get(name).copied() {
             return Some(kind);
@@ -3552,18 +4975,6 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn resolve_receipt_claim_output(&self, ty: &Type) -> Option<Type> {
-        let type_name = Self::base_type_name(ty)?;
-        if let Some(output) = self.receipt_claim_outputs.get(type_name) {
-            return output.clone();
-        }
-        let (resolver, module) = (self.resolver?, self.current_module.as_ref()?);
-        match resolver.resolve_type(module, type_name)? {
-            TypeDef::Receipt(receipt) => receipt.claim_output,
-            TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
-        }
-    }
-
     fn validate_receipt_claim_output(&self, output: &Type, span: Span) -> Result<()> {
         let Some(type_name) = Self::base_type_name(output) else {
             return Err(CompileError::new("receipt claim output must be a cell-backed resource or shared type", span));
@@ -3572,6 +4983,17 @@ impl<'a> TypeChecker<'a> {
             Some(CellTypeKind::Resource | CellTypeKind::Shared) => Ok(()),
             Some(CellTypeKind::Receipt) => Err(CompileError::new("receipt claim output must not be another receipt", span)),
             None => Err(CompileError::new("receipt claim output must be a cell-backed resource or shared type", span)),
+        }
+    }
+
+    fn resolve_receipt_claim_output(&self, name: &str) -> Option<Option<Type>> {
+        if let Some(output) = self.receipt_claim_outputs.get(name) {
+            return Some(output.clone());
+        }
+        let (resolver, module) = (self.resolver?, self.current_module.as_ref()?);
+        match resolver.resolve_type(module, name)? {
+            TypeDef::Receipt(receipt) => Some(receipt.claim_output),
+            TypeDef::Resource(_) | TypeDef::Shared(_) | TypeDef::Struct(_) | TypeDef::Enum(_) => None,
         }
     }
 
@@ -3608,30 +5030,33 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn require_capability(&self, ty: &Type, capability: Capability, operation: &str, span: Span) -> Result<()> {
+    fn require_capability_or_kernel_effects(
+        &self,
+        ty: &Type,
+        legacy_capability: Capability,
+        kernel_effects: &[Capability],
+        operation: &str,
+        span: Span,
+    ) -> Result<()> {
         let Some(type_name) = Self::base_type_name(ty) else {
             return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
         };
         let Some(capabilities) = self.resolve_capabilities(type_name) else {
             return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
         };
-        if capabilities.contains(&capability) {
-            Ok(())
-        } else {
-            Err(CompileError::new(
-                format!(
-                    "type '{}' does not declare '{}' capability required by {}",
-                    type_name,
-                    capability_name(capability),
-                    operation
-                ),
-                span,
-            ))
+        if capabilities.contains(&legacy_capability) || kernel_effects.iter().all(|effect| capabilities.contains(effect)) {
+            return Ok(());
         }
-    }
-
-    fn is_receipt_type(&self, ty: &Type) -> bool {
-        Self::base_type_name(ty).and_then(|name| self.resolve_cell_type_kind(name)).is_some_and(|kind| kind == CellTypeKind::Receipt)
+        Err(CompileError::new(
+            format!(
+                "type '{}' does not declare '{}' capability or kernel effects '{}' required by {}",
+                type_name,
+                capability_name(legacy_capability),
+                kernel_effects.iter().map(|effect| capability_name(*effect)).collect::<Vec<_>>().join("+"),
+                operation
+            ),
+            span,
+        ))
     }
 
     fn is_linear_type(&self, ty: &Type) -> bool {
@@ -3658,14 +5083,6 @@ impl<'a> TypeChecker<'a> {
     fn is_bool_type(&self, ty: &Type) -> bool {
         matches!(ty, Type::Bool)
     }
-
-    fn is_address_like_type(ty: &Type) -> bool {
-        match ty {
-            Type::Address => true,
-            Type::Ref(inner) | Type::MutRef(inner) => Self::is_address_like_type(inner),
-            _ => false,
-        }
-    }
 }
 
 fn stmt_span(stmt: &Stmt) -> Span {
@@ -3683,6 +5100,7 @@ fn stmt_span(stmt: &Stmt) -> Span {
 fn expr_span(expr: &Expr) -> Span {
     match expr {
         Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => Span::default(),
+        Expr::StdlibCall(call) => call.span,
         Expr::Assign(assign) => assign.span,
         Expr::Binary(binary) => binary.span,
         Expr::Unary(unary) => unary.span,
@@ -3707,6 +5125,172 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Range(range) => range.span,
         Expr::StructInit(init) => init.span,
         Expr::Match(match_expr) => match_expr.span,
+        Expr::RequireBlock(require_block) => require_block.span,
+        Expr::Preserve(preserve) => preserve.span,
+    }
+}
+
+fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+    if let Some(field) = output_field_constraint(expr, outputs) {
+        fields.insert(field);
+    }
+
+    match expr {
+        Expr::Assign(assign) => {
+            collect_required_output_fields(&assign.target, outputs, fields);
+            collect_required_output_fields(&assign.value, outputs, fields);
+        }
+        Expr::Binary(binary) => {
+            collect_required_output_fields(&binary.left, outputs, fields);
+            collect_required_output_fields(&binary.right, outputs, fields);
+        }
+        Expr::Unary(unary) => collect_required_output_fields(&unary.expr, outputs, fields),
+        Expr::Call(call) => {
+            collect_required_output_fields(&call.func, outputs, fields);
+            for arg in &call.args {
+                collect_required_output_fields(arg, outputs, fields);
+            }
+        }
+        Expr::FieldAccess(field) => collect_required_output_fields(&field.expr, outputs, fields),
+        Expr::Index(index) => {
+            collect_required_output_fields(&index.expr, outputs, fields);
+            collect_required_output_fields(&index.index, outputs, fields);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+            if let Some(lock) = &create.lock {
+                collect_required_output_fields(lock, outputs, fields);
+            }
+        }
+        Expr::Consume(consume) => collect_required_output_fields(&consume.expr, outputs, fields),
+        Expr::Transfer(transfer) => {
+            collect_required_output_fields(&transfer.expr, outputs, fields);
+            collect_required_output_fields(&transfer.to, outputs, fields);
+        }
+        Expr::Destroy(destroy) => collect_required_output_fields(&destroy.expr, outputs, fields),
+        Expr::Claim(claim) => collect_required_output_fields(&claim.receipt, outputs, fields),
+        Expr::Settle(settle) => collect_required_output_fields(&settle.expr, outputs, fields),
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+            if let Some(lock) = &create.lock {
+                collect_required_output_fields(lock, outputs, fields);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            collect_required_output_fields(&replace.expr, outputs, fields);
+            for (_, value) in &replace.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+        }
+        Expr::Assert(assert_expr) => {
+            collect_required_output_fields(&assert_expr.condition, outputs, fields);
+            collect_required_output_fields(&assert_expr.message, outputs, fields);
+        }
+        Expr::Require(require_expr) => {
+            collect_required_output_fields(&require_expr.condition, outputs, fields);
+            if let Some(message) = &require_expr.message {
+                collect_required_output_fields(message, outputs, fields);
+            }
+        }
+        Expr::Block(stmts) => {
+            for stmt in stmts {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+        Expr::Tuple(elems) | Expr::Array(elems) => {
+            for elem in elems {
+                collect_required_output_fields(elem, outputs, fields);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_required_output_fields(&if_expr.condition, outputs, fields);
+            collect_required_output_fields(&if_expr.then_branch, outputs, fields);
+            collect_required_output_fields(&if_expr.else_branch, outputs, fields);
+        }
+        Expr::Cast(cast) => collect_required_output_fields(&cast.expr, outputs, fields),
+        Expr::Range(range) => {
+            collect_required_output_fields(&range.start, outputs, fields);
+            collect_required_output_fields(&range.end, outputs, fields);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_required_output_fields(value, outputs, fields);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_required_output_fields(&match_expr.expr, outputs, fields);
+            for arm in &match_expr.arms {
+                collect_required_output_fields(&arm.value, outputs, fields);
+            }
+        }
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::ReadRef(_)
+        | Expr::StdlibCall(_) => {}
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_required_output_fields(expr, outputs, fields);
+            }
+        }
+        Expr::Preserve(preserve) => {
+            for field in &preserve.fields {
+                if outputs.contains(field) {
+                    fields.insert(field.clone());
+                }
+            }
+        }
+    }
+}
+
+fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
+        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_required_output_fields(expr, outputs, fields),
+        Stmt::Return(None) => {}
+        Stmt::If(if_stmt) => {
+            collect_required_output_fields(&if_stmt.condition, outputs, fields);
+            for stmt in &if_stmt.then_branch {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+            if let Some(else_branch) = &if_stmt.else_branch {
+                for stmt in else_branch {
+                    collect_required_output_fields_from_stmt(stmt, outputs, fields);
+                }
+            }
+        }
+        Stmt::For(for_stmt) => {
+            collect_required_output_fields(&for_stmt.iterable, outputs, fields);
+            for stmt in &for_stmt.body {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+        Stmt::While(while_stmt) => {
+            collect_required_output_fields(&while_stmt.condition, outputs, fields);
+            for stmt in &while_stmt.body {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+    }
+}
+
+fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<String> {
+    let Expr::FieldAccess(field) = expr else {
+        return None;
+    };
+    let Expr::Identifier(base) = field.expr.as_ref() else {
+        return None;
+    };
+    if outputs.contains(base) {
+        Some(format!("{}.{}", base, field.field))
+    } else {
+        None
     }
 }
 
@@ -3740,12 +5324,28 @@ fn match_pattern_variant<'a>(enum_name: &str, pattern: &'a str) -> Option<&'a st
     }
 }
 
+fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Bool | Type::U8 => Some(1),
+        Type::U16 => Some(2),
+        Type::U32 => Some(4),
+        Type::U64 => Some(8),
+        Type::U128 => Some(16),
+        Type::Address | Type::Hash => Some(32),
+        Type::Array(inner, len) => lock_args_static_type_len(inner).map(|inner_len| inner_len * len),
+        Type::Tuple(items) => items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).map(|len| acc + len)),
+        Type::Unit => Some(0),
+        Type::Named(_) | Type::Ref(_) | Type::MutRef(_) => None,
+    }
+}
+
 fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
     match item {
         Item::Resource(def) => Some((&def.name, def.span)),
         Item::Shared(def) => Some((&def.name, def.span)),
         Item::Receipt(def) => Some((&def.name, def.span)),
         Item::Struct(def) => Some((&def.name, def.span)),
+        Item::Flow(def) => def.name.as_deref().map(|name| (name, def.span)),
         Item::Invariant(def) => Some((&def.name, def.span)),
         Item::Enum(def) => Some((&def.name, def.span)),
         Item::Const(def) => Some((&def.name, def.span)),
@@ -3787,6 +5387,255 @@ fn assignment_root_name(expr: &Expr) -> Option<&str> {
         Expr::FieldAccess(field) => assignment_root_name(&field.expr),
         Expr::Index(index) => assignment_root_name(&index.expr),
         _ => None,
+    }
+}
+
+fn action_param_owned_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
+    action.params.iter().find(|param| param.name == name).and_then(|param| match &param.ty {
+        Type::Named(type_name) if matches!(param.source, ParamSource::Default | ParamSource::Input) && !param.is_read_ref => {
+            Some(type_name.split('<').next().unwrap_or(type_name.as_str()))
+        }
+        _ => None,
+    })
+}
+
+fn action_param_output_named_type<'a>(action: &'a ActionDef, name: &str) -> Option<&'a str> {
+    if let Some(output) = action.outputs.iter().find(|output| output.name == name) {
+        if let Type::Named(type_name) = &output.ty {
+            return Some(type_name.split('<').next().unwrap_or(type_name.as_str()));
+        }
+    }
+    None
+}
+
+fn action_output_binding_names(action: &ActionDef) -> HashMap<String, ActionOutputBinding> {
+    let mut bindings = HashMap::new();
+    for output in &action.outputs {
+        if let Type::Named(type_name) = &output.ty {
+            bindings.insert(
+                output.name.clone(),
+                ActionOutputBinding { type_name: type_name.split('<').next().unwrap_or(type_name.as_str()).to_string() },
+            );
+        }
+    }
+    bindings
+}
+
+fn action_core_evidence_binding_names(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = action_output_binding_names(action).keys().cloned().collect::<HashSet<_>>();
+    for input in action_inferred_lineage_bindings(action).keys() {
+        bindings.insert(input.clone());
+    }
+    bindings
+}
+
+fn action_inferred_lineage_bindings(action: &ActionDef) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+    let consumed = action_consumed_bindings(action);
+    for state_edge in &action.state_edges {
+        if consumed.contains(&state_edge.path.base) {
+            continue;
+        }
+        bindings.entry(state_edge.path.base.clone()).or_insert_with(|| state_edge.to_path.base.clone());
+    }
+
+    let mut outputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, binding) in action_output_binding_names(action) {
+        if bindings.values().any(|bound_output| bound_output == &name) {
+            continue;
+        }
+        outputs_by_type.entry(binding.type_name).or_default().push(name);
+    }
+
+    let mut inputs_by_type: HashMap<String, Vec<String>> = HashMap::new();
+    for param in &action.params {
+        if consumed.contains(&param.name) || bindings.contains_key(&param.name) {
+            continue;
+        }
+        let Some(type_name) = action_param_owned_named_type(action, &param.name) else {
+            continue;
+        };
+        inputs_by_type.entry(type_name.to_string()).or_default().push(param.name.clone());
+    }
+
+    for (type_name, inputs) in inputs_by_type {
+        let Some(outputs) = outputs_by_type.get(&type_name) else {
+            continue;
+        };
+        if inputs.len() == 1 && outputs.len() == 1 {
+            bindings.insert(inputs[0].clone(), outputs[0].clone());
+        }
+    }
+
+    bindings
+}
+
+fn action_consumed_bindings(action: &ActionDef) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    collect_consumed_bindings_from_stmts(&action.body, &mut bindings);
+    bindings
+}
+
+fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_consumed_bindings_from_stmts(else_branch, bindings);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_consumed_bindings_from_expr(&for_stmt.iterable, bindings);
+                collect_consumed_bindings_from_stmts(&for_stmt.body, bindings);
+            }
+            Stmt::While(while_stmt) => {
+                collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
+                collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
+            }
+        }
+    }
+}
+
+fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
+    match expr {
+        Expr::Consume(consume) => {
+            if let Expr::Identifier(name) = consume.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&consume.expr, bindings);
+        }
+        Expr::Transfer(transfer) => {
+            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
+            collect_consumed_bindings_from_expr(&transfer.to, bindings);
+        }
+        Expr::Assign(assign) => {
+            collect_consumed_bindings_from_expr(&assign.target, bindings);
+            collect_consumed_bindings_from_expr(&assign.value, bindings);
+        }
+        Expr::Binary(binary) => {
+            collect_consumed_bindings_from_expr(&binary.left, bindings);
+            collect_consumed_bindings_from_expr(&binary.right, bindings);
+        }
+        Expr::Unary(unary) => collect_consumed_bindings_from_expr(&unary.expr, bindings),
+        Expr::Call(call) => {
+            collect_consumed_bindings_from_expr(&call.func, bindings);
+            for arg in &call.args {
+                collect_consumed_bindings_from_expr(arg, bindings);
+            }
+        }
+        Expr::FieldAccess(field) => collect_consumed_bindings_from_expr(&field.expr, bindings),
+        Expr::Index(index) => {
+            collect_consumed_bindings_from_expr(&index.expr, bindings);
+            collect_consumed_bindings_from_expr(&index.index, bindings);
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::Destroy(destroy) => {
+            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&destroy.expr, bindings);
+        }
+        Expr::Claim(claim) => {
+            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&claim.receipt, bindings);
+        }
+        Expr::Settle(settle) => {
+            if let Expr::Identifier(name) = settle.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&settle.expr, bindings);
+        }
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+            if let Some(lock) = &create.lock {
+                collect_consumed_bindings_from_expr(lock, bindings);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            if let Expr::Identifier(name) = replace.expr.as_ref() {
+                bindings.insert(name.clone());
+            }
+            collect_consumed_bindings_from_expr(&replace.expr, bindings);
+            for (_, value) in &replace.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::Assert(assert_expr) => {
+            collect_consumed_bindings_from_expr(&assert_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&assert_expr.message, bindings);
+        }
+        Expr::Require(require_expr) => {
+            collect_consumed_bindings_from_expr(&require_expr.condition, bindings);
+            if let Some(message) = &require_expr.message {
+                collect_consumed_bindings_from_expr(message, bindings);
+            }
+        }
+        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_consumed_bindings_from_expr(item, bindings);
+            }
+        }
+        Expr::If(if_expr) => {
+            collect_consumed_bindings_from_expr(&if_expr.condition, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.then_branch, bindings);
+            collect_consumed_bindings_from_expr(&if_expr.else_branch, bindings);
+        }
+        Expr::Cast(cast) => collect_consumed_bindings_from_expr(&cast.expr, bindings),
+        Expr::Range(range) => {
+            collect_consumed_bindings_from_expr(&range.start, bindings);
+            collect_consumed_bindings_from_expr(&range.end, bindings);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_consumed_bindings_from_expr(value, bindings);
+            }
+        }
+        Expr::Match(match_expr) => {
+            collect_consumed_bindings_from_expr(&match_expr.expr, bindings);
+            for arm in &match_expr.arms {
+                collect_consumed_bindings_from_expr(&arm.value, bindings);
+            }
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::StdlibCall(call) => {
+            let qualified = format!("std::{}::{}", call.namespace, call.name);
+            match qualified.as_str() {
+                "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                    if !call.args.is_empty() {
+                        if let Expr::Identifier(name) = &call.args[0] {
+                            bindings.insert(name.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_consumed_bindings_from_expr(expr, bindings);
+            }
+        }
+        Expr::Preserve(_) => {}
     }
 }
 
@@ -3869,6 +5718,10 @@ fn capability_name(capability: Capability) -> &'static str {
         Capability::RetargetType => "retarget_type",
         Capability::ReadRef => "read_ref",
     }
+}
+
+fn is_state_storage_type(ty: &Type) -> bool {
+    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64)
 }
 
 pub fn check(module: &Module) -> Result<()> {
@@ -3955,9 +5808,9 @@ module app
 use cellscript::left::TokenA
 use cellscript::right::TokenB
 
-action main(a: TokenA) -> u64 {
+action main(a: TokenA) -> u64
+where
     return a.amount
-}
 "#,
         );
 
@@ -3997,6 +5850,7 @@ action main(a: TokenA) -> u64 {
             let is_linear = checker.is_linear_type(&param.ty);
             env.insert(param.name.clone(), param.ty.clone(), is_linear, param.is_mut);
         }
+        checker.bind_action_outputs(&mut env, &action).unwrap();
 
         for stmt in &action.body {
             checker.check_stmt(&mut env, stmt).unwrap();
@@ -4008,5 +5862,312 @@ action main(a: TokenA) -> u64 {
         }
 
         assert_eq!(env.linear_states.get("pool_paired_token"), Some(&LinearState::Consumed));
+    }
+
+    #[test]
+    fn preserve_rejects_mismatched_field_types() {
+        let module = source_module(
+            r#"
+module test
+
+resource A has store, transfer, destroy {
+    amount: u64
+}
+
+resource B has store, transfer, destroy {
+    amount: bool
+}
+
+action bad_preserve(a: A) -> b: B
+where
+    consume a
+    preserve b from a { amount }
+    create b = B { amount: true }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("preserve field 'amount' type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_rejects_nested_cell_operation() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action hidden_consume(coin: Coin)
+where
+    require (consume coin) == 0
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require condition contains cell/runtime operation"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_block_rejects_lifecycle_stdlib_call() {
+        let module = source_module(
+            r#"
+module test
+
+receipt Voucher has destroy {
+    amount: u64
+}
+
+action hidden_claim(voucher: Voucher)
+where
+    require {
+        std::receipt::claim(voucher, voucher, voucher.amount)
+    }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require block contains verifier-boundary syntax"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn require_block_rejects_assignment_expression() {
+        let module = source_module(
+            r#"
+module test
+
+action hidden_mutation(flag: bool)
+where
+    let mut ok = flag
+    require {
+        ok = false
+    }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("require block contains assignment"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_non_receipt_input() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_claim(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::receipt::claim(coin, next_coin, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim requires a receipt cell input"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_declared_output_type_mismatch() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+resource Badge has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher, to: Address) -> badge: Badge
+where
+    std::receipt::claim(voucher, badge, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim output type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_rejects_extra_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, coin, coin)
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_claim_output_requires_declared_claim_output_type() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher has destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::receipt::claim with an output requires receipt 'Voucher' to declare a claim output type"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_claim_requires_explicit_output_and_lock_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::receipt::claim expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_settle_requires_explicit_output_and_lock_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_settle(coin: Coin) -> next_coin: Coin
+where
+    std::lifecycle::settle(coin, next_coin) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::lifecycle::settle expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_transfer_output_requires_complete_field_coverage() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::lifecycle::transfer output construction must cover every 'Coin' field; missing owner"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_claim_output_requires_complete_field_coverage() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+    owner: Address
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+    owner: Address
+}
+
+action bad_claim(voucher: Voucher) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("std::receipt::claim output construction must cover every 'Coin' field; missing owner"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn stdlib_transfer_rejects_extra_arguments() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer, destroy {
+    amount: u64
+}
+
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to, to) { amount }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("std::lifecycle::transfer expects 3 arguments"), "unexpected error: {}", err.message);
     }
 }

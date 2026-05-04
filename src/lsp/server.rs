@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::{
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
     Location, MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams,
     RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, SymbolTag,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -421,43 +421,43 @@ fn convert_location(loc: lsp::Location) -> Location {
     Location { uri: url, range: convert_range(loc.range) }
 }
 
-#[allow(deprecated)]
 fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation {
-    SymbolInformation {
-        name: sym.name,
-        kind: match sym.kind {
-            lsp::SymbolKind::File => SymbolKind::FILE,
-            lsp::SymbolKind::Module => SymbolKind::MODULE,
-            lsp::SymbolKind::Namespace => SymbolKind::NAMESPACE,
-            lsp::SymbolKind::Package => SymbolKind::PACKAGE,
-            lsp::SymbolKind::Class => SymbolKind::CLASS,
-            lsp::SymbolKind::Method => SymbolKind::METHOD,
-            lsp::SymbolKind::Property => SymbolKind::PROPERTY,
-            lsp::SymbolKind::Field => SymbolKind::FIELD,
-            lsp::SymbolKind::Constructor => SymbolKind::CONSTRUCTOR,
-            lsp::SymbolKind::Enum => SymbolKind::ENUM,
-            lsp::SymbolKind::Interface => SymbolKind::INTERFACE,
-            lsp::SymbolKind::Function => SymbolKind::FUNCTION,
-            lsp::SymbolKind::Variable => SymbolKind::VARIABLE,
-            lsp::SymbolKind::Constant => SymbolKind::CONSTANT,
-            lsp::SymbolKind::String => SymbolKind::STRING,
-            lsp::SymbolKind::Number => SymbolKind::NUMBER,
-            lsp::SymbolKind::Boolean => SymbolKind::BOOLEAN,
-            lsp::SymbolKind::Array => SymbolKind::ARRAY,
-            lsp::SymbolKind::Object => SymbolKind::OBJECT,
-            lsp::SymbolKind::Key => SymbolKind::KEY,
-            lsp::SymbolKind::Null => SymbolKind::NULL,
-            lsp::SymbolKind::EnumMember => SymbolKind::ENUM_MEMBER,
-            lsp::SymbolKind::Struct => SymbolKind::STRUCT,
-            lsp::SymbolKind::Event => SymbolKind::EVENT,
-            lsp::SymbolKind::Operator => SymbolKind::OPERATOR,
-            lsp::SymbolKind::TypeParameter => SymbolKind::TYPE_PARAMETER,
-        },
-        deprecated: None,
-        location: convert_location(sym.location),
-        container_name: sym.container_name,
-        tags: None,
-    }
+    let kind = match sym.kind {
+        lsp::SymbolKind::File => SymbolKind::FILE,
+        lsp::SymbolKind::Module => SymbolKind::MODULE,
+        lsp::SymbolKind::Namespace => SymbolKind::NAMESPACE,
+        lsp::SymbolKind::Package => SymbolKind::PACKAGE,
+        lsp::SymbolKind::Class => SymbolKind::CLASS,
+        lsp::SymbolKind::Method => SymbolKind::METHOD,
+        lsp::SymbolKind::Property => SymbolKind::PROPERTY,
+        lsp::SymbolKind::Field => SymbolKind::FIELD,
+        lsp::SymbolKind::Constructor => SymbolKind::CONSTRUCTOR,
+        lsp::SymbolKind::Enum => SymbolKind::ENUM,
+        lsp::SymbolKind::Interface => SymbolKind::INTERFACE,
+        lsp::SymbolKind::Function => SymbolKind::FUNCTION,
+        lsp::SymbolKind::Variable => SymbolKind::VARIABLE,
+        lsp::SymbolKind::Constant => SymbolKind::CONSTANT,
+        lsp::SymbolKind::String => SymbolKind::STRING,
+        lsp::SymbolKind::Number => SymbolKind::NUMBER,
+        lsp::SymbolKind::Boolean => SymbolKind::BOOLEAN,
+        lsp::SymbolKind::Array => SymbolKind::ARRAY,
+        lsp::SymbolKind::Object => SymbolKind::OBJECT,
+        lsp::SymbolKind::Key => SymbolKind::KEY,
+        lsp::SymbolKind::Null => SymbolKind::NULL,
+        lsp::SymbolKind::EnumMember => SymbolKind::ENUM_MEMBER,
+        lsp::SymbolKind::Struct => SymbolKind::STRUCT,
+        lsp::SymbolKind::Event => SymbolKind::EVENT,
+        lsp::SymbolKind::Operator => SymbolKind::OPERATOR,
+        lsp::SymbolKind::TypeParameter => SymbolKind::TYPE_PARAMETER,
+    };
+    serde_json::from_value(serde_json::json!({
+        "name": sym.name,
+        "kind": kind,
+        "location": convert_location(sym.location),
+        "containerName": sym.container_name,
+        "tags": Option::<Vec<SymbolTag>>::None,
+    }))
+    .expect("symbol information JSON should match lsp-types")
 }
 
 fn convert_text_edit(edit: lsp::TextEdit) -> TextEdit {

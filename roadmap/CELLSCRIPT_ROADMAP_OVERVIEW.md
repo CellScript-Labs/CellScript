@@ -53,15 +53,15 @@ Each release answers a specific question:
 | Area | Current status | Detailed document |
 |---|---|---|
 | v0.12 release scope | Released production foundation. | Historical release evidence and bundled examples |
-| v0.13 release scope | Beta released; implementation scope closed. | [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md), [v0.13 release tracker](../docs/CELLSCRIPT_0_13_TODOLIST.md), [v0.13 release notes draft](../docs/CELLSCRIPT_0_13_RELEASE_NOTES_DRAFT.md) |
-| v0.14 release scope | Implementation branch is feature-complete for the current CKB semantic-completeness beta scope. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes draft](../docs/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
+| v0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate includes stateful business-flow/action coverage. | [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [v0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [v0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
+| v0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | v0.15 release scope | Implemented P0; P1 is partial. The branch adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, cell identity, destruction policies, capability reset, and macro provenance. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
 | v0.16 release scope | Implemented for the scoped `cellscript-0.16` metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
-| Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md) |
-| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; production claims still require report validation. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
-| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, and published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
+| Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
+| CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
+| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
 
 ---
 
@@ -305,7 +305,9 @@ v0.13 should be considered closed only when:
 - unsupported generic and cell-backed patterns fail closed;
 - optimizer passes do not rewrite resource effects unsafely;
 - CLI changes are covered by tests;
-- examples remain split by business, language, and acceptance audience;
+- top-level `examples/*.cell` remain the single checked-in bundled business
+  source, while `examples/language/*.cell` and `examples/ickb_benchmark/*.cell`
+  cover compiler/tooling and benchmark surfaces;
 - release notes distinguish v0.12 foundations from genuine v0.13 work.
 
 ---
@@ -325,8 +327,8 @@ v0.14 exposes more of CKB without hiding lock/type boundaries:
 - structured WitnessArgs field access;
 - target profile metadata for CKB ABI contracts;
 - declarative since/time and capacity surfaces;
-- fail-closed dynamic BLAKE2b policy until a real linked implementation is
-  selected.
+- fixed-Hash dynamic BLAKE2b via `hash_blake2b(input: Hash) -> Hash`, backed by
+  a real CKB-profile RISC-V helper and metadata-visible `CKB_BLAKE2B` access.
 
 ### 6.1 Implemented Branch Scope
 
@@ -731,6 +733,16 @@ v0.16 does not re-open v0.13 bounded collections, v0.14 CKB surface exposure,
 or v0.15 invariant syntax. It validates and operationalizes those models at
 the compiler metadata/tooling layer.
 
+The v0.15 hardening backlog is still tracked, but 0.16 keeps the claim scoped:
+
+- aggregate invariant executable lowering remains a 0.17 production track;
+- ProofPlan soundness is a metadata consistency checker, not a formal proof;
+- protocol macro provenance is visible, but full macro-only lowering is later;
+- covenant stdlib modules are schema stubs, not stable implementations;
+- `Address` / `LockScript` / `LockHash`, explicit entry-role annotations,
+  versioned layout policies, non-TYPE-ID global uniqueness certification, and
+  full `cellc explain-macro` source maps remain explicit follow-up tracks.
+
 ### 8.1 Formal Operational Semantics
 
 Publish a mechanically precise semantics for:
@@ -786,6 +798,7 @@ Each suite should include:
 - script args;
 - witness layout;
 - Molecule layout;
+- ScriptGroup and `outputs` / `outputs_data` positive and negative matrices;
 - accepted transaction shapes;
 - rejected transaction shapes;
 - cycle report envelopes;
@@ -870,7 +883,7 @@ v0.16 can ship when:
   and ProofPlan;
 - ProofPlan soundness checker is mandatory in strict mode;
 - standard CKB compatibility suites cover descriptive accepted and rejected
-  fixture shapes;
+  fixture shapes, including ScriptGroup and `outputs_data` matrices;
 - builder assumption schema is stable;
 - `cellc validate-tx` rejects missing, bare, or malformed schema-bound builder
   evidence;
@@ -951,7 +964,7 @@ Deferred:
 
 Source documents:
 
-- [v0.13 roadmap](CELLSCRIPT_0_13_ROADMAP.md)
+- [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 - [Linear ownership](../docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 
@@ -968,7 +981,7 @@ Important boundaries:
   transaction size;
 - declarative since/header/timepoint assumptions require target-profile
   semantics and concrete transaction/header evidence;
-- continuity policy for `&mut` replacement must cover type id, lock, data
+- continuity policy for signature-directed input/output Cell updates must cover type id, lock, data
   schema, and capacity continuity;
 - action builder plans must show obligations rather than silently satisfying
   them.
@@ -976,7 +989,7 @@ Important boundaries:
 Source documents:
 
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Mutate and replacement outputs](../docs/CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
+- [Output bindings](../docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
 - [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
 
 ### 9.5 Documentation and Developer Experience
@@ -994,8 +1007,10 @@ Future work:
 
 - keep wiki links rendered through GitHub Wiki URLs;
 - add recipes when new stable language patterns land;
-- keep release notes and roadmap docs separate from tutorial pages;
-- keep examples split by audience: business, language, and acceptance.
+- keep release notes in `docs/releases/` and roadmap files in `roadmap/`,
+  separate from tutorial pages;
+- keep top-level `examples/*.cell` as the single bundled business source, with
+  language and benchmark examples in explicit subdirectories.
 
 Source documents:
 

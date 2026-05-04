@@ -13,10 +13,10 @@ concepts:
 |---|---|
 | `resource` | Linear Cell-backed asset, represented by input/output Cells and typed data. |
 | `shared` | Contention-sensitive state Cell, read through CellDeps or updated by consume/create. |
-| `receipt` | Single-use proof Cell for lifecycle, claim, settlement, or protocol evidence. |
+| `receipt` | Single-use proof Cell for claim, settlement, or protocol evidence. |
 | `consume` | Spend an input Cell. |
-| `create` | Materialize a typed output Cell. |
-| `read_ref` | Load read-only CellDep-backed state. |
+| `create output = T { ... }` | Constrain a named proposed output Cell with typed data and optional lock. |
+| `read param: T` / `read_ref<T>()` | Load read-only CellDep-backed state. |
 | `action` | Transaction-shaped state transition entrypoint. |
 | `lock` | Spend predicate entrypoint compiled to ckb-vm RISC-V. |
 | `protected` | Marks a typed input Cell view guarded by the current lock invocation. |
@@ -25,19 +25,20 @@ concepts:
 | `require` | Fail the current script validation when a lock condition is false. |
 
 The strongest design point is that persistent state is explicit. Ordinary local
-values do not silently become chain state; only `create` materializes Cells, and
-linear values must be consumed, destroyed, transferred, claimed, settled, or
-returned. This is a good fit for CKB because it keeps the transaction input,
+values do not silently become chain state; action signatures bind transaction
+inputs and named proposed outputs, while `create output = T { ... }` constrains
+those outputs rather than allocating runtime objects. Linear values must be
+consumed, destroyed, transferred, claimed, settled, or linked to explicit output
+constraints. This is a good fit for CKB because it keeps the transaction input,
 output, data, witness, and dependency shape visible to the compiler and release
 evidence.
 
 The 2026-04-26 surface pass keeps this alignment intact. Its completed changes
 are presentation-level or classification-level: cleaner example modules,
 DSL-native capability declarations, field shorthand, typed empty `Vec<T>`
-literals, and explicit `protected` / `witness` / `require` lock syntax. It does
-not add implicit signer authority or hidden sighash defaults. The 0.14 branch
-adds fixed-width `lock_args` binding as a source classification, not as
-authorization proof.
+literals, explicit `protected` / `witness` / `require` lock syntax, and
+fixed-width `lock_args` binding. It does not add implicit signer authority,
+hidden sighash defaults, or automatic signature verification.
 
 The 0.13 compiler also exposes CKB-specific evidence instead of hiding it behind
 a generic artifact:
@@ -66,11 +67,11 @@ split across compiler metadata, builders, and production evidence.
 | Gap | Current status | Required direction |
 |---|---|---|
 | Signer authorization | `witness Address` parameters can prove equality only inside explicit lock predicates such as `vesting_admin`; `lock_args Address` now exposes script-args data, but neither value proves witness-sighash ownership by itself. | Add explicit script-hash policy, sighash verification, and later first-class verified signer binding. |
-| Lock behavior | All 16 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
-| `&mut` Cell updates | Metadata exposes mutate input/output access, but syntax can look like in-place account storage. | Add explicit continuity policy for type id, lock, data schema, and capacity. |
+| Lock behavior | All 17 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
+| Explicit Cell updates | Metadata exposes input/output access through action signatures and `require` constraints; source no longer looks like in-place account storage. | Keep continuity policy explicit for type id, lock, data schema, and capacity. |
 | Capacity policy | Capacity evidence is builder/runtime-required and validated by reports. | Promote common capacity requirements into declarative DSL policy where practical. |
 | Timelock policy | since/header/runtime features are visible in metadata. | Make since/header assumptions more directly declarative and statically auditable. |
-| Collection examples | `registry.cell` covers bounded local Vec language behavior. | Keep it outside production CKB scope unless promoted into builder-backed chain evidence. |
+| Language examples | `examples/registry.cell` and every checked-in `examples/language/*.cell` file cover compiler/tooling surfaces such as bounded local Vec behavior, stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and dynamic BLAKE2b. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |
 
 The most important correction is to avoid overstating what action coverage
 proves. The current production run proves transaction shape, Cell data layout,
@@ -80,7 +81,7 @@ lock predicates and the bundled lock predicates are exercised with positive and
 negative on-chain spend cases. That still does not make a witness `Address`
 parameter a cryptographic signer proof by itself. In CKB terms, the current
 syntax should be read as a typed view over one guarded input Cell plus decoded
-witness data and, where declared, typed script args. It is not a hidden
+witness data. `lock_args` is script-bound data, but it is not a hidden
 `WitnessArgs.lock` convention and not automatic sighash verification.
 
 After the 0.14 source-surface work, the recommended order is:

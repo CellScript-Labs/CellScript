@@ -10,7 +10,7 @@ you already know what you want to do.
 Use this when you have a single `.cell` file and want a CKB-profile artifact.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb -o /tmp/token.elf
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
 cellc verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -22,29 +22,34 @@ not prove that a complete CKB transaction has been built or accepted.
 Use a `resource` when a value should not be duplicated or silently dropped.
 
 ```cellscript
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
 ```
 
 The compiler tracks `Token` as a linear value. An action that receives a token
-must consume, return, transfer, claim, settle, or destroy it.
+must consume, return, destroy, validate a named successor output, or pass it
+through an explicit stdlib lifecycle pattern such as
+`std::lifecycle::transfer`, `std::receipt::claim`, or
+`std::lifecycle::settle`.
 
 ## Recipe: Mint A New Output Cell
 
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
-    auth.minted = auth.minted + amount
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+where
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
-}
 ```
 
 The field shorthand `amount` means `amount: amount`. The `with_lock(to)` part is
@@ -63,19 +68,19 @@ resource Badge has store, create, replace
     owner: Address
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge
+where
     create_unique<Badge>(identity = field(badge_id)) {
         badge_id,
         owner
     } with_lock(owner)
-}
 
-action move_badge(badge: Badge, new_owner: Address) -> Badge {
+action move_badge(badge: Badge, new_owner: Address) -> Badge
+where
     replace_unique<Badge>(identity = field(badge_id)) badge {
         badge_id: badge.badge_id,
         owner: new_owner
     }
-}
 ```
 
 `replace_unique` consumes the named input before the field initializer block.
@@ -83,19 +88,21 @@ For `field(...)`, the generated verifier compares the fixed-width identity field
 between input and output. Global uniqueness of field identities still needs
 builder or indexer evidence.
 
-## Recipe: Replace State Instead Of Updating In Place
+## Recipe: Update State Without Updating In Place
 
-Use `&mut` when the source should read like mutation, but remember the CKB model:
-the transaction still needs an input Cell and a replacement output Cell.
+Use an input-to-output action signature when the transaction updates state. The
+input and output names are ordinary bindings; `require` clauses prove continuity
+and the allowed field changes.
 
 ```cellscript
-action bump_nonce(wallet: &mut Wallet) {
-    wallet.nonce = wallet.nonce + 1
-}
+action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet
+where
+    require wallet_after.owner == wallet_before.owner
+    require wallet_after.nonce == wallet_before.nonce + 1
 ```
 
-When reviewing this pattern, inspect metadata and builder evidence for the
-replacement-output obligations. Do not treat it as account storage.
+When reviewing this pattern, inspect metadata and builder evidence for the input
+and output binding. Do not treat it as account storage.
 
 ## Recipe: Choose A Destruction Policy
 
@@ -108,16 +115,17 @@ destroy_instance(badge, identity_field = badge_id)
 burn_amount(token, field = amount)
 ```
 
-In `--primitive-strict=0.15` mode, bare `destroy value` is rejected. Keep the
-policy explicit so reviewers can distinguish output absence, identity
-consumption, instance consumption, and quantity burn.
+In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
+burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
+when reviewers must distinguish output absence, identity consumption, instance
+consumption, and quantity burn.
 
 ## Recipe: Write An Honest Lock Predicate
 
 Use `protected`, `witness`, and `require` to make the CKB boundary readable.
 
 ```cellscript
-lock owner_only(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
     require wallet.owner == claimed_owner
 }
 ```
@@ -136,7 +144,7 @@ signature verification.
 
 ```cellscript
 // Misleading: this is still only witness data.
-lock bad_owner_check(wallet: protected Wallet, signer: witness Address) -> bool {
+lock bad_owner_check(protected wallet: Wallet, witness signer: Address) -> bool {
     require wallet.owner == signer
 }
 ```
@@ -175,7 +183,7 @@ Use `[]` only where the expected `Vec<T>` type is known.
 ```cellscript
 let mut keys: Vec<Hash> = []
 
-create Proposal {
+create proposal = Proposal {
     proposal_id,
     proposer,
     data: [],
@@ -216,9 +224,7 @@ This is a compiler/package gate. Use it before asking for deeper CKB evidence.
 Use this only from the CellScript repository root:
 
 ```bash
-./scripts/ckb_cellscript_acceptance.sh --production
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+./scripts/cellscript_ckb_release_gate.sh full
 ```
 
 This is the boundary where compiler evidence becomes builder-backed local CKB
@@ -230,14 +236,15 @@ Start with the smallest example that teaches the idea you need:
 
 | Goal | Read |
 |---|---|
-| Linear resource lifecycle | `examples/token.cell` |
+| Linear resource effects | `examples/token.cell` |
 | Unique assets and ownership | `examples/nft.cell` |
 | Time-gated releases | `examples/timelock.cell` |
 | Threshold proposals | `examples/multisig.cell` |
 | Claim receipts | `examples/vesting.cell` |
 | Shared liquidity state | `examples/amm_pool.cell` |
 | Composition patterns | `examples/launch.cell` |
-| Local bounded vectors | `examples/registry.cell` |
+| Local bounded vectors | `examples/language/registry.cell` |
+| Local order-vector helpers | `examples/language/order_book.cell` |
 
 Read one example for one idea. The examples are easier to learn from when you do
 not treat them as one large feature checklist.

@@ -18,6 +18,7 @@ default_ckb_repo() {
 CKB_REPO="${CKB_REPO:-$(default_ckb_repo)}"
 CKB_BIN="${CKB_BIN:-}"
 RUN_ONCHAIN=1
+RUN_STATEFUL_SCENARIOS="${RUN_STATEFUL_SCENARIOS:-0}"
 KEEP_NODE_LOGS=1
 ACCEPTANCE_MODE="production"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
@@ -29,7 +30,7 @@ CKB_PID=""
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/ckb_cellscript_acceptance.sh [--ckb-repo <path>] [--ckb-bin <path>] [--compile-only] [--production|--bounded]
+Usage: scripts/ckb_cellscript_acceptance.sh [--ckb-repo <path>] [--ckb-bin <path>] [--compile-only] [--stateful-scenarios] [--production|--bounded]
 
 Runs CellScript CKB compatibility acceptance against a local CKB integration
 devnet from the parent CKB repository. The default mode is the production gate:
@@ -43,6 +44,10 @@ Options:
   --compile-only      Compile and verify the CKB-profile CellScript artifacts,
                       but skip local CKB node deployment/spend checks. This
                       mode does not require a CKB checkout or executable.
+  --stateful-scenarios
+                      After the production action/lock matrix, run additional
+                      local CKB transactions that feed live outputs from one
+                      action into the next action.
   --production        Enforce the production gate. This is the default.
   --bounded           Run the bounded development coverage matrix. This keeps
                       bounded harnesses visible, but it is not a
@@ -71,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --compile-only)
       RUN_ONCHAIN=0
+      shift
+      ;;
+    --stateful-scenarios)
+      RUN_STATEFUL_SCENARIOS=1
       shift
       ;;
     --production)
@@ -277,13 +286,26 @@ NON_PRODUCTION_EXAMPLES = [
     # bundled-contract matrix.
     "registry.cell",
 ]
+LANGUAGE_EXAMPLES = [
+    "canonical_style.cell",
+    "order_book.cell",
+    "registry.cell",
+    "stdlib.cell",
+    "v0_14_capacity_time.cell",
+    "v0_14_ckb_type_id_create.cell",
+    "v0_14_delegate_verify.cell",
+    "v0_14_hash_blake2b.cell",
+    "v0_14_multi_step_pipeline.cell",
+    "v0_14_witness_source.cell",
+]
 EXAMPLE_SCOPE = {
     "production_bundled_examples": EXAMPLES,
-    "non_production_language_examples": NON_PRODUCTION_EXAMPLES,
+    "non_production_top_level_examples": NON_PRODUCTION_EXAMPLES,
+    "non_production_language_examples": LANGUAGE_EXAMPLES,
     "production_scope_note": (
         "Only production_bundled_examples are deployed and action-exercised by this CKB production "
-        "acceptance report. non_production_language_examples are covered by compiler/tooling tests unless "
-        "they are promoted into production_bundled_examples."
+        "acceptance report. non_production_top_level_examples and non_production_language_examples are "
+        "covered by compiler/tooling tests unless they are promoted into production_bundled_examples."
     ),
 }
 LOCK_ACCEPTANCE_SCOPE = {
@@ -292,7 +314,7 @@ LOCK_ACCEPTANCE_SCOPE = {
     "pending_onchain_lock_spend_matrix": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock_when_promoted": ["valid_spend", "invalid_spend"],
@@ -307,7 +329,7 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "onchain_lock_spend_matrix_scope": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
@@ -320,21 +342,10 @@ TRUNCATE = 12000
 UNEXPECTED_PROFILE_TRAILER = bytes.fromhex("53504f5241424900")
 
 examples_dir = repo_root / "examples"
-business_examples_dir = examples_dir / "business"
-acceptance_examples_dir = examples_dir / "acceptance"
 language_examples_dir = examples_dir / "language"
 
-def business_example_path(name):
-    source = business_examples_dir / name
-    if source.is_file():
-        return source
+def production_example_path(name):
     return examples_dir / name
-
-def acceptance_example_path(name):
-    source = acceptance_examples_dir / name
-    if source.is_file():
-        return source
-    return business_example_path(name)
 
 def language_example_path(name):
     source = language_examples_dir / name
@@ -347,16 +358,30 @@ actual_flat_examples = sorted(
     for path in examples_dir.glob("*.cell")
     if path.is_file() and path.name not in NON_PRODUCTION_EXAMPLES
 )
-actual_business_examples = sorted(path.name for path in business_examples_dir.glob("*.cell") if path.is_file())
-actual_acceptance_examples = sorted(path.name for path in acceptance_examples_dir.glob("*.cell") if path.is_file())
 if actual_flat_examples != sorted(EXAMPLES):
-    raise SystemExit(f"flat bundled examples changed: expected {sorted(EXAMPLES)}, found {actual_flat_examples}")
-if actual_business_examples != sorted(EXAMPLES):
-    raise SystemExit(f"business examples changed: expected {sorted(EXAMPLES)}, found {actual_business_examples}")
-if actual_acceptance_examples != sorted(EXAMPLES):
-    raise SystemExit(f"acceptance examples changed: expected {sorted(EXAMPLES)}, found {actual_acceptance_examples}")
+    raise SystemExit(f"canonical bundled examples changed: expected {sorted(EXAMPLES)}, found {actual_flat_examples}")
+actual_non_production_examples = sorted(
+    path.name
+    for path in examples_dir.glob("*.cell")
+    if path.is_file() and path.name in NON_PRODUCTION_EXAMPLES
+)
+if actual_non_production_examples != sorted(NON_PRODUCTION_EXAMPLES):
+    raise SystemExit(
+        f"non-production top-level examples changed: expected {sorted(NON_PRODUCTION_EXAMPLES)}, "
+        f"found {actual_non_production_examples}"
+    )
+actual_language_examples = sorted(path.name for path in language_examples_dir.glob("*.cell") if path.is_file())
+if actual_language_examples != sorted(LANGUAGE_EXAMPLES):
+    raise SystemExit(f"language examples changed: expected {sorted(LANGUAGE_EXAMPLES)}, found {actual_language_examples}")
+for stale_dir in ("business", "acceptance"):
+    stale_path = examples_dir / stale_dir
+    if stale_path.exists():
+        raise SystemExit(f"stale checked-in example mirror directory must be removed: {stale_path.relative_to(repo_root)}")
 for name in NON_PRODUCTION_EXAMPLES:
-    if not language_example_path(name).is_file():
+    if not (examples_dir / name).is_file():
+        raise SystemExit(f"missing non-production top-level example: {name}")
+for name in LANGUAGE_EXAMPLES:
+    if not (language_examples_dir / name).is_file():
         raise SystemExit(f"missing non-production language example: {name}")
 
 source_root = run_dir / "generated-sources"
@@ -384,14 +409,14 @@ baseline_source = baseline_source_root / "ckb_noop.cell"
 baseline_source.write_text(
     """module acceptance::ckb_noop
 
-action main() -> u64 {
+action main() -> u64
+where
     0
-}
 """,
     encoding="utf-8",
 )
 
-TOKEN_TYPES_SOURCE = """resource Token has store, transfer, destroy {
+TOKEN_TYPES_SOURCE = """resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -405,44 +430,46 @@ resource MintAuthority has store {
 
 TOKEN_ACTION_SOURCES = {
     "mint": """
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+where
+    assert_invariant(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    auth.minted = auth.minted + amount
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount: amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
-}
 """,
     "transfer_token": """
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 """,
     "burn": """
-action burn(token: Token) {
+action burn(token: Token)
+where
     assert_invariant(token.amount > 0, "cannot burn zero")
     destroy token
-}
 """,
     "merge": """
-action merge(a: Token, b: Token, to: Address) -> Token {
+action merge(a: Token, b: Token, to: Address) -> merged: Token
+where
     assert_invariant(a.symbol == b.symbol, "symbol mismatch")
     let total = a.amount + b.amount
     consume a
     consume b
 
-    create Token {
+    create merged = Token {
         amount: total,
         symbol: a.symbol
     } with_lock(to)
-}
 """,
 }
 
@@ -452,7 +479,7 @@ for action, source in TOKEN_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-NFT_TYPES_SOURCE = """resource NFT has store, destroy {
+NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -466,14 +493,14 @@ resource Collection has store {
     max_supply: u64
 }
 
-receipt Listing has destroy {
+receipt Listing has create, consume, burn {
     token_id: u64
     seller: Address
     price: u64
     created_at: u64
 }
 
-receipt Offer has destroy {
+receipt Offer has create, consume, burn {
     token_id: u64
     buyer: Address
     price: u64
@@ -489,149 +516,164 @@ receipt RoyaltyPayment {
 
 NFT_ACTION_SOURCES = {
     "mint": """
-action mint(collection: &mut Collection, to: Address, metadata_hash: Hash) -> NFT {
-    assert_invariant(collection.total_supply < collection.max_supply, "max supply reached")
-    let token_id = collection.total_supply + 1
-    collection.total_supply = token_id
-    create NFT {
+action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
+where
+    assert_invariant(collection_before.total_supply < collection_before.max_supply, "max supply reached")
+    let token_id = collection_before.total_supply + 1
+
+    require collection_after.creator == collection_before.creator
+    require collection_after.max_supply == collection_before.max_supply
+    require collection_after.total_supply == token_id
+
+    create nft = NFT {
         token_id: token_id,
         owner: to,
         metadata_hash: metadata_hash,
-        royalty_recipient: collection.creator,
+        royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-}
 """,
     "transfer": """
-action transfer(nft: &mut NFT, to: Address) {
-    assert_invariant(nft.owner != to, "cannot transfer to self")
-    nft.owner = to
-}
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
+where
+    assert_invariant(nft_before.owner != to, "cannot transfer to self")
+    require nft_after.token_id == nft_before.token_id
+    require nft_after.owner == to
+    require nft_after.metadata_hash == nft_before.metadata_hash
+    require nft_after.royalty_recipient == nft_before.royalty_recipient
+    require nft_after.royalty_bps == nft_before.royalty_bps
 """,
     "create_listing": """
-action create_listing(nft: &NFT, price: u64, current_time: u64) -> Listing {
+action create_listing(read nft: NFT, price: u64, current_time: u64) -> listing: Listing
+where
     assert_invariant(price > 0, "price must be positive")
-    create Listing {
+    create listing = Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
         created_at: current_time
     }
-}
 """,
     "cancel_listing": """
-action cancel_listing(listing: Listing) {
+action cancel_listing(listing: Listing)
+where
     destroy listing
-}
 """,
     "buy_from_listing": """
-action buy_from_listing(nft: &mut NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (RoyaltyPayment, RoyaltyPayment) {
+action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
+where
     assert_invariant(payment >= listing.price, "insufficient payment")
 
-    let royalty_amount = payment * nft.royalty_bps / 10000
+    let royalty_amount = payment * nft_before.royalty_bps / 10000
     let seller_amount = payment - royalty_amount
 
-    nft.owner = buyer
+    require nft_after.token_id == nft_before.token_id
+    require nft_after.owner == buyer
+    require nft_after.metadata_hash == nft_before.metadata_hash
+    require nft_after.royalty_recipient == nft_before.royalty_recipient
+    require nft_after.royalty_bps == nft_before.royalty_bps
+
     destroy listing
 
-    let royalty_payment = create RoyaltyPayment {
-        token_id: nft.token_id,
-        recipient: nft.royalty_recipient,
+    create royalty_payment = RoyaltyPayment {
+        token_id: nft_before.token_id,
+        recipient: nft_before.royalty_recipient,
         amount: royalty_amount
     }
 
-    let seller_payment = create RoyaltyPayment {
-        token_id: nft.token_id,
+    create seller_payment = RoyaltyPayment {
+        token_id: nft_before.token_id,
         recipient: seller,
         amount: seller_amount
     }
-
-    (royalty_payment, seller_payment)
-}
 """,
     "create_offer": """
-action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> Offer {
+action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> offer: Offer
+where
     assert_invariant(price > 0, "price must be positive")
     assert_invariant(expires_at > 0, "expiration must be in the future")
-    create Offer {
+    create offer = Offer {
         token_id: token_id,
         buyer: buyer,
         price: price,
         expires_at: expires_at
     }
-}
 """,
     "accept_offer": """
-action accept_offer(nft: &mut NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (RoyaltyPayment, RoyaltyPayment) {
+action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
+where
     assert_invariant(current_time < offer.expires_at, "offer expired")
 
-    let royalty_amount = price * nft.royalty_bps / 10000
+    let royalty_amount = price * nft_before.royalty_bps / 10000
     let seller_amount = price - royalty_amount
 
-    nft.owner = buyer
+    require nft_after.token_id == nft_before.token_id
+    require nft_after.owner == buyer
+    require nft_after.metadata_hash == nft_before.metadata_hash
+    require nft_after.royalty_recipient == nft_before.royalty_recipient
+    require nft_after.royalty_bps == nft_before.royalty_bps
+
     destroy offer
 
-    let royalty_payment = create RoyaltyPayment {
-        token_id: nft.token_id,
-        recipient: nft.royalty_recipient,
+    create royalty_payment = RoyaltyPayment {
+        token_id: nft_before.token_id,
+        recipient: nft_before.royalty_recipient,
         amount: royalty_amount
     }
 
-    let seller_payment = create RoyaltyPayment {
-        token_id: nft.token_id,
+    create seller_payment = RoyaltyPayment {
+        token_id: nft_before.token_id,
         recipient: seller,
         amount: seller_amount
     }
-
-    (royalty_payment, seller_payment)
-}
 """,
     "burn": """
-action burn(nft: NFT) {
+action burn(nft: NFT)
+where
     destroy nft
-}
 """,
     "batch_mint": """
 action batch_mint(
-    collection: &mut Collection,
+    collection_before: Collection,
     recipients: [Address; 4],
     metadata_hashes: [Hash; 4],
-) -> (NFT, NFT, NFT, NFT) {
-    assert_invariant(collection.total_supply + 4 <= collection.max_supply, "max supply reached")
-    let first_token_id = collection.total_supply + 1
+) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT)
+where
+    assert_invariant(collection_before.total_supply + 4 <= collection_before.max_supply, "max supply reached")
+    let first_token_id = collection_before.total_supply + 1
 
-    let nft0 = create NFT {
+    require collection_after.creator == collection_before.creator
+    require collection_after.max_supply == collection_before.max_supply
+    require collection_after.total_supply == collection_before.total_supply + 4
+
+    create nft0 = NFT {
         token_id: first_token_id,
         owner: recipients[0],
         metadata_hash: metadata_hashes[0],
-        royalty_recipient: collection.creator,
+        royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft1 = create NFT {
+    create nft1 = NFT {
         token_id: first_token_id + 1,
         owner: recipients[1],
         metadata_hash: metadata_hashes[1],
-        royalty_recipient: collection.creator,
+        royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft2 = create NFT {
+    create nft2 = NFT {
         token_id: first_token_id + 2,
         owner: recipients[2],
         metadata_hash: metadata_hashes[2],
-        royalty_recipient: collection.creator,
+        royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-    let nft3 = create NFT {
+    create nft3 = NFT {
         token_id: first_token_id + 3,
         owner: recipients[3],
         metadata_hash: metadata_hashes[3],
-        royalty_recipient: collection.creator,
+        royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
-
-    collection.total_supply = collection.total_supply + 4
-    (nft0, nft1, nft2, nft3)
-}
 """,
 }
 
@@ -641,25 +683,25 @@ for action, source in NFT_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, destroy {
+TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn {
     owner: Address
     lock_type: u8
     unlock_height: u64
     created_at: u64
 }
 
-resource LockedAsset has store, destroy {
+resource LockedAsset has store, create, consume, burn {
     amount: u64
     lock_hash: Hash
 }
 
-receipt ReleaseRequest has destroy {
+receipt ReleaseRequest has create, consume, burn {
     lock_hash: Hash
     requester: Address
     requested_at: u64
 }
 
-receipt EmergencyRelease has destroy {
+receipt EmergencyRelease has create, consume, replace, burn {
     lock_hash: Hash
     requester: Address
     requested_at: u64
@@ -675,76 +717,82 @@ receipt ReleaseRecord {
 
 TIMELOCK_ACTION_SOURCES = {
     "create_absolute_lock": """
-action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> TimeLock {
+action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock
+where
     assert_invariant(unlock_height > current_height + 10, "too close")
     assert_invariant(unlock_height <= current_height + 2628000, "too far")
-    create TimeLock {
+    create created_lock = TimeLock {
         owner: owner,
         lock_type: 0,
         unlock_height: unlock_height,
         created_at: current_height
     }
-}
 """,
     "create_relative_lock": """
-action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> TimeLock {
+action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock
+where
     assert_invariant(lock_period >= 10, "too short")
     assert_invariant(lock_period <= 2628000, "too long")
-    create TimeLock {
+    create created_lock = TimeLock {
         owner: owner,
         lock_type: 1,
         unlock_height: current_height + lock_period,
         created_at: current_height
     }
-}
 """,
     "lock_asset": """
-action lock_asset(time_lock: &TimeLock, lock_hash: Hash, amount: u64) -> LockedAsset {
+action lock_asset(read time_lock: TimeLock, lock_hash: Hash, amount: u64) -> locked: LockedAsset
+where
     assert_invariant(amount > 0, "amount must be positive")
-    create LockedAsset {
+    create locked = LockedAsset {
         amount: amount,
         lock_hash: lock_hash
     }
-}
 """,
     "request_release": """
-action request_release(time_lock: &TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> ReleaseRequest {
+action request_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> request: ReleaseRequest
+where
     assert_invariant(current_height >= time_lock.unlock_height, "cannot unlock yet")
-    create ReleaseRequest {
+    create request = ReleaseRequest {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height
     }
-}
 """,
     "request_emergency_release": """
-action request_emergency_release(time_lock: &TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> EmergencyRelease {
+action request_emergency_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> emergency: EmergencyRelease
+where
     assert_invariant(time_lock.owner == requester, "not owner")
     assert_invariant(current_height < time_lock.unlock_height, "already unlockable")
-    create EmergencyRelease {
+    create emergency = EmergencyRelease {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height,
         approvals: 0
     }
-}
 """,
     "approve_emergency_release": """
-action approve_emergency_release(emergency: &mut EmergencyRelease, approver: Address, required_approvals: u8) {
-    assert_invariant(emergency.approvals < required_approvals, "already approved")
-    emergency.approvals = emergency.approvals + 1
-}
+action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease
+where
+    assert_invariant(emergency_before.approvals < required_approvals, "already approved")
+    require emergency_after.lock_hash == emergency_before.lock_hash
+    require emergency_after.requester == emergency_before.requester
+    require emergency_after.requested_at == emergency_before.requested_at
+    require emergency_after.approvals == emergency_before.approvals + 1
 """,
     "extend_lock": """
-action extend_lock(time_lock: &mut TimeLock, additional_period: u64, owner: Address, current_height: u64) {
-    assert_invariant(time_lock.owner == owner, "not owner")
-    assert_invariant(current_height < time_lock.unlock_height, "already unlocked")
+action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock
+where
+    assert_invariant(time_lock_before.owner == owner, "not owner")
+    assert_invariant(current_height < time_lock_before.unlock_height, "already unlocked")
 
-    let new_unlock_height = time_lock.unlock_height + additional_period
+    let new_unlock_height = time_lock_before.unlock_height + additional_period
     assert_invariant(new_unlock_height <= current_height + 2628000, "too far")
 
-    time_lock.unlock_height = new_unlock_height
-}
+    require time_lock_after.owner == time_lock_before.owner
+    require time_lock_after.lock_type == time_lock_before.lock_type
+    require time_lock_after.unlock_height == new_unlock_height
+    require time_lock_after.created_at == time_lock_before.created_at
 """,
     "execute_release": """
 action execute_release(
@@ -752,11 +800,12 @@ action execute_release(
     locked_asset: LockedAsset,
     request: ReleaseRequest,
     executor: Address
-) -> ReleaseRecord {
+) -> record: ReleaseRecord
+where
     assert_invariant(time_lock.owner == executor, "not owner")
     assert_invariant(locked_asset.lock_hash == request.lock_hash, "asset/request mismatch")
 
-    let record = create ReleaseRecord {
+    create record = ReleaseRecord {
         lock_hash: request.lock_hash,
         released_at: 125,
         released_by: executor
@@ -765,9 +814,6 @@ action execute_release(
     destroy time_lock
     destroy locked_asset
     destroy request
-
-    record
-}
 """,
     "execute_emergency_release": """
 action execute_emergency_release(
@@ -776,12 +822,13 @@ action execute_emergency_release(
     emergency: EmergencyRelease,
     executor: Address,
     required_approvals: u8
-) -> ReleaseRecord {
+) -> record: ReleaseRecord
+where
     assert_invariant(time_lock.owner == executor, "not owner")
     assert_invariant(emergency.approvals >= required_approvals, "not enough approvals")
     assert_invariant(locked_asset.lock_hash == emergency.lock_hash, "asset/emergency mismatch")
 
-    let record = create ReleaseRecord {
+    create record = ReleaseRecord {
         lock_hash: emergency.lock_hash,
         released_at: 125,
         released_by: executor
@@ -790,16 +837,14 @@ action execute_emergency_release(
     destroy time_lock
     destroy locked_asset
     destroy emergency
-
-    record
-}
 """,
     "batch_create_locks": """
 action batch_create_locks(
     owners: [Address; 4],
     unlock_heights: [u64; 4],
     current_height: u64,
-) -> (TimeLock, TimeLock, TimeLock, TimeLock) {
+) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock)
+where
     assert_invariant(unlock_heights[0] > current_height + 10, "too close")
     assert_invariant(unlock_heights[1] > current_height + 10, "too close")
     assert_invariant(unlock_heights[2] > current_height + 10, "too close")
@@ -809,33 +854,30 @@ action batch_create_locks(
     assert_invariant(unlock_heights[2] <= current_height + 2628000, "too far")
     assert_invariant(unlock_heights[3] <= current_height + 2628000, "too far")
 
-    let lock0 = create TimeLock {
+    create lock0 = TimeLock {
         owner: owners[0],
         lock_type: 0,
         unlock_height: unlock_heights[0],
         created_at: current_height
     }
-    let lock1 = create TimeLock {
+    create lock1 = TimeLock {
         owner: owners[1],
         lock_type: 0,
         unlock_height: unlock_heights[1],
         created_at: current_height
     }
-    let lock2 = create TimeLock {
+    create lock2 = TimeLock {
         owner: owners[2],
         lock_type: 0,
         unlock_height: unlock_heights[2],
         created_at: current_height
     }
-    let lock3 = create TimeLock {
+    create lock3 = TimeLock {
         owner: owners[3],
         lock_type: 0,
         unlock_height: unlock_heights[3],
         created_at: current_height
     }
-
-    (lock0, lock1, lock2, lock3)
-}
 """,
 }
 
@@ -867,7 +909,8 @@ receipt LPReceipt {
     provider: Address
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt) {
+action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt)
+where
     assert_invariant(token_a.symbol != token_b.symbol, "same token")
     assert_invariant(token_a.amount > 0 && token_b.amount > 0, "empty reserve")
     assert_invariant(fee_rate_bps <= 10000, "fee too high")
@@ -877,7 +920,7 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
     consume token_a
     consume token_b
 
-    let pool = create Pool {
+    create pool = Pool {
         token_a_symbol: token_a.symbol,
         token_b_symbol: token_b.symbol,
         reserve_a: token_a.amount,
@@ -886,16 +929,14 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
         fee_rate_bps: fee_rate_bps
     }
 
-    let receipt = create LPReceipt {
+    create receipt = LPReceipt {
         pool_id: pool.type_hash(),
         lp_amount: initial_lp,
         provider: provider
     } with_lock(provider)
 
-    (pool, receipt)
-}
-
-action isqrt(n: u64) -> u64 {
+action isqrt(n: u64) -> u64
+where
     if n == 0 {
         return 0
     }
@@ -909,7 +950,6 @@ action isqrt(n: u64) -> u64 {
     }
 
     x
-}
 """,
     "add_liquidity": """
 resource Token has store {
@@ -932,31 +972,34 @@ receipt LPReceipt {
     provider: Address
 }
 
-action add_liquidity(pool: &mut Pool, token_a: Token, token_b: Token, provider: Address) -> LPReceipt {
-    assert_invariant(token_a.symbol == pool.token_a_symbol, "wrong token a")
-    assert_invariant(token_b.symbol == pool.token_b_symbol, "wrong token b")
+action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt)
+where
+    assert_invariant(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
+    assert_invariant(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
 
-    let lp_from_a = token_a.amount * pool.total_lp / pool.reserve_a
-    let lp_from_b = token_b.amount * pool.total_lp / pool.reserve_b
+    let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
+    let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
     let lp_amount = min(lp_from_a, lp_from_b)
 
     consume token_a
     consume token_b
 
-    pool.reserve_a = pool.reserve_a + token_a.amount
-    pool.reserve_b = pool.reserve_b + token_b.amount
-    pool.total_lp = pool.total_lp + lp_amount
+    require pool_after.token_a_symbol == pool_before.token_a_symbol
+    require pool_after.token_b_symbol == pool_before.token_b_symbol
+    require pool_after.reserve_a == pool_before.reserve_a + token_a.amount
+    require pool_after.reserve_b == pool_before.reserve_b + token_b.amount
+    require pool_after.total_lp == pool_before.total_lp + lp_amount
+    require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    create LPReceipt {
-        pool_id: pool.type_hash(),
+    create receipt = LPReceipt {
+        pool_id: pool_before.type_hash(),
         lp_amount: lp_amount,
         provider: provider
     } with_lock(provider)
-}
 
-action min(a: u64, b: u64) -> u64 {
+action min(a: u64, b: u64) -> u64
+where
     if a < b { a } else { b }
-}
 """,
     "swap_a_for_b": """
 resource Token has store {
@@ -973,27 +1016,31 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-action swap_a_for_b(pool: &mut Pool, input: Token, min_output: u64, to: Address) -> Token {
-    assert_invariant(input.symbol == pool.token_a_symbol, "wrong input token")
+action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token)
+where
+    assert_invariant(input.symbol == pool_before.token_a_symbol, "wrong input token")
 
-    let fee = input.amount * pool.fee_rate_bps as u64 / 10000
+    let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
     let net_input = input.amount - fee
 
-    let output = pool.reserve_b * net_input / (pool.reserve_a + net_input)
+    let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
 
-    assert_invariant(output >= min_output, "slippage exceeded")
-    assert_invariant(output < pool.reserve_b, "insufficient reserves")
+    assert_invariant(amount_out >= min_output, "slippage exceeded")
+    assert_invariant(amount_out < pool_before.reserve_b, "insufficient reserves")
 
     consume input
 
-    pool.reserve_a = pool.reserve_a + input.amount
-    pool.reserve_b = pool.reserve_b - output
+    require pool_after.token_a_symbol == pool_before.token_a_symbol
+    require pool_after.token_b_symbol == pool_before.token_b_symbol
+    require pool_after.reserve_a == pool_before.reserve_a + input.amount
+    require pool_after.reserve_b == pool_before.reserve_b - amount_out
+    require pool_after.total_lp == pool_before.total_lp
+    require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    create Token {
-        amount: output,
-        symbol: pool.token_b_symbol
+    create token_out = Token {
+        amount: amount_out,
+        symbol: pool_before.token_b_symbol
     } with_lock(to)
-}
 """,
     "remove_liquidity": """
 resource Token has store {
@@ -1016,33 +1063,35 @@ receipt LPReceipt {
     provider: Address
 }
 
-action remove_liquidity(pool: &mut Pool, receipt: LPReceipt, provider: Address) -> (Token, Token) {
-    assert_invariant(receipt.pool_id == pool.type_hash(), "wrong pool")
+action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token)
+where
+    assert_invariant(receipt.pool_id == pool_before.type_hash(), "wrong pool")
 
-    let amount_a = receipt.lp_amount * pool.reserve_a / pool.total_lp
-    let amount_b = receipt.lp_amount * pool.reserve_b / pool.total_lp
+    let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
+    let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
 
     consume receipt
 
-    pool.reserve_a = pool.reserve_a - amount_a
-    pool.reserve_b = pool.reserve_b - amount_b
-    pool.total_lp = pool.total_lp - receipt.lp_amount
+    require pool_after.token_a_symbol == pool_before.token_a_symbol
+    require pool_after.token_b_symbol == pool_before.token_b_symbol
+    require pool_after.reserve_a == pool_before.reserve_a - amount_a
+    require pool_after.reserve_b == pool_before.reserve_b - amount_b
+    require pool_after.total_lp == pool_before.total_lp - receipt.lp_amount
+    require pool_after.fee_rate_bps == pool_before.fee_rate_bps
 
-    let token_a = create Token {
+    create token_a_out = Token {
         amount: amount_a,
-        symbol: pool.token_a_symbol
+        symbol: pool_before.token_a_symbol
     } with_lock(provider)
 
-    let token_b = create Token {
+    create token_b_out = Token {
         amount: amount_b,
-        symbol: pool.token_b_symbol
+        symbol: pool_before.token_b_symbol
     } with_lock(provider)
-
-    (token_a, token_b)
-}
 """,
     "isqrt": """
-action isqrt(n: u64) -> u64 {
+action isqrt(n: u64) -> u64
+where
     if n == 0 {
         return 0
     }
@@ -1056,12 +1105,11 @@ action isqrt(n: u64) -> u64 {
     }
 
     x
-}
 """,
     "min": """
-action min(a: u64, b: u64) -> u64 {
+action min(a: u64, b: u64) -> u64
+where
     if a < b { a } else { b }
-}
 """,
 }
 
@@ -1072,6 +1120,7 @@ for action, source in AMM_ACTION_SOURCES.items():
     )
 
 MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
+    wallet_id: Hash
     signer_a: Address
     signer_b: Address
     threshold: u8
@@ -1079,8 +1128,8 @@ MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
     created_at: u64
 }
 
-receipt Proposal has destroy {
-    wallet_hash: Hash
+receipt Proposal has create, consume, replace, burn {
+    wallet_id: Hash
     proposal_id: u64
     proposer: Address
     operation: u8
@@ -1108,131 +1157,166 @@ receipt ExecutionRecord {
 
 MULTISIG_ACTION_SOURCES = {
     "create_wallet": """
-action create_wallet(signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> MultisigWallet {
+action create_wallet(wallet_id: Hash, signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet
+where
     assert_invariant(signer_a != signer_b, "duplicate signer")
     assert_invariant(threshold >= 2, "threshold too low")
     assert_invariant(threshold <= 2, "threshold too high")
 
-    create MultisigWallet {
+    create wallet = MultisigWallet {
+        wallet_id: wallet_id,
         signer_a: signer_a,
         signer_b: signer_b,
         threshold: threshold,
         nonce: 0,
         created_at: current_time
     }
-}
 """,
     "propose_transfer": """
-action propose_transfer(wallet: &mut MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> Proposal {
-    assert_invariant(proposer == wallet.signer_a, "not signer")
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
+where
+    assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(amount > 0, "amount must be positive")
 
-    let proposal_id = wallet.nonce + 1
-    wallet.nonce = proposal_id
+    let proposal_id = wallet_before.nonce + 1
 
-    create Proposal {
-        wallet_hash: Hash::zero(),
+    require wallet_after.wallet_id == wallet_before.wallet_id
+    require wallet_after.signer_a == wallet_before.signer_a
+    require wallet_after.signer_b == wallet_before.signer_b
+    require wallet_after.threshold == wallet_before.threshold
+    require wallet_after.nonce == proposal_id
+    require wallet_after.created_at == wallet_before.created_at
+
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 0,
         target: target,
         amount: amount,
-        required_signatures: wallet.threshold,
+        required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,
         expires_at: current_time + 1440
     }
-}
 """,
     "add_signature": """
-action add_signature(proposal: &mut Proposal, signer: Address, current_time: u64) -> SignatureConfirmation {
-    assert_invariant(current_time < proposal.expires_at, "proposal expired")
-    assert_invariant(proposal.signature_count < proposal.required_signatures, "already enough signatures")
+action add_signature(proposal_before: Proposal, signer: Address, current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation)
+where
+    assert_invariant(current_time < proposal_before.expires_at, "proposal expired")
+    assert_invariant(proposal_before.signature_count < proposal_before.required_signatures, "already enough signatures")
 
-    proposal.signature_count = proposal.signature_count + 1
+    require proposal_after.wallet_id == proposal_before.wallet_id
+    require proposal_after.proposal_id == proposal_before.proposal_id
+    require proposal_after.proposer == proposal_before.proposer
+    require proposal_after.operation == proposal_before.operation
+    require proposal_after.target == proposal_before.target
+    require proposal_after.amount == proposal_before.amount
+    require proposal_after.required_signatures == proposal_before.required_signatures
+    require proposal_after.signature_count == proposal_before.signature_count + 1
+    require proposal_after.created_at == proposal_before.created_at
+    require proposal_after.expires_at == proposal_before.expires_at
 
-    create SignatureConfirmation {
-        proposal_id: proposal.proposal_id,
+    create confirmation = SignatureConfirmation {
+        proposal_id: proposal_before.proposal_id,
         signer: signer,
         timestamp: current_time
     }
-}
 """,
     "propose_add_signer": """
-action propose_add_signer(wallet: &mut MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> Proposal {
-    assert_invariant(proposer == wallet.signer_a, "not signer")
-    assert_invariant(new_signer != wallet.signer_a, "already signer")
-    assert_invariant(new_signer != wallet.signer_b, "already signer")
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
+where
+    assert_invariant(proposer == wallet_before.signer_a, "not signer")
+    assert_invariant(new_signer != wallet_before.signer_a, "already signer")
+    assert_invariant(new_signer != wallet_before.signer_b, "already signer")
 
-    let proposal_id = wallet.nonce + 1
-    wallet.nonce = proposal_id
+    let proposal_id = wallet_before.nonce + 1
 
-    create Proposal {
-        wallet_hash: Hash::zero(),
+    require wallet_after.wallet_id == wallet_before.wallet_id
+    require wallet_after.signer_a == wallet_before.signer_a
+    require wallet_after.signer_b == wallet_before.signer_b
+    require wallet_after.threshold == wallet_before.threshold
+    require wallet_after.nonce == proposal_id
+    require wallet_after.created_at == wallet_before.created_at
+
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 1,
         target: new_signer,
         amount: 0,
-        required_signatures: wallet.threshold,
+        required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,
         expires_at: current_time + 1440
     }
-}
 """,
     "propose_remove_signer": """
-action propose_remove_signer(wallet: &mut MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> Proposal {
-    assert_invariant(proposer == wallet.signer_a, "not signer")
-    assert_invariant(signer_to_remove == wallet.signer_b, "not removable signer")
-    assert_invariant(wallet.threshold <= 1, "would fall below threshold")
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
+where
+    assert_invariant(proposer == wallet_before.signer_a, "not signer")
+    assert_invariant(signer_to_remove == wallet_before.signer_b, "not removable signer")
+    assert_invariant(wallet_before.threshold <= 1, "would fall below threshold")
 
-    let proposal_id = wallet.nonce + 1
-    wallet.nonce = proposal_id
+    let proposal_id = wallet_before.nonce + 1
 
-    create Proposal {
-        wallet_hash: Hash::zero(),
+    require wallet_after.wallet_id == wallet_before.wallet_id
+    require wallet_after.signer_a == wallet_before.signer_a
+    require wallet_after.signer_b == wallet_before.signer_b
+    require wallet_after.threshold == wallet_before.threshold
+    require wallet_after.nonce == proposal_id
+    require wallet_after.created_at == wallet_before.created_at
+
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 2,
         target: signer_to_remove,
         amount: 0,
-        required_signatures: wallet.threshold,
+        required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,
         expires_at: current_time + 1440
     }
-}
 """,
     "propose_change_threshold": """
-action propose_change_threshold(wallet: &mut MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> Proposal {
-    assert_invariant(proposer == wallet.signer_a, "not signer")
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
+where
+    assert_invariant(proposer == wallet_before.signer_a, "not signer")
     assert_invariant(new_threshold >= 1, "threshold too low")
     assert_invariant(new_threshold <= 2, "threshold too high")
 
-    let proposal_id = wallet.nonce + 1
-    wallet.nonce = proposal_id
+    let proposal_id = wallet_before.nonce + 1
 
-    create Proposal {
-        wallet_hash: Hash::zero(),
+    require wallet_after.wallet_id == wallet_before.wallet_id
+    require wallet_after.signer_a == wallet_before.signer_a
+    require wallet_after.signer_b == wallet_before.signer_b
+    require wallet_after.threshold == wallet_before.threshold
+    require wallet_after.nonce == proposal_id
+    require wallet_after.created_at == wallet_before.created_at
+
+    create proposal = Proposal {
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 3,
         target: Address::zero(),
         amount: new_threshold,
-        required_signatures: wallet.threshold,
+        required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,
         expires_at: current_time + 1440
     }
-}
 """,
     "execute_proposal": """
-action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> ExecutionRecord {
+action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord
+where
     assert_invariant(current_time < proposal.expires_at, "proposal expired")
     assert_invariant(proposal.signature_count >= proposal.required_signatures, "not enough signatures")
 
-    let record = create ExecutionRecord {
+    create record = ExecutionRecord {
         proposal_id: proposal.proposal_id,
         executor: executor,
         executed_at: current_time,
@@ -1240,15 +1324,12 @@ action execute_proposal(proposal: Proposal, executor: Address, current_time: u64
     }
 
     destroy proposal
-
-    record
-}
 """,
     "cancel_proposal": """
-action cancel_proposal(proposal: Proposal, canceller: Address) {
+action cancel_proposal(proposal: Proposal, canceller: Address)
+where
     assert_invariant(proposal.proposer == canceller, "only proposer can cancel")
     destroy proposal
-}
 """,
 }
 
@@ -1300,7 +1381,7 @@ ORIGINAL_SCOPED_ACTIONS = {
 
 ORIGINAL_SCOPED_LOCKS = {
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-    "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+    "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
     "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
     "vesting.cell": ["vesting_admin"],
 }
@@ -1352,7 +1433,7 @@ EXPECTED_SOURCE_ACTIONS = {
 EXPECTED_SOURCE_LOCKS = {
     "token.cell": [],
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-    "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "emergency_approved", "not_expired"],
+    "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "emergency_approved", "not_expired"],
     "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
     "vesting.cell": ["vesting_admin"],
     "amm_pool.cell": [],
@@ -1387,7 +1468,7 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 def source_entries(name, keyword):
-    text = acceptance_example_path(name).read_text(encoding="utf-8")
+    text = production_example_path(name).read_text(encoding="utf-8")
     pattern = re.compile(rf"^\s*{keyword}\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
     return pattern.findall(text)
 
@@ -1502,9 +1583,15 @@ def verify_artifact(artifact):
     except json.JSONDecodeError as error:
         raise RuntimeError(f"verify-artifact did not return JSON for {artifact}: {clipped(completed.stdout)}") from error
 
+def internal_assembler_env():
+    env = os.environ.copy()
+    for key in ("CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"):
+        env.pop(key, None)
+    return env
+
 def compile_artifact(name, kind, source, artifact, *, entry_args=None):
     entry_args = entry_args or []
-    env = os.environ.copy()
+    env = internal_assembler_env()
     result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", *entry_args, "-o", artifact], env=env)
     if result["returncode"] != 0:
         raise RuntimeError(f"CKB artifact compile failed for {name}: {result['stderr']}")
@@ -1546,9 +1633,12 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
 validate_source_coverage_matrix()
 
 def strict_original_compile(name):
-    source = acceptance_example_path(name)
+    source = production_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact])
+    result = run(
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", "-o", artifact],
+        env=internal_assembler_env(),
+    )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -1568,7 +1658,10 @@ def strict_original_compile(name):
 
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
-    result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", entry_flag, entry_name, "-o", artifact])
+    result = run(
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", entry_flag, entry_name, "-o", artifact],
+        env=internal_assembler_env(),
+    )
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
@@ -1603,12 +1696,12 @@ for name in EXAMPLES:
     strict = strict_original_compile(name)
     if strict["unexpected_failure"]:
         raise RuntimeError(
-            f"strict original CKB compile for {name} failed for a non-policy reason: {strict['stderr']}"
+            f"primitive-strict original CKB compile for {name} failed for a non-policy reason: {strict['stderr']}"
         )
     record = {
         "name": name,
         "kind": "bundled-example-strict-original",
-        "source": str(acceptance_example_path(name)),
+        "source": str(production_example_path(name)),
         "strict_original_ckb_compile": strict,
     }
     bundled_examples.append(record)
@@ -1616,7 +1709,7 @@ for name in EXAMPLES:
         bundled_example_deployment_artifacts.append({
             "name": name,
             "kind": "bundled-example-strict-original",
-            "source": str(acceptance_example_path(name)),
+            "source": str(production_example_path(name)),
             "artifact": strict["artifact"],
         })
 
@@ -1630,7 +1723,7 @@ for action in TOKEN_ACTION_SOURCES:
         artifact_root / f"token_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("token.cell"))
+    record["original_source"] = str(production_example_path("token.cell"))
     token_action_artifacts.append(record)
 
 nft_action_artifacts = []
@@ -1643,7 +1736,7 @@ for action in NFT_ACTION_SOURCES:
         artifact_root / f"nft_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("nft.cell"))
+    record["original_source"] = str(production_example_path("nft.cell"))
     nft_action_artifacts.append(record)
 
 timelock_action_artifacts = []
@@ -1656,7 +1749,7 @@ for action in TIMELOCK_ACTION_SOURCES:
         artifact_root / f"timelock_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("timelock.cell"))
+    record["original_source"] = str(production_example_path("timelock.cell"))
     timelock_action_artifacts.append(record)
 
 amm_action_artifacts = []
@@ -1669,7 +1762,7 @@ for action in AMM_ACTION_SOURCES:
         artifact_root / f"amm_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("amm_pool.cell"))
+    record["original_source"] = str(production_example_path("amm_pool.cell"))
     amm_action_artifacts.append(record)
 
 multisig_action_artifacts = []
@@ -1682,7 +1775,7 @@ for action in MULTISIG_ACTION_SOURCES:
         artifact_root / f"multisig_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("multisig.cell"))
+    record["original_source"] = str(production_example_path("multisig.cell"))
     multisig_action_artifacts.append(record)
 
 original_scoped_action_artifacts = []
@@ -1691,13 +1784,13 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
         record = compile_artifact(
             f"{example_name}:{action}",
             "original-scoped-action-strict",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
-            entry_args=["--entry-action", action],
+            entry_args=["--primitive-strict", "0.15", "--entry-action", action],
         )
         record["example"] = example_name
         record["action"] = action
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_artifacts.append(record)
 
 launch_action_artifacts = [
@@ -1785,13 +1878,13 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
         record = compile_artifact(
             f"{example_name}:{lock}",
             "original-scoped-lock-strict",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
-            entry_args=["--entry-lock", lock],
+            entry_args=["--primitive-strict", "0.15", "--entry-lock", lock],
         )
         record["example"] = example_name
         record["lock"] = lock
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_lock_artifacts.append(record)
 
 original_scoped_action_fail_closed = []
@@ -1799,13 +1892,13 @@ for example_name, actions in ORIGINAL_SCOPED_ACTION_FAIL_CLOSED.items():
     for action in actions:
         record = strict_scoped_compile(
             f"{example_name}:{action}",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             "--entry-action",
             action,
         )
         record["example"] = example_name
         record["action"] = action
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_fail_closed.append(record)
 
 original_scoped_lock_fail_closed = []
@@ -1813,13 +1906,13 @@ for example_name, locks in ORIGINAL_SCOPED_LOCK_FAIL_CLOSED.items():
     for lock in locks:
         record = strict_scoped_compile(
             f"{example_name}:{lock}",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             "--entry-lock",
             lock,
         )
         record["example"] = example_name
         record["lock"] = lock
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_lock_fail_closed.append(record)
 
 expected_original_scoped_action_count = sum(len(actions) for actions in ORIGINAL_SCOPED_ACTIONS.values())
@@ -1909,15 +2002,15 @@ report = {
     "bundled_examples_exact_order": EXAMPLES,
     "bundled_examples_count": len(EXAMPLES),
     "non_production_examples": NON_PRODUCTION_EXAMPLES,
+    "language_examples_exact_order": LANGUAGE_EXAMPLES,
+    "language_examples_count": len(LANGUAGE_EXAMPLES),
     "example_scope": EXAMPLE_SCOPE,
     "example_source_layout": {
-        "canonical_business_examples": str(business_examples_dir),
-        "flat_business_compatibility_examples": str(examples_dir),
-        "production_acceptance_examples": str(acceptance_examples_dir),
+        "canonical_bundled_examples": str(examples_dir),
         "language_examples": str(language_examples_dir),
-        "profiled_acceptance_metadata_note": (
-            "Production acceptance compiles examples/acceptance when present so "
-            "canonical business examples can stay free of effect and scheduler hints."
+        "canonical_examples_note": (
+            "Production acceptance compiles the checked-in top-level examples/*.cell directly. "
+            "examples/business and examples/acceptance are intentionally not part of the checked-in source layout."
         ),
     },
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
@@ -1958,12 +2051,12 @@ def production_gate_failures(report):
     failures = []
     if report.get("strict_original_ckb_compile_policy_fail_closed"):
         failures.append(
-            "strict original bundled examples still fail CKB policy: "
+            "primitive-strict original bundled examples still fail CKB policy: "
             + ", ".join(report["strict_original_ckb_compile_policy_fail_closed"])
         )
     if report.get("strict_original_ckb_compile_unexpected_failures"):
         failures.append(
-            "strict original bundled examples have unexpected compile failures: "
+            "primitive-strict original bundled examples have unexpected compile failures: "
             + ", ".join(report["strict_original_ckb_compile_unexpected_failures"])
         )
     fail_closed_actions = [
@@ -2085,7 +2178,7 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" <<'PY'
+python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -2095,10 +2188,11 @@ import time
 import urllib.error
 import urllib.request
 
-rpc_url, report_path, ckb_repo, ckb_bin, ckb_log, repo_root = sys.argv[1:]
+rpc_url, report_path, ckb_repo, ckb_bin, ckb_log, repo_root, run_stateful_scenarios = sys.argv[1:]
 report_path = pathlib.Path(report_path)
 ckb_repo = pathlib.Path(ckb_repo)
 repo_root = pathlib.Path(repo_root)
+run_stateful_scenarios = run_stateful_scenarios == "1"
 
 ALWAYS_SUCCESS_CODE_HASH = "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5"
 ALWAYS_SUCCESS_INDEX = "0x5"
@@ -2109,7 +2203,7 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "onchain_lock_spend_matrix_scope": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
@@ -2159,6 +2253,7 @@ report.update({
         "amm_action_runs": [],
         "launch_action_runs": [],
         "lock_spend_matrix_runs": [],
+        "stateful_scenario_runs": [],
     },
 })
 
@@ -2387,27 +2482,36 @@ def collection_molecule_data(creator, total_supply, max_supply, name=b"Acceptanc
         molecule_bytes(base_uri),
     ])
 
-def listing_data(token_id, seller, price, created_at):
+def listing_data(token_id, seller, price, created_at, state=None):
     if len(seller) != 32:
         raise RuntimeError(f"Listing seller must be exactly 32 bytes, got {len(seller)}")
-    return token_id.to_bytes(8, "little") + seller + price.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"Listing state must fit in u8, got {state}")
+    payload = token_id.to_bytes(8, "little") + seller + price.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
-def offer_data(token_id, buyer, price, expires_at):
+def offer_data(token_id, buyer, price, expires_at, state=None):
     if len(buyer) != 32:
         raise RuntimeError(f"Offer buyer must be exactly 32 bytes, got {len(buyer)}")
-    return token_id.to_bytes(8, "little") + buyer + price.to_bytes(8, "little") + expires_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"Offer state must fit in u8, got {state}")
+    payload = token_id.to_bytes(8, "little") + buyer + price.to_bytes(8, "little") + expires_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
 def royalty_payment_data(token_id, recipient, amount):
     if len(recipient) != 32:
         raise RuntimeError(f"RoyaltyPayment recipient must be exactly 32 bytes, got {len(recipient)}")
     return token_id.to_bytes(8, "little") + recipient + amount.to_bytes(8, "little")
 
-def timelock_data(owner, lock_type, unlock_height, created_at):
+def timelock_data(owner, lock_type, unlock_height, created_at, lock_id=None):
+    if lock_id is not None and len(lock_id) != 32:
+        raise RuntimeError(f"TimeLock lock_id must be exactly 32 bytes, got {len(lock_id)}")
     if len(owner) != 32:
         raise RuntimeError(f"TimeLock owner must be exactly 32 bytes, got {len(owner)}")
     if not 0 <= lock_type <= 255:
         raise RuntimeError(f"TimeLock lock_type must fit in u8, got {lock_type}")
-    return owner + bytes([lock_type]) + unlock_height.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    payload = owner + bytes([lock_type]) + unlock_height.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return payload if lock_id is None else lock_id + payload
 
 def locked_asset_data(amount, lock_hash):
     if len(lock_hash) != 32:
@@ -2423,12 +2527,15 @@ def locked_asset_molecule_data(asset_type, amount, lock_hash):
         lock_hash,
     ])
 
-def release_request_data(lock_hash, requester, requested_at):
+def release_request_data(lock_hash, requester, requested_at, state=None):
     if len(lock_hash) != 32:
         raise RuntimeError(f"ReleaseRequest lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
     if len(requester) != 32:
         raise RuntimeError(f"ReleaseRequest requester must be exactly 32 bytes, got {len(requester)}")
-    return lock_hash + requester + requested_at.to_bytes(8, "little")
+    if state is not None and not 0 <= state <= 255:
+        raise RuntimeError(f"ReleaseRequest state must fit in u8, got {state}")
+    payload = lock_hash + requester + requested_at.to_bytes(8, "little")
+    return payload if state is None else payload + bytes([state])
 
 def emergency_release_data(lock_hash, requester, requested_at, approvals):
     if len(lock_hash) != 32:
@@ -2439,11 +2546,13 @@ def emergency_release_data(lock_hash, requester, requested_at, approvals):
         raise RuntimeError(f"EmergencyRelease approvals must fit in u8, got {approvals}")
     return lock_hash + requester + requested_at.to_bytes(8, "little") + bytes([approvals])
 
-def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, approvers):
+def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, approvers, state=0):
     if len(lock_hash) != 32:
         raise RuntimeError(f"EmergencyRelease lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
     if len(requester) != 32:
         raise RuntimeError(f"EmergencyRelease requester must be exactly 32 bytes, got {len(requester)}")
+    if not 0 <= state <= 255:
+        raise RuntimeError(f"EmergencyRelease state must fit in u8, got {state}")
     for approver in approvers:
         if len(approver) != 32:
             raise RuntimeError(f"EmergencyRelease approver must be exactly 32 bytes, got {len(approver)}")
@@ -2453,6 +2562,7 @@ def emergency_release_molecule_data(lock_hash, requester, reason, requested_at, 
         reason,
         requested_at.to_bytes(8, "little"),
         molecule_fixvec(approvers),
+        bytes([state]),
     ])
 
 def release_record_data(lock_hash, released_at, released_by):
@@ -2462,16 +2572,20 @@ def release_record_data(lock_hash, released_at, released_by):
         raise RuntimeError(f"ReleaseRecord released_by must be exactly 32 bytes, got {len(released_by)}")
     return lock_hash + released_at.to_bytes(8, "little") + released_by
 
-def multisig_wallet_data(signer_a, signer_b, threshold, nonce, created_at):
+def multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, nonce, created_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"MultisigWallet wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(signer_a) != 32:
         raise RuntimeError(f"MultisigWallet signer_a must be exactly 32 bytes, got {len(signer_a)}")
     if len(signer_b) != 32:
         raise RuntimeError(f"MultisigWallet signer_b must be exactly 32 bytes, got {len(signer_b)}")
     if not 0 <= threshold <= 255:
         raise RuntimeError(f"MultisigWallet threshold must fit in u8, got {threshold}")
-    return signer_a + signer_b + bytes([threshold]) + nonce.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return wallet_id + signer_a + signer_b + bytes([threshold]) + nonce.to_bytes(8, "little") + created_at.to_bytes(8, "little")
 
-def multisig_wallet_molecule_data(signers, threshold, nonce, created_at):
+def multisig_wallet_molecule_data(wallet_id, signers, threshold, nonce, created_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"MultisigWallet wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(signers) < 2:
         raise RuntimeError(f"MultisigWallet signers must contain at least 2 entries, got {len(signers)}")
     for signer in signers:
@@ -2480,15 +2594,16 @@ def multisig_wallet_molecule_data(signers, threshold, nonce, created_at):
     if not 0 <= threshold <= 255:
         raise RuntimeError(f"MultisigWallet threshold must fit in u8, got {threshold}")
     return molecule_table([
+        wallet_id,
         molecule_fixvec(signers),
         bytes([threshold]),
         nonce.to_bytes(8, "little"),
         created_at.to_bytes(8, "little"),
     ])
 
-def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at):
-    if len(wallet_hash) != 32:
-        raise RuntimeError(f"Proposal wallet_hash must be exactly 32 bytes, got {len(wallet_hash)}")
+def multisig_proposal_molecule_data(wallet_id, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at, state=0):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"Proposal wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(proposer) != 32:
         raise RuntimeError(f"Proposal proposer must be exactly 32 bytes, got {len(proposer)}")
     if len(target) != 32:
@@ -2497,6 +2612,8 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
         raise RuntimeError(f"Proposal operation must fit in u8, got {operation}")
     if not 0 <= required_signatures <= 255:
         raise RuntimeError(f"Proposal required_signatures must fit in u8, got {required_signatures}")
+    if not 0 <= state <= 255:
+        raise RuntimeError(f"Proposal state must fit in u8, got {state}")
     encoded_signatures = []
     for signer, signature in signatures:
         if len(signer) != 32:
@@ -2505,7 +2622,7 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
             raise RuntimeError(f"Proposal signature bytes must be exactly 64 bytes, got {len(signature)}")
         encoded_signatures.append(signer + signature)
     return molecule_table([
-        wallet_hash,
+        wallet_id,
         proposal_id.to_bytes(8, "little"),
         proposer,
         bytes([operation]),
@@ -2516,11 +2633,12 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
         molecule_fixvec(encoded_signatures),
         created_at.to_bytes(8, "little"),
         expires_at.to_bytes(8, "little"),
+        bytes([state]),
     ])
 
-def multisig_proposal_data(wallet_hash, proposal_id, proposer, operation, target, amount, required_signatures, signature_count, created_at, expires_at):
-    if len(wallet_hash) != 32:
-        raise RuntimeError(f"Proposal wallet_hash must be exactly 32 bytes, got {len(wallet_hash)}")
+def multisig_proposal_data(wallet_id, proposal_id, proposer, operation, target, amount, required_signatures, signature_count, created_at, expires_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"Proposal wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(proposer) != 32:
         raise RuntimeError(f"Proposal proposer must be exactly 32 bytes, got {len(proposer)}")
     if len(target) != 32:
@@ -2532,7 +2650,7 @@ def multisig_proposal_data(wallet_hash, proposal_id, proposer, operation, target
     if not 0 <= signature_count <= 255:
         raise RuntimeError(f"Proposal signature_count must fit in u8, got {signature_count}")
     return (
-        wallet_hash
+        wallet_id
         + proposal_id.to_bytes(8, "little")
         + proposer
         + bytes([operation])
@@ -2610,6 +2728,11 @@ def get_block_by_number(number):
         raise RuntimeError(f"block number not found: {number}")
     return block
 
+RESERVED_SPENDABLE_OUTPOINTS = set()
+
+def spendable_outpoint_key(tx_hash, index):
+    return (tx_hash, int(index))
+
 def find_spendable_cellbase(max_blocks=64):
     generated = []
     for _ in range(max_blocks):
@@ -2622,6 +2745,8 @@ def find_spendable_cellbase(max_blocks=64):
             for index, output in enumerate(outputs):
                 capacity = int(output["capacity"], 16)
                 if capacity > 0:
+                    if spendable_outpoint_key(cellbase["hash"], index) in RESERVED_SPENDABLE_OUTPOINTS:
+                        continue
                     live_status = wait_live_cell(cellbase["hash"], index)
                     if live_status and live_status.get("status") == "live":
                         return {
@@ -2647,6 +2772,8 @@ def collect_spendable_cellbases(min_capacity, max_cells=256):
             f"collected {total_capacity:#x} capacity from {len(cells)} cellbase cells, "
             f"need at least {min_capacity:#x}"
         )
+    for cell in cells:
+        RESERVED_SPENDABLE_OUTPOINTS.add(spendable_outpoint_key(cell["tx_hash"], cell["index"]))
     return {
         "cells": cells,
         "total_capacity": total_capacity,
@@ -2673,6 +2800,9 @@ def transaction(input_cells, outputs, outputs_data, cell_deps, witnesses=None, h
         "outputs_data": outputs_data,
         "witnesses": witnesses or [],
     }
+
+def cell_dep_for(cell):
+    return {"out_point": out_point(cell["tx_hash"], cell["index"]), "dep_type": "code"}
 
 def parse_hex_u64(value):
     if value is None:
@@ -2817,6 +2947,8 @@ def submit_and_commit(tx, label, max_blocks=64):
         last_status = tx_status
         if tx_status.get("status") == "committed":
             return {"tx_hash": tx_hash, "generated_blocks_after_submit": generated, "status": tx_status}
+        if tx_status.get("status") == "rejected":
+            raise RuntimeError(f"{label} was rejected while waiting for commit: {tx_hash}; last_status={tx_status}")
         rpc("generate_block")
         time.sleep(0.05)
     raise RuntimeError(f"{label} was not committed after {max_blocks} generated blocks: {tx_hash}; last_status={last_status}")
@@ -2854,6 +2986,54 @@ def assert_live(tx_hash, index, label):
         raise RuntimeError(f"{label} is not live: {result}")
     return result
 
+def is_transient_dead_outpoint_error(error):
+    message = str(error)
+    return "Resolve failed Dead(OutPoint" in message or "Dead(OutPoint" in message
+
+def code_cell_deploy_transaction(deploy_input, artifact, always_success_dep):
+    return transaction(
+        deploy_input,
+        [
+            {
+                "capacity": hex_u64(deploy_input["total_capacity"]),
+                "lock": always_success_lock(),
+                "type": None,
+            }
+        ],
+        ["0x" + artifact.hex()],
+        [always_success_dep],
+    )
+
+def submit_code_cell_deploy_with_fresh_funding(
+    name,
+    artifact,
+    always_success_dep,
+    label_suffix,
+    measure_dry_run=False,
+    max_attempts=4,
+):
+    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        deploy_input = collect_spendable_cellbases(deploy_min_capacity)
+        deploy_tx = code_cell_deploy_transaction(deploy_input, artifact, always_success_dep)
+        try:
+            valid_deploy_dry_run = rpc("dry_run_transaction", [deploy_tx]) if measure_dry_run else None
+            deploy_result = submit_and_commit(deploy_tx, f"{name} {label_suffix}")
+            return {
+                "deploy_input": deploy_input,
+                "deploy_tx": deploy_tx,
+                "valid_deploy_dry_run": valid_deploy_dry_run,
+                "code_cell_deploy": deploy_result,
+                "deploy_attempts": attempt,
+            }
+        except RuntimeError as error:
+            last_error = error
+            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+                continue
+            raise
+    raise RuntimeError(f"{name} {label_suffix} failed after {max_attempts} attempts: {last_error}")
+
 def run_artifact(artifact_record, always_success_dep):
     name = artifact_record["name"]
     artifact_path = pathlib.Path(artifact_record["artifact"])
@@ -2873,21 +3053,9 @@ def run_artifact(artifact_record, always_success_dep):
     if result["artifact_has_unexpected_profile_trailer"]:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
 
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
-    )
-    deploy_result = submit_and_commit(deploy_tx, f"{name} code-cell deploy")
+    deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "code-cell deploy")
+    deploy_input = deploy["deploy_input"]
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} code cell")
     code_dep = {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"}
     result.update({
@@ -2895,6 +3063,7 @@ def run_artifact(artifact_record, always_success_dep):
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": code_dep,
+        "deploy_attempts": deploy["deploy_attempts"],
     })
 
     create_input = collect_spendable_cellbases(100 * 100_000_000, max_cells=1)
@@ -2985,30 +3154,23 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
     if result["artifact_has_unexpected_profile_trailer"]:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
 
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
+    deploy = submit_code_cell_deploy_with_fresh_funding(
+        name,
+        artifact,
+        always_success_dep,
+        "bundled-example code-cell deploy",
+        measure_dry_run=True,
     )
-    valid_deploy_dry_run = rpc("dry_run_transaction", [deploy_tx])
-    deploy_result = submit_and_commit(deploy_tx, f"{name} bundled-example code-cell deploy")
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} bundled-example code cell")
     result.update({
-        "deploy_input": deploy_input,
-        "valid_deploy_dry_run": valid_deploy_dry_run,
-        "measured_constraints": measure_release_constraints(deploy_tx, valid_deploy_dry_run),
+        "deploy_input": deploy["deploy_input"],
+        "valid_deploy_dry_run": deploy["valid_deploy_dry_run"],
+        "measured_constraints": measure_release_constraints(deploy["deploy_tx"], deploy["valid_deploy_dry_run"]),
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
+        "deploy_attempts": deploy["deploy_attempts"],
         "status": "passed",
     })
     return result
@@ -3016,29 +3178,18 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
 def deploy_code_cell(name, artifact_path, always_success_dep):
     artifact = pathlib.Path(artifact_path).read_bytes()
     artifact_ckb_data_hash = data_hash(artifact)
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
-    )
-    deploy_result = submit_and_commit(deploy_tx, f"{name} action code-cell deploy")
+    deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "action code-cell deploy")
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} action code cell")
     return {
         "artifact": str(artifact_path),
         "artifact_size_bytes": len(artifact),
         "artifact_ckb_data_hash_blake2b": artifact_ckb_data_hash,
+        "deploy_input": deploy["deploy_input"],
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
+        "deploy_attempts": deploy["deploy_attempts"],
     }
 
 def create_script_locked_cells(label, cells, cell_deps):
@@ -3114,21 +3265,24 @@ def lock_spend_case_specs(example, lock_name, lock_script):
         }
 
     proposal_valid = multisig_proposal_molecule_data(
-        zero_hash, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a), (addr_b, signature_b)], 2, 10, 2000
+        hash_a, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a), (addr_b, signature_b)], 2, 10, 2000
     )
     proposal_missing_signature = multisig_proposal_molecule_data(
-        zero_hash, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a)], 2, 10, 2000
+        hash_a, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a)], 2, 10, 2000
     )
     nft_valid = nft_data(1, addr_a, hash_a, addr_b, 250)
     asset_type_native = molecule_table([bytes([0])])
-    time_lock_valid = timelock_data(addr_a, 0, 100, 10)
-    emergency_valid = emergency_release_molecule_data(zero_hash, addr_a, b"operator review", 10, [addr_a, addr_b])
+    time_lock_valid = timelock_data(addr_a, 0, 100, 10, lock_id=hash_a)
+    lock_seed = bytes([0x66]) * 32
+    committed_lock_id = hashlib.blake2b(lock_seed, digest_size=32, person=b"ckb-default-hash").digest()
+    time_lock_committed = timelock_data(addr_a, 0, 100, 10, lock_id=committed_lock_id)
+    emergency_valid = emergency_release_molecule_data(hash_a, addr_a, b"operator review", 10, [addr_a, addr_b])
 
     cases = {
         ("multisig.cell", "is_signer_lock"): {
-            "valid_cells": [cell(multisig_wallet_molecule_data([addr_a, addr_b], 2, 0, 10))],
+            "valid_cells": [cell(multisig_wallet_molecule_data(hash_a, [addr_a, addr_b], 2, 0, 10))],
             "valid_witnesses": [entry_witness(addr_a)],
-            "invalid_cells": [cell(multisig_wallet_molecule_data([addr_a, addr_b], 2, 0, 10))],
+            "invalid_cells": [cell(multisig_wallet_molecule_data(hash_a, [addr_a, addr_b], 2, 0, 10))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("multisig.cell", "can_execute"): {
@@ -3162,15 +3316,15 @@ def lock_spend_case_specs(example, lock_name, lock_script):
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "listing_seller"): {
-            "valid_cells": [cell(listing_data(1, addr_a, 500, 10))],
+            "valid_cells": [cell(listing_data(1, addr_a, 500, 10, state=0))],
             "valid_witnesses": [entry_witness(addr_a)],
-            "invalid_cells": [cell(listing_data(1, addr_a, 500, 10))],
+            "invalid_cells": [cell(listing_data(1, addr_a, 500, 10, state=0))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "offer_buyer"): {
-            "valid_cells": [cell(offer_data(1, addr_b, 500, 2000))],
+            "valid_cells": [cell(offer_data(1, addr_b, 500, 2000, state=0))],
             "valid_witnesses": [entry_witness(addr_b)],
-            "invalid_cells": [cell(offer_data(1, addr_b, 500, 2000))],
+            "invalid_cells": [cell(offer_data(1, addr_b, 500, 2000, state=0))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("nft.cell", "valid_royalty"): {
@@ -3197,10 +3351,18 @@ def lock_spend_case_specs(example, lock_name, lock_script):
             "invalid_cells": [cell(time_lock_valid)],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
+        ("timelock.cell", "lock_id_commitment"): {
+            "valid_cells": [cell(time_lock_committed)],
+            "valid_witnesses": [entry_witness(lock_seed)],
+            "invalid_cells": [cell(time_lock_committed)],
+            "invalid_witnesses": [entry_witness(hash_b)],
+        },
         ("timelock.cell", "asset_matches"): {
-            "valid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, zero_hash)), cell(time_lock_valid)],
+            "valid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_a))],
+            "valid_read_deps": [cell(time_lock_valid)],
             "valid_witnesses": [entry_witness(), "0x"],
-            "invalid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_b)), cell(time_lock_valid)],
+            "invalid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_b))],
+            "invalid_read_deps": [cell(time_lock_valid)],
             "invalid_witnesses": [entry_witness(), "0x"],
         },
         ("timelock.cell", "not_expired"): {
@@ -3227,11 +3389,15 @@ def lock_spend_case_specs(example, lock_name, lock_script):
     except KeyError as exc:
         raise RuntimeError(f"missing lock spend matrix case for {example}:{lock_name}") from exc
 
-def run_lock_spend_case(label, cells, witnesses, cell_deps, commit_valid):
-    initial = create_script_locked_cells(label, cells, cell_deps)
-    total_capacity = sum(cell["capacity"] for cell in initial["cells"])
+def run_lock_spend_case(label, cells, witnesses, cell_deps, commit_valid, read_deps=None):
+    read_deps = read_deps or []
+    initial = create_script_locked_cells(label, cells + read_deps, cell_deps)
+    input_cells = initial["cells"][:len(cells)]
+    dep_cells = initial["cells"][len(cells):]
+    action_cell_deps = [cell_dep_for(cell) for cell in dep_cells] + cell_deps
+    total_capacity = sum(cell["capacity"] for cell in input_cells)
     tx = transaction(
-        initial["cells"],
+        input_cells,
         [
             {
                 "capacity": hex_u64(total_capacity),
@@ -3240,7 +3406,7 @@ def run_lock_spend_case(label, cells, witnesses, cell_deps, commit_valid):
             }
         ],
         ["0x"],
-        cell_deps,
+        action_cell_deps,
         witnesses,
     )
     if not commit_valid:
@@ -3288,6 +3454,7 @@ def run_lock_spend_matrix(lock_record, always_success_dep):
         specs["invalid_witnesses"],
         cell_deps,
         False,
+        specs.get("invalid_read_deps"),
     )
     valid_spend = run_lock_spend_case(
         f"{name} valid-spend",
@@ -3295,6 +3462,7 @@ def run_lock_spend_matrix(lock_record, always_success_dep):
         specs["valid_witnesses"],
         cell_deps,
         True,
+        specs.get("valid_read_deps"),
     )
     return {
         "name": name,
@@ -3334,17 +3502,17 @@ def build_token_action_case(action, cellscript_lock, cellscript_type, destinatio
             }
         ]
         valid_outputs = [
-            {"capacity": 100 * 100_000_000, "lock": destination_lock, "type": cellscript_type},
             {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type},
+            {"capacity": 100 * 100_000_000, "lock": destination_lock, "type": cellscript_type},
         ]
         valid_outputs_data = [
-            "0x" + token_data(5, token_symbol).hex(),
             "0x" + mint_authority_data(token_symbol, 1000, 15).hex(),
+            "0x" + token_data(5, token_symbol).hex(),
         ]
         malformed_outputs = valid_outputs
         malformed_outputs_data = [
-            "0x" + token_data(6, token_symbol).hex(),
             "0x" + mint_authority_data(token_symbol, 1000, 15).hex(),
+            "0x" + token_data(6, token_symbol).hex(),
         ]
         witnesses = [entry_witness(destination_lock_hash, 5)]
     elif action == "transfer_token":
@@ -3479,6 +3647,7 @@ def run_token_action(action_record, always_success_dep):
 def build_nft_action_case(action_record, cellscript_lock, cellscript_type, destination_lock, current_owner, destination_owner, metadata_hash, royalty_recipient, nft_type, listing_type, offer_type, royalty_payment_type, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
+    flow_state = 0 if original_scoped else None
 
     if action == "mint":
         input_collection_payload = (
@@ -3498,16 +3667,16 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         )
         input_cell = initial["cells"][0]
         outputs = [
-            {"capacity": hex_u64(300 * 100_000_000), "lock": destination_lock, "type": cellscript_type},
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": destination_lock, "type": cellscript_type},
         ]
         witness = [entry_witness(destination_owner, metadata_hash)]
         valid_tx = transaction(
             input_cell,
             outputs,
             [
-                "0x" + nft_data(11, destination_owner, metadata_hash, current_owner, 250).hex(),
                 "0x" + output_collection_payload.hex(),
+                "0x" + nft_data(11, destination_owner, metadata_hash, current_owner, 250).hex(),
             ],
             cell_deps,
             witness,
@@ -3516,8 +3685,8 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
             input_cell,
             outputs,
             [
-                "0x" + nft_data(12, destination_owner, metadata_hash, current_owner, 250).hex(),
                 "0x" + output_collection_payload.hex(),
+                "0x" + nft_data(12, destination_owner, metadata_hash, current_owner, 250).hex(),
             ],
             cell_deps,
             witness,
@@ -3540,31 +3709,35 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         nft_payload = nft_data(token_id, current_owner, metadata_hash, royalty_recipient, 250)
         initial = create_script_locked_cells(
             "nft.create_listing",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload}],
+            [
+                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": nft_type, "data": nft_payload},
+            ],
             cell_deps,
         )
         input_cell = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": listing_type},
-            {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ]
         witness = [entry_witness(price, current_time)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price, current_time).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price + 1, current_time).hex(), "0x" + nft_payload.hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price, current_time, state=flow_state).hex(), "0x"], action_cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + listing_data(token_id, current_owner, price + 1, current_time, state=flow_state).hex(), "0x"], action_cell_deps, witness)
     elif action == "cancel_listing":
         token_id = 4
         price = 120
         created_at = 60
         initial = create_script_locked_cells(
             "nft.cancel_listing",
-            [{"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at)}],
+            [{"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=flow_state)}],
             cell_deps,
         )
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": None}]
         witness = [entry_witness()]
         valid_tx = transaction(input_cell, outputs, ["0x"], cell_deps, witness)
-        malformed_tx = transaction(input_cell, [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": listing_type}], ["0x" + listing_data(token_id, current_owner, price, created_at).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": listing_type}], ["0x" + listing_data(token_id, current_owner, price, created_at, state=flow_state).hex()], cell_deps, witness)
     elif action == "buy_from_listing":
         token_id = 6
         price = 10_000
@@ -3576,26 +3749,26 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         initial = create_script_locked_cells(
             "nft.buy_from_listing",
             [
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at)},
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
+                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=flow_state)},
             ],
             cell_deps,
         )
         outputs = [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
-            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
             {"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
         ]
         witness = [entry_witness(destination_owner, current_owner, payment), "0x"]
         valid_tx = transaction(initial["cells"], outputs, [
+            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
             "0x" + royalty_payment_data(token_id, royalty_recipient, royalty_amount).hex(),
             "0x" + royalty_payment_data(token_id, current_owner, seller_amount).hex(),
-            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
         ], cell_deps, witness)
         malformed_tx = transaction(initial["cells"], outputs, [
+            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
             "0x" + royalty_payment_data(token_id, royalty_recipient, royalty_amount).hex(),
             "0x" + royalty_payment_data(token_id, current_owner, seller_amount + 1).hex(),
-            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
         ], cell_deps, witness)
     elif action == "create_offer":
         token_id = 5
@@ -3609,8 +3782,8 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": offer_type}]
         witness = [entry_witness(token_id, destination_owner, price, expires_at)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price, expires_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price + 1, expires_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price, expires_at, state=flow_state).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + offer_data(token_id, destination_owner, price + 1, expires_at, state=flow_state).hex()], cell_deps, witness)
     elif action == "accept_offer":
         token_id = 7
         price = 10_000
@@ -3622,26 +3795,26 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         initial = create_script_locked_cells(
             "nft.accept_offer",
             [
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at)},
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
+                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at, state=flow_state)},
             ],
             cell_deps,
         )
         outputs = [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
-            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
             {"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": royalty_payment_type},
         ]
         witness = [entry_witness(destination_owner, current_owner, price, current_time), "0x"]
         valid_tx = transaction(initial["cells"], outputs, [
+            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
             "0x" + royalty_payment_data(token_id, royalty_recipient, royalty_amount).hex(),
             "0x" + royalty_payment_data(token_id, current_owner, seller_amount).hex(),
-            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
         ], cell_deps, witness)
         malformed_tx = transaction(initial["cells"], outputs, [
+            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
             "0x" + royalty_payment_data(token_id, royalty_recipient, royalty_amount).hex(),
             "0x" + royalty_payment_data(token_id, current_owner, seller_amount + 1).hex(),
-            "0x" + nft_data(token_id, destination_owner, metadata_hash, royalty_recipient, 250).hex(),
         ], cell_deps, witness)
     elif action == "burn":
         initial = create_script_locked_cells(
@@ -3666,23 +3839,23 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         )
         input_cell = initial["cells"][0]
         outputs = [
-            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
-            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
-            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
-            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
             {"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": collection_type},
+            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
+            {"capacity": hex_u64(250 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
         ]
         outputs_data = [
+            "0x" + output_collection_payload.hex(),
             "0x" + nft_data(21, recipients[0], metadata_hashes[0], current_owner, 250).hex(),
             "0x" + nft_data(22, recipients[1], metadata_hashes[1], current_owner, 250).hex(),
             "0x" + nft_data(23, recipients[2], metadata_hashes[2], current_owner, 250).hex(),
             "0x" + nft_data(24, recipients[3], metadata_hashes[3], current_owner, 250).hex(),
-            "0x" + output_collection_payload.hex(),
         ]
         witness = [entry_witness(fixed_address_array4(recipients), fixed_hash_array4(metadata_hashes))]
         valid_tx = transaction(input_cell, outputs, outputs_data, cell_deps, witness)
         malformed_outputs_data = list(outputs_data)
-        malformed_outputs_data[2] = "0x" + nft_data(99, recipients[2], metadata_hashes[2], current_owner, 250).hex()
+        malformed_outputs_data[3] = "0x" + nft_data(99, recipients[2], metadata_hashes[2], current_owner, 250).hex()
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, witness)
     else:
         raise RuntimeError(f"unsupported NFT action harness: {action}")
@@ -3868,22 +4041,22 @@ def build_amm_action_case(action_record, cellscript_lock, destination_lock, cell
         token_b_type = always_success_lock("0x72")
         pool_type = always_success_lock("0x73")
         initial = create_script_locked_cells("amm.swap_a_for_b", [
-            {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": token_a_type, "data": token_data(input_amount, token_a_symbol)},
             {"capacity": 400 * 100_000_000, "lock": cellscript_lock, "type": pool_type, "data": pool_data(token_a_symbol, token_b_symbol, pool_reserve_a, pool_reserve_b, pool_total_lp, fee_rate_bps)},
+            {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": token_a_type, "data": token_data(input_amount, token_a_symbol)},
         ], cell_deps)
         valid_tx = transaction(initial["cells"], [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": to_lock, "type": token_b_type},
             {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": to_lock, "type": token_b_type},
         ], [
-            "0x" + token_data(output_amount, token_b_symbol).hex(),
             "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a + input_amount, pool_reserve_b - output_amount, pool_total_lp, fee_rate_bps).hex(),
+            "0x" + token_data(output_amount, token_b_symbol).hex(),
         ], cell_deps, [entry_witness(min_output, to), "0x"])
         malformed_tx = transaction(initial["cells"], [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": to_lock, "type": token_b_type},
             {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": to_lock, "type": token_b_type},
         ], [
-            "0x" + token_data(output_amount + 1, token_b_symbol).hex(),
             "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a + input_amount, pool_reserve_b - output_amount, pool_total_lp, fee_rate_bps).hex(),
+            "0x" + token_data(output_amount + 1, token_b_symbol).hex(),
         ], cell_deps, [entry_witness(min_output, to), "0x"])
         input_cells_to_check = initial["cells"]
     elif action == "add_liquidity":
@@ -3904,23 +4077,23 @@ def build_amm_action_case(action_record, cellscript_lock, destination_lock, cell
         lp_type = always_success_lock("0x6a")
         pool_id = decode_hex(script_hash(pool_type), 32)
         initial = create_script_locked_cells("amm.add_liquidity", [
+            {"capacity": 400 * 100_000_000, "lock": cellscript_lock, "type": pool_type, "data": pool_data(token_a_symbol, token_b_symbol, pool_reserve_a, pool_reserve_b, pool_total_lp, fee_rate_bps)},
             {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": token_a_type, "data": token_data(token_a_amount, token_a_symbol)},
             {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": token_b_type, "data": token_data(token_b_amount, token_b_symbol)},
-            {"capacity": 400 * 100_000_000, "lock": cellscript_lock, "type": pool_type, "data": pool_data(token_a_symbol, token_b_symbol, pool_reserve_a, pool_reserve_b, pool_total_lp, fee_rate_bps)},
         ], cell_deps)
         valid_tx = transaction(initial["cells"], [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": lp_type},
             {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": lp_type},
         ], [
-            "0x" + lp_receipt_data(pool_id, minted_lp, provider).hex(),
             "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a + token_a_amount, pool_reserve_b + token_b_amount, pool_total_lp + minted_lp, fee_rate_bps).hex(),
+            "0x" + lp_receipt_data(pool_id, minted_lp, provider).hex(),
         ], cell_deps, [entry_witness(provider), "0x", "0x"])
         malformed_tx = transaction(initial["cells"], [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": lp_type},
             {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": lp_type},
         ], [
-            "0x" + lp_receipt_data(pool_id, minted_lp + 1, provider).hex(),
             "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a + token_a_amount, pool_reserve_b + token_b_amount, pool_total_lp + minted_lp, fee_rate_bps).hex(),
+            "0x" + lp_receipt_data(pool_id, minted_lp + 1, provider).hex(),
         ], cell_deps, [entry_witness(provider), "0x", "0x"])
         input_cells_to_check = initial["cells"]
     elif action == "remove_liquidity":
@@ -3941,26 +4114,26 @@ def build_amm_action_case(action_record, cellscript_lock, destination_lock, cell
         lp_type = always_success_lock("0x6f")
         pool_id = decode_hex(script_hash(pool_type), 32)
         initial = create_script_locked_cells("amm.remove_liquidity", [
-            {"capacity": 600 * 100_000_000, "lock": cellscript_lock, "type": lp_type, "data": lp_receipt_data(pool_id, burned_lp, provider)},
             {"capacity": 400 * 100_000_000, "lock": cellscript_lock, "type": pool_type, "data": pool_data(token_a_symbol, token_b_symbol, pool_reserve_a, pool_reserve_b, pool_total_lp, fee_rate_bps)},
+            {"capacity": 600 * 100_000_000, "lock": cellscript_lock, "type": lp_type, "data": lp_receipt_data(pool_id, burned_lp, provider)},
         ], cell_deps)
         valid_tx = transaction(initial["cells"], [
+            {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_a_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_b_type},
-            {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
         ], [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a - withdrawn_a, pool_reserve_b - withdrawn_b, pool_total_lp - burned_lp, fee_rate_bps).hex(),
             "0x" + token_data(withdrawn_a, token_a_symbol).hex(),
             "0x" + token_data(withdrawn_b, token_b_symbol).hex(),
-            "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a - withdrawn_a, pool_reserve_b - withdrawn_b, pool_total_lp - burned_lp, fee_rate_bps).hex(),
         ], cell_deps, [entry_witness(provider), "0x"])
         malformed_tx = transaction(initial["cells"], [
+            {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_a_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_b_type},
-            {"capacity": hex_u64(400 * 100_000_000), "lock": cellscript_lock, "type": pool_type},
         ], [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a - withdrawn_a, pool_reserve_b - withdrawn_b, pool_total_lp - burned_lp, fee_rate_bps).hex(),
             "0x" + token_data(withdrawn_a + 1, token_a_symbol).hex(),
             "0x" + token_data(withdrawn_b, token_b_symbol).hex(),
-            "0x" + pool_data(token_a_symbol, token_b_symbol, pool_reserve_a - withdrawn_a, pool_reserve_b - withdrawn_b, pool_total_lp - burned_lp, fee_rate_bps).hex(),
         ], cell_deps, [entry_witness(provider), "0x"])
         input_cells_to_check = initial["cells"]
     else:
@@ -4004,7 +4177,7 @@ def run_multisig_action(action_record, always_success_dep):
     signer_b = decode_hex(script_hash(always_success_lock("0x55")), 32)
     signer_c = decode_hex(script_hash(always_success_lock("0x56")), 32)
     target = decode_hex(script_hash(always_success_lock("0x57")), 32)
-    wallet_hash = bytes(32)
+    wallet_id = decode_hex(script_hash(always_success_lock("0x58")), 32)
     cell_deps = [always_success_dep, code["code_cell_dep"]]
 
     result = {
@@ -4027,7 +4200,7 @@ def run_multisig_action(action_record, always_success_dep):
         signer_b,
         signer_c,
         target,
-        wallet_hash,
+        wallet_id,
         cell_deps,
     )
     initial = multisig_case["initial"]
@@ -4060,7 +4233,7 @@ def run_multisig_action(action_record, always_success_dep):
     })
     return result
 
-def build_multisig_action_case(action_record, cellscript_lock, wallet_type, proposal_type, confirmation_type, execution_type, signer_a, signer_b, signer_c, target, wallet_hash, cell_deps):
+def build_multisig_action_case(action_record, cellscript_lock, wallet_type, proposal_type, confirmation_type, execution_type, signer_a, signer_b, signer_c, target, wallet_id, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
 
@@ -4068,9 +4241,9 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         current_time = 10
         signers = [signer_a, signer_b]
         signers_payload = molecule_fixvec(signers)
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, current_time) if original_scoped else multisig_wallet_data(signer_a, signer_b, 2, 0, current_time)
-        malformed_wallet_payload = multisig_wallet_molecule_data(signers, 1, 0, current_time) if original_scoped else multisig_wallet_data(signer_a, signer_b, 1, 0, current_time)
-        witness = entry_witness(molecule_bytes(signers_payload), bytes([2]), current_time) if original_scoped else entry_witness(signer_a, signer_b, bytes([2]), current_time)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, current_time) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, 2, 0, current_time)
+        malformed_wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 1, 0, current_time) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, 1, 0, current_time)
+        witness = entry_witness(wallet_id, molecule_bytes(signers_payload), bytes([2]), current_time) if original_scoped else entry_witness(wallet_id, signer_a, signer_b, bytes([2]), current_time)
         initial = create_script_locked_cells(
             "multisig.create_wallet",
             [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
@@ -4086,7 +4259,7 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         initial_nonce = 0
         proposal_id = 1
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, threshold, initial_nonce, 10) if original_scoped else multisig_wallet_data(signer_a, signer_b, threshold, initial_nonce, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, threshold, initial_nonce, 10) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, initial_nonce, 10)
         initial = create_script_locked_cells(
             f"multisig.{action}",
             [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": wallet_type, "data": wallet_payload}],
@@ -4122,17 +4295,17 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
             data_payload = bytes([new_threshold])
             witness = entry_witness(signer_a, bytes([new_threshold]), current_time)
             malformed_witness = entry_witness(signer_a, bytes([3]), current_time)
-        output_wallet_payload = multisig_wallet_molecule_data(signers, threshold, proposal_id, 10) if original_scoped else multisig_wallet_data(signer_a, signer_b, threshold, proposal_id, 10)
+        output_wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, threshold, proposal_id, 10) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, proposal_id, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, operation, proposal_target, amount, data_payload, [], threshold, current_time, current_time + 1440)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, operation, proposal_target, amount, data_payload, [], threshold, current_time, current_time + 1440)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, operation, proposal_target, amount, threshold, 0, current_time, current_time + 1440)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, operation, proposal_target, amount, threshold, 0, current_time, current_time + 1440)
         )
         outputs = [
-            {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": proposal_type},
             {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": wallet_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": proposal_type},
         ]
-        outputs_data = ["0x" + proposal_payload.hex(), "0x" + output_wallet_payload.hex()]
+        outputs_data = ["0x" + output_wallet_payload.hex(), "0x" + proposal_payload.hex()]
         valid_tx = transaction(input_cell, outputs, outputs_data, cell_deps, [witness])
         malformed_tx = transaction(input_cell, outputs, outputs_data, cell_deps, [malformed_witness])
     elif action == "add_signature":
@@ -4141,61 +4314,67 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         signature_a = bytes([0xA5]) * 64
         signature_b = bytes([0xB6]) * 64
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 1, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 1, 20, 2000)
         )
         output_proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
         )
-        input_cells = [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload}]
-        if original_scoped:
-            input_cells.append({"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": wallet_type, "data": wallet_payload})
-        initial = create_script_locked_cells("multisig.add_signature", input_cells, cell_deps)
-        inputs = initial["cells"] if original_scoped else initial["cells"][0]
-        outputs = [
-            {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": confirmation_type},
-            {"capacity": hex_u64(600 * 100_000_000), "lock": cellscript_lock, "type": proposal_type},
+        input_cells = [
+            {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
+            {"capacity": 500 * 100_000_000, "lock": always_success_lock(), "type": wallet_type, "data": wallet_payload},
         ]
-        valid_tx = transaction(inputs, outputs, ["0x" + signature_confirmation_data(proposal_id, signer_b, current_time).hex(), "0x" + output_proposal_payload.hex()], cell_deps, [entry_witness(signer_b, signature_b, current_time), "0x"] if original_scoped else [entry_witness(signer_b, current_time)])
-        malformed_tx = transaction(inputs, outputs, ["0x" + signature_confirmation_data(proposal_id, signer_b, current_time).hex(), "0x" + proposal_payload.hex()], cell_deps, [entry_witness(signer_b, signature_b, current_time), "0x"] if original_scoped else [entry_witness(signer_b, current_time)])
+        initial = create_script_locked_cells("multisig.add_signature", input_cells, cell_deps)
+        inputs = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
+        outputs = [
+            {"capacity": hex_u64(600 * 100_000_000), "lock": cellscript_lock, "type": proposal_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": confirmation_type},
+        ]
+        valid_tx = transaction(inputs, outputs, ["0x" + output_proposal_payload.hex(), "0x" + signature_confirmation_data(proposal_id, signer_b, current_time).hex()], action_cell_deps, [entry_witness(signer_b, signature_b, current_time)])
+        malformed_tx = transaction(inputs, outputs, ["0x" + proposal_payload.hex(), "0x" + signature_confirmation_data(proposal_id, signer_b, current_time).hex()], action_cell_deps, [entry_witness(signer_b, signature_b, current_time)])
     elif action == "execute_proposal":
         current_time = 40
         proposal_id = 8
         signature_a = bytes([0xA5]) * 64
         signature_b = bytes([0xB6]) * 64
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
         )
-        input_cells = [{"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload}]
-        if original_scoped:
-            input_cells.append({"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": wallet_type, "data": wallet_payload})
+        input_cells = [
+            {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
+            {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": wallet_type, "data": wallet_payload},
+        ]
         initial = create_script_locked_cells("multisig.execute_proposal", input_cells, cell_deps)
-        inputs = initial["cells"] if original_scoped else initial["cells"][0]
+        inputs = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [{"capacity": hex_u64(200 * 100_000_000), "lock": cellscript_lock, "type": execution_type}]
-        valid_tx = transaction(inputs, outputs, ["0x" + execution_record_data(proposal_id, signer_a, current_time, 1).hex()], cell_deps, [entry_witness(signer_a, current_time), "0x"] if original_scoped else [entry_witness(signer_a, current_time)])
-        malformed_tx = transaction(inputs, outputs, ["0x" + execution_record_data(proposal_id, signer_a, current_time + 1, 1).hex()], cell_deps, [entry_witness(signer_a, current_time), "0x"] if original_scoped else [entry_witness(signer_a, current_time)])
+        valid_tx = transaction(inputs, outputs, ["0x" + execution_record_data(proposal_id, signer_a, current_time, 1).hex()], action_cell_deps, [entry_witness(signer_a, current_time)])
+        malformed_tx = transaction(inputs, outputs, ["0x" + execution_record_data(proposal_id, signer_a, current_time + 1, 1).hex()], action_cell_deps, [entry_witness(signer_a, current_time)])
     elif action == "cancel_proposal":
         proposal_id = 9
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
-        proposal_payload = multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [], 2, 20, 2000) if original_scoped else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 0, 20, 2000)
-        input_cells = [{"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload}]
-        if original_scoped:
-            input_cells.append({"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": wallet_type, "data": wallet_payload})
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
+        proposal_payload = multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [], 2, 20, 2000) if original_scoped else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 0, 20, 2000)
+        input_cells = [
+            {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
+            {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": wallet_type, "data": wallet_payload},
+        ]
         initial = create_script_locked_cells("multisig.cancel_proposal", input_cells, cell_deps)
-        inputs = initial["cells"] if original_scoped else initial["cells"][0]
+        inputs = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [{"capacity": hex_u64(490 * 100_000_000), "lock": cellscript_lock, "type": None}]
-        valid_tx = transaction(inputs, outputs, ["0x"], cell_deps, [entry_witness(signer_a), "0x"] if original_scoped else [entry_witness(signer_a)])
-        malformed_tx = transaction(inputs, outputs, ["0x"], cell_deps, [entry_witness(signer_b), "0x"] if original_scoped else [entry_witness(signer_b)])
+        valid_tx = transaction(inputs, outputs, ["0x"], action_cell_deps, [entry_witness(signer_a)])
+        malformed_tx = transaction(inputs, outputs, ["0x"], action_cell_deps, [entry_witness(signer_b)])
     else:
         raise RuntimeError(f"unsupported multisig action harness: {action}")
 
@@ -4217,6 +4396,8 @@ def run_launch_action(action_record, always_success_dep):
     auth_type = always_success_lock("0x61")
     token_type = always_success_lock("0x62")
     pool_paired_type = always_success_lock("0x63")
+    pool_type = always_success_lock("0x64")
+    lp_type = always_success_lock("0x65")
     symbol = b"LAUNCH01"
     max_supply = 10_000
     initial_mint = 1_000
@@ -4251,6 +4432,8 @@ def run_launch_action(action_record, always_success_dep):
         auth_type,
         token_type,
         pool_paired_type,
+        pool_type,
+        lp_type,
         symbol,
         max_supply,
         initial_mint,
@@ -4296,26 +4479,37 @@ def run_launch_action(action_record, always_success_dep):
     })
     return result
 
-def build_launch_action_case(action_record, cellscript_lock, auth_type, token_type, pool_paired_type, symbol, max_supply, initial_mint, pool_seed_amount, paired_amount, paired_symbol, fee_rate_bps, creator_lock, creator, recipient_locks, recipients, recipient_payload, total_distributed, cell_deps):
+def build_launch_action_case(action_record, cellscript_lock, auth_type, token_type, pool_paired_type, pool_type, lp_type, symbol, max_supply, initial_mint, pool_seed_amount, paired_amount, paired_symbol, fee_rate_bps, creator_lock, creator, recipient_locks, recipients, recipient_payload, total_distributed, cell_deps):
     action = action_record["action"]
     if action == "launch_token":
+        initial_lp = pool_seed_amount
+        remaining = initial_mint - total_distributed - pool_seed_amount
+        pool_id = decode_hex(script_hash(pool_type), 32)
         initial = create_script_locked_cells(
             "launch.launch_token",
             [{"capacity": 4000 * 100_000_000, "lock": cellscript_lock, "type": pool_paired_type, "data": token_data(paired_amount, paired_symbol)}],
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        outputs = [{"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type}]
-        outputs_data = ["0x" + mint_authority_data(symbol, max_supply, initial_mint).hex()]
+        outputs = [
+            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type},
+            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": lp_type},
+        ]
+        outputs_data = [
+            "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
+            "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, initial_lp, fee_rate_bps).hex(),
+            "0x" + lp_receipt_data(pool_id, initial_lp, creator).hex(),
+        ]
         for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
             outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
             outputs_data.append("0x" + token_data(amount, symbol).hex())
         outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": token_type})
-        outputs_data.append("0x" + token_data(pool_seed_amount, symbol).hex())
+        outputs_data.append("0x" + token_data(remaining, symbol).hex())
         witness = entry_witness(symbol, max_supply, initial_mint, pool_seed_amount, bytes([fee_rate_bps & 0xff, fee_rate_bps >> 8]), creator, recipient_payload)
         valid_tx = transaction(input_cell, outputs, outputs_data, cell_deps, [witness])
         malformed_outputs_data = list(outputs_data)
-        malformed_outputs_data[-1] = "0x" + token_data(pool_seed_amount - 1, symbol).hex()
+        malformed_outputs_data[-1] = "0x" + token_data(remaining - 1, symbol).hex()
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, [witness])
     else:
         initial = create_script_locked_cells(
@@ -4443,7 +4637,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         grant_type = always_success_lock("0x43")
         amount = 77
         now = 0
-        header_dep = find_spendable_cellbase()["block_hash"]
+        header_dep = get_block_by_number(0)["header"]["hash"]
         initial = create_script_locked_cells(
             "vesting.grant_vesting",
             [
@@ -4496,7 +4690,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         grant_timepoint = 0
         cliff_timepoint = 0
         end_timepoint = 0
-        header_dep = find_spendable_cellbase()["block_hash"]
+        header_dep = get_block_by_number(0)["header"]["hash"]
         initial = create_script_locked_cells(
             "vesting.claim_vested",
             [{"capacity": 500 * 100_000_000, "lock": beneficiary_lock, "type": grant_type, "data": vesting_grant_data(1, beneficiary, total_amount, claimed_amount, grant_timepoint, cliff_timepoint, end_timepoint, symbol)}],
@@ -4543,7 +4737,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         grant_timepoint = 0
         cliff_timepoint = 0
         end_timepoint = 0
-        header_dep = find_spendable_cellbase()["block_hash"]
+        header_dep = get_block_by_number(0)["header"]["hash"]
         initial = create_script_locked_cells(
             "vesting.revoke_grant",
             [
@@ -4595,6 +4789,20 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
 def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, owner, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
+    flow_state = 0 if original_scoped else None
+    lock_id = decode_hex(script_hash(cellscript_type), 32)
+
+    def scoped_lock_id():
+        return lock_id if original_scoped else bytes(32)
+
+    def scoped_timelock_data(owner_value, lock_type, unlock_height, created_at):
+        return timelock_data(
+            owner_value,
+            lock_type,
+            unlock_height,
+            created_at,
+            lock_id=lock_id if original_scoped else None,
+        )
 
     if action == "create_absolute_lock":
         current_height = 50
@@ -4605,10 +4813,10 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        witness = [entry_witness(owner, unlock_height, current_height)]
+        witness = [entry_witness(lock_id, owner, unlock_height, current_height)] if original_scoped else [entry_witness(owner, unlock_height, current_height)]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, unlock_height, current_height).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, unlock_height + 1, current_height).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, unlock_height, current_height).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, unlock_height + 1, current_height).hex()], cell_deps, witness)
     elif action == "create_relative_lock":
         current_height = 50
         lock_period = 25
@@ -4618,75 +4826,87 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        witness = [entry_witness(owner, lock_period, current_height)]
+        witness = [entry_witness(lock_id, owner, lock_period, current_height)] if original_scoped else [entry_witness(owner, lock_period, current_height)]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 1, current_height + lock_period, current_height).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 1, current_height + lock_period + 1, current_height).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 1, current_height + lock_period, current_height).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 1, current_height + lock_period + 1, current_height).hex()], cell_deps, witness)
     elif action == "lock_asset":
         unlock_height = 500
         created_at = 1
         amount = 42
         asset_type_payload = molecule_bytes(bytes([0]))
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount, lock_hash) if original_scoped else locked_asset_data(amount, lock_hash)
         malformed_locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount + 1, lock_hash) if original_scoped else locked_asset_data(amount + 1, lock_hash)
         locked_asset_type = always_success_lock("0x20")
         initial = create_script_locked_cells(
             "timelock.lock_asset",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)}],
+            [
+                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
+            ],
             cell_deps,
         )
-        inputs = initial["cells"] if original_scoped else initial["cells"][0]
+        inputs = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": locked_asset_type},
-            {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ]
         witness = [entry_witness(molecule_bytes(asset_type_payload), amount)] if original_scoped else [entry_witness(lock_hash, amount)]
-        valid_tx = transaction(inputs, outputs, ["0x" + locked_asset_payload.hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(inputs, outputs, ["0x" + malformed_locked_asset_payload.hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(inputs, outputs, ["0x" + locked_asset_payload.hex(), "0x"], action_cell_deps, witness)
+        malformed_tx = transaction(inputs, outputs, ["0x" + malformed_locked_asset_payload.hex(), "0x"], action_cell_deps, witness)
     elif action == "request_release":
         unlock_height = 100
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         request_type = always_success_lock("0x21")
         initial = create_script_locked_cells(
             "timelock.request_release",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)}],
+            [
+                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
+            ],
             cell_deps,
         )
         input_cell = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": request_type},
-            {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ]
         witness = [entry_witness(owner, current_height)] if original_scoped else [entry_witness(lock_hash, owner, current_height)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height + 1).hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height, state=flow_state).hex(), "0x"], action_cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + release_request_data(lock_hash, owner, current_height + 1, state=flow_state).hex(), "0x"], action_cell_deps, witness)
     elif action == "request_emergency_release":
         unlock_height = 500
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         reason_payload = molecule_bytes(b"emergency release")
         emergency_type = always_success_lock("0x22")
         initial = create_script_locked_cells(
             "timelock.request_emergency_release",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)}],
+            [
+                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
+            ],
             cell_deps,
         )
         emergency_payload = emergency_release_molecule_data(lock_hash, owner, reason_payload, current_height, []) if original_scoped else emergency_release_data(lock_hash, owner, current_height, 0)
         malformed_emergency_payload = emergency_release_molecule_data(lock_hash, owner, reason_payload, current_height + 1, []) if original_scoped else emergency_release_data(lock_hash, owner, current_height, 1)
-        inputs = initial["cells"] if original_scoped else initial["cells"][0]
+        inputs = initial["cells"][0]
+        action_cell_deps = [cell_dep_for(initial["cells"][1])] + cell_deps
         outputs = [
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": emergency_type},
-            {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ]
         witness = [entry_witness(owner, molecule_bytes(reason_payload), current_height)] if original_scoped else [entry_witness(lock_hash, owner, current_height)]
-        valid_tx = transaction(inputs, outputs, ["0x" + emergency_payload.hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(inputs, outputs, ["0x" + malformed_emergency_payload.hex(), "0x" + timelock_data(owner, 0, unlock_height, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(inputs, outputs, ["0x" + emergency_payload.hex(), "0x"], action_cell_deps, witness)
+        malformed_tx = transaction(inputs, outputs, ["0x" + malformed_emergency_payload.hex(), "0x"], action_cell_deps, witness)
     elif action == "approve_emergency_release":
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         requester = owner
         requested_at = 120
         initial_approvals = 1
@@ -4714,19 +4934,19 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         created_at = 1
         initial = create_script_locked_cells(
             "timelock.extend_lock",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": timelock_data(owner, 0, initial_unlock_height, created_at)}],
+            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": scoped_timelock_data(owner, 0, initial_unlock_height, created_at)}],
             cell_deps,
         )
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
         witness = [entry_witness(additional_period, owner, current_height)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, initial_unlock_height + additional_period, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, initial_unlock_height + additional_period + 1, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, initial_unlock_height + additional_period, created_at).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, initial_unlock_height + additional_period + 1, created_at).hex()], cell_deps, witness)
     elif action == "execute_release":
         unlock_height = 100
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         time_lock_type = always_success_lock("0x01")
         locked_asset_type = always_success_lock("0x02")
         release_request_type = always_success_lock("0x03")
@@ -4736,9 +4956,9 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         initial = create_script_locked_cells(
             "timelock.execute_release",
             [
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": locked_asset_type, "data": locked_asset_payload},
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": release_request_type, "data": release_request_data(lock_hash, owner, 120)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": release_request_type, "data": release_request_data(lock_hash, owner, 120, state=flow_state)},
             ],
             cell_deps,
         )
@@ -4750,7 +4970,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         unlock_height = 500
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         time_lock_type = always_success_lock("0x11")
         locked_asset_type = always_success_lock("0x12")
         emergency_type = always_success_lock("0x13")
@@ -4763,7 +4983,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         initial = create_script_locked_cells(
             "timelock.execute_emergency_release",
             [
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": locked_asset_type, "data": locked_asset_payload},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": emergency_type, "data": emergency_payload},
             ],
@@ -4776,6 +4996,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
     elif action == "batch_create_locks":
         current_height = 50
         owners = [owner, bytes([0x51]) * 32, bytes([0x52]) * 32, bytes([0x53]) * 32]
+        lock_ids = [lock_id, bytes([0x61]) * 32, bytes([0x62]) * 32, bytes([0x63]) * 32]
         unlock_heights = [100, 110, 120, 130]
         initial = create_script_locked_cells(
             "timelock.batch_create_locks",
@@ -4790,15 +5011,15 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
         ]
         outputs_data = [
-            "0x" + timelock_data(owners[0], 0, unlock_heights[0], current_height).hex(),
-            "0x" + timelock_data(owners[1], 0, unlock_heights[1], current_height).hex(),
-            "0x" + timelock_data(owners[2], 0, unlock_heights[2], current_height).hex(),
-            "0x" + timelock_data(owners[3], 0, unlock_heights[3], current_height).hex(),
+            "0x" + timelock_data(owners[0], 0, unlock_heights[0], current_height, lock_id=lock_ids[0] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[1], 0, unlock_heights[1], current_height, lock_id=lock_ids[1] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[2], 0, unlock_heights[2], current_height, lock_id=lock_ids[2] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[3], 0, unlock_heights[3], current_height, lock_id=lock_ids[3] if original_scoped else None).hex(),
         ]
-        witness = [entry_witness(fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)]
+        witness = [entry_witness(fixed_hash_array4(lock_ids), fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)] if original_scoped else [entry_witness(fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)]
         valid_tx = transaction(input_cell, outputs, outputs_data, cell_deps, witness)
         malformed_outputs_data = list(outputs_data)
-        malformed_outputs_data[1] = "0x" + timelock_data(owners[1], 0, unlock_heights[1] + 1, current_height).hex()
+        malformed_outputs_data[1] = "0x" + timelock_data(owners[1], 0, unlock_heights[1] + 1, current_height, lock_id=lock_ids[1] if original_scoped else None).hex()
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, witness)
     else:
         raise RuntimeError(f"unsupported TimeLock action harness: {action}")
@@ -4859,6 +5080,1094 @@ def run_timelock_action(action_record, always_success_dep):
         "status": "passed",
     })
     return result
+
+def action_record_by(records, action):
+    for record in records:
+        if record.get("action") == action:
+            return record
+    raise RuntimeError(f"missing action artifact for stateful scenario: {action}")
+
+def deploy_stateful_action(record, always_success_dep):
+    code = deploy_code_cell(f"stateful.{record['name']}", record["artifact"], always_success_dep)
+    lock_script = {
+        "code_hash": code["artifact_ckb_data_hash_blake2b"],
+        "hash_type": "data1",
+        "args": "0x",
+    }
+    return {
+        "action": record["action"],
+        "name": record["name"],
+        "record": record,
+        "code": code,
+        "lock": lock_script,
+        "lock_hash": decode_hex(script_hash(lock_script), 32),
+        "cell_deps": [always_success_dep, code["code_cell_dep"]],
+    }
+
+def output_cell_from_tx(commit, tx, index):
+    output = tx["outputs"][index]
+    return {
+        "tx_hash": commit["tx_hash"],
+        "index": index,
+        "capacity": parse_hex_u64(output["capacity"]),
+        "lock": output["lock"],
+        "type": output.get("type"),
+        "data_hex": tx["outputs_data"][index],
+    }
+
+def assert_not_live(tx_hash, index, label):
+    result = rpc("get_live_cell", [out_point(tx_hash, index), True])
+    if result and result.get("status") == "live":
+        raise RuntimeError(f"{label} is still live after stateful spend: {result}")
+    return result
+
+def assert_stateful_step_constraints(label, constraints):
+    failures = []
+    if constraints.get("consensus_serialized_tx_size_bytes") is None:
+        failures.append("consensus tx size was not measured")
+    if constraints.get("occupied_capacity_shannons") is None:
+        failures.append("occupied capacity was not derived")
+    if constraints.get("capacity_is_sufficient") is not True:
+        failures.append(
+            "outputs are under-capacity"
+            if constraints.get("capacity_is_sufficient") is False
+            else "capacity sufficiency was not measured"
+        )
+    if failures:
+        detail = {
+            "label": label,
+            "failures": failures,
+            "tx_measure_error": constraints.get("tx_measure_error"),
+            "under_capacity_output_indexes": constraints.get("under_capacity_output_indexes"),
+        }
+        raise RuntimeError("stateful step constraint measurement failed: " + json.dumps(detail, sort_keys=True))
+
+def run_stateful_step(scenario, step, tx, consumed_cells=None, live_output_indexes=None):
+    consumed_cells = consumed_cells or []
+    live_output_indexes = list(range(len(tx["outputs"]))) if live_output_indexes is None else live_output_indexes
+    dry_run = rpc("dry_run_transaction", [tx])
+    constraints = measure_release_constraints(tx, dry_run)
+    assert_stateful_step_constraints(f"{scenario}.{step}", constraints)
+    commit = submit_and_commit(tx, f"stateful {scenario}.{step}")
+    consumed = [
+        assert_not_live(cell["tx_hash"], cell["index"], f"stateful {scenario}.{step} consumed input {index}")
+        for index, cell in enumerate(consumed_cells)
+    ]
+    outputs_live = {
+        str(index): assert_live(commit["tx_hash"], index, f"stateful {scenario}.{step} output {index}").get("status") == "live"
+        for index in live_output_indexes
+    }
+    return {
+        "step": step,
+        "dry_run": dry_run,
+        "commit": commit,
+        "measured_constraints": constraints,
+        "consumed_inputs": consumed,
+        "outputs_live": outputs_live,
+        "status": "passed",
+    }
+
+def action_example(record):
+    example = record.get("example")
+    if example:
+        return pathlib.Path(example).name
+    original_source = record.get("original_source") or record.get("source")
+    if original_source:
+        return pathlib.Path(original_source).name
+    name = record.get("name", "")
+    for row in (report.get("ckb_business_coverage") or {}).get("rows", []):
+        candidate = row.get("example", "")
+        if candidate.removesuffix(".cell") in name:
+            return candidate
+    raise RuntimeError(f"cannot determine example for action record: {record}")
+
+def action_id(record_or_action):
+    record = record_or_action.get("record", record_or_action)
+    return f"{action_example(record)}:{record['action']}"
+
+def action_ids(records_or_actions):
+    return [action_id(record_or_action) for record_or_action in records_or_actions]
+
+def expected_stateful_action_ids():
+    coverage_rows = (report.get("ckb_business_coverage") or {}).get("rows", [])
+    if not coverage_rows:
+        raise RuntimeError("acceptance report does not contain CKB business coverage rows")
+    return sorted(
+        f"{example}:{action}"
+        for row in coverage_rows
+        for example in [row["example"]]
+        for action in (row.get("strict_ckb_actions") or row.get("source_actions") or [])
+    )
+
+def all_stateful_action_records():
+    records = (
+        token_action_artifacts
+        + nft_action_artifacts
+        + timelock_action_artifacts
+        + multisig_action_artifacts
+        + vesting_action_artifacts
+        + amm_action_artifacts
+        + launch_action_artifacts
+    )
+    by_id = {}
+    for record in records:
+        by_id.setdefault(action_id(record), record)
+    return [by_id[action] for action in sorted(by_id)]
+
+def consumed_cells_from_tx(tx):
+    consumed = []
+    for tx_input in tx.get("inputs", []):
+        previous_output = tx_input["previous_output"]
+        consumed.append({
+            "tx_hash": previous_output["tx_hash"],
+            "index": parse_hex_u64(previous_output["index"]),
+        })
+    return consumed
+
+def build_stateful_action_branch_case(record, always_success_dep):
+    deployed = deploy_stateful_action(record, always_success_dep)
+    cellscript_lock = deployed["lock"]
+    cell_deps = deployed["cell_deps"]
+    example = action_example(record)
+
+    if example == "token.cell":
+        cellscript_type = always_success_lock()
+        destination_lock = always_success_lock()
+        case = build_token_action_case(
+            record["action"],
+            cellscript_lock,
+            cellscript_type,
+            destination_lock,
+            decode_hex(script_hash(destination_lock), 32),
+            b"TOKEN001",
+            cell_deps,
+        )
+    elif example == "nft.cell":
+        destination_lock = always_success_lock()
+        case = build_nft_action_case(
+            record,
+            cellscript_lock,
+            always_success_lock(),
+            destination_lock,
+            decode_hex(script_hash(cellscript_lock), 32),
+            decode_hex(script_hash(destination_lock), 32),
+            bytes(range(32)),
+            bytes(reversed(range(32))),
+            always_success_lock("0x21"),
+            always_success_lock("0x22"),
+            always_success_lock("0x23"),
+            always_success_lock("0x24"),
+            cell_deps,
+        )
+    elif example == "timelock.cell":
+        owner = decode_hex(script_hash(cellscript_lock), 32)
+        case = build_timelock_action_case(record, cellscript_lock, always_success_lock(), owner, cell_deps)
+    elif example == "multisig.cell":
+        case = build_multisig_action_case(
+            record,
+            cellscript_lock,
+            always_success_lock("0x51"),
+            always_success_lock("0x52"),
+            always_success_lock("0x53"),
+            always_success_lock("0x54"),
+            decode_hex(script_hash(cellscript_lock), 32),
+            decode_hex(script_hash(always_success_lock("0x55")), 32),
+            decode_hex(script_hash(always_success_lock("0x56")), 32),
+            decode_hex(script_hash(always_success_lock("0x57")), 32),
+            bytes(32),
+            cell_deps,
+        )
+    elif example == "vesting.cell":
+        admin_lock = always_success_lock()
+        case = build_vesting_action_case(
+            record,
+            cellscript_lock,
+            admin_lock,
+            always_success_lock("0x41"),
+            decode_hex(script_hash(admin_lock), 32),
+            b"VEST0001",
+            10,
+            100,
+            True,
+            cell_deps,
+        )
+    elif example == "amm_pool.cell":
+        case = build_amm_action_case(record, cellscript_lock, always_success_lock(), cell_deps)
+    elif example == "launch.cell":
+        action = record["action"]
+        symbol = b"LAUNCH01"
+        max_supply = 10_000
+        initial_mint = 1_000
+        pool_seed_amount = 500
+        paired_amount = 250
+        paired_symbol = b"PAIR0001"
+        fee_rate_bps = 30
+        creator_lock = always_success_lock("0x60")
+        recipient_amounts = [10, 20, 30, 40] if action == "launch_token" else [10, 20, 30, 40, 50, 60, 70, 80]
+        recipient_locks = [always_success_lock("0x7" + format(index, "x")) for index in range(len(recipient_amounts))]
+        recipients = [
+            (decode_hex(script_hash(lock), 32), amount)
+            for lock, amount in zip(recipient_locks, recipient_amounts)
+        ]
+        case = build_launch_action_case(
+            record,
+            cellscript_lock,
+            always_success_lock("0x61"),
+            always_success_lock("0x62"),
+            always_success_lock("0x63"),
+            always_success_lock("0x64"),
+            always_success_lock("0x65"),
+            symbol,
+            max_supply,
+            initial_mint,
+            pool_seed_amount,
+            paired_amount,
+            paired_symbol,
+            fee_rate_bps,
+            creator_lock,
+            decode_hex(script_hash(creator_lock), 32),
+            recipient_locks,
+            recipients,
+            fixed_recipient_tuple_array4(recipients) if action == "launch_token" else fixed_recipient_tuple_array(recipients),
+            sum(amount for _, amount in recipients),
+            cell_deps,
+        )
+    else:
+        raise RuntimeError(f"unsupported stateful action branch example: {example}")
+
+    return {
+        "record": record,
+        "deployed_action": deployed,
+        "initial": case["initial"],
+        "builder_name": case["builder_name"],
+        "valid_tx": case["valid_tx"],
+    }
+
+def run_stateful_action_branch(record, always_success_dep):
+    case = build_stateful_action_branch_case(record, always_success_dep)
+    coverage_id = action_id(record)
+    scenario = coverage_id.replace(":", ".") + ".stateful-branch"
+    step = run_stateful_step(
+        scenario,
+        "valid_action_branch",
+        case["valid_tx"],
+        consumed_cells_from_tx(case["valid_tx"]),
+    )
+    return {
+        "name": scenario,
+        "kind": "stateful-action-branch",
+        "builder_backed": True,
+        "builder_name": case["builder_name"],
+        "actions": [record["action"]],
+        "action_ids": [coverage_id],
+        "initial_cells": case["initial"],
+        "steps": [step],
+        "status": "passed",
+    }
+
+def run_stateful_action_branch_coverage(always_success_dep, required_records, already_covered):
+    branch_runs = []
+    for record in required_records:
+        if action_id(record) in already_covered:
+            continue
+        branch_runs.append(run_stateful_action_branch(record, always_success_dep))
+    return branch_runs
+
+def run_stateful_token_lifecycle(always_success_dep):
+    scenario = "token.mint-transfer-mint-merge-burn"
+    actions = {
+        name: deploy_stateful_action(action_record_by(token_action_artifacts, name), always_success_dep)
+        for name in ("mint", "transfer_token", "merge", "burn")
+    }
+    token_type = always_success_lock("0xa1")
+    token_symbol = b"STATE001"
+    steps = []
+
+    initial = create_script_locked_cells(
+        "stateful.token.auth",
+        [{
+            "capacity": 700 * 100_000_000,
+            "lock": actions["mint"]["lock"],
+            "type": token_type,
+            "data": mint_authority_data(token_symbol, 1000, 0),
+        }],
+        actions["mint"]["cell_deps"],
+    )
+    auth0 = initial["cells"][0]
+    tx1 = transaction(
+        auth0,
+        [
+            {"capacity": hex_u64(600 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(100 * 100_000_000), "lock": actions["transfer_token"]["lock"], "type": token_type},
+        ],
+        [
+            "0x" + mint_authority_data(token_symbol, 1000, 5).hex(),
+            "0x" + token_data(5, token_symbol).hex(),
+        ],
+        actions["mint"]["cell_deps"],
+        [entry_witness(actions["transfer_token"]["lock_hash"], 5)],
+    )
+    step = run_stateful_step(scenario, "mint_first_token_to_transfer", tx1, [auth0])
+    steps.append(step)
+    auth1 = output_cell_from_tx(step["commit"], tx1, 0)
+    token_a = output_cell_from_tx(step["commit"], tx1, 1)
+
+    tx2 = transaction(
+        token_a,
+        [{"capacity": hex_u64(100 * 100_000_000), "lock": actions["merge"]["lock"], "type": token_type}],
+        ["0x" + token_data(5, token_symbol).hex()],
+        actions["transfer_token"]["cell_deps"],
+        [entry_witness(actions["merge"]["lock_hash"])],
+    )
+    step = run_stateful_step(scenario, "transfer_first_token_to_merge", tx2, [token_a])
+    steps.append(step)
+    token_a_for_merge = output_cell_from_tx(step["commit"], tx2, 0)
+
+    tx3 = transaction(
+        auth1,
+        [
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(100 * 100_000_000), "lock": actions["merge"]["lock"], "type": token_type},
+        ],
+        [
+            "0x" + mint_authority_data(token_symbol, 1000, 12).hex(),
+            "0x" + token_data(7, token_symbol).hex(),
+        ],
+        actions["mint"]["cell_deps"],
+        [entry_witness(actions["merge"]["lock_hash"], 7)],
+    )
+    step = run_stateful_step(scenario, "mint_second_token_to_merge", tx3, [auth1])
+    steps.append(step)
+    auth2 = output_cell_from_tx(step["commit"], tx3, 0)
+    token_b_for_merge = output_cell_from_tx(step["commit"], tx3, 1)
+
+    tx4 = transaction(
+        [token_a_for_merge, token_b_for_merge],
+        [{"capacity": hex_u64(200 * 100_000_000), "lock": actions["burn"]["lock"], "type": token_type}],
+        ["0x" + token_data(12, token_symbol).hex()],
+        actions["merge"]["cell_deps"],
+        [entry_witness(actions["burn"]["lock_hash"]), "0x"],
+    )
+    step = run_stateful_step(scenario, "merge_tokens_to_burn", tx4, [token_a_for_merge, token_b_for_merge])
+    steps.append(step)
+    merged_token = output_cell_from_tx(step["commit"], tx4, 0)
+
+    tx5 = transaction(
+        merged_token,
+        [{"capacity": hex_u64(200 * 100_000_000), "lock": always_success_lock(), "type": None}],
+        ["0x"],
+        actions["burn"]["cell_deps"],
+        [entry_witness()],
+    )
+    step = run_stateful_step(scenario, "burn_merged_token", tx5, [merged_token])
+    steps.append(step)
+
+    auth2_live = assert_live(auth2["tx_hash"], auth2["index"], f"stateful {scenario} final mint authority").get("status") == "live"
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "final_live_cells": {"mint_authority": auth2_live},
+        "status": "passed",
+    }
+
+def run_stateful_timelock_release(always_success_dep):
+    scenario = "timelock.create-lock-lock-asset-request-release-execute"
+    actions = {
+        name: deploy_stateful_action(action_record_by(timelock_action_artifacts, name), always_success_dep)
+        for name in ("create_absolute_lock", "lock_asset", "request_release", "execute_release")
+    }
+    time_lock_type = always_success_lock("0xb1")
+    locked_asset_type = always_success_lock("0xb2")
+    request_type = always_success_lock("0xb3")
+    record_type = always_success_lock("0xb4")
+    owner = actions["execute_release"]["lock_hash"]
+    lock_id = decode_hex(script_hash(time_lock_type), 32)
+    asset_type_payload = bytes([0])
+    current_height = 50
+    unlock_height = 100
+    release_height = 125
+    steps = []
+
+    initial = create_script_locked_cells(
+        "stateful.timelock.create",
+        [{"capacity": 500 * 100_000_000, "lock": actions["create_absolute_lock"]["lock"], "type": None, "data": b""}],
+        actions["create_absolute_lock"]["cell_deps"],
+    )
+    create_input = initial["cells"][0]
+    tx1 = transaction(
+        create_input,
+        [{"capacity": hex_u64(300 * 100_000_000), "lock": actions["execute_release"]["lock"], "type": time_lock_type}],
+        ["0x" + timelock_data(owner, 0, unlock_height, current_height, lock_id=lock_id).hex()],
+        actions["create_absolute_lock"]["cell_deps"],
+        [entry_witness(lock_id, owner, unlock_height, current_height)],
+    )
+    step = run_stateful_step(scenario, "create_absolute_lock_for_release", tx1, [create_input])
+    steps.append(step)
+    time_lock_cell = output_cell_from_tx(step["commit"], tx1, 0)
+    time_lock_dep = cell_dep_for(time_lock_cell)
+
+    lock_asset_initial = create_script_locked_cells(
+        "stateful.timelock.lock_asset",
+        [{"capacity": 1000 * 100_000_000, "lock": actions["lock_asset"]["lock"], "type": None, "data": b""}],
+        actions["lock_asset"]["cell_deps"],
+    )
+    lock_asset_input = lock_asset_initial["cells"][0]
+    tx2 = transaction(
+        lock_asset_input,
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": actions["execute_release"]["lock"], "type": locked_asset_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
+        ],
+        [
+            "0x" + locked_asset_molecule_data(asset_type_payload, 42, lock_id).hex(),
+            "0x",
+        ],
+        [time_lock_dep] + actions["lock_asset"]["cell_deps"],
+        [entry_witness(molecule_bytes(asset_type_payload), 42)],
+    )
+    step = run_stateful_step(scenario, "lock_asset_against_live_lock", tx2, [lock_asset_input])
+    steps.append(step)
+    locked_asset_cell = output_cell_from_tx(step["commit"], tx2, 0)
+
+    request_initial = create_script_locked_cells(
+        "stateful.timelock.request_release",
+        [{"capacity": 1000 * 100_000_000, "lock": actions["request_release"]["lock"], "type": None, "data": b""}],
+        actions["request_release"]["cell_deps"],
+    )
+    request_input = request_initial["cells"][0]
+    tx3 = transaction(
+        request_input,
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": actions["execute_release"]["lock"], "type": request_type},
+            {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
+        ],
+        [
+            "0x" + release_request_data(lock_id, owner, release_height, state=0).hex(),
+            "0x",
+        ],
+        [time_lock_dep] + actions["request_release"]["cell_deps"],
+        [entry_witness(owner, release_height)],
+    )
+    step = run_stateful_step(scenario, "request_release_from_live_lock", tx3, [request_input])
+    steps.append(step)
+    request_cell = output_cell_from_tx(step["commit"], tx3, 0)
+
+    tx4 = transaction(
+        [time_lock_cell, locked_asset_cell, request_cell],
+        [{"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": record_type}],
+        ["0x" + release_record_data(lock_id, release_height, owner).hex()],
+        actions["execute_release"]["cell_deps"],
+        [entry_witness(owner, release_height), "0x", "0x"],
+    )
+    step = run_stateful_step(scenario, "execute_release_from_live_cells", tx4, [time_lock_cell, locked_asset_cell, request_cell])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_nft_listing_sale(always_success_dep):
+    scenario = "nft.mint-list-transfer-by-listing"
+    actions = {
+        name: deploy_stateful_action(action_record_by(nft_action_artifacts, name), always_success_dep)
+        for name in ("mint", "create_listing", "buy_from_listing")
+    }
+    collection_type = always_success_lock("0xc1")
+    nft_type = always_success_lock("0xc2")
+    listing_type = always_success_lock("0xc3")
+    royalty_payment_type = always_success_lock("0xc4")
+    seller = bytes([0x11]) * 32
+    buyer_lock = always_success_lock("0xc5")
+    buyer = decode_hex(script_hash(buyer_lock), 32)
+    royalty_recipient = seller
+    metadata_hash = bytes([0x33]) * 32
+    token_id = 1
+    price = 10_000
+    royalty_amount = 250
+    seller_amount = price - royalty_amount
+    created_at = 70
+    steps = []
+
+    initial = create_script_locked_cells(
+        "stateful.nft.collection",
+        [{
+            "capacity": 900 * 100_000_000,
+            "lock": actions["mint"]["lock"],
+            "type": collection_type,
+            "data": collection_molecule_data(seller, 0, 1000),
+        }],
+        actions["mint"]["cell_deps"],
+    )
+    collection0 = initial["cells"][0]
+    tx1 = transaction(
+        collection0,
+        [
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": collection_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": nft_type},
+        ],
+        [
+            "0x" + collection_molecule_data(seller, token_id, 1000).hex(),
+            "0x" + nft_data(token_id, seller, metadata_hash, royalty_recipient, 250).hex(),
+        ],
+        actions["mint"]["cell_deps"],
+        [entry_witness(seller, metadata_hash)],
+    )
+    step = run_stateful_step(scenario, "mint_nft_for_listing_sale", tx1, [collection0])
+    steps.append(step)
+    nft_for_sale = output_cell_from_tx(step["commit"], tx1, 1)
+    nft_dep = cell_dep_for(nft_for_sale)
+
+    listing_initial = create_script_locked_cells(
+        "stateful.nft.create_listing",
+        [{"capacity": 500 * 100_000_000, "lock": actions["create_listing"]["lock"], "type": None, "data": b""}],
+        actions["create_listing"]["cell_deps"],
+    )
+    listing_input = listing_initial["cells"][0]
+    tx2 = transaction(
+        listing_input,
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": listing_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": always_success_lock(), "type": None},
+        ],
+        [
+            "0x" + listing_data(token_id, seller, price, created_at, state=0).hex(),
+            "0x",
+        ],
+        [nft_dep] + actions["create_listing"]["cell_deps"],
+        [entry_witness(price, created_at)],
+    )
+    step = run_stateful_step(scenario, "create_listing_from_live_nft_dep", tx2, [listing_input])
+    steps.append(step)
+    listing = output_cell_from_tx(step["commit"], tx2, 0)
+
+    tx3 = transaction(
+        [nft_for_sale, listing],
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": buyer_lock, "type": nft_type},
+            {"capacity": hex_u64(150 * 100_000_000), "lock": always_success_lock(), "type": royalty_payment_type},
+            {"capacity": hex_u64(150 * 100_000_000), "lock": always_success_lock(), "type": royalty_payment_type},
+        ],
+        [
+            "0x" + nft_data(token_id, buyer, metadata_hash, royalty_recipient, 250).hex(),
+            "0x" + royalty_payment_data(token_id, royalty_recipient, royalty_amount).hex(),
+            "0x" + royalty_payment_data(token_id, seller, seller_amount).hex(),
+        ],
+        actions["buy_from_listing"]["cell_deps"],
+        [entry_witness(buyer, seller, price), "0x"],
+    )
+    step = run_stateful_step(scenario, "buy_listing_from_live_nft_and_listing", tx3, [nft_for_sale, listing])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_launch_to_token_mint(always_success_dep):
+    scenario = "launch.launch-token-then-mint"
+    launch = deploy_stateful_action(action_record_by(launch_action_artifacts, "launch_token"), always_success_dep)
+    mint = deploy_stateful_action(action_record_by(token_action_artifacts, "mint"), always_success_dep)
+    actions = {"launch_token": launch, "mint": mint}
+    auth_type = always_success_lock("0x91")
+    token_type = always_success_lock("0x92")
+    pool_paired_type = always_success_lock("0x93")
+    pool_type = always_success_lock("0x94")
+    lp_type = always_success_lock("0x95")
+    symbol = b"LAUNCH01"
+    paired_symbol = b"PAIR0001"
+    max_supply = 10_000
+    initial_mint = 1_000
+    extra_mint = 25
+    pool_seed_amount = 500
+    paired_amount = 250
+    fee_rate_bps = 30
+    creator = mint["lock_hash"]
+    recipient_locks = [always_success_lock("0xa" + format(index, "x")) for index in range(4)]
+    recipients = [
+        (decode_hex(script_hash(lock), 32), amount)
+        for lock, amount in zip(recipient_locks, [10, 20, 30, 40])
+    ]
+    recipient_payload = fixed_recipient_tuple_array4(recipients)
+    total_distributed = sum(amount for _, amount in recipients)
+    remaining = initial_mint - total_distributed - pool_seed_amount
+    pool_id = decode_hex(script_hash(pool_type), 32)
+    steps = []
+
+    initial = create_script_locked_cells(
+        "stateful.launch.paired_token",
+        [{
+            "capacity": 4000 * 100_000_000,
+            "lock": launch["lock"],
+            "type": pool_paired_type,
+            "data": token_data(paired_amount, paired_symbol),
+        }],
+        launch["cell_deps"],
+    )
+    paired_input = initial["cells"][0]
+    outputs = [
+        {"capacity": hex_u64(400 * 100_000_000), "lock": mint["lock"], "type": auth_type},
+        {"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": pool_type},
+        {"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": lp_type},
+    ]
+    outputs_data = [
+        "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
+        "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, pool_seed_amount, fee_rate_bps).hex(),
+        "0x" + lp_receipt_data(pool_id, pool_seed_amount, creator).hex(),
+    ]
+    for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
+        outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
+        outputs_data.append("0x" + token_data(amount, symbol).hex())
+    outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": token_type})
+    outputs_data.append("0x" + token_data(remaining, symbol).hex())
+
+    tx1 = transaction(
+        paired_input,
+        outputs,
+        outputs_data,
+        launch["cell_deps"],
+        [entry_witness(symbol, max_supply, initial_mint, pool_seed_amount, bytes([fee_rate_bps & 0xff, fee_rate_bps >> 8]), creator, recipient_payload)],
+    )
+    step = run_stateful_step(scenario, "launch_token_to_live_mint_authority", tx1, [paired_input])
+    steps.append(step)
+    auth_for_mint = output_cell_from_tx(step["commit"], tx1, 0)
+
+    to_lock = always_success_lock("0xa4")
+    to = decode_hex(script_hash(to_lock), 32)
+    tx2 = transaction(
+        auth_for_mint,
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": mint["lock"], "type": auth_type},
+            {"capacity": hex_u64(100 * 100_000_000), "lock": to_lock, "type": token_type},
+        ],
+        [
+            "0x" + mint_authority_data(symbol, max_supply, initial_mint + extra_mint).hex(),
+            "0x" + token_data(extra_mint, symbol).hex(),
+        ],
+        mint["cell_deps"],
+        [entry_witness(to, extra_mint)],
+    )
+    step = run_stateful_step(scenario, "mint_again_from_launched_authority", tx2, [auth_for_mint])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_amm_pool_lifecycle(always_success_dep):
+    scenario = "amm.seed-add-swap-remove"
+    actions = {
+        name: deploy_stateful_action(action_record_by(amm_action_artifacts, name), always_success_dep)
+        for name in ("seed_pool", "add_liquidity", "swap_a_for_b", "remove_liquidity")
+    }
+    token_a_symbol = b"AMMA0001"
+    token_b_symbol = b"AMMB0001"
+    token_a_type = always_success_lock("0xd1")
+    token_b_type = always_success_lock("0xd2")
+    pool_type = always_success_lock("0xd3")
+    lp_type = always_success_lock("0xd4")
+    provider_lock = actions["remove_liquidity"]["lock"]
+    provider = actions["remove_liquidity"]["lock_hash"]
+    pool_id = decode_hex(script_hash(pool_type), 32)
+    fee_rate_bps = 30
+    steps = []
+
+    seed_initial = create_script_locked_cells(
+        "stateful.amm.seed_inputs",
+        [
+            {"capacity": 200 * 100_000_000, "lock": actions["seed_pool"]["lock"], "type": token_a_type, "data": token_data(4, token_a_symbol)},
+            {"capacity": 200 * 100_000_000, "lock": actions["seed_pool"]["lock"], "type": token_b_type, "data": token_data(9, token_b_symbol)},
+        ],
+        actions["seed_pool"]["cell_deps"],
+    )
+    tx1 = transaction(
+        seed_initial["cells"],
+        [
+            {"capacity": hex_u64(200 * 100_000_000), "lock": actions["add_liquidity"]["lock"], "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": lp_type},
+        ],
+        [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, 4, 9, 6, fee_rate_bps).hex(),
+            "0x" + lp_receipt_data(pool_id, 6, provider).hex(),
+        ],
+        actions["seed_pool"]["cell_deps"],
+        [entry_witness(fee_rate_bps.to_bytes(2, "little"), provider), "0x"],
+    )
+    step = run_stateful_step(scenario, "seed_pool_for_add_liquidity", tx1, seed_initial["cells"])
+    steps.append(step)
+    pool_for_add = output_cell_from_tx(step["commit"], tx1, 0)
+
+    add_tokens = create_script_locked_cells(
+        "stateful.amm.add_liquidity_tokens",
+        [
+            {"capacity": 200 * 100_000_000, "lock": actions["add_liquidity"]["lock"], "type": token_a_type, "data": token_data(4, token_a_symbol)},
+            {"capacity": 200 * 100_000_000, "lock": actions["add_liquidity"]["lock"], "type": token_b_type, "data": token_data(9, token_b_symbol)},
+        ],
+        actions["add_liquidity"]["cell_deps"],
+    )
+    add_inputs = [pool_for_add, *add_tokens["cells"]]
+    tx2 = transaction(
+        add_inputs,
+        [
+            {"capacity": hex_u64(200 * 100_000_000), "lock": actions["swap_a_for_b"]["lock"], "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": actions["remove_liquidity"]["lock"], "type": lp_type},
+        ],
+        [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, 8, 18, 12, fee_rate_bps).hex(),
+            "0x" + lp_receipt_data(pool_id, 6, provider).hex(),
+        ],
+        actions["add_liquidity"]["cell_deps"],
+        [entry_witness(provider), "0x", "0x"],
+    )
+    step = run_stateful_step(scenario, "add_liquidity_to_live_pool", tx2, add_inputs)
+    steps.append(step)
+    pool_for_swap = output_cell_from_tx(step["commit"], tx2, 0)
+    receipt_for_remove = output_cell_from_tx(step["commit"], tx2, 1)
+
+    swap_token = create_script_locked_cells(
+        "stateful.amm.swap_token",
+        [{"capacity": 200 * 100_000_000, "lock": actions["swap_a_for_b"]["lock"], "type": token_a_type, "data": token_data(2, token_a_symbol)}],
+        actions["swap_a_for_b"]["cell_deps"],
+    )
+    swap_inputs = [pool_for_swap, swap_token["cells"][0]]
+    to_lock = always_success_lock("0xd5")
+    to = decode_hex(script_hash(to_lock), 32)
+    tx3 = transaction(
+        swap_inputs,
+        [
+            {"capacity": hex_u64(200 * 100_000_000), "lock": actions["remove_liquidity"]["lock"], "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": to_lock, "type": token_b_type},
+        ],
+        [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, 10, 15, 12, fee_rate_bps).hex(),
+            "0x" + token_data(3, token_b_symbol).hex(),
+        ],
+        actions["swap_a_for_b"]["cell_deps"],
+        [entry_witness(2, to), "0x"],
+    )
+    step = run_stateful_step(scenario, "swap_against_live_pool", tx3, swap_inputs)
+    steps.append(step)
+    pool_for_remove = output_cell_from_tx(step["commit"], tx3, 0)
+
+    remove_funding = find_spendable_cellbase()
+    remove_change_capacity = remove_funding["capacity"] - 200 * 100_000_000
+    tx4 = transaction(
+        [pool_for_remove, receipt_for_remove, remove_funding],
+        [
+            {"capacity": hex_u64(200 * 100_000_000), "lock": always_success_lock(), "type": pool_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_a_type},
+            {"capacity": hex_u64(200 * 100_000_000), "lock": provider_lock, "type": token_b_type},
+            {"capacity": hex_u64(remove_change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [
+            "0x" + pool_data(token_a_symbol, token_b_symbol, 5, 8, 6, fee_rate_bps).hex(),
+            "0x" + token_data(5, token_a_symbol).hex(),
+            "0x" + token_data(7, token_b_symbol).hex(),
+            "0x",
+        ],
+        actions["remove_liquidity"]["cell_deps"],
+        [entry_witness(provider), "0x", "0x"],
+    )
+    step = run_stateful_step(scenario, "remove_liquidity_from_live_pool", tx4, [pool_for_remove, receipt_for_remove, remove_funding])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_vesting_revoke(always_success_dep):
+    scenario = "vesting.create-config-grant-revoke"
+    actions = {
+        name: deploy_stateful_action(action_record_by(vesting_action_artifacts, name), always_success_dep)
+        for name in ("create_vesting_config", "grant_vesting", "revoke_grant")
+    }
+    symbol = b"VEST0001"
+    cliff_period = 10
+    total_period = 100
+    amount = 77
+    config_type = always_success_lock("0x41")
+    token_type = always_success_lock("0x44")
+    grant_type = always_success_lock("0x43")
+    admin_lock = always_success_lock()
+    admin = decode_hex(script_hash(admin_lock), 32)
+    beneficiary = actions["revoke_grant"]["lock_hash"]
+    header_dep = get_block_by_number(0)["header"]["hash"]
+    steps = []
+
+    config_initial = create_script_locked_cells(
+        "stateful.vesting.config_input",
+        [{"capacity": 1000 * 100_000_000, "lock": actions["create_vesting_config"]["lock"], "type": None, "data": b""}],
+        actions["create_vesting_config"]["cell_deps"],
+    )
+    config_input = config_initial["cells"][0]
+    tx1 = transaction(
+        config_input,
+        [{"capacity": hex_u64(300 * 100_000_000), "lock": admin_lock, "type": config_type}],
+        ["0x" + vesting_config_data(admin, symbol, cliff_period, total_period, True).hex()],
+        actions["create_vesting_config"]["cell_deps"],
+        [entry_witness(admin, symbol, cliff_period, total_period, bytes([1]))],
+    )
+    step = run_stateful_step(scenario, "create_config_for_grant", tx1, [config_input])
+    steps.append(step)
+    config_cell = output_cell_from_tx(step["commit"], tx1, 0)
+    config_dep = cell_dep_for(config_cell)
+
+    grant_initial = create_script_locked_cells(
+        "stateful.vesting.grant_tokens",
+        [{"capacity": 200 * 100_000_000, "lock": actions["grant_vesting"]["lock"], "type": token_type, "data": token_data(amount, symbol)}],
+        actions["grant_vesting"]["cell_deps"],
+    )
+    grant_input = grant_initial["cells"][0]
+    funding_input = find_spendable_cellbase()
+    grant_change_capacity = grant_input["capacity"] + funding_input["capacity"] - 300 * 100_000_000
+    tx2 = transaction(
+        [grant_input, funding_input],
+        [
+            {"capacity": hex_u64(300 * 100_000_000), "lock": actions["revoke_grant"]["lock"], "type": grant_type},
+            {"capacity": hex_u64(grant_change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [
+            "0x" + vesting_grant_data(0, beneficiary, amount, 0, 0, cliff_period, total_period, symbol).hex(),
+            "0x",
+        ],
+        [config_dep] + actions["grant_vesting"]["cell_deps"],
+        [entry_witness(beneficiary), "0x"],
+        [header_dep],
+    )
+    step = run_stateful_step(scenario, "grant_vesting_from_live_config", tx2, [grant_input, funding_input])
+    steps.append(step)
+    grant_cell = output_cell_from_tx(step["commit"], tx2, 0)
+
+    tx3 = transaction(
+        grant_cell,
+        [
+            {"capacity": hex_u64(150 * 100_000_000), "lock": actions["revoke_grant"]["lock"], "type": token_type},
+            {"capacity": hex_u64(150 * 100_000_000), "lock": admin_lock, "type": token_type},
+        ],
+        [
+            "0x" + token_data(0, symbol).hex(),
+            "0x" + token_data(amount, symbol).hex(),
+        ],
+        [config_dep] + actions["revoke_grant"]["cell_deps"],
+        [entry_witness(admin)],
+        [header_dep],
+    )
+    step = run_stateful_step(scenario, "revoke_live_grant", tx3, [grant_cell])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_multisig_execution(always_success_dep):
+    scenario = "multisig.create-propose-sign-sign-execute"
+    actions = {
+        name: deploy_stateful_action(action_record_by(multisig_action_artifacts, name), always_success_dep)
+        for name in ("create_wallet", "propose_transfer", "add_signature", "execute_proposal")
+    }
+    wallet_type = always_success_lock("0xf1")
+    proposal_type = always_success_lock("0xf2")
+    confirmation_type = always_success_lock("0xf3")
+    execution_type = always_success_lock("0xf4")
+    signer_a = actions["propose_transfer"]["lock_hash"]
+    signer_b = decode_hex(script_hash(always_success_lock("0xf5")), 32)
+    target = decode_hex(script_hash(always_success_lock("0xf6")), 32)
+    signature_a = bytes([0xa5]) * 64
+    signature_b = bytes([0xb6]) * 64
+    wallet_id = decode_hex(script_hash(wallet_type), 32)
+    signers = [signer_a, signer_b]
+    proposal_id = 1
+    created_at = 20
+    expires_at = created_at + 1440
+    steps = []
+
+    wallet_initial = create_script_locked_cells(
+        "stateful.multisig.wallet_input",
+        [{"capacity": 2000 * 100_000_000, "lock": actions["create_wallet"]["lock"], "type": None, "data": b""}],
+        actions["create_wallet"]["cell_deps"],
+    )
+    wallet_input = wallet_initial["cells"][0]
+    tx1 = transaction(
+        wallet_input,
+        [{"capacity": hex_u64(2000 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type}],
+        ["0x" + multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10).hex()],
+        actions["create_wallet"]["cell_deps"],
+        [entry_witness(wallet_id, molecule_bytes(molecule_fixvec(signers)), bytes([2]), 10)],
+    )
+    step = run_stateful_step(scenario, "create_wallet_for_proposal", tx1, [wallet_input])
+    steps.append(step)
+    wallet_for_propose = output_cell_from_tx(step["commit"], tx1, 0)
+
+    proposal_payload = multisig_proposal_molecule_data(
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [], 2, created_at, expires_at
+    )
+    wallet_after_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, proposal_id, 10)
+    tx2 = transaction(
+        wallet_for_propose,
+        [
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type},
+            {"capacity": hex_u64(1500 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
+        ],
+        ["0x" + wallet_after_payload.hex(), "0x" + proposal_payload.hex()],
+        actions["propose_transfer"]["cell_deps"],
+        [entry_witness(signer_a, target, 500, created_at)],
+    )
+    step = run_stateful_step(scenario, "propose_transfer_from_live_wallet", tx2, [wallet_for_propose])
+    steps.append(step)
+    wallet_dep_cell = output_cell_from_tx(step["commit"], tx2, 0)
+    wallet_dep = cell_dep_for(wallet_dep_cell)
+    proposal0 = output_cell_from_tx(step["commit"], tx2, 1)
+
+    proposal1_payload = multisig_proposal_molecule_data(
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, created_at, expires_at
+    )
+    tx3 = transaction(
+        proposal0,
+        [
+            {"capacity": hex_u64(1200 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
+        ],
+        [
+            "0x" + proposal1_payload.hex(),
+            "0x" + signature_confirmation_data(proposal_id, signer_a, 30).hex(),
+        ],
+        [wallet_dep] + actions["add_signature"]["cell_deps"],
+        [entry_witness(signer_a, signature_a, 30)],
+    )
+    step = run_stateful_step(scenario, "add_first_signature", tx3, [proposal0])
+    steps.append(step)
+    proposal1 = output_cell_from_tx(step["commit"], tx3, 0)
+
+    proposal2_payload = multisig_proposal_molecule_data(
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, created_at, expires_at
+    )
+    tx4 = transaction(
+        proposal1,
+        [
+            {"capacity": hex_u64(900 * 100_000_000), "lock": actions["execute_proposal"]["lock"], "type": proposal_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
+        ],
+        [
+            "0x" + proposal2_payload.hex(),
+            "0x" + signature_confirmation_data(proposal_id, signer_b, 31).hex(),
+        ],
+        [wallet_dep] + actions["add_signature"]["cell_deps"],
+        [entry_witness(signer_b, signature_b, 31)],
+    )
+    step = run_stateful_step(scenario, "add_second_signature", tx4, [proposal1])
+    steps.append(step)
+    proposal2 = output_cell_from_tx(step["commit"], tx4, 0)
+
+    tx5 = transaction(
+        proposal2,
+        [{"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": execution_type}],
+        ["0x" + execution_record_data(proposal_id, signer_a, 40, 1).hex()],
+        [wallet_dep] + actions["execute_proposal"]["cell_deps"],
+        [entry_witness(signer_a, 40)],
+    )
+    step = run_stateful_step(scenario, "execute_signed_proposal", tx5, [proposal2])
+    steps.append(step)
+
+    return {
+        "name": scenario,
+        "kind": "stateful-scenario",
+        "builder_backed": True,
+        "builder_name": "cellscript-stateful-scenario-builder-v1",
+        "actions": list(actions.keys()),
+        "action_ids": action_ids(actions.values()),
+        "steps": steps,
+        "status": "passed",
+    }
+
+def run_stateful_scenario_suite(always_success_dep):
+    required_records = all_stateful_action_records()
+    required_ids = sorted(action_id(record) for record in required_records)
+    expected_ids = expected_stateful_action_ids()
+    missing_artifact_ids = sorted(set(expected_ids) - set(required_ids))
+    unexpected_artifact_ids = sorted(set(required_ids) - set(expected_ids))
+    if missing_artifact_ids:
+        raise RuntimeError("stateful action artifacts missing: " + ", ".join(missing_artifact_ids))
+
+    main_runs = [
+        run_stateful_token_lifecycle(always_success_dep),
+        run_stateful_nft_listing_sale(always_success_dep),
+        run_stateful_timelock_release(always_success_dep),
+        run_stateful_launch_to_token_mint(always_success_dep),
+        run_stateful_amm_pool_lifecycle(always_success_dep),
+        run_stateful_vesting_revoke(always_success_dep),
+        run_stateful_multisig_execution(always_success_dep),
+    ]
+    covered_ids = set()
+    for run in main_runs:
+        covered_ids.update(run.get("action_ids", []))
+    branch_runs = run_stateful_action_branch_coverage(always_success_dep, required_records, covered_ids)
+    runs = main_runs + branch_runs
+    for run in branch_runs:
+        covered_ids.update(run.get("action_ids", []))
+    missing_stateful_action_ids = sorted(set(required_ids) - covered_ids)
+    if missing_stateful_action_ids:
+        raise RuntimeError("stateful action coverage missing: " + ", ".join(missing_stateful_action_ids))
+
+    return {
+        "status": "passed",
+        "scope": (
+            "Strict stateful local CKB scenarios. End-to-end flows commit live output handoffs between "
+            "related actions; branch scenarios then commit every remaining production acceptance action."
+        ),
+        "scenario_count": len(runs),
+        "step_count": sum(len(run.get("steps", [])) for run in runs),
+        "end_to_end_scenario_count": len(main_runs),
+        "action_branch_scenario_count": len(branch_runs),
+        "stateful_action_coverage": {
+            "status": "passed",
+            "required_action_count": len(required_ids),
+            "covered_action_count": len(covered_ids),
+            "required_action_ids": required_ids,
+            "covered_action_ids": sorted(covered_ids),
+            "missing_action_ids": missing_stateful_action_ids,
+            "missing_artifact_ids": missing_artifact_ids,
+            "unexpected_artifact_ids": unexpected_artifact_ids,
+        },
+        "runs": runs,
+    }
 
 try:
     tip_before = rpc("get_tip_header")
@@ -4934,6 +6243,12 @@ try:
         lock_result = run_lock_spend_matrix(lock_record, always_success_dep)
         report["onchain"]["lock_spend_matrix_runs"].append(lock_result)
         report["onchain"]["completed_lock_spend_matrix"] = len(report["onchain"]["lock_spend_matrix_runs"])
+        write_report()
+
+    if run_stateful_scenarios:
+        stateful_result = run_stateful_scenario_suite(always_success_dep)
+        report["onchain"]["stateful_scenarios"] = stateful_result
+        report["onchain"]["stateful_scenario_runs"] = stateful_result["runs"]
         write_report()
 
     tip_after = rpc("get_tip_header")
@@ -5139,6 +6454,20 @@ try:
             "builder-backed lock valid/invalid spend matrix is incomplete: "
             + ", ".join(missing_lock_matrix or [f"{len(all_lock_runs)}/{expected_lock_spend_count} locks"])
         )
+    stateful_scenarios = report["onchain"].get("stateful_scenarios")
+    if run_stateful_scenarios:
+        stateful_coverage = (stateful_scenarios or {}).get("stateful_action_coverage") or {}
+        if (
+            not stateful_scenarios
+            or stateful_scenarios.get("status") != "passed"
+            or stateful_coverage.get("status") != "passed"
+            or stateful_coverage.get("missing_action_ids")
+            or stateful_coverage.get("missing_artifact_ids")
+        ):
+            final_hardening_failures.append(
+                "stateful scenario coverage is incomplete: "
+                + json.dumps(stateful_coverage, sort_keys=True)
+            )
     missing_lock_tx_size = [
         run["name"]
         for run in all_lock_runs
@@ -5164,6 +6493,7 @@ try:
         "requires_measured_cycles": True,
         "requires_consensus_serialized_tx_size": True,
         "requires_exact_occupied_capacity": True,
+        "requires_stateful_action_coverage": run_stateful_scenarios,
         "failures": final_hardening_failures,
     }
     update_ckb_business_coverage({
@@ -5177,7 +6507,7 @@ try:
     })
     if not report["onchain"]["all_bundled_examples_deployed"]:
         raise RuntimeError(
-            "not all strict original bundled examples deployed: "
+            "not all primitive-strict original bundled examples deployed: "
             f"deployed={report['onchain']['bundled_examples_deployed']}, "
             f"expected={report['bundled_examples_exact_order']}"
         )
