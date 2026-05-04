@@ -141,7 +141,7 @@ CellScript now supports CKB as its only target profile:
 
 | Profile | When to use | What you get |
 |---|---|---|
-| `ckb` | CKB mainnet artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
+| `ckb` | CKB ckb-vm RISC-V artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
 
 > The `ckb` profile is production-gated for the bundled CellScript suite. It
 > emits raw CKB ckb-vm artifacts, uses CKB syscall
