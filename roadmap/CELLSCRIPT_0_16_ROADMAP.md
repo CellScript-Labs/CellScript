@@ -158,6 +158,7 @@ Each suite must cover:
 - script args layout
 - witness layout
 - Molecule data layout
+- ScriptGroup and `outputs` / `outputs_data` positive and negative transaction fixture matrices
 - error behavior
 - accepted/rejected transaction fixtures
 - cycle envelope

@@ -385,7 +385,9 @@ Compatibility fixtures for:
 - NervosDAO-style epoch/since cases
 - Type ID
 
-Each suite covers script args, witness layout, Molecule layout, accepted/rejected transactions, cycles, and script reference metadata.
+Each suite covers script args, witness layout, Molecule layout, ScriptGroup and
+`outputs` / `outputs_data` positive/negative transaction fixture matrices,
+accepted/rejected transactions, cycles, and script reference metadata.
 
 ### 6.4 Builder Assumption Contract and Transaction Solver (P0/P1)
 
