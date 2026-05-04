@@ -865,6 +865,7 @@ Those claims were downgraded in `roadmap/CELLSCRIPT_0_14_ROADMAP.md` and
 | `cargo test --locked -p cellscript -- --test-threads=1` | PASS | Covered by quick release gate; 482 lib tests plus integration/doc suites passed. |
 | `cargo test --locked -p cellscript --test v0_14 -- --test-threads=1` | PASS | Targeted v0.14 compiler/metadata tests. |
 | `cargo test --locked -p cellscript --test examples release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts -- --test-threads=1` | PASS | Example realism/display guard. |
+| `./scripts/cellscript_0_14_scope_audit.sh` | PASS | Reusable strict 0.14 scope gate; compiles 7 v0.14 language examples to asm+ELF and validates metadata/doc evidence boundaries. Reports are written to `/Users/arthur/RustroverProjects/CellScript/target/strict-0-14-scope-audit/<timestamp>/cellscript-0-14-scope-audit-report.json`. |
 | `./scripts/cellscript_syntax_combo_audit.sh deep --seed 2026050401..2026050410` | PASS | 10 seeds; each generated 40 cases, accepted 22, rejected 18, failures 0. |
 | Strict language example asm/ELF/metadata oracle | PASS | Checked 7 v0.14 language example metadata files under `target/strict-0-14-scope-audit/20260504-190320-after-fix`. |
 | Strict production report oracle | PASS | Verified production-ready full report, 43/43 action coverage, 17/17 lock matrix, cycles/tx-size/capacity/stateful flags. |

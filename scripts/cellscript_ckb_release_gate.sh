@@ -40,8 +40,11 @@ check_trailing_whitespace() {
         "docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
+        "docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md"
+        "docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md"
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
+        "docs/CELLSCRIPT_0_14_SUPER_AUDIT.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
@@ -56,6 +59,7 @@ check_trailing_whitespace() {
         "editors/vscode-cellscript/package.json"
         "editors/vscode-cellscript/scripts/validate.mjs"
         "scripts/cellscript_ckb_release_gate.sh"
+        "scripts/cellscript_0_14_scope_audit.sh"
         "scripts/cellscript_syntax_combo_audit.sh"
         "scripts/cellscript_syntax_combo_audit.py"
         "scripts/ckb_cellscript_acceptance.sh"
@@ -159,9 +163,11 @@ run_common_gate() {
     run python3 scripts/validate_cellscript_tooling_release.py
     run bash -n scripts/ckb_cellscript_acceptance.sh
     run bash -n scripts/cellscript_ckb_release_gate.sh
+    run bash -n scripts/cellscript_0_14_scope_audit.sh
     run bash -n scripts/cellscript_syntax_combo_audit.sh
     run python3 -m py_compile scripts/cellscript_syntax_combo_audit.py
     run ./scripts/cellscript_syntax_combo_audit.sh quick
+    run ./scripts/cellscript_0_14_scope_audit.sh
     run npm --prefix editors/vscode-cellscript run validate
     run npm --prefix editors/vscode-cellscript run publish:dry-run
     run git diff --check
