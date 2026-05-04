@@ -81,8 +81,8 @@ The following capabilities are already delivered and will not be re-planned:
 
 - ✅ Stack-backed fixed-width value-vector helpers for checked `Vec<T>` paths
 - ✅ Metadata and `cellc explain-generics` for concrete checked vector instantiations
-- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `transition` state edges
-- ✅ Non-empty multi-edge `transition { ... }` blocks for compactly declaring several explicit state edges without moving proof logic into `where`
+- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `move` state edges
+- ✅ Stable v0.13 action boundary: state topology is declared separately from proof obligations, and proof logic remains in `where`
 - ✅ `preserve` sugar and anonymous `require` blocks with canonical verifier expansion and pure-boolean enforcement
 - ✅ Compiler-recognized stdlib patterns for lifecycle and Cell metadata:
   `std::lifecycle::transfer`, `std::receipt::claim`,
@@ -159,18 +159,17 @@ where
 
 | Layer | Change | Details |
 |-------|--------|---------|
-| Lexer | New keywords | `spawn`, `pipe`, `pipe_write`, `pipe_read`, `wait`, `process_id`, `inherited_fd`, `close` added to TokenKind or stdlib builtin table |
-| AST | New nodes | `SpawnExpr`, `PipeExpr`, `WaitExpr` with typed fields |
+| Lexer / builtins | New helper surface | `spawn`, `pipe`, `pipe_write`, `pipe_read`, `wait`, `process_id`, `inherited_fd`, `close` are accepted as typed builtin helper calls |
+| AST | Existing call expressions | The implemented surface uses normal call expressions plus builtin validation, not dedicated `SpawnExpr` / `PipeExpr` / `WaitExpr` nodes |
 | Type checker | Argument validation | Verify spawn target is a string literal or `String` const; fd usage tracking rejects use-after-close, double-close, and leaked descriptors |
 | Metadata | Spawn target evidence | Emit runtime-required CellDep/DepGroup script-reference obligations for each spawn target so builders cannot treat a string name as authority |
-| IR | New instructions | `IrInstruction::Spawn`, `IrInstruction::Pipe`, `IrInstruction::PipeWrite`, `IrInstruction::PipeRead`, `IrInstruction::Wait`, `IrInstruction::Close` |
+| IR | Runtime helper calls | Lower builtin calls to CKB runtime helper calls such as `__ckb_spawn`, `__ckb_pipe`, `__ckb_pipe_write`, `__ckb_pipe_read`, `__ckb_wait`, and `__ckb_close` |
 | Codegen | Syscall mapping | `spawn` -> 2601, `wait` -> 2602, `process_id` -> 2603, `pipe` -> 2604, `pipe_write` -> 2605, `pipe_read` -> 2606, `inherited_fd` -> 2607, `close` -> 2608 |
 
 **Safety Constraints**:
-- Max VM spawn depth enforced at compile time (configurable, default 4)
-- Cycle budget allocation: shared budget model (parent + children share a total cycle limit, matching CKB's existing semantics)
+- Cycle budget allocation: shared budget model (parent + children share a total cycle limit, matching CKB's existing semantics). v0.14 does not ship a source-level `max_cycles` spawn parameter.
 - File descriptor lifetime tracking: compiler rejects use-after-close, double-close, and statically visible leaked fds
-- Spawn target resolution: must reference a known script (dep cell or inline)
+- Spawn target resolution boundary: the source target must be static, and metadata records a runtime-required CellDep/DepGroup obligation for the transaction builder. Full registry-backed dep resolution is deferred.
 
 **Risk**: **MEDIUM** — Syscalls are stable; complexity is in DSL ergonomics and fd tracking
 **Depends on**: v0.13 fixed-width value metadata for typed spawn arguments
@@ -185,7 +184,7 @@ where
 - Standard lock scripts read signatures from `WitnessArgs.lock`.
 - Type scripts may use `input_type` / `output_type` for protocol-specific proofs.
 - Advanced scripts need to choose transaction-global vs script-group views intentionally.
-- Profile-correct Source encodings differ between CKB strict mode and portable compatibility paths, so the compiler must own this boundary.
+- Profile-correct Source encodings are CKB-specific in v0.14, so the compiler must own this boundary and future profiles must opt in explicitly.
 
 **DSL Design**:
 
@@ -209,8 +208,8 @@ where
 | `source::*` DSL | `input(n)`, `output(n)`, `cell_dep(n)`, `header_dep(n)`, `group_input(n)`, `group_output(n)` with profile-correct encoding |
 | `witness::*` DSL | `raw<T>`, `lock<T>`, `input_type<T>`, `output_type<T>` with CKB Molecule `WitnessArgs` decoding |
 | Metadata exposure | Emit runtime access records with witness field, source view, index, ABI, and expected byte bounds |
-| Profile gates | CKB profile requires `WitnessArgs` decoding for structured fields; portable profile keeps raw/entry witness ABI unless an explicit compatibility mode is selected |
-| Tests | Secp256k1-style lock fixture, type-script input/output witness fixture, source view mismatch tests |
+| Profile gates | The implemented release profile is `ckb`. Future non-CKB profiles must reject CKB-only WitnessArgs/Source assumptions unless an explicit compatibility mode is implemented and tested. |
+| Tests | Metadata/lowering tests and language examples cover lock/input_type/output_type and global/group Source views; malformed transaction WitnessArgs fixtures remain part of the later compatibility suite. |
 
 **Risk**: **HIGH** — This changes author-facing authentication/proof semantics and must fail closed
 **Depends on**: Target Profile Formalization (#3)
@@ -223,7 +222,7 @@ where
 
 **Profile Semantic Reference**:
 
-| Feature | CKB Profile | Portable Cell |
+| Feature | Implemented CKB Profile | Future Portable Profile Boundary |
 |---------|-------------|---------------|
 | Hash function | BLAKE2B | configurable |
 | Time reference | Block Number / EpochNumberWithFraction | abstract |
@@ -234,14 +233,14 @@ where
 | Spawn/IPC | Available (VM v2+) | not available |
 | Tx version | 0 | N/A |
 
-**Key Design Decision**: CKB epoch semantics are CKB-specific. The portable profile remains abstract and must not emulate CKB epoch behavior without an explicit target profile.
+**Key Design Decision**: CKB epoch semantics are CKB-specific. The compiler currently ships the `ckb` profile only. A future portable profile must not emulate CKB epoch behavior without an explicit target profile and tests.
 
 **Implementation Items**:
 
 **3a. TargetProfile Enum Specification**
 - Formalize `TargetProfile::Ckb` with a complete semantic contract
-- Document which builtins, syscalls, and constraints each profile enables
-- Publish as `docs/wiki/CELLSCRIPT_TARGET_PROFILES.md`
+- Document which builtins, syscalls, and constraints the CKB profile enables
+- Publish through `docs/wiki/Tutorial-05-CKB-Target-Profiles.md` and `cellc explain-profile ckb`
 
 **3b. Profile-gated hash policy**
 - Keep existing hash-domain metadata explicit; do not silently make portable code depend on different hash algorithms.
@@ -256,7 +255,7 @@ where
 **3d. Profile Script Mapping Registry Design**
 - Standard scripts (secp256k1, multisig, etc.) may have different `code_hash` values across target profiles
 - Design a registry format: `scripts.toml` mapping `(script_name, profile) → code_hash`
-- Compiler resolves spawn targets and dep cell references through this registry
+- v0.14 records script-reference obligations in metadata; full registry-backed resolution remains deferred to the deployment/compatibility track
 
 **Risk**: **LOW** — Formalizing existing implicit behavior
 **Depends on**: None
@@ -278,10 +277,10 @@ where
 | Item | Details |
 |------|---------|
 | ScriptGroup metadata | Emit entry kind, active lock/type group kind, selected Source surfaces, and group-scoped Source usage for every CKB entry |
-| Source conformance tests | Cover `Input`, `Output`, `CellDep`, `HeaderDep`, `GroupInput`, `GroupOutput`, out-of-bounds access, and wrong-profile access |
+| Source conformance tests | Cover metadata/lowering for `Input`, `Output`, `CellDep`, `HeaderDep`, `GroupInput`, and `GroupOutput`; out-of-bounds and wrong-profile transaction fixtures stay in the later compatibility suite |
 | Output data binding | Emit output-data index obligations for every created or updated output; reject metadata where output data is detached from the output cell index |
 | TYPE_ID metadata validation MVP | For `#[type_id]` under CKB profile, validate output index, first-input args source, one-input/one-output group rule, duplicate output rejection, and missing-plan rejection |
-| Acceptance fixtures | Add positive/negative fixture transactions for ScriptGroup views, outputs_data mismatch, and TYPE_ID create/continue failure cases |
+| Acceptance fixtures | Add metadata/tamper fixtures for ScriptGroup views, outputs_data mismatch, and TYPE_ID create-plan failure cases; defer dedicated accepted/rejected CKB transaction fixture matrices to the later standard compatibility suite |
 
 **Boundary**: This is not the v0.15 identity-policy redesign. v0.14 validates CKB transaction-shape facts and existing TYPE_ID metadata plans. It does not add new identity primitives, destruction policies, or protocol macro lowering.
 
@@ -298,31 +297,31 @@ where
 
 **DSL Design**:
 
-**Annotation form — compile-time static capacity floor**:
+**Declaration form — compile-time static capacity floor**:
 ```cellscript
-@capacity_floor(shannons: 6_100_000_000)  // minimum 61 CKB
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy
+with_capacity_floor(6100000000)  // minimum 61 CKB
+{
     amount: u64
     symbol: [u8; 8]
 }
 ```
 
-**Action-level explicit capacity control**:
+**Action-level capacity visibility**:
 ```cellscript
-action transfer_with_fee(token: Token, fee: u64) -> next_token: Token
+action capacity_visible(amount: u64) -> output: Token
 where
-    let freed_cap = consume token
-    assert(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
-    create next_token = Token { amount: token.amount } with_lock(recipient)
-    // remaining capacity implicitly becomes miner fee
+    let floor = occupied_capacity("Token")
+    assert(floor >= 0, "capacity floor visible")
+    create output = Token { amount }
 ```
 
 **Implementation Items**:
 
 | Item | Details |
 |------|---------|
-| `with_capacity_floor(...)` declaration | Parser + AST capability node + validation; support explicit shannons. Compiler-computed floors remain builder/acceptance evidence for now. |
-| `occupied_capacity(T)` const fn | Compile-time constant: field sizes + overhead |
+| `with_capacity_floor(...)` declaration | Parser + AST declaration + validation; support explicit shannons. Compiler-computed floors remain builder/acceptance evidence for now. |
+| `occupied_capacity("TypeName")` helper | Metadata-visible CKB capacity policy helper keyed by type name |
 | Capacity floor check insertion | Metadata and constraints expose required floors; automatic verifier insertion remains future work unless separately promoted. |
 | Builder integration | Existing acceptance measures occupied capacity and tx size; automatic change-output generation remains future builder work. |
 
@@ -340,27 +339,28 @@ where
 ```cellscript
 action claim_after_ckb_timeout(htlc: HtlcReceipt)
 where
-    require_maturity(blocks: 100)          // CKB: block-number delta
-    require_time(after: Timestamp(target)) // CKB: absolute timestamp since
-    require_epoch(relative: EpochFraction(10, 0, 1)) // CKB-only epoch since
+    require_maturity(100)                 // CKB: block-number delta
+    require_time(target)                  // CKB: absolute timestamp since
+    require_epoch_after(10, 0, 1)         // CKB-only absolute epoch since
+    require_epoch_relative(10, 0, 1)      // CKB-only relative epoch since
     consume htlc
 ```
 
 **Profile-gated Compilation**:
 
-| Primitive | CKB Profile | Portable Cell |
+| Primitive | Implemented CKB Profile | Future Portable Profile Boundary |
 |-----------|-------------|---------------|
-| `require_maturity(blocks: N)` | Relative block-number since | Compile error |
-| `require_time(after: Timestamp(T))` | Absolute timestamp since | Compile error |
-| `require_epoch(after: EpochFraction(...))` | Absolute epoch since | Compile error |
-| `require_epoch(relative: EpochFraction(...))` | Relative epoch since | Compile error |
+| `require_maturity(N)` | Relative block-number since obligation | Must reject unless a portable semantics is explicitly designed |
+| `require_time(T)` | Absolute timestamp since obligation | Must reject unless a portable semantics is explicitly designed |
+| `require_epoch_after(number, index, length)` | Absolute epoch since obligation | Must reject |
+| `require_epoch_relative(number, index, length)` | Relative epoch since obligation | Must reject |
 
 **Implementation Items**:
 
-- `require_maturity(blocks: N)` → AST node + profile-gated IR lowering
-- `require_time(after: Timestamp(T))` → AST node + shared lowering (both profiles use timestamp)
-- `EpochFraction(number, index, length)` value type with well-formedness checks and CKB `EpochNumberWithFraction` encoding
-- Compiler static check: `require_time` / `require_maturity` / `require_epoch` must appear at action entry (before state mutations)
+- `require_maturity(N)` → typed helper call + CKB-profile runtime-access lowering
+- `require_time(T)` → typed helper call + CKB-profile runtime-access lowering
+- `require_epoch_after(number, index, length)` and `require_epoch_relative(number, index, length)` expose CKB epoch since obligations
+- Epoch helper arguments are type-checked and metadata-visible; full consensus-vector and ordering-rule coverage remains a later compatibility-suite concern unless promoted with tests
 - Coexistence: `ckb::input_since()` low-level API remains available (not removed)
 
 **Risk**: **MEDIUM** — CKB epoch since semantics must match consensus exactly
@@ -392,7 +392,7 @@ where
 |------|---------|
 | Script reference metadata | Emit `code_hash`, `hash_type`, `args`, dep source, and resolved profile for lock/type/spawn targets |
 | HashType validation | Accept only CKB-supported hash types under CKB profile; reject unknown or profile-incompatible values |
-| Dep-cell linkage checks | Verify every script reference used by `spawn`, lock/type metadata, action-boundary `read` parameters, or expression-level `read_ref<T>()` has a resolvable CellDep/DepGroup path |
+| Dep-cell linkage checks | Verify metadata shape for script references used by `spawn`, lock/type metadata, action-boundary `read` parameters, or expression-level `read_ref<T>()`; full registry-backed CellDep/DepGroup resolution remains deferred |
 | Audit output | Include script reference table in generated audit docs and metadata validation errors |
 
 **Boundary**: This does not split `Address`, `LockScript`, and `LockHash` in the type system. That is v0.15. v0.14 only makes CKB artifact references precise and auditable.
@@ -449,6 +449,17 @@ rules.
 
 **Implementation Items**:
 
+- DepGroup dynamic composition: declare a group of related dep cells
+- Multi-module CellDep dependency graph: compiler resolves transitive deps
+- Shared code cell version locking: pin dep cell `out_point` in manifest
+
+**Current nightly boundary**: P2/later. v0.14 exposes script-reference and
+CellDep metadata obligations, but does not ship transitive registry-backed
+CellDep resolution or dynamic DepGroup composition.
+
+**Risk**: **LOW**
+**Depends on**: None
+
 #### 12. Surface Ergonomics Backlog 🟢
 
 **Problem**: v0.13 intentionally prioritizes verifier correctness and explicit CKB semantics over syntax sugar. Several useful ergonomic features are good candidates for v0.14 design, but they are not v0.13 correctness blockers.
@@ -461,12 +472,6 @@ rules.
 - Attribute-form hash type declarations such as `#[default_hash_type(Data1)]` as a possible spelling alongside or instead of `with_default_hash_type(Data1)`.
 
 **Boundary**: These items must not hide Cell layout, invent recoverable verifier errors casually, or weaken fail-closed semantics. Each item needs parser, type checker, lowering, codegen, formatter, LSP, docs, and regression coverage before promotion.
-- DepGroup dynamic composition: declare a group of related dep cells
-- Multi-module CellDep dependency graph: compiler resolves transitive deps
-- Shared code cell version locking: pin dep cell `out_point` in manifest
-
-**Risk**: **LOW**
-**Depends on**: None
 
 ---
 
@@ -476,12 +481,12 @@ v0.14 introduces Spawn/IPC and profile formalization at the DSL layer. Periphera
 
 | Component | Path | v0.14 Work |
 |-----------|------|------------|
-| **Wallet** | `wallet/` | Already supports witness/timelock/signing. v0.14: sync spawn-aware transaction construction (pass child script deps, allocate cycle budget) |
-| **SDK Adaptor** | `sdk/adaptor/` | Add spawn transaction construction examples, capacity planning API |
-| **WASM SDK** | `wasm/` | Sync new syscall bindings (spawn/pipe/wait/read/write/close) |
-| **Standard Scripts** | `exec/src/scripts/` | Add bounded spawn verifier example scripts: delegate verifier, multi-step pipeline |
-| **CLI** | `cli/` | v0.13 covered CLI enhancements. v0.14 adds `cellc spawn-test` for local spawn simulation |
-| **CI** | `.github/workflows/` | Mandatory dual-profile testing for all new features |
+| **Wallet** | `wallet/` | Later integration track: spawn-aware transaction construction must pass child script deps and respect shared cycle budget |
+| **SDK Adaptor** | `sdk/adaptor/` | Later integration track: spawn transaction examples and capacity planning APIs |
+| **WASM SDK** | `wasm/` | Deferred; current WASM backend is audit-only and fail-closed for executable entries |
+| **Standard Scripts** | `exec/src/scripts/` | Language examples cover bounded spawn verifier patterns; production standard-script packaging remains separate |
+| **CLI** | `cli/` | v0.14 ships compile/metadata/profile evidence; no `cellc spawn-test` release claim unless separately implemented |
+| **CI** | `.github/workflows/` | CKB-profile tests and release gates cover implemented 0.14 surfaces |
 
 ---
 
@@ -493,10 +498,10 @@ v0.14 introduces Spawn/IPC and profile formalization at the DSL layer. Periphera
 |--------|--------|
 | All CKB-targeted bundled examples compile under CKB profile | ✅ Required |
 | At least 2 spawn-based language examples | ✅ Required |
-| Structured `WitnessArgs.lock/input_type/output_type` examples pass under CKB profile | ✅ Required |
+| Structured `WitnessArgs.lock/input_type/output_type` tests and examples pass under CKB profile | ✅ Required |
 | Source global/group view tests pass under CKB strict mode | ✅ Required |
-| ScriptGroup metadata matches CKB lock/type group fixtures | ✅ Required |
-| `outputs` ↔ `outputs_data` binding tests reject detached or mismatched output data | ✅ Required |
+| ScriptGroup metadata matches CKB lock/type group metadata/tamper fixtures | ✅ Required |
+| `outputs` ↔ `outputs_data` binding metadata tests reject detached or mismatched output data | ✅ Required |
 | CKB TYPE_ID metadata validation covers create, duplicate stable type_id, and missing/mismatched metadata-plan cases | ✅ Required |
 | CKB `require_epoch_after` and `require_epoch_relative` tests match the expected metadata/runtime surface | ✅ Required |
 | Capacity floor metadata covers 100% of declared `with_capacity_floor` operations and rejects mismatched top-level constraint records | ✅ Required |
@@ -522,7 +527,7 @@ done
 | Non-Goal | Rationale |
 |----------|-----------|
 | Epoch support outside CKB profile | Epoch is CKB-specific and must not leak into portable semantics. |
-| On-chain WASM execution | RISC-V remains the on-chain target. WASM is for browser simulation only. |
+| On-chain WASM execution | RISC-V remains the on-chain target. Executable browser/WASM simulation is deferred until a tested harness exists. |
 | Reopening the action model beyond state-edge spelling | Signature-direction outputs, `where`, named `create`, and stdlib lifecycle patterns stay intact; v0.14 only renames action-level state edges from legacy `move` to `transition` and rejects the old spelling. |
 | Broad breaking DSL changes | v0.14 intentionally makes the `move` -> `transition` cleanup without compatibility aliases; other 0.13.2 syntax should remain stable unless separately justified. |
 | Primitive kernel reset | v0.15 owns protocol-macro lowering, ProofPlan unification, and core primitive redesign. |
@@ -542,15 +547,15 @@ done
 
 **Scenario**: Parent script spawns children that consume unbounded cycles, making total cycle cost unpredictable.
 
-**Mitigation**: Use CKB's existing shared budget model — parent and children share a total cycle limit. The compiler emits a configurable `max_cycles` parameter on `spawn()`. Default is "inherit remaining budget". CI tests verify that spawn-heavy examples stay within expected cycle bounds.
+**Mitigation**: Use CKB's existing shared budget model — parent and children share a total cycle limit. v0.14 records Spawn/IPC runtime accesses and requires builder/dry-run evidence for concrete transactions. A source-level `max_cycles` parameter is not a release claim.
 
 ---
 
 ### Risk 2: Profile Divergence on New Features 🟡
 
-**Scenario**: New features (spawn, WitnessArgs, Source views, capacity syntax, time constraints) behave subtly differently across CKB and portable profiles, creating portability bugs.
+**Scenario**: New features (spawn, WitnessArgs, Source views, capacity syntax, time constraints) are accidentally described as portable even though only the CKB profile is implemented.
 
-**Mitigation**: **Mandatory profile CI testing**. Every new feature must include test cases for the relevant target profiles. The CI workflow is extended to cover v0.14 features. Profile-specific behavior must be explicitly documented in the semantic reference table.
+**Mitigation**: Keep the release profile explicit: `TargetProfile::Ckb` is the implemented profile, and unsupported target-profile names fail closed. Future portable-profile work must add its own tests before any portability claim.
 
 ---
 
@@ -560,9 +565,10 @@ done
 
 **Mitigation**:
 - Structured witness APIs must always include source view and index in metadata.
-- CKB profile decodes Molecule `WitnessArgs` fields explicitly and rejects malformed tables.
-- Tests must include mismatched global/group indexes, missing fields, extra witnesses, and wrong field placement.
-- Non-CKB profiles must not pretend raw witness bytes are CKB `WitnessArgs` unless compatibility mode is explicit.
+- CKB profile lowers structured `WitnessArgs` field reads explicitly and records the runtime access.
+- Metadata/tamper tests cover wrong runtime-access and ScriptGroup records.
+- Malformed WitnessArgs transaction fixtures remain part of the later compatibility suite.
+- Non-CKB profiles must not pretend raw witness bytes are CKB `WitnessArgs` unless compatibility mode is explicit and tested.
 
 ---
 
@@ -572,7 +578,7 @@ done
 
 **Mitigation**:
 - Reuse CKB-compatible bit encoding and well-formedness rules in tests.
-- Include absolute and relative epoch cases against fixture vectors.
+- Include absolute and relative epoch cases against the expected metadata/runtime surface.
 - Keep `require_epoch` unavailable outside CKB profile; do not emulate epoch in portable semantics.
 
 ---
@@ -583,8 +589,8 @@ done
 
 **Mitigation**:
 - Conservative default: compiler checks based on fixed-width layout only
-- Dynamic-length fields: emit runtime fallback check with compiler warning
-- `@capacity_floor(...)` allows developer override when compiler estimate is insufficient
+- Dynamic-length fields still require builder-side capacity evidence
+- `with_capacity_floor(...)` allows developer override when compiler estimate is insufficient
 - Builder integration provides a second safety net at transaction construction time
 
 ---
@@ -601,7 +607,7 @@ done
 
 **Scenario**: WASM simulation environment diverges from actual on-chain behavior, giving false confidence.
 
-**Mitigation**: WASM shim is explicitly labeled as "simulation only". Shim implementations are tested against the same test vectors as RISC-V codegen. Known divergences (timing, cycle counting) are documented.
+**Mitigation**: The executable WASM simulation backend is deferred. The current `src/wasm` module is audit-only and fail-closed for executable action/lock modules, so 0.14 must not claim browser simulation until runnable harness tests exist.
 
 ---
 
@@ -610,9 +616,9 @@ done
 **Scenario**: CellScript metadata claims a group/source/output-data relation that CKB would not actually provide to the running script.
 
 **Mitigation**:
-- Test lock and type ScriptGroup fixtures against CKB-compatible resolved transaction layouts.
+- Test lock and type ScriptGroup metadata against CKB-profile runtime-access records.
 - Treat `outputs[i]` and `outputs_data[i]` as one indexed pair in metadata validation.
-- Include negative tests for wrong group source, empty group output on lock scripts, and detached output data.
+- Include negative metadata/tamper tests for wrong group source/runtime-access drift and detached output data. Dedicated accepted/rejected transaction fixture matrices are deferred to the compatibility suite.
 
 ---
 
@@ -636,8 +642,8 @@ v0.14 **extends** the 0.13.2 production plan:
 - ✅ Molecule ABI remains public format
 - ✅ Registry remains fail-closed
 - **New**: Profile semantic spec becomes a mandatory production artifact
-- **New**: CKB ScriptGroup, outputs_data, and TYPE_ID validation fixtures become mandatory CKB strict-mode evidence
-- **New**: Dual-profile CI becomes a release gate
+- **New**: CKB ScriptGroup, outputs_data, and TYPE_ID metadata/tamper validation fixtures become mandatory CKB strict-mode evidence; dedicated accepted/rejected transaction fixture matrices stay deferred to the later compatibility suite
+- **New**: CKB-profile CI becomes a release gate; unsupported target-profile names fail closed until future profiles are implemented
 
 ### v0.13 Stretch Goals Carried Forward
 
@@ -662,9 +668,6 @@ for file in examples/*.cell; do
     cargo run -p cellscript -- "$file" --target-profile ckb
 done
 
-# Test spawn simulation locally
-cargo run -p cellscript -- spawn-test examples/delegate_verify.cell
-
 # Check profile-specific compilation
 cargo run -p cellscript -- explain-profile ckb
 ```
@@ -673,14 +676,14 @@ cargo run -p cellscript -- explain-profile ckb
 
 | Example | Pattern | Features Exercised |
 |---------|---------|-------------------|
-| `delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, `assert` |
-| `multi_step_pipeline.cell` | Pipe-connected verification chain | `spawn`, `pipe`, `pipe_write`, `wait` |
-| `witness_args_lock.cell` | CKB-style lock reads `WitnessArgs.lock` | `witness::lock<T>`, `source::group_input(0)`, signature verification |
-| `script_group_type_transition.cell` | Type script reads group input/output views | ScriptGroup metadata, `source::group_input`, `source::group_output` |
-| `ckb_type_id_create.cell` | TYPE_ID creation and rejection fixtures | `#[type_id]`, output index plan, duplicate/missing-plan validation |
-| `capacity_aware_token.cell` | Token with capacity floor annotation | `@capacity_floor`, `occupied_capacity(T)` |
-| `cross_chain_htlc.cell` | HTLC with profile-gated time constraints | `require_maturity`, `require_time`, `require_epoch`, CKB profile |
-| `script_reference_manifest.cell` | Script reference table and dep linkage | `code_hash`, `hash_type`, `args`, CellDep/DepGroup linkage |
+| `examples/language/v0_14_delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, runtime-required spawn CellDep obligation |
+| `examples/language/v0_14_multi_step_pipeline.cell` | Pipe-connected verification chain | `spawn`, `pipe`, `pipe_write`, `pipe_read`, `wait`, `close` |
+| `examples/language/v0_14_witness_source.cell` | CKB-style lock reads `WitnessArgs.lock` | `witness::lock`, `source::group_input(0)` |
+| `examples/language/canonical_style.cell` | Canonical lock/action boundary style | `protected`, `lock_args`, `witness`, `env::sighash_all` |
+| `examples/language/v0_14_ckb_type_id_create.cell` | TYPE_ID creation metadata | `#[type_id]`, output index plan, missing/mismatched metadata-plan validation in tests |
+| `examples/language/v0_14_capacity_time.cell` | Capacity and CKB since policy | `with_capacity_floor`, `occupied_capacity("TypeName")`, `require_maturity`, `require_time`, absolute and relative epoch helpers |
+| `examples/language/v0_14_hash_blake2b.cell` | Dynamic fixed-Hash Blake2b | `hash_blake2b(input: Hash)` |
+| `examples/language/registry.cell` | Bounded local registry sketch | Stack-backed value-vector helpers, not persistent registry deployment |
 
 ---
 
@@ -688,23 +691,23 @@ cargo run -p cellscript -- explain-profile ckb
 
 **v0.12 proved CellScript can compile production-grade cell contracts.**
 **v0.13 proved CellScript has a stable explicit verifier surface with strict CKB release evidence.**
-**v0.14 will prove CellScript exposes bounded verifier composition, and the target-profile model is formally complete.**
+**v0.14 will prove CellScript exposes bounded verifier composition, and the CKB target-profile contract is explicit and testable.**
 
 v0.14 delivers:
 
 - **Bounded Verifier Composition**: First-class `spawn`/`pipe`/`wait`/fd operations in DSL, mapped to VM syscalls 2601-2608, without claiming multi-tenant type-script composition
-- **CKB Semantic Completeness**: Structured `WitnessArgs`, explicit Source views, CKB epoch since, and formalized profiles (CKB/Portable)
+- **CKB Semantic Completeness**: Structured `WitnessArgs`, explicit Source views, CKB epoch since, and a formalized CKB profile contract. Portable profile behavior remains a future explicit target.
 - **CKB Transaction Conformance**: ScriptGroup metadata, outputs_data binding, TYPE_ID metadata validation MVP, and strict script-reference records
-- **Declarative Safety**: `@capacity_floor`, `occupied_capacity(T)`, `require_maturity`, `require_time`, `require_epoch`
+- **Declarative Safety**: `with_capacity_floor`, `occupied_capacity("TypeName")`, `require_maturity`, `require_time`, `require_epoch_after`, and `require_epoch_relative`
 - **Hash Policy Clarity**: Profile-aware hash-domain metadata and fixed-Hash dynamic BLAKE2b support with production-gated evidence
 - **Simulation**: Deferred P2. WASM remains audit-only until executable browser-side tests exist.
 
 **Expected Outcomes**:
 - Bounded verifier reuse patterns unlocked (delegate verify, multi-step pipelines)
 - CKB lock/type witness patterns become source-level, typed, and auditable
-- CKB transaction shape assumptions become fixture-tested instead of implicit
+- CKB transaction shape assumptions become metadata/tamper-tested instead of implicit; dedicated accepted/rejected transaction fixture matrices stay deferred to the compatibility suite
 - Profile divergence becomes explicit instead of implicit
-- Capacity-related transaction failures reduced to near zero
+- Capacity floors and measurement obligations become explicit; builders still own funding, change, occupied-capacity, and tx-size evidence
 - Foundation laid for the v0.15 primitive-kernel reset and later formal verification
 
 ---
