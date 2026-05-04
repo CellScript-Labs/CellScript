@@ -26,7 +26,7 @@ An output Cell is a new Cell created by a transaction. In CellScript, `create`
 materializes typed output data and attaches it to a lock:
 
 ```cellscript
-create Token {
+create token = Token {
     amount,
     symbol
 } with_lock(owner)
@@ -48,7 +48,7 @@ A type script checks state transition rules for Cells. CellScript `action`
 entries are closer to type-script style transition logic: they describe the
 inputs, invariants, and outputs of a state change.
 
-Use `assert_invariant` inside actions for business-state transition checks.
+Use `assert` inside actions for business-state transition checks.
 
 ## TYPE_ID
 
@@ -87,9 +87,9 @@ signature binding.
 Script args are bytes stored in the executing script. They are often used to
 bind a script to a particular owner, policy, or configuration.
 
-CellScript supports `lock_args T` for fixed-width typed script-args decoding.
-This tells readers that the value comes from the executing `Script.args`; it
-does not prove a signature and does not create signer authority by itself.
+CellScript uses `lock_args T` on lock parameters for typed fixed-width decoding
+from the executing lock script's `Script.args`. This binds data to script args;
+it does not by itself verify a transaction signature.
 
 When `identity(script_args)` is used, ProofPlan reports the provenance as
 `lock_args` rather than witness data. Runtime identity preservation is checked

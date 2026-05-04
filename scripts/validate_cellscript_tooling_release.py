@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import re
+import tomllib
 from pathlib import Path
 
 
@@ -26,16 +28,49 @@ def require_contains(path: str, tokens: list[str]) -> None:
 
 
 def main() -> int:
+    cargo_toml = read("Cargo.toml")
+    cargo = tomllib.loads(cargo_toml)
+    cargo_lock = tomllib.loads(read("Cargo.lock"))
     package_json = json.loads(read("editors/vscode-cellscript/package.json"))
+    changelog = read("CHANGELOG.md")
+
+    crate_version = cargo["package"]["version"]
+    lock_versions = [
+        package.get("version")
+        for package in cargo_lock.get("package", [])
+        if package.get("name") == "cellscript"
+    ]
+    changelog_match = re.search(r"^## ([0-9]+\.[0-9]+\.[0-9]+) - ", changelog, re.MULTILINE)
+
+    require(lock_versions == [crate_version], "Cargo.lock cellscript version must match Cargo.toml package.version")
+    require(package_json["version"] == crate_version, "VS Code extension version must match Cargo.toml package.version")
+    require(changelog_match is not None, "CHANGELOG.md must start with a semver release heading")
+    require(changelog_match.group(1) == crate_version, "CHANGELOG.md current release heading must match Cargo.toml package.version")
+    require_contains(
+        "src/lib.rs",
+        ['pub const VERSION: &str = env!("CARGO_PKG_VERSION");'],
+    )
+    require_contains(
+        "src/main.rs",
+        ["#[command(version = cellscript::VERSION)]"],
+    )
+    require_contains("README.md", [f'version = "{crate_version}"'])
+    require_contains("README_CH.md", [f'version = "{crate_version}"'])
 
     require(package_json["name"] == "cellscript-vscode", "VS Code extension package name changed")
     require(package_json["main"] == "./dist/extension.js", "VS Code extension entrypoint changed")
     require("vscode-languageclient" in package_json.get("devDependencies", {}), "VS Code extension must build with vscode-languageclient")
     require("esbuild" in package_json.get("devDependencies", {}), "VS Code extension must bundle with esbuild")
+    require("@vscode/vsce" in package_json.get("devDependencies", {}), "VS Code extension must pin vsce for package dry runs")
     require("build" in package_json.get("scripts", {}), "VS Code extension must expose a build script")
     require("vscode:prepublish" in package_json.get("scripts", {}), "VS Code extension must build before publish")
     require("package" in package_json.get("scripts", {}), "VS Code extension must expose a package script")
     require("publish:dry-run" in package_json.get("scripts", {}), "VS Code extension must expose a publish dry-run script")
+    require(
+        "vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix"
+        in package_json["scripts"]["publish:dry-run"],
+        "VS Code publish dry-run must package a local VSIX instead of using an unsupported publish --dry-run flag",
+    )
 
     require_contains(
         "src/main.rs",
@@ -97,7 +132,6 @@ def main() -> int:
         ],
     )
 
-    cargo_toml = read("Cargo.toml")
     for excluded in [
         '".github/"',
         '"docs/"',

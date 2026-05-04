@@ -19,20 +19,32 @@ EXPECTED_EXAMPLES = [
     "vesting.cell",
 ]
 EXPECTED_NON_PRODUCTION_EXAMPLES = ["registry.cell"]
+EXPECTED_LANGUAGE_EXAMPLES = [
+    "canonical_style.cell",
+    "order_book.cell",
+    "registry.cell",
+    "stdlib.cell",
+    "v0_14_capacity_time.cell",
+    "v0_14_ckb_type_id_create.cell",
+    "v0_14_delegate_verify.cell",
+    "v0_14_hash_blake2b.cell",
+    "v0_14_multi_step_pipeline.cell",
+    "v0_14_witness_source.cell",
+]
 EXPECTED_ACTION_COUNT = 43
-EXPECTED_LOCK_COUNT = 16
 EXPECTED_STATUS = "passed"
 EXPECTED_MODE = "production"
 EXPECTED_LOCK_SPEND_MATRIX = {
     "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-    "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+    "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
     "vesting.cell": ["vesting_admin"],
 }
+EXPECTED_LOCK_COUNT = sum(len(locks) for locks in EXPECTED_LOCK_SPEND_MATRIX.values())
 EXPECTED_LOCK_NAMES = [
     f"{example}:{lock}"
-    for example in EXPECTED_EXAMPLES
-    for lock in EXPECTED_LOCK_SPEND_MATRIX.get(example, [])
+    for example, locks in EXPECTED_LOCK_SPEND_MATRIX.items()
+    for lock in locks
 ]
 
 ACTION_RUN_KEYS = [
@@ -159,6 +171,8 @@ def validate_compile_gate(report: dict[str, Any], *, compile_only: bool = False)
     require_field(report, "bundled_examples_count", len(EXPECTED_EXAMPLES))
     require_field(report, "bundled_examples_exact_order", EXPECTED_EXAMPLES)
     require_field(report, "non_production_examples", EXPECTED_NON_PRODUCTION_EXAMPLES)
+    require_field(report, "language_examples_count", len(EXPECTED_LANGUAGE_EXAMPLES))
+    require_field(report, "language_examples_exact_order", EXPECTED_LANGUAGE_EXAMPLES)
     require_field(report, "original_scoped_action_count", EXPECTED_ACTION_COUNT)
     require_field(report, "original_scoped_lock_count", EXPECTED_LOCK_COUNT)
     require_field(report, "original_scoped_action_fail_closed_count", 0)
@@ -199,13 +213,32 @@ def validate_compile_gate(report: dict[str, Any], *, compile_only: bool = False)
     example_scope = report.get("example_scope")
     require(isinstance(example_scope, dict), "example_scope must be an object")
     require_field(example_scope, "production_bundled_examples", EXPECTED_EXAMPLES, "example_scope")
-    require_field(example_scope, "non_production_language_examples", EXPECTED_NON_PRODUCTION_EXAMPLES, "example_scope")
+    require_field(example_scope, "non_production_top_level_examples", EXPECTED_NON_PRODUCTION_EXAMPLES, "example_scope")
+    require_field(example_scope, "non_production_language_examples", EXPECTED_LANGUAGE_EXAMPLES, "example_scope")
     scope_note = example_scope.get("production_scope_note")
     require(
         isinstance(scope_note, str)
         and "Only production_bundled_examples" in scope_note
+        and "non_production_top_level_examples" in scope_note
         and "non_production_language_examples" in scope_note,
         "example_scope.production_scope_note must state the production/non-production example boundary",
+    )
+    source_layout = report.get("example_source_layout")
+    require(isinstance(source_layout, dict), "example_source_layout must be an object")
+    require(isinstance(source_layout.get("canonical_bundled_examples"), str), "example_source_layout must record canonical_bundled_examples")
+    require(isinstance(source_layout.get("language_examples"), str), "example_source_layout must record language_examples")
+    require(
+        "production_acceptance_examples" not in source_layout
+        and "canonical_business_examples" not in source_layout
+        and "flat_business_compatibility_examples" not in source_layout,
+        "example_source_layout must not advertise the removed business/acceptance split",
+    )
+    layout_note = source_layout.get("canonical_examples_note")
+    require(
+        isinstance(layout_note, str)
+        and "top-level examples/*.cell directly" in layout_note
+        and "examples/business and examples/acceptance" in layout_note,
+        "example_source_layout.canonical_examples_note must state the single-source example layout",
     )
 
     lock_scope = report.get("lock_acceptance_scope")

@@ -80,6 +80,7 @@ impl ModuleResolver {
                 Item::Struct(s) => {
                     Self::insert_type_symbol(&mut symbol_table, &s.name, TypeDef::Struct(s.clone()), s.span)?;
                 }
+                Item::Flow(_) => {}
                 Item::Enum(e) => {
                     Self::insert_type_symbol(&mut symbol_table, &e.name, TypeDef::Enum(e.clone()), e.span)?;
                 }
@@ -465,6 +466,8 @@ mod tests {
                         name: "Token".to_string(),
                         params: Vec::new(),
                         return_type: Some(Type::U64),
+                        outputs: Vec::new(),
+                        state_edges: Vec::new(),
                         body: vec![Stmt::Return(Some(Expr::Integer(0)))],
                         effect: EffectClass::Pure,
                         effect_declared: false,

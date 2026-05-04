@@ -20,14 +20,30 @@ run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
 
-Lock coverage now runs in the same production acceptance flow: all 16 bundled
+Lock coverage now runs in the same production acceptance flow: all 17 bundled
 locks strict-compile under the CKB profile and are exercised with builder-backed
 local CKB valid-spend and invalid-spend transactions. The production report keeps
 the matrix explicit in `lock_acceptance_scope.onchain_lock_spend_matrix_scope`.
 
-`registry.cell` is not part of the seven-example CKB production action matrix.
-It is a 0.13 language/tooling example for bounded local `Vec<Address>` and
-`Vec<Hash>` helper behavior.
+`examples/registry.cell` and every checked-in `examples/language/*.cell` file
+are not part of the seven-example CKB production action matrix. They are
+language/tooling examples for compiler surfaces such as bounded local `Vec<T>`,
+stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and
+dynamic BLAKE2b.
+
+## Cell Lifecycle Vocabulary
+
+The examples use lifecycle words with fixed audit meaning:
+
+- `read`: reference an existing Cell without spending it.
+- `consume`: spend an input Cell as evidence for a transition, settlement, or
+  successor output.
+- `destroy`: terminally spend an input Cell with no successor of the same
+  logical object; the type must expose `destroy`.
+- `create`: require a named output Cell to appear with the declared data and,
+  when specified, lock.
+- `preserve`: local sugar for field equality; it lowers to ordinary verifier
+  constraints and does not imply transaction semantics.
 
 ## `token.cell`
 
@@ -38,12 +54,12 @@ and same-symbol merge flows.
 flowchart TD
     A["MintAuthority input Cell"] --> B["mint"]
     B --> C["Check minted plus amount <= max_supply"]
-    C --> D["Mutate MintAuthority.minted"]
+    C --> D["Constrain MintAuthority output minted field"]
     D --> E["Create Token output Cell for recipient"]
 
     F["Token input Cell"] --> G["transfer_token"]
     G --> H["Consume old Token"]
-    H --> I["Create replacement Token locked to recipient"]
+    H --> I["Create proposed Token locked to recipient"]
 
     J["Token input Cell"] --> K["burn"]
     K --> L["Check amount > 0"]
@@ -77,21 +93,21 @@ flowchart TD
     J["Token A input Cell"] --> I
     I --> K["Check input symbol and slippage"]
     K --> L["Consume input token"]
-    L --> M["Replace Pool reserves"]
+    L --> M["Update Pool reserves"]
     M --> N["Create Token B output Cell"]
 
     O["Pool input Cell"] --> P["add_liquidity"]
     Q["Token A input Cell"] --> P
     R["Token B input Cell"] --> P
     P --> S["Check token symbols"]
-    S --> T["Replace Pool reserves and total LP"]
+    S --> T["Update Pool reserves and total LP"]
     T --> U["Create LPReceipt output Cell"]
 
     V["Pool input Cell"] --> W["remove_liquidity"]
     X["LPReceipt input Cell"] --> W
     W --> Y["Check receipt pool id"]
     Y --> Z["Destroy LPReceipt"]
-    Z --> AA["Replace Pool reserves and total LP"]
+    Z --> AA["Update Pool reserves and total LP"]
     AA --> AB["Create Token A and Token B outputs"]
 ```
 
@@ -126,7 +142,7 @@ are no lock entries in this example.
 
 ## `multisig.cell`
 
-Business purpose: threshold wallet creation, proposal lifecycle, signature
+Business purpose: threshold wallet creation, proposal records, signature
 collection, execution, cancellation, and signer/threshold governance proposals.
 
 ```mermaid
@@ -143,7 +159,7 @@ flowchart TD
     H --> I["add_signature"]
     D --> I
     I --> J["Check signer, expiry, and no duplicate signature"]
-    J --> K["Append Signature to Proposal replacement"]
+    J --> K["Append Signature to proposed Proposal output"]
     K --> L["Create SignatureConfirmation receipt"]
 
     H --> M["execute_proposal"]
@@ -185,12 +201,12 @@ and batch mint flows.
 flowchart TD
     A["Collection input Cell"] --> B["mint"]
     B --> C["Check supply below max"]
-    C --> D["Replace Collection total_supply"]
+    C --> D["Update Collection total_supply"]
     D --> E["Create NFT output Cell"]
 
     F["NFT input Cell"] --> G["transfer"]
     G --> H["Check recipient differs from owner"]
-    H --> I["Replace NFT.owner"]
+    H --> I["Update NFT.owner"]
 
     F --> J["create_listing"]
     J --> K["Check positive price"]
@@ -202,7 +218,7 @@ flowchart TD
     F --> O["buy_from_listing"]
     L --> O
     O --> P["Check payment covers price"]
-    P --> Q["Replace NFT.owner with buyer"]
+    P --> Q["Update NFT.owner with buyer"]
     Q --> R["Destroy Listing"]
     R --> S["Create royalty and seller payment receipts"]
 
@@ -212,7 +228,7 @@ flowchart TD
     F --> W["accept_offer"]
     V --> W
     W --> X["Check offer not expired"]
-    X --> Y["Replace NFT.owner with buyer"]
+    X --> Y["Update NFT.owner with buyer"]
     Y --> Z["Destroy Offer"]
     Z --> AA["Create royalty and seller payment receipts"]
 
@@ -221,7 +237,7 @@ flowchart TD
 
     A --> AD["batch_mint"]
     AD --> AE["Check capacity for four new NFTs"]
-    AE --> AF["Replace Collection total_supply"]
+    AE --> AF["Update Collection total_supply"]
     AF --> AG["Create four NFT output Cells"]
 ```
 
@@ -277,7 +293,7 @@ flowchart TD
 
     U --> V["approve_emergency_release"]
     V --> W["Check approver not duplicated"]
-    W --> X["Append approver to replacement EmergencyRelease"]
+    W --> X["Append approver to proposed EmergencyRelease output"]
 
     D --> Y["execute_emergency_release"]
     K --> Y
@@ -288,7 +304,7 @@ flowchart TD
 
     D --> AC["extend_lock"]
     AC --> AD["Check owner and still locked"]
-    AD --> AE["Replace TimeLock.unlock_height"]
+    AD --> AE["Update TimeLock.unlock_height"]
 
     AF["Four owner and height pairs"] --> AG["batch_create_locks"]
     AG --> AH["Create four TimeLock Cells"]
@@ -300,13 +316,14 @@ Strict-compiled locks:
 flowchart LR
     A["can_unlock_lock"] --> B["Height reached predicate"]
     C["is_owner"] --> D["Owner predicate"]
-    E["asset_matches"] --> F["Locked asset hash predicate"]
-    G["emergency_approved"] --> H["Approval count predicate"]
-    I["not_expired"] --> J["Still locked predicate"]
+    E["lock_id_commitment"] --> F["CKB Blake2b lock-id commitment predicate"]
+    G["asset_matches"] --> H["Locked asset hash predicate"]
+    I["emergency_approved"] --> J["Approval count predicate"]
+    K["not_expired"] --> L["Still locked predicate"]
 ```
 
 CKB acceptance status: all ten actions are builder-backed and run on-chain. The
-five locks strict-compile and have builder-backed valid-spend and invalid-spend
+six locks strict-compile and have builder-backed valid-spend and invalid-spend
 cases.
 
 ## `vesting.cell`

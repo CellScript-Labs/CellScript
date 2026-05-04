@@ -6,7 +6,8 @@ with_capacity_floor(6100000000)
     amount: u64,
 }
 
-action mint_after_maturity(amount: u64) -> TimedToken {
+action mint_after_maturity(amount: u64) -> output: TimedToken
+where
     // These are CKB-profile since constraints. Portable profiles must not
     // pretend to emulate CKB epoch or block-number behavior.
     require_maturity(100)
@@ -16,5 +17,4 @@ action mint_after_maturity(amount: u64) -> TimedToken {
     let floor = occupied_capacity("TimedToken")
     assert_invariant(floor >= 0, "capacity policy is metadata-visible")
 
-    create TimedToken { amount }
-}
+    create output = TimedToken { amount }

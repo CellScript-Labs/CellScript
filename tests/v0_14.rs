@@ -1,4 +1,4 @@
-use cellscript::{compile, CompileOptions};
+use cellscript::{compile, validate_compile_metadata, ArtifactFormat, CompileOptions};
 
 #[test]
 fn v0_14_exposes_spawn_ipc_source_witness_time_capacity_metadata() {
@@ -18,14 +18,15 @@ struct Proof {
     signature: Hash,
 }
 
-action delegate_verify(proof: Proof) -> u64 {
+action delegate_verify(proof: Proof) -> u64
+where
     let pid = spawn("secp256k1_verifier")
     let status = wait()
     assert_invariant(status == 0, "delegate failed")
     return pid
-}
 
-action pipe_pipeline(value: u64) -> u64 {
+action pipe_pipeline(value: u64) -> u64
+where
     let fds = pipe()
     let read_fd = fds.0
     let write_fd = fds.1
@@ -34,16 +35,16 @@ action pipe_pipeline(value: u64) -> u64 {
     close(read_fd)
     close(write_fd)
     return echoed
-}
 
-action capacity_and_time(amount: u64) -> Token {
+action capacity_and_time(amount: u64) -> output: Token
+where
     require_maturity(100)
     require_time(1714000000)
+    require_epoch_after(10, 0, 1)
     require_epoch_relative(10, 0, 1)
     let floor = occupied_capacity("Token")
     assert_invariant(floor >= 0, "capacity floor visible")
-    create Token { amount }
-}
+    create output = Token { amount }
 
 lock owner_lock(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
     let view = source::group_input(0)
@@ -101,6 +102,18 @@ lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Addres
         access.operation == "witness-output-type"
             && access.syscall == "LOAD_WITNESS_ARGS_OUTPUT_TYPE"
             && access.source == "GroupOutput"
+    }));
+    assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "require-epoch-after"
+            && access.syscall == "LOAD_INPUT_BY_FIELD"
+            && access.source == "GroupInput"
+            && access.binding == "require_epoch_after"
+    }));
+    assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "require-epoch-relative"
+            && access.syscall == "LOAD_INPUT_BY_FIELD"
+            && access.source == "GroupInput"
+            && access.binding == "require_epoch_relative"
     }));
     assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| access.operation == "spawn"));
     let delegate_verify =
@@ -178,9 +191,9 @@ with_capacity_floor(6100000000)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
-    create Token { amount }
-}
+action mint(amount: u64) -> output: Token
+where
+    create output = Token { amount }
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -199,6 +212,40 @@ action mint(amount: u64) -> Token {
     assert_eq!(floor.source, "dsl-with_capacity_floor");
     assert_eq!(floor.status, "builder-must-preserve-output-capacity-at-or-above-floor");
     result.validate().unwrap();
+
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").declared_capacity_floors.clear();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("declared_capacity_floors") && err.message.contains("missing"), "unexpected error: {}", err.message);
+
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").declared_capacity_floors[0].shannons = 6_000_000_000;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(
+        err.message.contains("declared_capacity_floors") && err.message.contains("missing") && err.message.contains("extra"),
+        "unexpected error: {}",
+        err.message
+    );
+
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").created_output_count = 0;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("created_output_count"), "unexpected error: {}", err.message);
+
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").capacity_evidence_contract.occupied_capacity_measurement_required =
+        false;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(
+        err.message.contains("capacity_evidence_contract.occupied_capacity_measurement_required"),
+        "unexpected error: {}",
+        err.message
+    );
+
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb = None;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("missing constraints.ckb"), "unexpected error: {}", err.message);
 
     let err = compile(
         r#"
@@ -228,9 +275,9 @@ with_default_hash_type(Type)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token {
-    create Token { amount }
-}
+action mint(amount: u64) -> output: Token
+where
+    create output = Token { amount }
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -276,27 +323,235 @@ action mint(amount: u64) -> Token {
         .runtime
         .ckb_runtime_accesses
         .iter()
-        .find(|access| access.operation == "create" && access.source == "Output" && access.index == 0)
+        .find(|access| matches!(access.operation.as_str(), "create" | "output") && access.source == "Output" && access.index == 0)
         .expect("create output runtime access");
     assert_eq!(create_access.syscall, "LOAD_CELL");
     assert_eq!(result.metadata.target_profile.output_data_abi, "ckb-outputs-and-outputs-data-index-aligned");
 }
 
 #[test]
-fn v0_14_rejects_unavailable_dynamic_blake2b() {
+fn v0_14_rejects_tampered_type_id_output_data_and_script_reference_metadata() {
+    let source = r#"
+module cellscript::v0_14_type_id_tamper
+
+#[type_id("cellscript::v0_14_type_id_tamper::Token:v1")]
+resource Token has store
+with_default_hash_type(Type)
+{
+    amount: u64,
+}
+
+action mint(amount: u64) -> output: Token
+where
+    create output = Token { amount }
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let base = result.metadata.clone();
+    validate_compile_metadata(&base, ArtifactFormat::RiscvAssembly).unwrap();
+
+    let mut metadata = base.clone();
+    metadata.actions[0].create_set[0].ckb_output_data.as_mut().expect("CKB output data binding").output_data_index = 1;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("ckb_output_data.output_data_index"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    metadata.actions[0].create_set[0].ckb_output_data = None;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("missing ckb_output_data index binding"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    metadata.actions[0].create_set[0].ckb_type_id.as_mut().expect("CKB TYPE_ID output plan").hash_type = "data".to_string();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("ckb_type_id.hash_type"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    metadata.actions[0].create_set[0].ckb_type_id = None;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("missing ckb_type_id output plan"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    let reference = metadata
+        .constraints
+        .ckb
+        .as_mut()
+        .expect("CKB constraints")
+        .script_references
+        .iter_mut()
+        .find(|reference| reference.purpose == "type-id-create-output")
+        .expect("TYPE_ID script reference");
+    reference.hash_type = Some("data".to_string());
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("script_references") && err.message.contains("hash_type"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    let reference = metadata
+        .constraints
+        .ckb
+        .as_mut()
+        .expect("CKB constraints")
+        .script_references
+        .iter_mut()
+        .find(|reference| reference.purpose == "type-id-create-output")
+        .expect("TYPE_ID script reference");
+    reference.dep_source.clear();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("script_references") && err.message.contains("dep_source"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").script_references.clear();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("script_references") && err.message.contains("missing"), "unexpected error: {}", err.message);
+
+    let mut metadata = base;
+    let extra_reference = metadata.constraints.ckb.as_ref().expect("CKB constraints").script_references[0].clone();
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").script_references.push(extra_reference);
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("script_references") && err.message.contains("extra"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn v0_14_rejects_tampered_spawn_script_reference_metadata() {
+    let source = r#"
+module cellscript::v0_14_spawn_reference_tamper
+
+action delegate_verify() -> u64
+where
+    let pid = spawn("secp256k1_verifier")
+    return pid
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let base = result.metadata.clone();
+    let mut metadata = base.clone();
+    let reference = metadata
+        .constraints
+        .ckb
+        .as_mut()
+        .expect("CKB constraints")
+        .script_references
+        .iter_mut()
+        .find(|reference| reference.purpose == "spawn-target")
+        .expect("spawn script reference");
+    reference.dep_source = "CellDep#0".to_string();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("spawn-target") || err.message.contains("CellDep-or-DepGroup"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    let reference = metadata
+        .constraints
+        .ckb
+        .as_mut()
+        .expect("CKB constraints")
+        .script_references
+        .iter_mut()
+        .find(|reference| reference.purpose == "spawn-target")
+        .expect("spawn script reference");
+    reference.code_hash = Some("00".repeat(32));
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("code_hash/hash_type/args"), "unexpected error: {}", err.message);
+
+    let mut metadata = base;
+    metadata.constraints.ckb.as_mut().expect("CKB constraints").script_references.clear();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("script_references") && err.message.contains("missing"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn v0_14_rejects_tampered_runtime_access_and_script_group_metadata() {
+    let source = r#"
+module cellscript::v0_14_script_group_tamper
+
+resource Token has store {
+    amount: u64,
+}
+
+action mint(amount: u64) -> output: Token
+where
+    create output = Token { amount }
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let base = result.metadata.clone();
+    validate_compile_metadata(&base, ArtifactFormat::RiscvAssembly).unwrap();
+
+    let mut metadata = base.clone();
+    metadata.actions[0].ckb_script_group = None;
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("missing ckb_script_group"), "unexpected error: {}", err.message);
+
+    let mut metadata = base.clone();
+    metadata.actions[0].ckb_script_group.as_mut().expect("CKB script group").group_kind = "lock".to_string();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("ckb_script_group") && err.message.contains("runtime access"), "unexpected error: {}", err.message);
+
+    let mut metadata = base;
+    metadata.actions[0].ckb_runtime_accesses[0].source = "Bogus".to_string();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(err.message.contains("ckb_runtime_accesses") && err.message.contains("source"), "unexpected error: {}", err.message);
+
+    let mut metadata = result.metadata;
+    metadata.runtime.ckb_runtime_accesses.clear();
+    let err = validate_compile_metadata(&metadata, ArtifactFormat::RiscvAssembly).unwrap_err();
+    assert!(
+        err.message.contains("runtime.ckb_runtime_accesses") && err.message.contains("missing"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn v0_14_compiles_dynamic_blake2b_hash_helper() {
+    let source = r#"
+module cellscript::blake2b
+
+action digest(input: Hash, expected: Hash) -> bool
+where
+    let actual = hash_blake2b(input)
+    return actual == expected
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__ckb_hash_blake2b"), "missing blake2b helper:\n{}", asm);
+    assert!(asm.contains("CKB Blake2b-256 helper"), "helper should not be metadata-only:\n{}", asm);
+    assert!(asm.contains("xor "), "Blake2b helper should use real mixing instructions:\n{}", asm);
+    assert!(result.metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "ckb-blake2b"));
+    assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "hash-blake2b"
+            && access.syscall == "CKB_BLAKE2B"
+            && access.source == "Profile"
+            && access.binding == "hash_blake2b"
+    }));
+    result.validate().unwrap();
+
+    let elf = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(!elf.artifact_bytes.is_empty(), "blake2b helper should assemble to ELF");
+}
+
+#[test]
+fn v0_14_rejects_blake2b_non_hash_input() {
     let err = compile(
         r#"
 module cellscript::bad_blake2b
 
-action bad(input: Hash) -> Hash {
+action bad(input: u64) -> Hash
+where
     return hash_blake2b(input)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
     .unwrap_err();
 
-    assert!(err.message.contains("hash_blake2b is not available"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("hash_blake2b expects Hash input"), "unexpected error: {}", err.message);
 }
 
 #[test]
@@ -305,11 +560,11 @@ fn v0_14_rejects_spawn_ipc_fd_use_after_close() {
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     let (read_fd, write_fd) = pipe()
     close(read_fd)
     pipe_read(read_fd)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -324,12 +579,12 @@ fn v0_14_rejects_spawn_ipc_fd_double_close() {
         r#"
 module cellscript::bad_fd
 
-action bad() -> u64 {
+action bad() -> u64
+where
     let fds = pipe()
     let read_fd = fds.0
     close(read_fd)
     close(read_fd)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -344,13 +599,13 @@ fn v0_14_rejects_spawn_ipc_fd_leak() {
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64 {
+action bad(value: u64) -> u64
+where
     let fds = pipe()
     let read_fd = fds.0
     let write_fd = fds.1
     pipe_write(write_fd, value)
     return pipe_read(read_fd)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -367,9 +622,9 @@ module cellscript::static_spawn
 
 const VERIFY_TARGET: String = "secp256k1_verifier";
 
-action delegate() -> u64 {
+action delegate() -> u64
+where
     return spawn(VERIFY_TARGET)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -380,9 +635,9 @@ action delegate() -> u64 {
         r#"
 module cellscript::dynamic_spawn
 
-action delegate(target: String) -> u64 {
+action delegate(target: String) -> u64
+where
     return spawn(target)
-}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -411,6 +666,14 @@ fn v0_14_language_examples_cover_spawn_pipeline_type_id_and_canonical_style() {
         .transaction_runtime_input_requirements
         .iter()
         .any(|requirement| { requirement.component == "spawn-target-cell-dep" && requirement.status == "runtime-required" }));
+
+    let blake2b = compile(
+        include_str!("../examples/language/v0_14_hash_blake2b.cell"),
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .unwrap();
+    let blake2b_lock = blake2b.metadata.locks.iter().find(|lock| lock.name == "blake2b_matches").expect("blake2b lock metadata");
+    assert!(blake2b_lock.ckb_runtime_accesses.iter().any(|access| access.operation == "hash-blake2b"));
 
     let type_id = compile(
         include_str!("../examples/language/v0_14_ckb_type_id_create.cell"),

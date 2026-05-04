@@ -25,7 +25,8 @@ action mint_owned_owner(
     owner_index: u64,
     expected_owned_type_hash: Hash,
     owner_relative_distance: i32
-) -> (OwnedWithdrawal, OwnerCell) {
+) -> (owned: OwnedWithdrawal, owner_cell: OwnerCell)
+where
     ckb::require_current_script_args_empty()
     let role = ckb::current_role()
     let owner_output_index = ckb::cell_output_index(source::output(owner_index))
@@ -48,7 +49,7 @@ action mint_owned_owner(
         RELATED_DATA_RULE_EXACT_U64_NONZERO
     )
 
-    let owned = create OwnedWithdrawal {
+    create owned = OwnedWithdrawal {
         request_epoch,
         maturity_epoch,
         owner,
@@ -56,21 +57,19 @@ action mint_owned_owner(
         owner_relative_distance
     } with_lock(owner)
 
-    let owner_cell = create OwnerCell {
+    create owner_cell = OwnerCell {
         owner,
         owned_index,
         owner_index,
         owner_relative_distance
     } with_lock(owner)
 
-    (owned, owner_cell)
-}
-
 action melt_owned_owner(
     owned: OwnedWithdrawal,
     owner_cell: OwnerCell,
     claimed_owner: Address
-) {
+)
+where
     ckb::require_current_script_args_empty()
     assert_invariant(owner_cell.owner == claimed_owner, "wrong owner")
     assert_invariant(owned.owner == owner_cell.owner, "owner mismatch")
@@ -79,7 +78,6 @@ action melt_owned_owner(
 
     consume owned
     consume owner_cell
-}
 
 lock owned_unlock(
     owned: protected OwnedWithdrawal,

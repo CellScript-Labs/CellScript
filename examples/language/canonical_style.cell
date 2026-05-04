@@ -1,72 +1,50 @@
 module cellscript::canonical_style
 
-resource Vault has store, transfer {
+resource Vault has store, create, consume, replace, relock {
     owner: Address
     asset_symbol: [u8; 8]
     balance: u64
 }
 
-shared Market has store {
-    total_locked: u64
-}
-
-receipt DepositReceipt has store, destroy {
-    vault_hash: Hash
+receipt DepositReceipt has store, create, consume, burn {
     amount: u64
     participant: Address
     approvals: Vec<Address>
 }
 
-action open_vault(owner: Address, asset_symbol: [u8; 8], balance: u64) -> Vault {
+action open_vault(owner: Address, asset_symbol: [u8; 8], balance: u64) -> vault: Vault
+where
     assert_invariant(balance > 0, "empty vault")
 
-    create Vault {
+    create vault = Vault {
         owner,
         asset_symbol,
         balance
     } with_lock(owner)
-}
 
-action deposit(
-    market: &mut Market,
-    vault: &mut Vault,
-    amount: u64,
-    participant: Address
-) -> DepositReceipt {
-    assert_invariant(amount > 0, "zero deposit")
-    assert_invariant(participant == vault.owner, "wrong participant")
+action issue_receipt(vault: Vault, amount: u64, participant: Address) -> (next_vault: Vault, receipt: DepositReceipt)
+where
+    require amount > 0
+    require participant == vault.owner
 
-    market.total_locked = market.total_locked + amount
-    vault.balance = vault.balance + amount
+    std::lifecycle::transfer(vault, next_vault, participant) {
+        owner
+        asset_symbol
+        balance
+    }
 
-    create DepositReceipt {
-        vault_hash: vault.type_hash(),
+    create receipt = DepositReceipt {
         amount,
         participant,
         approvals: []
     } with_lock(participant)
-}
 
-action settle_deposit(
-    market: &mut Market,
-    vault: &mut Vault,
-    receipt: DepositReceipt,
-    recipient: Address
-) {
-    assert_invariant(receipt.vault_hash == vault.type_hash(), "wrong vault")
-    assert_invariant(recipient == receipt.participant, "wrong recipient")
-
-    consume receipt
-    market.total_locked = market.total_locked - receipt.amount
-    vault.balance = vault.balance - receipt.amount
-}
-
-action discard_empty_receipt(receipt: DepositReceipt) {
-    assert_invariant(receipt.amount == 0, "non-empty receipt")
+action discard_empty_receipt(receipt: DepositReceipt)
+where
+    require receipt.amount == 0
     destroy receipt
-}
 
-lock vault_owner(vault: protected Vault, owner: lock_args Address, claimed_owner: witness Address) -> bool {
+lock vault_owner(protected vault: Vault, lock_args owner: Address, witness claimed_owner: Address) -> bool {
     // CKB boundary surfaces: protected input cell, script args, witness field,
     // and an explicit sighash digest. This still is not first-class signer auth.
     let input = source::group_input(0)

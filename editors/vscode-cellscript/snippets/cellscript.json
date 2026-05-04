@@ -2,18 +2,28 @@
   "Action": {
     "prefix": "action",
     "body": [
-      "action ${1:name}(${2:param}: ${3:u64}) -> ${4:u64} {",
-      "    ${5:return ${2}}",
-      "}"
+      "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}",
+      "where",
+      "    require ${5:${4}.owner == ${2}.owner}"
     ],
-    "description": "Create a CellScript action"
+    "description": "Create a CellScript action with a where proof block"
+  },
+  "State Transition Action": {
+    "prefix": "action-transition",
+    "body": [
+      "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}",
+      "    transition ${2}.${5:state}: ${6:Created} -> ${4}.${5}: ${7:Live}",
+      "where",
+      "    require ${8:${4}.owner == ${2}.owner}"
+    ],
+    "description": "Create an action with an explicit state transition"
   },
   "Lock": {
     "prefix": "lock",
     "body": [
-      "lock ${1:name}(${2:cell}: protected ${3:CellType}, ${4:owner}: lock_args ${5:Address}, ${6:claimed_owner}: witness ${7:Address}) -> bool {",
-      "    require ${4} == ${2}.owner",
-      "    require ${6} == ${4}",
+      "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {",
+      "    require ${6} == ${2}.owner",
+      "    require ${4} == ${6}",
       "}"
     ],
     "description": "Create a CellScript lock with explicit protected, lock_args, and witness boundaries"
@@ -22,7 +32,7 @@
     "prefix": "resource",
     "body": [
       "resource ${1:Token} {",
-      "    ${2:amount}: ${3:u64},",
+      "    ${2:amount}: ${3:u64}",
       "}"
     ],
     "description": "Create a CellScript resource"
@@ -31,7 +41,7 @@
     "prefix": "shared",
     "body": [
       "shared ${1:Pool} {",
-      "    ${2:reserve}: ${3:u64},",
+      "    ${2:reserve}: ${3:u64}",
       "}"
     ],
     "description": "Create a CellScript shared state"
@@ -40,7 +50,7 @@
     "prefix": "receipt",
     "body": [
       "receipt ${1:Grant} {",
-      "    ${2:beneficiary}: ${3:Address},",
+      "    ${2:beneficiary}: ${3:Address}",
       "}"
     ],
     "description": "Create a CellScript receipt"
@@ -56,11 +66,41 @@
   "Create With Lock": {
     "prefix": "create",
     "body": [
-      "create ${1:Token} {",
-      "    ${2:amount}: ${3:1}",
-      "} with_lock(${4:owner})"
+      "create ${1:output} = ${2:Token} {",
+      "    ${3:amount}: ${4:1}",
+      "} with_lock(${5:owner})"
     ],
-    "description": "Create a resource with a lock"
+    "description": "Constrain a named output with a lock"
+  },
+  "Transition": {
+    "prefix": "transition",
+    "body": [
+      "transition ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2}: ${5:Live}"
+    ],
+    "description": "Declare a field-to-field state transition"
+  },
+  "Flow": {
+    "prefix": "flow",
+    "body": [
+      "flow ${1:Name} for ${2:Type}.${3:state} {",
+      "    ${4:Created} -> ${5:Live};",
+      "}"
+    ],
+    "description": "Declare valid state edges for a state field"
+  },
+  "Read Parameter": {
+    "prefix": "read",
+    "body": [
+      "read ${1:config}: ${2:Config}"
+    ],
+    "description": "Declare a read-only action parameter"
+  },
+  "Witness Parameter": {
+    "prefix": "witness",
+    "body": [
+      "witness ${1:sig}: ${2:Signature}"
+    ],
+    "description": "Declare a witness-sourced parameter"
   },
   "Require": {
     "prefix": "require",
@@ -68,5 +108,93 @@
       "require ${1:condition}"
     ],
     "description": "Fail the current script if a condition is false"
+  },
+  "Require Block": {
+    "prefix": "require-block",
+    "body": [
+      "require {",
+      "    ${1:condition}",
+      "}"
+    ],
+    "description": "Group multiple require conditions in an anonymous block"
+  },
+  "Preserve": {
+    "prefix": "preserve",
+    "body": [
+      "preserve ${1:output} from ${2:input} {",
+      "    ${3:field}",
+      "}"
+    ],
+    "description": "Preserve fields from input to output with require equality sugar"
+  },
+  "Stdlib Same Lock": {
+    "prefix": "std-cell-same-lock",
+    "body": [
+      "std::cell::same_lock(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.lock_hash == input.lock_hash"
+  },
+  "Stdlib Same Type": {
+    "prefix": "std-cell-same-type",
+    "body": [
+      "std::cell::same_type(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.type_hash == input.type_hash"
+  },
+  "Stdlib Preserve Lock": {
+    "prefix": "std-cell-preserve-lock",
+    "body": [
+      "std::cell::preserve_lock(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.lock_hash == input.lock_hash"
+  },
+  "Stdlib Preserve Type": {
+    "prefix": "std-cell-preserve-type",
+    "body": [
+      "std::cell::preserve_type(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.type_hash == input.type_hash"
+  },
+  "Stdlib Preserve Capacity": {
+    "prefix": "std-cell-preserve-capacity",
+    "body": [
+      "std::cell::preserve_capacity(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.capacity == input.capacity"
+  },
+  "Stdlib Transfer": {
+    "prefix": "std-lifecycle-transfer",
+    "body": [
+      "std::lifecycle::transfer(${1:input}, ${2:output}, ${3:to}) {",
+      "    ${4:field1}",
+      "    ${5:field2}",
+      "}"
+    ],
+    "description": "Consume input, lock output, and preserve all output fields"
+  },
+  "Stdlib Claim": {
+    "prefix": "std-receipt-claim",
+    "body": [
+      "std::receipt::claim(${1:receipt}, ${2:output}, ${3:lock}) {",
+      "    ${4:field1}",
+      "}"
+    ],
+    "description": "Consume receipt and create locked output preserving all output fields"
+  },
+  "Stdlib Settle": {
+    "prefix": "std-lifecycle-settle",
+    "body": [
+      "std::lifecycle::settle(${1:input}, ${2:output}, ${3:lock}) {",
+      "    ${4:field1}",
+      "}"
+    ],
+    "description": "Consume input and create locked output preserving all output fields"
+  },
+  "Stdlib Conserved": {
+    "prefix": "std-accounting-conserved",
+    "body": [
+      "std::accounting::conserved(${1:output}, ${2:input})"
+    ],
+    "description": "Require output.amount == input.amount"
   }
 }

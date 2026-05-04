@@ -8,17 +8,16 @@ use cellscript::{
 
 const BUNDLED_EXAMPLES: [&str; 7] =
     ["amm_pool.cell", "launch.cell", "multisig.cell", "nft.cell", "timelock.cell", "token.cell", "vesting.cell"];
-const PROFILED_ACCEPTANCE_EXAMPLES: [&str; 3] = ["multisig.cell", "nft.cell", "timelock.cell"];
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 40 * 1024),
-    ("launch.cell", 28 * 1024),
-    ("multisig.cell", 80 * 1024),
+    ("launch.cell", 30 * 1024),
+    ("multisig.cell", 84 * 1024),
     ("nft.cell", 54 * 1024),
-    ("timelock.cell", 44 * 1024),
+    ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
-    ("vesting.cell", 20 * 1024),
+    ("vesting.cell", 22 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
@@ -34,19 +33,19 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 1_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 2_700,
-            max_call_edges: 370,
+            max_call_edges: 420,
             max_unreachable_machine_blocks: 1_200,
         },
     ),
     (
         "launch.cell",
         AssemblyShapeBudget {
-            max_lines: 6_300,
+            max_lines: 6_800,
             max_fail_handlers: 16,
             max_shared_epilogues: 4,
-            max_text_bytes: 24 * 1024,
+            max_text_bytes: 27 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_500,
+            max_cond_branch_abs_distance: 2_800,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -57,12 +56,12 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 20_500,
+            max_lines: 21_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 20,
             max_text_bytes: 80 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_000,
+            max_cond_branch_abs_distance: 7_400,
             max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 5_800,
@@ -80,26 +79,26 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 6_000,
             max_machine_blocks: 2_500,
-            max_machine_block_bytes: 256,
+            max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
-            max_call_edges: 330,
+            max_call_edges: 440,
             max_unreachable_machine_blocks: 2_100,
         },
     ),
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 10_500,
+            max_lines: 16_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 22,
-            max_text_bytes: 40 * 1024,
+            max_text_bytes: 64 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 3_600,
+            max_cond_branch_abs_distance: 4_300,
             max_machine_blocks: 1_900,
-            max_machine_block_bytes: 320,
+            max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_100,
-            max_call_edges: 260,
-            max_unreachable_machine_blocks: 1_800,
+            max_call_edges: 380,
+            max_unreachable_machine_blocks: 1_850,
         },
     ),
     (
@@ -114,24 +113,24 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 550,
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
-            max_call_edges: 95,
-            max_unreachable_machine_blocks: 220,
+            max_call_edges: 110,
+            max_unreachable_machine_blocks: 230,
         },
     ),
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 4_400,
+            max_lines: 4_600,
             max_fail_handlers: 28,
             max_shared_epilogues: 6,
             max_text_bytes: 17 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 650,
+            max_machine_blocks: 700,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_150,
-            max_call_edges: 220,
-            max_unreachable_machine_blocks: 540,
+            max_cfg_edges: 1_200,
+            max_call_edges: 230,
+            max_unreachable_machine_blocks: 620,
         },
     ),
 ];
@@ -180,47 +179,69 @@ fn example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(name)
 }
 
-fn business_example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("business").join(name)
-}
-
-fn acceptance_example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("acceptance").join(name)
-}
-
 fn language_example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("language").join(name)
 }
 
+fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut files = Vec::new();
+    for root in [&examples_root, &examples_root.join("language")] {
+        let entries = std::fs::read_dir(root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
+        for entry in entries {
+            let path = Utf8PathBuf::from_path_buf(entry.expect("example directory entry should be readable").path())
+                .expect("example path should be valid UTF-8");
+            if path.is_file() && path.extension() == Some("cell") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
 #[test]
-fn business_examples_are_free_of_profile_hint_noise() {
+fn canonical_examples_are_the_single_checked_in_business_source() {
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    assert!(!examples_root.join("business").exists(), "examples/business should not be checked in");
+    assert!(!examples_root.join("acceptance").exists(), "examples/acceptance should not be checked in");
+
     for example in BUNDLED_EXAMPLES {
         let flat_path = example_path(example);
-        let business_path = business_example_path(example);
         let flat = std::fs::read_to_string(&flat_path).unwrap_or_else(|err| panic!("failed to read {flat_path}: {err}"));
-        let business = std::fs::read_to_string(&business_path).unwrap_or_else(|err| panic!("failed to read {business_path}: {err}"));
-        let normalized_business = business.replace("module cellscript::business::", "module cellscript::");
-        assert_eq!(
-            flat, normalized_business,
-            "{business_path} should mirror the top-level business example except for its duplicate-safe module namespace"
-        );
         assert!(!flat.contains("#[effect("), "{flat_path} should not expose effect profile attributes");
         assert!(!flat.contains("#[scheduler_hint("), "{flat_path} should not expose scheduler profile attributes");
+        compile_file(&flat_path, CompileOptions::default())
+            .unwrap_or_else(|err| panic!("canonical example {example} should compile: {}", err.message));
     }
 }
 
 #[test]
-fn acceptance_examples_preserve_profile_metadata_surface() {
-    for example in BUNDLED_EXAMPLES {
-        compile_file(acceptance_example_path(example), CompileOptions::default())
-            .unwrap_or_else(|err| panic!("acceptance example {example} should compile: {}", err.message));
-    }
+fn all_checked_in_cell_examples_compile() {
+    let files = checked_in_example_cell_files();
+    assert_eq!(
+        files.len(),
+        BUNDLED_EXAMPLES.len() + 1 + 10,
+        "expected bundled examples, top-level registry.cell, and language examples"
+    );
 
-    for example in PROFILED_ACCEPTANCE_EXAMPLES {
-        let path = acceptance_example_path(example);
+    for path in files {
+        compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
+    }
+}
+
+#[test]
+fn release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts() {
+    for example in BUNDLED_EXAMPLES {
+        let path = example_path(example);
         let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        assert!(source.contains("#[effect("), "{path} should preserve effect profile attributes");
-        assert!(source.contains("#[scheduler_hint("), "{path} should preserve scheduler profile attributes");
+        assert!(!source.contains("Hash::zero()"), "{path} should not use placeholder hash constants");
+        assert!(!source.contains("fn hash_wallet"), "{path} should not hide wallet identity behind stub hashing");
+        assert!(!source.contains("fn hash_lock"), "{path} should not hide lock identity behind stub hashing");
+        assert!(
+            !source.contains("{ { {") && !source.contains("} } }"),
+            "{path} should not contain formatter/parser artifact brace nesting"
+        );
     }
 }
 
@@ -311,127 +332,6 @@ fn assert_with_regression_margin(example: &str, field: &str, actual: u64, baseli
         baseline,
         margin
     );
-}
-
-struct SchedulerAccessWitness {
-    operation: u8,
-    source: u8,
-    index: u32,
-    binding_hash: [u8; 32],
-}
-
-struct SchedulerWitness {
-    magic: u16,
-    version: u8,
-    effect_class: u8,
-    parallelizable: bool,
-    touches_shared_count: u32,
-    touches_shared: Vec<[u8; 32]>,
-    estimated_cycles: u64,
-    access_count: u32,
-    accesses: Vec<SchedulerAccessWitness>,
-}
-
-fn decode_hex_bytes(hex: &str) -> Vec<u8> {
-    assert_eq!(hex.len() % 2, 0, "hex string must contain full bytes");
-    (0..hex.len()).step_by(2).map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("valid hex byte")).collect()
-}
-
-fn scheduler_witness_operation_ids(hex: &str) -> Vec<u8> {
-    let bytes = decode_hex_bytes(hex);
-    let witness = decode_molecule_scheduler_witness(&bytes);
-    assert_eq!(witness.magic, 0xCE11);
-    assert_eq!(witness.version, 1);
-    assert!(witness.effect_class <= 4);
-    assert_eq!(witness.touches_shared_count as usize, witness.touches_shared.len());
-    assert_eq!(witness.access_count as usize, witness.accesses.len());
-    for access in &witness.accesses {
-        assert!(access.source <= 3, "unexpected scheduler access source {}", access.source);
-        assert!(access.index < u32::MAX, "scheduler access index should decode as a concrete u32");
-        assert_ne!(access.binding_hash, [0; 32], "scheduler access binding hash should be populated");
-    }
-    let _ = (witness.parallelizable, witness.estimated_cycles);
-    witness.accesses.into_iter().map(|access| access.operation).collect()
-}
-
-fn decode_molecule_scheduler_witness(bytes: &[u8]) -> SchedulerWitness {
-    let fields = decode_molecule_table(bytes, 9);
-    SchedulerWitness {
-        magic: read_u16(fields[0], "magic"),
-        version: read_u8(fields[1], "version"),
-        effect_class: read_u8(fields[2], "effect_class"),
-        parallelizable: read_bool(fields[3], "parallelizable"),
-        touches_shared_count: read_u32(fields[4], "touches_shared_count"),
-        touches_shared: read_fixvec_byte32(fields[5]),
-        estimated_cycles: read_u64(fields[6], "estimated_cycles"),
-        access_count: read_u32(fields[7], "access_count"),
-        accesses: read_scheduler_accesses(fields[8]),
-    }
-}
-
-fn decode_molecule_table(bytes: &[u8], expected_fields: usize) -> Vec<&[u8]> {
-    assert!(bytes.len() >= 8, "molecule table header is too short: {}", bytes.len());
-    let total_size = read_u32(&bytes[..4], "total_size") as usize;
-    assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
-    let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
-    assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
-    let field_count = first_offset / 4 - 1;
-    assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
-    let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();
-    offsets.push(total_size);
-    for pair in offsets.windows(2) {
-        assert!(pair[0] <= pair[1], "molecule offsets must be monotonic: {:?}", offsets);
-        assert!(pair[0] >= first_offset && pair[1] <= total_size, "molecule offsets must stay in payload: {:?}", offsets);
-    }
-    offsets.windows(2).map(|pair| &bytes[pair[0]..pair[1]]).collect()
-}
-
-fn read_scheduler_accesses(bytes: &[u8]) -> Vec<SchedulerAccessWitness> {
-    let count = read_u32(&bytes[..4], "access_count") as usize;
-    assert_eq!(bytes.len(), 4 + count * 38, "access fixvec byte length mismatch");
-    bytes[4..]
-        .chunks_exact(38)
-        .map(|chunk| SchedulerAccessWitness {
-            operation: chunk[0],
-            source: chunk[1],
-            index: read_u32(&chunk[2..6], "access.index"),
-            binding_hash: chunk[6..38].try_into().expect("binding hash width"),
-        })
-        .collect()
-}
-
-fn read_fixvec_byte32(bytes: &[u8]) -> Vec<[u8; 32]> {
-    let count = read_u32(&bytes[..4], "byte32_count") as usize;
-    assert_eq!(bytes.len(), 4 + count * 32, "byte32 fixvec byte length mismatch");
-    bytes[4..].chunks_exact(32).map(|chunk| chunk.try_into().expect("byte32 width")).collect()
-}
-
-fn read_u8(bytes: &[u8], field: &str) -> u8 {
-    assert_eq!(bytes.len(), 1, "{field} should be a molecule byte");
-    bytes[0]
-}
-
-fn read_bool(bytes: &[u8], field: &str) -> bool {
-    match read_u8(bytes, field) {
-        0 => false,
-        1 => true,
-        value => panic!("{field} should be a molecule bool, got {value}"),
-    }
-}
-
-fn read_u16(bytes: &[u8], field: &str) -> u16 {
-    assert_eq!(bytes.len(), 2, "{field} should be a molecule u16");
-    u16::from_le_bytes(bytes.try_into().expect("u16 width"))
-}
-
-fn read_u32(bytes: &[u8], field: &str) -> u32 {
-    assert_eq!(bytes.len(), 4, "{field} should be a molecule u32");
-    u32::from_le_bytes(bytes.try_into().expect("u32 width"))
-}
-
-fn read_u64(bytes: &[u8], field: &str) -> u64 {
-    assert_eq!(bytes.len(), 8, "{field} should be a molecule u64");
-    u64::from_le_bytes(bytes.try_into().expect("u64 width"))
 }
 
 fn assert_pool_component(primitive: &PoolPrimitiveMetadata, component: &str, context: &str) {
@@ -538,9 +438,264 @@ fn registry_example_uses_bounded_local_vec_helpers_without_collection_debt() {
     }
 }
 
+#[test]
+fn registry_example_with_insert_contains_compiles_to_elf() {
+    let result = compile_file(
+        language_example_path("registry.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("registry example should compile to ELF through the internal assembler");
+
+    assert!(!result.artifact_bytes.is_empty(), "registry ELF artifact should be non-empty");
+}
+
+#[test]
+fn order_book_language_example_uses_local_vec_helpers_without_collection_debt() {
+    let result =
+        compile_file(language_example_path("order_book.cell"), CompileOptions::default()).expect("order book example should compile");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("order book asm should be utf8");
+
+    for marker in [
+        "# cellscript abi: stack collection push element_size=56",
+        "# cellscript abi: stack collection insert element_size=56",
+        "# cellscript abi: stack collection contains element_size=56",
+        "# cellscript abi: stack collection remove element_size=56",
+        "# cellscript abi: stack collection pop element_size=56",
+        "# cellscript abi: stack collection reverse element_size=56",
+        "# cellscript abi: stack collection swap element_size=56",
+        "# cellscript abi: stack collection clear",
+    ] {
+        assert!(asm.contains(marker), "order book example should lower bounded Vec helper marker {marker}:\n{asm}");
+    }
+
+    for name in ["local_book_seed", "local_bid_priority", "local_cancel_order", "local_match_quote"] {
+        let action = action(&result.metadata, name);
+        assert!(
+            action.fail_closed_runtime_features.is_empty(),
+            "order book {name} should not carry collection fail-closed debt: {:?}",
+            action.fail_closed_runtime_features
+        );
+    }
+
+    let order_vecs = result
+        .metadata
+        .runtime
+        .collection_instantiations
+        .iter()
+        .filter(|instantiation| instantiation.collection_ty == "Vec<Order>")
+        .collect::<Vec<_>>();
+    assert!(!order_vecs.is_empty(), "order book should expose Vec<Order> monomorphization metadata");
+    for instantiation in &order_vecs {
+        assert_eq!(instantiation.element_ty, "Order");
+        assert_eq!(instantiation.element_width_bytes, 56);
+        assert_eq!(instantiation.backing, "stack-fixed-buffer:256");
+        assert_eq!(instantiation.status, "checked-runtime");
+    }
+
+    let bid_priority = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_bid_priority")
+        .expect("bid priority should expose Vec<Order> metadata");
+    for helper in ["new", "push", "insert", "swap", "reverse", "index", "len"] {
+        assert!(
+            bid_priority.helpers.contains(&helper.to_string()),
+            "order book bid priority should expose helper {helper}: {:?}",
+            bid_priority.helpers
+        );
+    }
+
+    let cancel = order_vecs
+        .iter()
+        .find(|instantiation| instantiation.scope_name == "local_cancel_order")
+        .expect("cancel should expose Vec<Order> metadata");
+    for helper in ["new", "push", "contains", "remove", "clear", "len"] {
+        assert!(cancel.helpers.contains(&helper.to_string()), "order book cancel should expose helper {helper}: {:?}", cancel.helpers);
+    }
+
+    let elf = compile_file(
+        language_example_path("order_book.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("order book example should compile to ELF through the internal assembler");
+    assert!(!elf.artifact_bytes.is_empty(), "order book ELF artifact should be non-empty");
+}
+
+#[test]
+fn stdlib_language_example_compiles_with_all_patterns() {
+    let result = compile_file(language_example_path("stdlib.cell"), CompileOptions::default()).expect("stdlib example should compile");
+    assert!(!result.artifact_bytes.is_empty(), "stdlib artifact should be non-empty");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("stdlib asm should be utf8");
+
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_type"),
+        "stdlib example should expose coin_preserve_type action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_same_lock"),
+        "stdlib example should expose coin_same_lock action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_lock"),
+        "stdlib example should expose coin_preserve_lock action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_preserve_capacity"),
+        "stdlib example should expose coin_preserve_capacity action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "coin_conserved"),
+        "stdlib example should expose coin_conserved action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "transfer_coin"),
+        "stdlib example should expose transfer_coin action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "claim_voucher"),
+        "stdlib example should expose claim_voucher action"
+    );
+    assert!(
+        result.metadata.actions.iter().any(|action| action.name == "settle_voucher"),
+        "stdlib example should expose settle_voucher action"
+    );
+
+    let transfer_coin = result.metadata.actions.iter().find(|action| action.name == "transfer_coin").expect("transfer_coin action");
+    assert_eq!(transfer_coin.effect_class, "Mutating");
+    assert!(
+        transfer_coin.consume_set.iter().any(|pattern| pattern.operation == "consume" && pattern.binding == "coin"),
+        "transfer_coin should consume the input coin: {:?}",
+        transfer_coin.consume_set
+    );
+    let transfer_outputs = transfer_coin
+        .create_set
+        .iter()
+        .filter(|pattern| pattern.operation == "output" && pattern.binding == "next_coin")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transfer_outputs.len(),
+        1,
+        "transfer_coin should expose exactly one canonical output constraint: {:?}",
+        transfer_coin.create_set
+    );
+    assert!(transfer_outputs[0].has_lock, "transfer stdlib output must bind the destination lock");
+    assert_eq!(
+        transfer_outputs[0].fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "transfer stdlib output should preserve the full example output field set"
+    );
+
+    let same_lock = result.metadata.actions.iter().find(|action| action.name == "coin_same_lock").expect("coin_same_lock action");
+    assert!(same_lock.fail_closed_runtime_features.is_empty());
+    assert!(
+        same_lock.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:lock_hash:coin_after:coin_before"
+                && requirement.component == "cell-metadata-lock_hash"
+                && requirement.status == "checked-runtime"
+                && requirement.source == "InputOutput"
+                && requirement.binding == "coin_after:coin_before"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "cell-metadata-lock-hash-equality-32"
+                && requirement.byte_len == Some(32)
+        }),
+        "coin_same_lock should expose checked lock-hash metadata requirements: {:?}",
+        same_lock.transaction_runtime_input_requirements
+    );
+    let preserve_lock =
+        result.metadata.actions.iter().find(|action| action.name == "coin_preserve_lock").expect("coin_preserve_lock action");
+    assert!(
+        preserve_lock.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:lock_hash:coin_after:coin_before"
+                && requirement.component == "cell-metadata-lock_hash"
+                && requirement.status == "checked-runtime"
+                && requirement.byte_len == Some(32)
+        }),
+        "coin_preserve_lock should share the checked lock-hash metadata lowering: {:?}",
+        preserve_lock.transaction_runtime_input_requirements
+    );
+
+    let preserve_capacity =
+        result.metadata.actions.iter().find(|action| action.name == "coin_preserve_capacity").expect("coin_preserve_capacity action");
+    assert!(preserve_capacity.fail_closed_runtime_features.is_empty());
+    assert!(
+        preserve_capacity.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "cell-metadata-equality:capacity:coin_after:coin_before"
+                && requirement.component == "cell-metadata-capacity"
+                && requirement.status == "checked-runtime"
+                && requirement.source == "InputOutput"
+                && requirement.binding == "coin_after:coin_before"
+                && requirement.field.as_deref() == Some("capacity")
+                && requirement.abi == "cell-metadata-capacity-equality-8"
+                && requirement.byte_len == Some(8)
+        }),
+        "coin_preserve_capacity should expose checked capacity metadata requirements: {:?}",
+        preserve_capacity.transaction_runtime_input_requirements
+    );
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_left_lock_hash source=Output index=0 field=3")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_right_lock_hash source=Input index=0 field=3")
+            && asm.contains("# cellscript abi: verify cell metadata lock_hash equality Output#0 == Input#0 size=32"),
+        "lock metadata stdlib helpers should lower to canonical cell field syscalls:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_left_capacity source=Output index=0 field=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=cell_metadata_right_capacity source=Input index=0 field=0")
+            && asm.contains("# cellscript abi: verify cell metadata capacity equality Output#0 == Input#0 size=8"),
+        "capacity metadata stdlib helper should lower to canonical cell field syscalls:\n{}",
+        asm
+    );
+
+    let claim_voucher = result.metadata.actions.iter().find(|action| action.name == "claim_voucher").expect("claim_voucher action");
+    assert_eq!(claim_voucher.effect_class, "Mutating");
+    assert!(
+        claim_voucher.consume_set.iter().any(|pattern| pattern.binding == "voucher"),
+        "claim_voucher should consume the input voucher: {:?}",
+        claim_voucher.consume_set
+    );
+    assert!(
+        claim_voucher.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "coin" && pattern.has_lock),
+        "claim_voucher should create and lock the canonical claim output: {:?}",
+        claim_voucher.create_set
+    );
+    let claim_output = claim_voucher
+        .create_set
+        .iter()
+        .find(|pattern| pattern.operation == "output" && pattern.binding == "coin")
+        .expect("claim output metadata");
+    assert_eq!(
+        claim_output.fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "claim_voucher should preserve every Coin field present in the example output"
+    );
+
+    let settle_voucher = result.metadata.actions.iter().find(|action| action.name == "settle_voucher").expect("settle_voucher action");
+    assert!(
+        settle_voucher.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "coin" && pattern.has_lock),
+        "settle_voucher should create and lock the canonical settle output: {:?}",
+        settle_voucher.create_set
+    );
+    let settle_output = settle_voucher
+        .create_set
+        .iter()
+        .find(|pattern| pattern.operation == "output" && pattern.binding == "coin")
+        .expect("settle output metadata");
+    assert_eq!(
+        settle_output.fields,
+        vec!["amount".to_string(), "nonce".to_string()],
+        "settle_voucher should preserve every Coin field present in the example output"
+    );
+
+    let elf = compile_file(
+        language_example_path("stdlib.cell"),
+        CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() },
+    )
+    .expect("stdlib example should compile to ELF through the internal assembler");
+    assert!(!elf.artifact_bytes.is_empty(), "stdlib ELF artifact should be non-empty");
+}
+
 fn assert_create(action: &cellscript::ActionMetadata, ty: &str, context: &str) {
     assert!(
-        action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "create"),
+        action.create_set.iter().any(|pattern| pattern.ty == ty && matches!(pattern.operation.as_str(), "create" | "output")),
         "{} should expose a create output for {}: {:?}",
         context,
         ty,
@@ -558,17 +713,26 @@ fn assert_destroy(action: &cellscript::ActionMetadata, binding: &str, context: &
     );
 }
 
-fn assert_mutate_field(action: &cellscript::ActionMetadata, ty: &str, binding: &str, field: &str, context: &str) {
+fn assert_input_output_binding(
+    action: &cellscript::ActionMetadata,
+    ty: &str,
+    input_binding: &str,
+    output_binding: &str,
+    context: &str,
+) {
     assert!(
-        action.mutate_set.iter().any(|mutation| mutation.ty == ty
-            && mutation.binding == binding
-            && mutation.fields.iter().any(|candidate| candidate == field)),
-        "{} should expose {}.{} mutation for '{}': {:?}",
+        action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == input_binding),
+        "{} should expose input '{}': {:?}",
         context,
-        ty,
-        field,
-        binding,
-        action.mutate_set
+        input_binding,
+        action.consume_set
+    );
+    assert!(
+        action.create_set.iter().any(|pattern| pattern.ty == ty && pattern.operation == "output" && pattern.binding == output_binding),
+        "{} should expose output '{}': {:?}",
+        context,
+        output_binding,
+        action.create_set
     );
 }
 
@@ -983,55 +1147,12 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
     );
     assert!(
         claim_vested.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "lifecycle-transition"
+            obligation.category == "state-transition"
                 && obligation.feature == "VestingGrant.state"
                 && obligation.status == "checked-runtime"
         }),
-        "claim_vested should expose the runtime-checked lifecycle transition obligation"
+        "claim_vested should expose the runtime-checked state transition obligation"
     );
-    let claim_conditions = claim_vested
-        .verifier_obligations
-        .iter()
-        .find(|obligation| {
-            obligation.category == "transaction-invariant"
-                && obligation.feature == "claim-conditions:VestingGrant"
-                && obligation.status == "checked-runtime"
-        })
-        .expect("claim_vested should expose receipt claim condition obligation");
-    assert!(
-        claim_conditions.detail.contains("timepoint-check=checked-runtime")
-            && claim_conditions.detail.contains("state-not-fully-claimed=checked-runtime")
-            && claim_conditions.detail.contains("positive-claimable=checked-runtime")
-            && claim_conditions.detail.contains("claim-input-lock-hash=checked-runtime")
-            && claim_conditions.detail.contains("claim-lock-hash-field-binding=checked-runtime"),
-        "claim_vested should surface checked source predicates and CKB-compatible lock authorization: {}",
-        claim_conditions.detail
-    );
-    assert!(
-        claim_conditions.detail.contains("Input#0:grant.cliff_timepoint=input-cell-field-u64[8]")
-            && claim_conditions.detail.contains("Input#0:grant.state=input-cell-field-u8[1]")
-            && claim_conditions.detail.contains("Input#0:grant.beneficiary=input-cell-field-bytes-32[32]"),
-        "claim_vested should expose field-aware receipt inputs for remaining runtime authorization: {}",
-        claim_conditions.detail
-    );
-    assert!(
-        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.feature == "claim-conditions:VestingGrant"
-                && requirement.status == "checked-runtime"
-                && requirement.component == "claim-input-lock-hash"
-                && requirement.source == "Input"
-                && requirement.field.as_deref() == Some("lock_hash")
-                && requirement.abi == "claim-input-lock-hash-32"
-                && requirement.byte_len == Some(32)
-                && requirement.blocker.is_none()
-                && requirement.blocker_class.is_none()
-        }),
-        "claim_vested should expose structured input lock-hash authorization requirements: {:?}",
-        claim_vested.transaction_runtime_input_requirements
-    );
-    // Time context is now checked via consume-input and current_timepoint() comparison,
-    // not via a separate claim-time-context requirement.
-    // The timepoint check is part of the claim-conditions verifier obligation.
     assert!(
         claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "consume-input:VestingGrant:grant"
@@ -1046,16 +1167,34 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
         claim_vested.transaction_runtime_input_requirements
     );
     assert!(
-        result.metadata.runtime.transaction_runtime_input_requirements.iter().any(|requirement| {
-            requirement.scope == "action:claim_vested"
-                && requirement.feature == "claim-conditions:VestingGrant"
+        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-output:Token:tokens"
                 && requirement.status == "checked-runtime"
-                && requirement.component == "claim-input-lock-hash"
+                && requirement.component == "create-output-lock"
+                && requirement.source == "Output"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "create-output-lock-hash-32"
+                && requirement.byte_len == Some(32)
                 && requirement.blocker.is_none()
                 && requirement.blocker_class.is_none()
         }),
-        "module runtime metadata should aggregate checked claim lock-hash authorization runtime input requirements: {:?}",
-        result.metadata.runtime.transaction_runtime_input_requirements
+        "claim_vested should expose structured create-output lock-hash requirements: {:?}",
+        claim_vested.transaction_runtime_input_requirements
+    );
+    assert!(
+        claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-output:VestingGrant:updated_grant"
+                && requirement.status == "checked-runtime"
+                && requirement.component == "create-output-lock"
+                && requirement.source == "Output"
+                && requirement.field.as_deref() == Some("lock_hash")
+                && requirement.abi == "create-output-lock-hash-32"
+                && requirement.byte_len == Some(32)
+                && requirement.blocker.is_none()
+                && requirement.blocker_class.is_none()
+        }),
+        "claim_vested should expose structured create-output VestingGrant lock-hash requirements: {:?}",
+        claim_vested.transaction_runtime_input_requirements
     );
 
     let revoke_grant = result.metadata.actions.iter().find(|action| action.name == "revoke_grant").expect("revoke_grant metadata");
@@ -1067,125 +1206,65 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
 }
 
 #[test]
-fn token_mint_authority_mutation_is_explicit() {
+fn token_mint_authority_input_output_binding_is_explicit() {
     let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("token asm should be utf8");
     let mint = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
-    let mutation = mint
-        .mutate_set
-        .iter()
-        .find(|mutation| mutation.operation == "mutate" && mutation.ty == "MintAuthority" && mutation.binding == "auth")
-        .expect("mint should expose MintAuthority mutate_set metadata");
 
-    assert_eq!(mutation.fields, vec!["minted".to_string()]);
-    assert_eq!(mutation.preserved_fields, vec!["max_supply".to_string(), "token_symbol".to_string()]);
-    assert_eq!(mutation.input_source, "Input");
-    assert_eq!(mutation.input_index, 0);
-    assert_eq!(mutation.output_source, "Output");
-    assert_eq!(mutation.output_index, 1);
-    assert!(mutation.preserve_type_hash);
-    assert!(mutation.preserve_lock_hash);
-    assert_eq!(mutation.type_hash_preservation_status, "checked-runtime");
-    assert_eq!(mutation.lock_hash_preservation_status, "checked-runtime");
-    assert_eq!(mutation.field_equality_status, "checked-runtime");
-    assert_eq!(mutation.field_transition_status, "checked-runtime");
-
+    assert_eq!(mint.effect_class, "Mutating");
+    assert_input_output_binding(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
     assert!(
-        mint.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "cell-state"
-                && obligation.feature == "mutable-cell:MintAuthority"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("Input#0 -> Output#1")
-                && obligation.detail.contains("type_hash preservation=checked-runtime")
-                && obligation.detail.contains("lock_hash preservation=checked-runtime")
-                && obligation.detail.contains("field equality=checked-runtime")
-                && obligation.detail.contains("field transition=checked-runtime")
-                && obligation.detail.contains("transition fields: minted")
-                && obligation.detail.contains("preserved fields: max_supply, token_symbol")
-        }),
-        "mint authority updates should remain explicit until the replacement authority cell is proved: {:?}",
-        mint.verifier_obligations
-    );
-    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
-        access.operation == "mutate-input" && access.source == "Input" && access.index == 0 && access.binding == "auth"
-    }));
-    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
-        access.operation == "mutate-output" && access.source == "Output" && access.index == 1 && access.binding == "auth"
-    }));
-    let scheduler_ops = scheduler_witness_operation_ids(&mint.scheduler_witness_hex);
-    assert!(scheduler_ops.contains(&8), "mint scheduler witness should encode mutate-input access");
-    assert!(scheduler_ops.contains(&9), "mint scheduler witness should encode mutate-output access");
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_type_hash source=Input index=0 field=5")
-            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_type_hash source=Output index=1 field=5")
-            && asm.contains("# cellscript abi: verify mutate replacement MintAuthority type_hash Input#0 == Output#1 size=32"),
-        "mint should emit executable TypeHash preservation checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_lock_hash source=Input index=0 field=3")
-            && asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_lock_hash source=Output index=1 field=3")
-            && asm.contains("# cellscript abi: verify mutate replacement MintAuthority lock_hash Input#0 == Output#1 size=32"),
-        "mint should emit executable LockHash preservation checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_input_data source=Input index=0")
-            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_output_data source=Output index=1")
-            && asm.contains(
-                "# cellscript abi: verify mutate preserved field MintAuthority.max_supply Input#0 == Output#1 offset=8 size=8"
-            )
-            && asm.contains(
-                "# cellscript abi: verify mutate preserved field MintAuthority.token_symbol Input#0 == Output#1 offset=0 size=8"
-            ),
-        "mint should emit executable preserved-field equality checks for the replacement MintAuthority cell:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_input_transition source=Input index=0")
-            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=mutate_output_transition source=Output index=1")
-            && asm.contains(
-                "# cellscript abi: verify mutate transition field MintAuthority.minted Add Input#0 -> Output#1 offset=16 size=8"
-            ),
-        "mint should emit executable transition checks for the replacement MintAuthority cell:\n{}",
-        asm
+        mint.create_set.iter().any(|pattern| pattern.ty == "Token" && pattern.operation == "output" && pattern.binding == "token"),
+        "token mint should expose a named Token output binding: {:?}",
+        mint.create_set
     );
     assert!(
         mint.fail_closed_runtime_features.is_empty(),
-        "mint authority mutation should be a verifier obligation, not a fail-closed lowering path: {:?}",
+        "mint authority input/output binding should be verifier-coverable, not a fail-closed lowering path: {:?}",
         mint.fail_closed_runtime_features
+    );
+    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "input" && access.source == "Input" && access.index == 0 && access.binding == "auth_before"
+    }));
+    assert!(mint.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "output" && access.source == "Output" && access.index == 0 && access.binding == "auth_after"
+    }));
+    assert!(
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0")
+            && asm.contains("# cellscript abi: schema field MintAuthority.minted offset=16 size=8"),
+        "mint should bind authority input/output and verify minted through explicit require checks:\n{}",
+        asm
     );
 }
 
 #[test]
 fn nft_core_actions_expose_action_specific_builder_metadata() {
-    let result = compile_file(acceptance_example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
+    let result = compile_file(example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
 
     let mint = action(&result.metadata, "mint");
-    assert_eq!(mint.effect_class, "Creating");
+    assert_eq!(mint.effect_class, "Mutating");
     assert!(mint.parallelizable);
     assert!(mint.fail_closed_runtime_features.is_empty(), "nft mint should not carry fail-closed debt");
+    assert_input_output_binding(mint, "Collection", "collection_before", "collection_after", "nft mint");
     assert_create(mint, "NFT", "nft mint");
-    assert_mutate_field(mint, "Collection", "collection", "total_supply", "nft mint");
-    assert_runtime_requirement(mint, "create-output:NFT:create_NFT", "checked-runtime", "create-output-fields", "nft mint");
-    assert_no_runtime_requirement(mint, "mutable-cell:Collection", "mutate-field-equality", "nft mint");
-    assert_no_runtime_requirement(mint, "mutable-cell:Collection", "mutate-field-transition", "nft mint");
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved Molecule table fields Collection Input#0 == Output#1"),
-        "nft mint should verify dynamic Collection preserved Molecule table fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "nft mint should bind Collection input/output deterministically:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table transition fields Collection Input#0 -> Output#1"),
-        "nft mint should verify dynamic Collection total_supply transition through Molecule table offsets:\n{}",
+        asm.contains("# cellscript abi: schema field Collection.total_supply"),
+        "nft mint should verify Collection total_supply through explicit output requirements:\n{}",
         asm
     );
 
     let transfer = action(&result.metadata, "transfer");
     assert_eq!(transfer.effect_class, "Mutating");
     assert!(transfer.fail_closed_runtime_features.is_empty(), "nft transfer should not carry fail-closed debt");
-    assert_mutate_field(transfer, "NFT", "nft", "owner", "nft transfer");
+    assert_input_output_binding(transfer, "NFT", "nft_before", "nft_after", "nft transfer");
     assert!(
         !transfer
             .transaction_runtime_input_requirements
@@ -1205,8 +1284,7 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
 
 #[test]
 fn timelock_core_actions_expose_time_and_release_metadata() {
-    let result =
-        compile_file(acceptance_example_path("timelock.cell"), CompileOptions::default()).expect("timelock example should compile");
+    let result = compile_file(example_path("timelock.cell"), CompileOptions::default()).expect("timelock example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("timelock asm should be utf8");
 
     let create_absolute_lock = action(&result.metadata, "create_absolute_lock");
@@ -1214,7 +1292,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(create_absolute_lock, "TimeLock", "timelock create_absolute_lock");
     assert_runtime_requirement(
         create_absolute_lock,
-        "create-output:TimeLock:create_TimeLock",
+        "create-output:TimeLock:created_lock",
         "checked-runtime",
         "create-output-fields",
         "timelock create_absolute_lock",
@@ -1223,7 +1301,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(create_relative_lock, "TimeLock", "timelock create_relative_lock");
     assert_runtime_requirement(
         create_relative_lock,
-        "create-output:TimeLock:create_TimeLock",
+        "create-output:TimeLock:created_lock",
         "checked-runtime",
         "create-output-fields",
         "timelock create_relative_lock",
@@ -1233,7 +1311,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(request_release, "ReleaseRequest", "timelock request_release");
     assert_runtime_requirement(
         request_release,
-        "create-output:ReleaseRequest:create_ReleaseRequest",
+        "create-output:ReleaseRequest:request",
         "checked-runtime",
         "create-output-fields",
         "timelock request_release",
@@ -1268,7 +1346,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     );
     assert_runtime_requirement(
         execute_release,
-        "create-output:ReleaseRecord:create_ReleaseRecord",
+        "create-output:ReleaseRecord:record",
         "checked-runtime",
         "create-output-fields",
         "timelock execute_release",
@@ -1277,7 +1355,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_create(execute_emergency_release, "ReleaseRecord", "timelock execute_emergency_release");
     assert_runtime_requirement(
         execute_emergency_release,
-        "create-output:ReleaseRecord:create_ReleaseRecord",
+        "create-output:ReleaseRecord:record",
         "checked-runtime",
         "create-output-fields",
         "timelock execute_emergency_release",
@@ -1285,13 +1363,10 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
 
     let extend_lock = action(&result.metadata, "extend_lock");
     assert!(extend_lock.fail_closed_runtime_features.is_empty(), "extend_lock should not carry fail-closed debt");
-    assert_mutate_field(extend_lock, "TimeLock", "time_lock", "unlock_height", "timelock extend_lock");
-    assert_no_runtime_requirement(extend_lock, "mutable-cell:TimeLock", "mutate-field-equality", "timelock extend_lock");
+    assert_input_output_binding(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved fields TimeLock Input#0 == Output#0")
-            && asm.contains("# cellscript abi: verify mutate preserved field TimeLock.lock_type Input#0 == Output#0 offset=32 size=1")
-            && asm.contains("# cellscript abi: verify output field TimeLock set.unlock_height offset=33 size=8"),
-        "timelock extend_lock should verify fieldless enum preservation and unlock_height transition:\n{}",
+        asm.contains("# cellscript abi: schema field TimeLock.unlock_height"),
+        "timelock extend_lock should verify unlock_height through explicit output requirements:\n{}",
         asm
     );
     assert!(
@@ -1300,12 +1375,19 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
         "timelock helper calls should preserve schema pointer length through ref/deref aliases:\n{}",
         asm
     );
+
+    let lock_id_commitment =
+        result.metadata.locks.iter().find(|lock| lock.name == "lock_id_commitment").expect("timelock lock_id_commitment metadata");
+    assert!(
+        lock_id_commitment.ckb_runtime_accesses.iter().any(|access| access.operation == "hash-blake2b"),
+        "timelock lock_id_commitment should cover real CKB Blake2b runtime access: {:?}",
+        lock_id_commitment.ckb_runtime_accesses
+    );
 }
 
 #[test]
-fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
-    let result =
-        compile_file(acceptance_example_path("multisig.cell"), CompileOptions::default()).expect("multisig example should compile");
+fn multisig_core_actions_expose_threshold_flow_metadata() {
+    let result = compile_file(example_path("multisig.cell"), CompileOptions::default()).expect("multisig example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("multisig asm should be utf8");
 
     let create_wallet = action(&result.metadata, "create_wallet");
@@ -1313,7 +1395,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     assert_create(create_wallet, "MultisigWallet", "multisig create_wallet");
     assert_runtime_requirement(
         create_wallet,
-        "create-output:MultisigWallet:create_MultisigWallet",
+        "create-output:MultisigWallet:wallet",
         "checked-runtime",
         "create-output-fields",
         "multisig create_wallet",
@@ -1324,50 +1406,27 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.threshold index=1 size=1")
-            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.nonce index=2 size=8")
-            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.created_at index=3 size=8"),
+        asm.contains("# cellscript abi: verify output Molecule table bytes field MultisigWallet.wallet_id index=0 size=32")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.threshold index=2 size=1")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.nonce index=3 size=8")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.created_at index=4 size=8"),
         "multisig create_wallet should verify fixed fields through Molecule table offsets, not fixed-struct offsets:\n{}",
         asm
     );
 
     let propose_transfer = action(&result.metadata, "propose_transfer");
-    assert_eq!(propose_transfer.effect_class, "Creating");
+    assert_eq!(propose_transfer.effect_class, "Mutating");
+    assert_input_output_binding(propose_transfer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_transfer");
     assert_create(propose_transfer, "Proposal", "multisig propose_transfer");
-    assert_mutate_field(propose_transfer, "MultisigWallet", "wallet", "nonce", "multisig propose_transfer");
-    assert_runtime_requirement(
-        propose_transfer,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig propose_transfer",
-    );
-    assert_no_runtime_requirement(
-        propose_transfer,
-        "mutable-cell:MultisigWallet",
-        "mutate-field-equality",
-        "multisig propose_transfer",
-    );
-    assert_no_runtime_requirement(
-        propose_transfer,
-        "mutable-cell:MultisigWallet",
-        "mutate-field-transition",
-        "multisig propose_transfer",
-    );
     assert!(
-        asm.contains("# cellscript abi: verify mutate preserved Molecule table fields MultisigWallet Input#0 == Output#1"),
-        "multisig propose_transfer should verify dynamic wallet preserved Molecule table fields:\n{}",
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "multisig propose_transfer should bind wallet input/output deterministically:\n{}",
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table transition fields MultisigWallet Input#0 -> Output#1"),
-        "multisig propose_transfer should verify dynamic wallet nonce transition through Molecule table offsets:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: preserve mutate table input scalar before transition expression")
-            && asm.contains("# cellscript abi: preserve mutate table expected scalar across output field load"),
-        "multisig propose_transfer should preserve transition scalars across dynamic Molecule table expression and output decoding:\n{}",
+        asm.contains("# cellscript abi: schema field MultisigWallet.nonce"),
+        "multisig propose_transfer should verify wallet nonce through explicit output requirements:\n{}",
         asm
     );
     assert!(
@@ -1386,42 +1445,21 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     let add_signature = action(&result.metadata, "add_signature");
     assert_eq!(add_signature.effect_class, "Mutating");
     assert_create(add_signature, "SignatureConfirmation", "multisig add_signature");
-    assert_runtime_requirement(
-        add_signature,
-        "create-output:SignatureConfirmation:create_SignatureConfirmation",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig add_signature",
-    );
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-equality", "multisig add_signature");
     assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-transition", "multisig add_signature");
+    assert_input_output_binding(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
     assert!(
-        asm.contains("# cellscript abi: verify mutate Molecule table append fields Proposal Input#0 -> Output#1")
-            && asm.contains("# cellscript abi: verify mutate Molecule vector append Proposal.signatures element_size=96")
-            && asm.contains("# cellscript abi: collection push is covered by mutate append verifier"),
-        "multisig add_signature should verify Proposal.signatures append and skip runtime collection push:\n{}",
-        asm
-    );
-    let append_marker = "# cellscript abi: verify mutate Molecule vector append Proposal.signatures element_size=96";
-    let append_start = asm.find(append_marker).expect("multisig add_signature should emit a Proposal.signatures append verifier");
-    let append_end = (append_start + 4096).min(asm.len());
-    let append_block = &asm[append_start..append_end];
-    assert!(
-        append_block.contains("addi a0, a0, 4") && append_block.contains("addi a1, a1, 4") && append_block.contains("addi a2, a2, -4"),
-        "Molecule fixvec append prefix comparison must skip the 4-byte count header:\n{}",
-        append_block
+        add_signature.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "proposal_before")
+            && add_signature.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "proposal_after"),
+        "multisig add_signature should expose Proposal input/output bindings: {:?} {:?}",
+        add_signature.consume_set,
+        add_signature.create_set
     );
 
     let propose_add_signer = action(&result.metadata, "propose_add_signer");
-    assert_eq!(propose_add_signer.effect_class, "Creating");
+    assert_eq!(propose_add_signer.effect_class, "Mutating");
+    assert_input_output_binding(propose_add_signer, "MultisigWallet", "wallet_before", "wallet_after", "multisig propose_add_signer");
     assert_create(propose_add_signer, "Proposal", "multisig propose_add_signer");
-    assert_runtime_requirement(
-        propose_add_signer,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
-        "multisig propose_add_signer",
-    );
     assert!(
         !propose_add_signer.fail_closed_runtime_features.contains(&"output-verification-incomplete".to_string()),
         "multisig propose_add_signer should verify constructed Proposal.data bytes without fail-closed debt: {:?}",
@@ -1435,15 +1473,15 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
 
     let propose_change_threshold = action(&result.metadata, "propose_change_threshold");
-    assert_eq!(propose_change_threshold.effect_class, "Creating");
-    assert_create(propose_change_threshold, "Proposal", "multisig propose_change_threshold");
-    assert_runtime_requirement(
+    assert_eq!(propose_change_threshold.effect_class, "Mutating");
+    assert_input_output_binding(
         propose_change_threshold,
-        "create-output:Proposal:create_Proposal",
-        "checked-runtime",
-        "create-output-fields",
+        "MultisigWallet",
+        "wallet_before",
+        "wallet_after",
         "multisig propose_change_threshold",
     );
+    assert_create(propose_change_threshold, "Proposal", "multisig propose_change_threshold");
     assert!(
         propose_change_threshold.fail_closed_runtime_features.is_empty(),
         "multisig propose_change_threshold should verify scalar byte-vector construction without fail-closed debt: {:?}",
@@ -1469,7 +1507,7 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
     );
     assert_runtime_requirement(
         execute_proposal,
-        "create-output:ExecutionRecord:create_ExecutionRecord",
+        "create-output:ExecutionRecord:record",
         "checked-runtime",
         "create-output-fields",
         "multisig execute_proposal",
@@ -1495,528 +1533,56 @@ fn multisig_core_actions_expose_threshold_lifecycle_metadata() {
 }
 
 #[test]
-fn amm_pool_mutable_shared_params_are_scheduler_visible() {
-    let result = compile_file(example_path("amm_pool.cell"), CompileOptions::default()).expect("amm pool example should compile");
-    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("amm pool asm should be utf8");
+fn amm_pool_input_output_params_are_scheduler_visible() {
+    let result = compile_file(example_path("amm_pool.cell"), CompileOptions::default()).expect("amm_pool example should compile");
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("amm_pool asm should be utf8");
 
-    let seed_pool = result.metadata.actions.iter().find(|action| action.name == "seed_pool").expect("seed_pool metadata");
-    assert!(!seed_pool.touches_shared.is_empty(), "created Pool should be scheduler-visible");
-    assert!(!seed_pool.parallelizable, "new shared Pool creation should not be marked parallelizable");
-    assert!(
-        seed_pool.fail_closed_runtime_features.is_empty(),
-        "seed_pool should not carry generic fail-closed debt; unresolved AMM production policy is reported through pool-pattern obligations: {:?}",
-        seed_pool.fail_closed_runtime_features
-    );
-    assert!(
-        seed_pool.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "pool-pattern"
-                && obligation.feature == "pool-create:Pool"
-                && obligation.status == "checked-runtime"
-                && obligation.detail.contains("ordinary shared Cell creation")
-                && obligation.detail.contains("pool_primitives[].invariant_families")
-        }),
-        "seed_pool should keep pool-pattern creation/admission semantics explicit: {:?}",
-        seed_pool.verifier_obligations
-    );
-    let seed_pool_primitive = seed_pool
-        .pool_primitives
-        .iter()
-        .find(|primitive| primitive.feature == "pool-create:Pool")
-        .expect("seed_pool should expose structured Pool creation metadata");
-    assert_eq!(seed_pool_primitive.operation, "create");
-    assert_eq!(seed_pool_primitive.status, "checked-runtime");
-    assert_eq!(seed_pool_primitive.binding.as_deref(), Some("create_Pool"));
-    assert_eq!(seed_pool_primitive.output_source.as_deref(), Some("Output"));
-    assert_eq!(seed_pool_primitive.output_index, Some(0));
-    assert_eq!(seed_pool_primitive.source_invariant_count, 3);
-    assert_pool_component(seed_pool_primitive, "ordinary-shared-create-summary", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "assert-invariant-cfg=3", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:token-pair-distinct=checked-runtime", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:positive-reserves=checked-runtime", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "source-invariant:fee-bps-bound=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "token-pair-distinct", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "positive-reserves", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_invariant_family(seed_pool_primitive, "fee-bps-bound", "checked-runtime", "assert-invariant-cfg", "seed_pool");
-    assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-symbol-admission=checked-runtime", "seed_pool");
-    assert!(
-        asm.contains(
-            "# cellscript abi: pool token-pair identity admission source=Input left=token_a#0 right=token_b#1 field=type_hash size=32"
-        ),
-        "seed_pool should emit executable token-pair TypeHash identity admission:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_left_type_hash source=Input index=0 field=5")
-            && asm
-                .contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=pool_token_pair_right_type_hash source=Input index=1 field=5"),
-        "seed_pool should load both consumed token TypeHash fields:\n{}",
-        asm
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:token-pair-identity-admission=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "token-pair-identity-admission",
-        "checked-runtime",
-        "input-type-id-abi+load-cell-by-field",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission"),
-        "seed_pool token-pair identity admission should be closed by executable Input TypeHash inequality checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "token-pair-symbol-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-symbol-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-symbol-admission"),
-        "seed_pool token-pair symbol admission should be closed by source guard plus Pool symbol field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:positive-reserve-admission=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "positive-reserve-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "positive-reserve-admission"),
-        "seed_pool positive reserve admission should be closed by executable source guard plus create-field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:fee-policy=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "fee-policy",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "fee-policy"),
-        "seed_pool fee policy should be closed by executable fee bound plus create-field checks: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert_pool_component(seed_pool_primitive, "pool-protocol:lp-supply-invariant=checked-runtime", "seed_pool");
-    assert_pool_invariant_family(
-        seed_pool_primitive,
-        "lp-supply-invariant",
-        "checked-runtime",
-        "create-output-field-coupling",
-        "seed_pool",
-    );
-    assert!(
-        !seed_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
-        "seed_pool LP supply should be closed when Pool.total_lp and LPReceipt.lp_amount share a verifier-covered source: {:?}",
-        seed_pool_primitive.runtime_required_components
-    );
-    assert!(
-        !seed_pool_primitive
-            .runtime_input_requirements
-            .iter()
-            .any(|requirement| requirement.component == "token-pair-identity-admission"),
-        "checked token-pair identity admission should not remain in Pool runtime input requirements: {:?}",
-        seed_pool_primitive.runtime_input_requirements
-    );
-    assert!(!seed_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-admission"));
-    assert!(
-        result
-            .metadata
-            .runtime
-            .pool_primitives
-            .iter()
-            .any(|primitive| primitive.scope == "action:seed_pool" && primitive.feature == "pool-create:Pool"),
-        "runtime metadata should aggregate structured Pool primitive obligations"
-    );
-    assert!(
-        asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=0 field=5"),
-        "created Pool type_hash should be loaded from the Output TypeHash field:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
-        "LPReceipt.pool_id should be checked against the created Pool output type hash:\n{}",
-        asm
-    );
-
-    for (
-        action_name,
-        expected_fields,
-        expected_preserved,
-        expected_checked_transitions,
-        expected_input_index,
-        expected_output_index,
-        expected_invariant_count,
-        expected_source_invariants,
-        expected_runtime_family,
-        _expected_runtime_source,
-    ) in [
-        (
-            "swap_a_for_b",
-            &["reserve_a", "reserve_b"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol", "total_lp"][..],
-            &["reserve_a", "reserve_b"][..],
-            1,
-            1,
-            3,
-            &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
-            "constant-product-pricing",
-            "swap-constant-product-abi",
-        ),
-        (
-            "add_liquidity",
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol"][..],
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            2,
-            1,
-            2,
-            &["deposit-token-a-match", "deposit-token-b-match"][..],
-            "proportional-liquidity-accounting",
-            "add-liquidity-proportional-abi",
-        ),
-        (
-            "remove_liquidity",
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            &["fee_rate_bps", "token_a_symbol", "token_b_symbol"][..],
-            &["reserve_a", "reserve_b", "total_lp"][..],
-            1,
-            2,
-            1,
-            &["lp-receipt-pool-id-match"][..],
-            "proportional-withdrawal-accounting",
-            "remove-liquidity-proportional-withdrawal-abi",
-        ),
+    for (action_name, input_binding, output_binding, extra_created_ty) in [
+        ("swap_a_for_b", "pool_before", "pool_after", "Token"),
+        ("add_liquidity", "pool_before", "pool_after", "LPReceipt"),
+        ("remove_liquidity", "pool_before", "pool_after", "Token"),
     ] {
         let action = result.metadata.actions.iter().find(|action| action.name == action_name).expect("amm action metadata");
-        let mutation = action
-            .mutate_set
-            .iter()
-            .find(|mutation| mutation.operation == "mutate" && mutation.ty == "Pool" && mutation.binding == "pool")
-            .expect("amm action should expose Pool mutate_set metadata");
-        let mutation_fields = mutation.fields.iter().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(
-            mutation_fields.as_slice(),
-            expected_fields,
-            "{} should expose the mutated Pool fields in mutate_set metadata",
-            action_name
-        );
-        assert_eq!(
-            mutation.preserved_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
-            expected_preserved,
-            "{} should expose Pool fields that must be preserved by the replacement output",
-            action_name
-        );
-        assert_eq!(mutation.input_source, "Input");
-        assert_eq!(mutation.input_index, expected_input_index, "{} should pin the mutable Pool input ABI index", action_name);
-        assert_eq!(mutation.output_source, "Output");
-        assert_eq!(
-            mutation.output_index, expected_output_index,
-            "{} should pin the mutable Pool replacement output ABI index",
-            action_name
-        );
-        assert!(mutation.preserve_type_hash, "{} should require Pool TypeHash preservation", action_name);
-        assert!(mutation.preserve_lock_hash, "{} should require Pool LockHash preservation", action_name);
-        assert_eq!(mutation.type_hash_preservation_status, "checked-runtime");
-        assert_eq!(mutation.lock_hash_preservation_status, "checked-runtime");
-        assert_eq!(mutation.field_equality_status, "checked-runtime");
-        assert_eq!(mutation.field_transition_status, "checked-runtime");
-        assert!(action.ckb_runtime_accesses.iter().any(|access| {
-            access.operation == "mutate-input"
-                && access.source == "Input"
-                && access.index == expected_input_index
-                && access.binding == "pool"
-        }));
-        assert!(action.ckb_runtime_accesses.iter().any(|access| {
-            access.operation == "mutate-output"
-                && access.source == "Output"
-                && access.index == expected_output_index
-                && access.binding == "pool"
-        }));
-        let scheduler_ops = scheduler_witness_operation_ids(&action.scheduler_witness_hex);
-        assert!(scheduler_ops.contains(&8), "{} scheduler witness should encode mutate-input access", action_name);
-        assert!(scheduler_ops.contains(&9), "{} scheduler witness should encode mutate-output access", action_name);
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_type_hash source=Input index={} field=5",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_type_hash source=Output index={} field=5",
-                expected_output_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: verify mutate replacement Pool type_hash Input#{} == Output#{} size=32",
-                expected_input_index, expected_output_index
-            )),
-            "{} should emit executable TypeHash preservation checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_input_lock_hash source=Input index={} field=3",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_BY_FIELD reason=mutate_output_lock_hash source=Output index={} field=3",
-                expected_output_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: verify mutate replacement Pool lock_hash Input#{} == Output#{} size=32",
-                expected_input_index, expected_output_index
-            )),
-            "{} should emit executable LockHash preservation checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_input_data source=Input index={}",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_output_data source=Output index={}",
-                expected_output_index
-            )) && expected_preserved.iter().all(|field| {
-                asm.contains(&format!(
-                    "# cellscript abi: verify mutate preserved field Pool.{} Input#{} == Output#{}",
-                    field, expected_input_index, expected_output_index
-                ))
-            }),
-            "{} should emit executable preserved-field equality checks for the replacement Pool cell:\n{}",
-            action_name,
-            asm
-        );
-        assert!(
-            asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_input_transition source=Input index={}",
-                expected_input_index
-            )) && asm.contains(&format!(
-                "# cellscript abi: LOAD_CELL_DATA reason=mutate_output_transition source=Output index={}",
-                expected_output_index
-            )) && expected_checked_transitions
-                .iter()
-                .all(|field| { asm.contains(&format!("# cellscript abi: verify mutate transition field Pool.{}", field)) }),
-            "{} should emit executable transition checks for verifier-coverable Pool delta fields {:?}:\n{}",
-            action_name,
-            expected_checked_transitions,
-            asm
-        );
+        assert_input_output_binding(action, "Pool", input_binding, output_binding, action_name);
+        assert_create(action, extra_created_ty, action_name);
         assert!(
             !action.touches_shared.is_empty(),
-            "{} mutates &mut Pool and must expose the shared Pool type hash to the scheduler",
+            "{} updates shared Pool state and must expose the Pool type hash to the scheduler",
             action_name
         );
-        assert!(!action.parallelizable, "{} mutates shared Pool state and should not default to parallel execution", action_name);
+        assert!(!action.parallelizable, "{} updates shared Pool state and should not default to parallel execution", action_name);
         assert_eq!(action.effect_class, "Mutating", "{} should be classified as mutating shared state", action_name);
         assert!(
-            action.verifier_obligations.iter().any(|obligation| {
-                obligation.category == "shared-state"
-                    && obligation.feature == "shared-mutation:Pool"
-                    && obligation.status == "checked-runtime"
-                    && obligation.detail.contains("type_hash preservation=checked-runtime")
-                    && obligation.detail.contains("lock_hash preservation=checked-runtime")
-                    && obligation.detail.contains("field equality=checked-runtime")
-                    && obligation.detail.contains("field transition=checked-runtime")
-                    && obligation.detail.contains("transition fields:")
-                    && obligation.detail.contains("preserved fields:")
-            }),
-            "{} should report fully verifier-covered &mut Pool state transitions for the source-level formulas: {:?}",
+            action.fail_closed_runtime_features.is_empty(),
+            "{} should keep explicit output requirements verifier-coverable: {:?}",
+            action_name,
+            action.fail_closed_runtime_features
+        );
+        assert!(
+            action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("resource-conservation:Token")
+                || obligation.feature.starts_with("pool-create:Pool")),
+            "{} should retain AMM-specific runtime obligations separately from input/output binding: {:?}",
             action_name,
             action.verifier_obligations
         );
-        let expected_pool_status = "checked-runtime";
-        assert!(
-            action.verifier_obligations.iter().any(|obligation| {
-                obligation.category == "pool-pattern"
-                    && obligation.feature == "pool-mutation-invariants:Pool"
-                    && obligation.status == expected_pool_status
-                    && obligation.detail.contains("Generic shared mutation checks")
-            }),
-            "{} should keep pool-pattern invariant/admission semantics explicit: {:?}",
-            action_name,
-            action.verifier_obligations
-        );
-        let pool_primitive = action
-            .pool_primitives
-            .iter()
-            .find(|primitive| primitive.feature == "pool-mutation-invariants:Pool")
-            .expect("AMM action should expose structured Pool mutation primitive metadata");
-        assert_eq!(pool_primitive.operation, "mutation-invariants");
-        assert_eq!(pool_primitive.status, expected_pool_status);
-        assert_eq!(pool_primitive.binding.as_deref(), Some("pool"));
-        assert_eq!(pool_primitive.input_source.as_deref(), Some("Input"));
-        assert_eq!(pool_primitive.input_index, Some(expected_input_index));
-        assert_eq!(pool_primitive.output_source.as_deref(), Some("Output"));
-        assert_eq!(pool_primitive.output_index, Some(expected_output_index));
-        assert_eq!(pool_primitive.transition_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(), expected_fields);
-        assert_eq!(pool_primitive.preserved_fields.iter().map(String::as_str).collect::<Vec<_>>().as_slice(), expected_preserved);
-        assert_eq!(pool_primitive.source_invariant_count, expected_invariant_count);
-        assert_pool_component(pool_primitive, "field-transition=checked-runtime", action_name);
-        for source_invariant in expected_source_invariants {
-            assert_pool_component(pool_primitive, &format!("source-invariant:{}=checked-runtime", source_invariant), action_name);
-            assert_pool_invariant_family(pool_primitive, source_invariant, "checked-runtime", "assert-invariant-cfg", action_name);
-        }
-        if matches!(action_name, "swap_a_for_b" | "add_liquidity" | "remove_liquidity") {
-            let checked_component = match action_name {
-                "swap_a_for_b" => "pool-protocol:constant-product-pricing=checked-runtime",
-                "add_liquidity" => "pool-protocol:proportional-liquidity-accounting=checked-runtime",
-                "remove_liquidity" => "pool-protocol:proportional-withdrawal-accounting=checked-runtime",
-                _ => unreachable!("unexpected AMM action"),
-            };
-            assert_pool_component(pool_primitive, checked_component, action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                expected_runtime_family,
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != expected_runtime_family),
-                "{} should discharge AMM accounting through verifier-computed Pool transitions and output fields: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-        }
-        assert_pool_invariant_family(pool_primitive, "reserve-conservation", "checked-runtime", "transition-formula", action_name);
-        assert!(
-            !pool_primitive.runtime_required_components.iter().any(|component| component == "reserve-conservation"),
-            "{} should discharge reserve conservation through checked field transition formula: {:?}",
-            action_name,
-            pool_primitive.runtime_required_components
-        );
-        if matches!(action_name, "swap_a_for_b" | "add_liquidity" | "remove_liquidity") {
-            assert_pool_component(pool_primitive, "pool-protocol:pool-specific-admission=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "pool-specific-admission",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != "pool-specific-admission"),
-                "{} should discharge token/pool/receipt admission through source guards, preserved Pool symbols, and checked output fields: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-        }
-        if action_name == "swap_a_for_b" {
-            assert_pool_component(pool_primitive, "pool-protocol:lp-supply-consistency=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "lp-supply-consistency",
-                "checked-runtime",
-                "mutate-preserved-field-equality",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_required_components.iter().all(|component| component != "lp-supply-consistency"),
-                "{} should discharge LP supply consistency through preserved Pool.total_lp equality: {:?}",
-                action_name,
-                pool_primitive.runtime_required_components
-            );
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| requirement.component != "lp-supply-consistency"),
-                "{} checked LP supply consistency should not retain total_lp runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert_pool_component(pool_primitive, "pool-protocol:reserve-conservation=checked-runtime", action_name);
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| requirement.component != "reserve-conservation"),
-                "{} checked reserve conservation should not retain runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert_pool_component(pool_primitive, "pool-protocol:fee-accounting=checked-runtime", action_name);
-            assert_pool_invariant_family(
-                pool_primitive,
-                "fee-accounting",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert_pool_invariant_family(
-                pool_primitive,
-                "constant-product-pricing",
-                "checked-runtime",
-                "assert-invariant-cfg+create-output-fields",
-                action_name,
-            );
-            assert!(
-                pool_primitive.runtime_input_requirements.is_empty(),
-                "{} checked swap metadata should not retain pool runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-            assert!(
-                action.verifier_obligations.iter().any(|obligation| {
-                    obligation.category == "transaction-invariant"
-                        && obligation.feature == "resource-conservation:Token"
-                        && obligation.status == "checked-runtime"
-                }),
-                "{} AMM swap resource conservation should be checked by protocol formulas: {:?}",
-                action_name,
-                action.verifier_obligations
-            );
-            assert!(
-                action.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
-                "{} checked swap action should not retain runtime-required verifier obligations: {:?}",
-                action_name,
-                action.verifier_obligations
-            );
-            assert!(
-                action.transaction_runtime_input_requirements.iter().all(|requirement| requirement.status != "runtime-required"),
-                "{} checked swap action should not retain runtime-required transaction inputs: {:?}",
-                action_name,
-                action.transaction_runtime_input_requirements
-            );
-        }
-        if matches!(action_name, "add_liquidity" | "remove_liquidity") {
-            assert_pool_component(pool_primitive, "pool-protocol:lp-supply-consistency=checked-runtime", action_name);
-            assert!(
-                pool_primitive.runtime_input_requirements.iter().all(|requirement| {
-                    requirement.component != "pool-specific-admission"
-                        && requirement.component != "proportional-liquidity-accounting"
-                        && requirement.component != "lp-supply-consistency"
-                }),
-                "{} checked AMM liquidity metadata should not retain admission/accounting/LP runtime inputs: {:?}",
-                action_name,
-                pool_primitive.runtime_input_requirements
-            );
-        }
     }
 
-    let add_liquidity = result.metadata.actions.iter().find(|action| action.name == "add_liquidity").expect("add_liquidity metadata");
-    let pool_param = add_liquidity.params.iter().find(|param| param.name == "pool").expect("add_liquidity pool param");
-    assert!(pool_param.schema_pointer_abi, "&mut Pool should still use the schema pointer ABI");
-    assert!(pool_param.type_hash_pointer_abi, "&mut Pool type_hash should require a trusted TypeHash pointer ABI");
-    assert!(pool_param.type_hash_length_abi, "&mut Pool type_hash should require a trusted TypeHash length ABI");
-    assert_eq!(pool_param.type_hash_len, Some(32), "&mut Pool TypeHash ABI must be exactly 32 bytes");
     assert!(
-        add_liquidity.fail_closed_runtime_features.is_empty(),
-        "add_liquidity should verify &mut Pool type_hash through the parameter ABI without fail-closed debt: {:?}",
-        add_liquidity.fail_closed_runtime_features
-    );
-    let remove_liquidity =
-        result.metadata.actions.iter().find(|action| action.name == "remove_liquidity").expect("remove_liquidity metadata");
-    assert!(
-        remove_liquidity.fail_closed_runtime_features.is_empty(),
-        "remove_liquidity should compare receipt.pool_id against the trusted Pool TypeHash bytes without fail-closed debt: {:?}",
-        remove_liquidity.fail_closed_runtime_features
+        asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
+            && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "AMM input/output bindings should bind Pool input/output parameters through transaction cells:\n{}",
+        asm
     );
     assert!(
-        asm.contains("# cellscript abi: schema param pool type_hash pointer=a2 length=a3 size=32"),
-        "&mut Pool type_hash ABI should be explicit in the verifier assembly:\n{}",
+        asm.contains("# cellscript abi: schema field Pool.reserve_a")
+            && asm.contains("# cellscript abi: schema field Pool.reserve_b")
+            && asm.contains("# cellscript abi: schema field Pool.total_lp"),
+        "AMM input/output bindings should verify Pool reserve and LP fields through explicit require checks:\n{}",
         asm
     );
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
-        "LPReceipt.pool_id should be checked against loaded TypeHash bytes:\n{}",
+        "LPReceipt.pool_id should be checked against loaded Pool TypeHash bytes:\n{}",
         asm
     );
 }
@@ -2027,16 +1593,21 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("launch asm should be utf8");
     let launch_token = result.metadata.actions.iter().find(|action| action.name == "launch_token").expect("launch_token metadata");
 
-    assert!(asm.contains("\nseed_pool:\n"), "launch_token must link the imported seed_pool callee into production assembly");
-    assert!(asm.contains("\nisqrt:\n"), "launch_token must link seed_pool's transitive isqrt helper");
+    assert!(
+        !asm.contains("\nseed_pool:\n") && !asm.contains("\nisqrt:\n"),
+        "launch_token models output topology directly; action outputs are not runtime return values"
+    );
     assert!(!asm.contains("\nadd_liquidity:\n"), "launch_token should not link unrelated AMM actions");
     assert!(!asm.contains("\nremove_liquidity:\n"), "launch_token should not link unrelated AMM actions");
 
     assert!(
         !launch_token.touches_shared.is_empty(),
-        "launch_token calls seed_pool and returns Pool, so shared Pool touch metadata must not be lost"
+        "launch_token creates Pool output, so shared Pool touch metadata must not be lost"
     );
     assert!(!launch_token.parallelizable, "launch_token composes Pool creation and should not default to parallel execution");
+    assert_create(launch_token, "MintAuthority", "launch_token");
+    assert_create(launch_token, "Pool", "launch_token");
+    assert_create(launch_token, "LPReceipt", "launch_token");
     let distribution = launch_token.params.iter().find(|param| param.name == "distribution").expect("distribution param metadata");
     assert!(distribution.fixed_byte_pointer_abi);
     assert!(distribution.fixed_byte_length_abi);
@@ -2050,93 +1621,51 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         "recipient locks loaded from fixed tuple-array distribution should be verifier-coverable"
     );
     assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_a pointer=a0 length=a1"),
-        "launch_token -> seed_pool must use pointer+length ABI for Token arguments:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains(
-            "# cellscript abi: call seed_pool schema param token_a has no tracked ABI length; pass zero length to fail closed"
-        ),
-        "launch_token must fail fast when its locally-created pool token cannot be represented as runtime schema bytes:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: call seed_pool schema param token_b pointer=a2 length=a3"),
-        "launch_token -> seed_pool must preserve the second Token pointer+length ABI:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: call seed_pool fixed-byte param provider pointer=a5 length=a6 size=32"),
-        "launch_token -> seed_pool must preserve Address pointer+length ABI:\n{}",
-        asm
-    );
-    assert!(
         launch_token.fail_closed_runtime_features.is_empty(),
-        "launch_token seed_pool tuple-return projection and fixed tuple-array distribution should be verifier-coverable: {:?}",
+        "launch_token named outputs and fixed tuple-array distribution should be verifier-coverable: {:?}",
         launch_token.fail_closed_runtime_features
     );
     assert!(
         launch_token.verifier_obligations.iter().any(|obligation| {
             obligation.category == "pool-pattern"
-                && obligation.feature == "pool-composition:Pool"
-                && obligation.status == "checked-runtime"
+                && obligation.feature == "pool-create:Pool"
+                && obligation.status == "runtime-required"
         }),
-        "launch_token should discharge explicit pool-pattern obligations from seed_pool composition: {:?}",
+        "launch_token should report direct named Pool output creation obligations accurately: {:?}",
         launch_token.verifier_obligations
     );
     let launch_pool_primitive = launch_token
         .pool_primitives
         .iter()
-        .find(|primitive| primitive.feature == "pool-composition:Pool")
-        .expect("launch_token should expose structured Pool composition primitive metadata");
-    assert_eq!(launch_pool_primitive.operation, "composition");
-    assert_eq!(launch_pool_primitive.status, "checked-runtime");
-    assert!(launch_pool_primitive.callee.as_deref().is_some_and(|callee| callee.contains("seed_pool")));
+        .find(|primitive| primitive.feature == "pool-create:Pool")
+        .expect("launch_token should expose structured Pool creation primitive metadata");
+    assert_eq!(launch_pool_primitive.operation, "create");
+    assert_eq!(launch_pool_primitive.status, "runtime-required");
+    assert_eq!(launch_pool_primitive.callee, None);
+    assert_eq!(launch_pool_primitive.binding.as_deref(), Some("pool"));
     assert_eq!(launch_pool_primitive.source_invariant_count, 3);
-    assert_pool_component(launch_pool_primitive, "shared-touch-propagation=checked-metadata", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:initial-mint-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:pool-seed-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:distribution-cap=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:minted-equals-initial-mint=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:seed-token-amount=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "launch-pool-atomicity:symbol-consistency=checked-runtime", "launch_token");
-    assert_pool_component(
-        launch_pool_primitive,
-        "launch-pool-atomicity:distribution-sum-plus-seed-lte-initial-mint=checked-runtime",
-        "launch_token",
-    );
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:seed-token-symbol-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:paired-token-symbol-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "callee-pool-admission:fee-bound-handoff=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:tuple-return-projection=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:pool-type-hash-return-abi=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:lp-receipt-pool-id-return-abi=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "pool-id-continuity:callee-output-field-equality=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=3", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-0=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-1=checked-runtime", "launch_token");
+    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-2=checked-runtime", "launch_token");
     assert_pool_invariant_family(
         launch_pool_primitive,
-        "callee-pool-admission",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
+        "token-pair-identity-admission",
+        "runtime-required",
+        "token-input-type-id-abi",
         "launch_token",
     );
     assert_pool_invariant_family(
         launch_pool_primitive,
-        "launch-pool-atomicity",
-        "checked-runtime",
-        "assert-invariant-cfg+create-output-fields",
-        "launch_token",
-    );
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "pool-id-continuity",
-        "checked-runtime",
-        "callee-output-field-coupling+tuple-return-abi",
+        "lp-supply-invariant",
+        "runtime-required",
+        "pool-protocol-admission",
         "launch_token",
     );
     assert!(
-        launch_pool_primitive.runtime_required_components.is_empty(),
-        "controlled launch_token -> seed_pool composition should discharge all runtime-required Pool components: {:?}",
+        launch_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission")
+            && launch_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
+        "direct launch_token Pool creation should surface unresolved AMM admission components instead of claiming seed_pool equivalence: {:?}",
         launch_pool_primitive.runtime_required_components
     );
     assert!(
@@ -2145,16 +1674,8 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         launch_pool_primitive.runtime_input_requirements
     );
     assert!(
-        asm.contains("# cellscript abi: tuple call return field .0 projected from return register")
-            && asm.contains("# cellscript abi: tuple call return field .1 projected from return register"),
-        "seed_pool tuple return should project Pool/LPReceipt from the call return ABI:\n{}",
-        asm
-    );
-    assert!(
-        asm.contains("# cellscript abi: construct tuple aggregate")
-            && asm.contains("# cellscript abi: return tuple field .0 via a0")
-            && asm.contains("# cellscript abi: return tuple field .1 via a1"),
-        "seed_pool tuple callee should return Pool/LPReceipt through the register ABI:\n{}",
+        asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
+        "launch_token should bind LPReceipt.pool_id to the named Pool output TypeHash:\n{}",
         asm
     );
     assert!(

@@ -1,6 +1,6 @@
 # CellScript Capacity And Builder Contract
 
-**Status**: CKB builder contract.
+**Status**: production builder contract for the current CellScript CKB profile.
 
 CellScript exposes capacity requirements, but it does not claim to statically
 prove every CKB transaction's occupied capacity. Capacity is a transaction-level
@@ -39,7 +39,7 @@ For CKB artifacts, `constraints.ckb.capacity_evidence_contract` includes:
 - measured occupied capacity, when supplied by acceptance/builder tooling
 - measured tx size, when supplied by acceptance/builder tooling
 
-State-changing actions that create or mutate outputs require builder evidence.
+State-changing actions that create or update outputs require builder evidence.
 
 ## Measurement Helper
 

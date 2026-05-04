@@ -1,6 +1,6 @@
 # CellScript Scheduler Hints
 
-**Status**: production metadata contract for CellScript 0.12.
+**Status**: production metadata contract for the current CellScript CKB profile.
 
 CellScript emits scheduler-facing metadata for CKB. These hints are not hidden
 comments; they are part of action metadata and the Molecule scheduler witness.
@@ -16,8 +16,8 @@ Each action can expose:
 - scheduler-visible input/output/cell-dep accesses
 - binding hashes for conflict grouping
 
-Mutating shared state sets `parallelizable = false` and records mutate-input and
-mutate-output accesses.
+Updating shared state sets `parallelizable = false` and records input/output
+accesses for the affected shared-state binding.
 
 ## Consumption Boundary
 
@@ -25,7 +25,7 @@ The compiler and metadata make the hints available. Production schedulers,
 wallets, builders, and devnet acceptance must consume them according to their
 policy.
 
-For 0.12, the supported policy boundary is:
+The supported policy boundary is:
 
 - admission tooling may group or reject actions based on shared touch sets
 - wallet/build tooling may use estimated cycles for budget summaries

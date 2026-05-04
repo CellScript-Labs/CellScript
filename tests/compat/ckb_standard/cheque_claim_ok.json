@@ -7,18 +7,134 @@
   "transaction_shape": {
     "version": 0,
     "inputs": [
-      { "type": "cheque-cell", "capacity_shannons": 6200000000, "lock_script": "cheque-lock", "type_script": "cheque-type-script", "data": "cheque-cell-data", "witness": "receiver-spend-witness" }
+      {
+        "type": "cheque-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "cheque-lock",
+        "type_script": "cheque-type-script",
+        "data": "cheque-cell-data",
+        "witness": "receiver-spend-witness"
+      }
     ],
     "outputs": [
-      { "type": "sudt-cell", "capacity_shannons": 6200000000, "lock_script": "receiver-lock", "type_script": "sudt-type-script", "data": "claimed-amount" }
+      {
+        "type": "sudt-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "receiver-lock",
+        "type_script": "sudt-type-script",
+        "data": "claimed-amount"
+      }
     ],
-    "cell_deps": [{ "dep_type": "code", "name": "cheque-type-script-dep" }, { "dep_type": "code", "name": "sudt-type-script-dep" }]
+    "cell_deps": [
+      {
+        "dep_type": "code",
+        "name": "cheque-type-script-dep"
+      },
+      {
+        "dep_type": "code",
+        "name": "sudt-type-script-dep"
+      }
+    ]
   },
-  "expected_behavior": { "script_exit_code": 0, "conservation": "receiver-claims-amount", "cycle_envelope": "within-cheque-standard-envelope" },
-  "script_args_layout": { "field": "sender_and_receiver_lock_hashes", "size_bytes": 64, "encoding": "32-byte-sender-hash + 32-byte-receiver-hash" },
-  "witness_layout": { "field": "sender_receiver_spend_witness", "source": "SignatureEntry", "passthrough": true },
-  "molecule_data_layout": { "field": "cheque_cell_data", "encoding": "passthrough" },
-  "metadata_expectation": { "proof_plan": { "trigger": "lock_group", "scope": "group", "reads": ["group_input", "group_output", "witness"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": [], "codegen_coverage_status": "covered" },
-  "cycle_report": { "estimated": "within-cheque-standard-envelope", "source": "acceptance-report" },
-  "capacity_report": { "occupied_capacity_shannons": 6200000000, "tx_size_bytes_estimate": 420, "source": "acceptance-report" }
+  "script_group": {
+    "kind": "lock",
+    "active_group": "lock_group",
+    "script_field": "lock_script",
+    "active_script": "cheque-lock",
+    "group_inputs": [
+      0
+    ],
+    "group_outputs": [],
+    "positive": [
+      {
+        "case": "lock-script-group-selected",
+        "inputs": [
+          0
+        ],
+        "outputs": [],
+        "expected": "accepted-shape"
+      }
+    ],
+    "negative": [
+      {
+        "case": "wrong-script-group-kind",
+        "expected": "reject",
+        "reason": "fixture requires lock_group"
+      },
+      {
+        "case": "missing-active-group-cell",
+        "expected": "reject",
+        "reason": "ScriptGroup must contain at least one input or output cell matching the active script"
+      }
+    ]
+  },
+  "outputs_data_matrix": {
+    "positive": [
+      {
+        "case": "outputs-data-index-aligned",
+        "output_index": 0,
+        "outputs_data_index": 0,
+        "data": "claimed-amount",
+        "expected": "outputs[i] and outputs_data[i] bind the same cell"
+      }
+    ],
+    "negative": [
+      {
+        "case": "missing-outputs-data-entry",
+        "output_index": 0,
+        "expected": "reject",
+        "reason": "outputs_data must have one entry per output"
+      },
+      {
+        "case": "mismatched-outputs-data-index",
+        "output_index": 0,
+        "outputs_data_index": 1,
+        "expected": "reject",
+        "reason": "outputs and outputs_data are index-aligned"
+      }
+    ]
+  },
+  "expected_behavior": {
+    "script_exit_code": 0,
+    "conservation": "receiver-claims-amount",
+    "cycle_envelope": "within-cheque-standard-envelope"
+  },
+  "script_args_layout": {
+    "field": "sender_and_receiver_lock_hashes",
+    "size_bytes": 64,
+    "encoding": "32-byte-sender-hash + 32-byte-receiver-hash"
+  },
+  "witness_layout": {
+    "field": "sender_receiver_spend_witness",
+    "source": "SignatureEntry",
+    "passthrough": true
+  },
+  "molecule_data_layout": {
+    "field": "cheque_cell_data",
+    "encoding": "passthrough"
+  },
+  "metadata_expectation": {
+    "proof_plan": {
+      "trigger": "lock_group",
+      "scope": "group",
+      "reads": [
+        "group_input",
+        "output",
+        "witness"
+      ],
+      "coverage": "covered",
+      "on_chain_checked": true
+    },
+    "builder_assumptions": [],
+    "codegen_coverage_status": "covered"
+  },
+  "cycle_report": {
+    "estimated": "within-cheque-standard-envelope",
+    "source": "acceptance-report"
+  },
+  "capacity_report": {
+    "occupied_capacity_shannons": 6200000000,
+    "tx_size_bytes_estimate": 420,
+    "source": "acceptance-report"
+  }
 }

@@ -133,7 +133,7 @@ cellc doc --json
 ```
 
 Generated docs summarize modules, actions, resources, receipts, locks,
-lifecycle rules, and lowering metadata.
+flow rules, and lowering metadata.
 
 ## Audit And Evidence Reports
 

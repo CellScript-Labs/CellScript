@@ -13,6 +13,7 @@ pub enum Item {
     Shared(SharedDef),
     Receipt(ReceiptDef),
     Struct(StructDef),
+    Flow(FlowDef),
     Invariant(InvariantDef),
     Const(ConstDef),
     Enum(EnumDef),
@@ -54,7 +55,6 @@ pub struct ReceiptDef {
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub claim_output: Option<Type>,
-    pub lifecycle: Option<Lifecycle>,
     pub capabilities: Vec<Capability>,
     pub fields: Vec<Field>,
     pub span: Span,
@@ -111,8 +111,25 @@ pub struct EnumVariant {
 }
 
 #[derive(Debug, Clone)]
-pub struct Lifecycle {
-    pub states: Vec<String>,
+pub struct StateFieldPath {
+    pub base: String,
+    pub field: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateTransition {
+    pub from: String,
+    pub to: String,
+    pub action: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowDef {
+    pub name: Option<String>,
+    pub target: StateFieldPath,
+    pub transitions: Vec<StateTransition>,
     pub span: Span,
 }
 
@@ -201,11 +218,29 @@ pub struct ActionDef {
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub outputs: Vec<ActionOutput>,
+    pub state_edges: Vec<ActionStateEdge>,
     pub body: Vec<Stmt>,
     pub effect: EffectClass,
     pub effect_declared: bool,
     pub scheduler_hint: Option<SchedulerHint>,
     pub doc_comment: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionOutput {
+    pub name: String,
+    pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionStateEdge {
+    pub path: StateFieldPath,
+    pub to_path: StateFieldPath,
+    pub from: String,
+    pub to: String,
     pub span: Span,
 }
 
@@ -255,6 +290,8 @@ pub struct Param {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamSource {
     Default,
+    Input,
+    Output,
     Protected,
     Witness,
     LockArgs,
@@ -352,6 +389,8 @@ pub enum Expr {
     ReplaceUnique(ReplaceUniqueExpr),
     Assert(AssertExpr),
     Require(RequireExpr),
+    RequireBlock(RequireBlockExpr),
+    Preserve(PreserveExpr),
     Block(Vec<Stmt>),
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
@@ -360,6 +399,48 @@ pub enum Expr {
     Range(RangeExpr),
     StructInit(StructInitExpr),
     Match(MatchExpr),
+    StdlibCall(StdlibCallExpr),
+}
+
+impl Expr {
+    /// Return the source span of this expression.
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Integer(_) => Span::default(), // primitives carry no span
+            Expr::Bool(_) => Span::default(),
+            Expr::String(_) => Span::default(),
+            Expr::ByteString(_) => Span::default(),
+            Expr::Identifier(_) => Span::default(),
+            Expr::Assign(e) => e.span,
+            Expr::Binary(e) => e.span,
+            Expr::Unary(e) => e.span,
+            Expr::Call(e) => e.span,
+            Expr::FieldAccess(e) => e.span,
+            Expr::Index(e) => e.span,
+            Expr::Create(e) => e.span,
+            Expr::Consume(e) => e.span,
+            Expr::Transfer(e) => e.span,
+            Expr::Destroy(e) => e.span,
+            Expr::ReadRef(e) => e.span,
+            Expr::Claim(e) => e.span,
+            Expr::Settle(e) => e.span,
+            Expr::CreateUnique(e) => e.span,
+            Expr::ReplaceUnique(e) => e.span,
+            Expr::Assert(e) => e.span,
+            Expr::Require(e) => e.span,
+            Expr::RequireBlock(e) => e.span,
+            Expr::Preserve(e) => e.span,
+            Expr::Block(_) => Span::default(),
+            Expr::Tuple(_) => Span::default(),
+            Expr::Array(_) => Span::default(),
+            Expr::If(e) => e.span,
+            Expr::Cast(e) => e.span,
+            Expr::Range(e) => e.span,
+            Expr::StructInit(e) => e.span,
+            Expr::Match(e) => e.span,
+            Expr::StdlibCall(e) => e.span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -439,6 +520,7 @@ pub struct IndexExpr {
 
 #[derive(Debug, Clone)]
 pub struct CreateExpr {
+    pub target: Option<String>,
     pub ty: String,
     pub fields: Vec<(String, Expr)>,
     pub lock: Option<Box<Expr>>,
@@ -518,7 +600,7 @@ pub struct SettleExpr {
     pub span: Span,
 }
 
-/// Assert / assert_invariant expression
+/// Assert expression.
 #[derive(Debug, Clone)]
 pub struct AssertExpr {
     pub condition: Box<Expr>,
@@ -530,6 +612,25 @@ pub struct AssertExpr {
 #[derive(Debug, Clone)]
 pub struct RequireExpr {
     pub condition: Box<Expr>,
+    pub message: Option<Box<Expr>>,
+    pub span: Span,
+}
+
+/// Anonymous require block: `require { expr; expr; }`
+/// Desugars into independent atomic `require` statements.
+#[derive(Debug, Clone)]
+pub struct RequireBlockExpr {
+    pub expressions: Vec<Expr>,
+    pub span: Span,
+}
+
+/// Preserve sugar: `preserve output from input { field1, field2 }`
+/// Desugars into `require output.field1 == input.field1; require output.field2 == input.field2;`
+#[derive(Debug, Clone)]
+pub struct PreserveExpr {
+    pub output_name: String,
+    pub input_name: String,
+    pub fields: Vec<String>,
     pub span: Span,
 }
 
@@ -583,6 +684,21 @@ pub enum EffectClass {
     Mutating,
     Creating,
     Destroying,
+}
+
+/// Stdlib call expression: `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`
+///
+/// Each stdlib pattern has a canonical expansion into core CellScript.
+/// Constraint patterns expand to `require` constraints or canonical verifier metadata checks.
+/// Lifecycle patterns expand to `consume` plus explicit output and verifier constraints.
+#[derive(Debug, Clone)]
+pub struct StdlibCallExpr {
+    pub namespace: String,
+    pub name: String,
+    pub args: Vec<Expr>,
+    /// Optional preserve-style field list for lifecycle patterns
+    pub preserve_fields: Vec<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

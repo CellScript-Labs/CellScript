@@ -152,7 +152,9 @@ impl Repl {
         println!("{}", "Example code:".bold());
         println!("  let x = 42");
         println!("  resource Token {{ amount: u64 }}");
-        println!("  action mint() {{ create Token {{ amount: 100 }} }}");
+        println!("  action mint()");
+        println!("  where");
+        println!("      create Token {{ amount: 100 }}");
     }
 
     fn process_input(&mut self, input: &str) -> Result<(), String> {

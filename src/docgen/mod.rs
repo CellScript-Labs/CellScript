@@ -809,14 +809,6 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             if let Some(output) = &receipt.claim_output {
                 summary.push_str(&format!("Claim output: {}. ", format_type(output)));
             }
-            if let Some(lifecycle) = &receipt.lifecycle {
-                summary.push_str(&format!("Lifecycle: {}. ", lifecycle.states.join(" -> ")));
-                let transitions =
-                    lifecycle.states.windows(2).map(|window| format!("{} -> {}", window[0], window[1])).collect::<Vec<_>>();
-                if !transitions.is_empty() {
-                    summary.push_str(&format!("Transitions: {}. ", transitions.join(", ")));
-                }
-            }
             summary.push_str(&format!("Fields: {}", format_fields(&receipt.fields)));
             Some(ItemDoc {
                 kind: "receipt".to_string(),
@@ -835,6 +827,30 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             name: struct_def.name.clone(),
             signature: format!("struct {}", struct_def.name),
             summary: format!("Fields: {}", format_fields(&struct_def.fields)),
+        }),
+        Item::Flow(machine) => Some(ItemDoc {
+            kind: "flow".to_string(),
+            name: machine.name.clone().unwrap_or_else(|| format!("{}.{}", machine.target.base, machine.target.field)),
+            signature: if let Some(name) = &machine.name {
+                format!("flow {} for {}.{}", name, machine.target.base, machine.target.field)
+            } else {
+                format!("flow {}.{}", machine.target.base, machine.target.field)
+            },
+            summary: format!(
+                "Transitions: {}",
+                machine
+                    .transitions
+                    .iter()
+                    .map(|transition| {
+                        let mut edge = format!("{} -> {}", transition.from, transition.to);
+                        if let Some(action) = &transition.action {
+                            edge.push_str(&format!(" by {}", action));
+                        }
+                        edge
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }),
         Item::Invariant(invariant) => Some(ItemDoc {
             kind: "invariant".to_string(),
@@ -904,7 +920,9 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
 fn action_signature(keyword: &str, action: &ActionDef) -> String {
     let params = action.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
     let mut signature = format!("{} {}({})", keyword, action.name, params);
-    if let Some(return_type) = &action.return_type {
+    if !action.outputs.is_empty() {
+        signature.push_str(&format!(" -> {}", format_action_outputs(&action.outputs)));
+    } else if let Some(return_type) = &action.return_type {
         signature.push_str(&format!(" -> {}", format_type(return_type)));
     }
     signature
@@ -967,38 +985,35 @@ fn format_param(param: &Param) -> String {
     if param.is_ref {
         rendered.push('&');
     }
+    match param.source {
+        ParamSource::Input => rendered.push_str("input "),
+        ParamSource::Output => rendered.push_str("output "),
+        ParamSource::Protected => rendered.push_str("protected "),
+        ParamSource::Witness => rendered.push_str("witness "),
+        ParamSource::LockArgs => rendered.push_str("lock_args "),
+        ParamSource::Default if param.is_read_ref => rendered.push_str("read "),
+        ParamSource::Default => {}
+    }
     rendered.push_str(&param.name);
     rendered.push_str(": ");
-    match param.source {
-        ParamSource::Protected => {
-            rendered.push_str("protected ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Witness => {
-            rendered.push_str("witness ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::LockArgs => {
-            rendered.push_str("lock_args ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::Default if param.is_read_ref => {
-            rendered.push_str("read_ref ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Default => {
-            rendered.push_str(&format_type(&param.ty));
-        }
-    }
+    let ty = match (&param.source, &param.ty) {
+        (ParamSource::Protected, Type::Ref(inner)) => inner.as_ref(),
+        (ParamSource::Default, Type::Ref(inner)) if param.is_read_ref => inner.as_ref(),
+        _ => &param.ty,
+    };
+    rendered.push_str(&format_type(ty));
     rendered
+}
+
+fn format_action_outputs(outputs: &[ActionOutput]) -> String {
+    if outputs.len() == 1 {
+        format!("{}: {}", outputs[0].name, format_type(&outputs[0].ty))
+    } else {
+        format!(
+            "({})",
+            outputs.iter().map(|output| format!("{}: {}", output.name, format_type(&output.ty))).collect::<Vec<_>>().join(", ")
+        )
+    }
 }
 
 fn format_type(ty: &Type) -> String {
@@ -1032,6 +1047,7 @@ fn item_name_for_xref(item: &Item) -> Option<String> {
         Item::Shared(s) => Some(s.name.clone()),
         Item::Receipt(r) => Some(r.name.clone()),
         Item::Struct(s) => Some(s.name.clone()),
+        Item::Flow(machine) => machine.name.clone().or_else(|| Some(format!("{}.{}", machine.target.base, machine.target.field))),
         Item::Invariant(i) => Some(i.name.clone()),
         Item::Enum(e) => Some(e.name.clone()),
         Item::Action(a) => Some(a.name.clone()),
@@ -1053,9 +1069,9 @@ mod tests {
 module demo
 
 /// adds two numbers
-action add(x: u64, y: u64) -> u64 {
+action add(x: u64, y: u64) -> u64
+where
     return x + y
-}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -1178,9 +1194,9 @@ action add(x: u64, y: u64) -> u64 {
         let obligation = crate::VerifierObligationMetadata {
             scope: "action:claim_vested".to_string(),
             category: "transaction-invariant".to_string(),
-            feature: "claim-conditions:VestingGrant".to_string(),
-            status: "runtime-required".to_string(),
-            detail: "Source claim predicates are present as timepoint-check=checked-runtime, state-not-fully-claimed=checked-runtime, positive-claimable=checked-runtime, claim-witness-format=checked-runtime, claim-authorization-domain=checked-runtime; signature verification remains runtime-required".to_string(),
+            feature: "resource-conservation:Token".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "field equality=checked-runtime, field transition=checked-runtime".to_string(),
         };
 
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
@@ -1220,19 +1236,16 @@ action add(x: u64, y: u64) -> u64 {
             transaction_invariant_checked_subconditions: transaction_invariant_checked_subcondition_docs(&[obligation]),
             transaction_runtime_input_requirements: vec![TransactionRuntimeInputRequirementMetadata {
                 scope: "action:claim_vested".to_string(),
-                feature: "claim-conditions:VestingGrant".to_string(),
-                status: "runtime-required".to_string(),
-                component: "claim-witness-signature".to_string(),
-                source: "Witness".to_string(),
-                binding: "VestingGrant".to_string(),
-                field: Some("signature".to_string()),
-                abi: "claim-witness-signature-65".to_string(),
-                byte_len: Some(65),
-                blocker: Some(
-                    "claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"
-                        .to_string(),
-                ),
-                blocker_class: Some("witness-verification-gap".to_string()),
+                feature: "consume-input:VestingGrant:grant".to_string(),
+                status: "checked-runtime".to_string(),
+                component: "consume-input-data".to_string(),
+                source: "Input".to_string(),
+                binding: "grant".to_string(),
+                field: Some("data".to_string()),
+                abi: "consume-load-cell-input".to_string(),
+                byte_len: None,
+                blocker: None,
+                blocker_class: None,
             }],
             pool_primitives: Vec::new(),
             pool_runtime_input_requirements: Vec::new(),
@@ -1243,18 +1256,10 @@ action add(x: u64, y: u64) -> u64 {
         assert!(docs.contains("### Transaction Runtime Input Requirements"));
         assert!(docs
             .contains("| Scope | Feature | Status | Component | Source | Binding | Field | ABI | Bytes | Blocker | Blocker Class |"));
-        assert!(docs.contains("`claim-conditions:VestingGrant`"));
-        assert!(docs.contains("`runtime-required`"));
-        assert!(docs.contains(
-            "claim lowering checks witness shape but has no verifier-coverable signer key binding or secp256k1 verification call"
-        ));
-        assert!(docs.contains("witness-verification-gap"));
-        assert!(docs.contains("timepoint-check"));
-        assert!(docs.contains("state-not-fully-claimed"));
-        assert!(docs.contains("positive-claimable"));
-        assert!(docs.contains("claim-witness-format"));
-        assert!(docs.contains("claim-authorization-domain"));
-        assert!(docs.contains("`claim-witness-signature-65`"));
-        assert!(docs.contains("signature verification remains runtime-required"));
+        assert!(docs.contains("`resource-conservation:Token`"));
+        assert!(docs.contains("`checked-runtime`"));
+        assert!(docs.contains("field equality"));
+        assert!(docs.contains("field transition"));
+        assert!(docs.contains("`consume-load-cell-input`"));
     }
 }

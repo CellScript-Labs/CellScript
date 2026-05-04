@@ -1941,7 +1941,7 @@ impl CommandExecutor {
                 "script references keep code_hash, hash_type, and args visible",
                 "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
                 "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
-                "Dynamic hash_blake2b is unavailable until a real linked RISC-V implementation is selected"
+                "hash_blake2b(input: Hash) uses CKB Blake2b-256; wider byte serialization hashing remains out of scope"
             ],
         });
         if args.json {
@@ -3430,6 +3430,11 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
         Some(_) => violations.push("artifact.size_bytes must be greater than zero".to_string()),
         None => violations.push("artifact.size_bytes is required".to_string()),
     }
+    match plan.get("metadata_schema_version").and_then(serde_json::Value::as_u64) {
+        Some(version) if version > 0 => {}
+        Some(_) => violations.push("metadata_schema_version must be greater than zero".to_string()),
+        None => violations.push("metadata_schema_version is required".to_string()),
+    }
     if plan.get("target_profile").is_none() {
         violations.push("target_profile is required".to_string());
     }
@@ -3515,11 +3520,21 @@ fn json_diff_report(kind: &str, old: &serde_json::Value, new: &serde_json::Value
 }
 
 fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde_json::Value {
+    let mut proof_plan_records = Vec::new();
     let actions = metadata
         .actions
         .iter()
         .filter(|action| entry.is_none_or(|entry| action.name == entry))
         .map(|action| {
+            proof_plan_records.extend(action.proof_plan.iter().map(|plan| {
+                profile_proof_plan_record_json(
+                    "action",
+                    &action.name,
+                    serde_json::json!(action.estimated_cycles),
+                    action.ckb_runtime_accesses.len(),
+                    plan,
+                )
+            }));
             serde_json::json!({
                 "kind": "action",
                 "name": action.name,
@@ -3534,6 +3549,9 @@ fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde
         .iter()
         .filter(|lock| entry.is_none_or(|entry| lock.name == entry))
         .map(|lock| {
+            proof_plan_records.extend(lock.proof_plan.iter().map(|plan| {
+                profile_proof_plan_record_json("lock", &lock.name, serde_json::Value::Null, lock.ckb_runtime_accesses.len(), plan)
+            }));
             serde_json::json!({
                 "kind": "lock",
                 "name": lock.name,
@@ -3550,7 +3568,36 @@ fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde
         "entry": entry,
         "actions": actions,
         "locks": locks,
+        "proof_plan_records": proof_plan_records,
         "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
+    })
+}
+
+fn profile_proof_plan_record_json(
+    entry_kind: &str,
+    entry_name: &str,
+    estimated_cycles: serde_json::Value,
+    runtime_accesses: usize,
+    plan: &ProofPlanMetadata,
+) -> serde_json::Value {
+    serde_json::json!({
+        "entry_kind": entry_kind,
+        "entry_name": entry_name,
+        "name": plan.name,
+        "origin": plan.origin,
+        "category": plan.category,
+        "feature": plan.feature,
+        "trigger": plan.trigger,
+        "scope": plan.scope,
+        "reads": plan.reads,
+        "coverage": plan.coverage,
+        "codegen_coverage_status": plan.codegen_coverage_status,
+        "on_chain_checked": plan.on_chain_checked,
+        "status": plan.status,
+        "estimated_cycles": estimated_cycles,
+        "runtime_accesses": runtime_accesses,
+        "builder_assumptions": plan.builder_assumptions,
+        "detail": plan.detail,
     })
 }
 
@@ -4173,23 +4220,8 @@ fn target_profile_policy_violations(
     }
 }
 
-fn ckb_target_profile_policy_violations(metadata: &crate::CompileMetadata, _artifact_format: ArtifactFormat) -> Vec<String> {
-    // CKB is the only target profile; keep these checks focused on CKB-specific unsupported features.
-    let mut violations = Vec::new();
-
-    let unsupported_claim_features = metadata
-        .runtime
-        .ckb_runtime_features
-        .iter()
-        .filter(|feature| matches!(feature.as_str(), "load-claim-ecdsa-signature-hash" | "verify-claim-secp256k1-signature"))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !unsupported_claim_features.is_empty() {
-        violations
-            .push(format!("Claim helper syscall features not supported in CKB profile: {}", unsupported_claim_features.join(", ")));
-    }
-
-    violations
+fn ckb_target_profile_policy_violations(_metadata: &crate::CompileMetadata, _artifact_format: ArtifactFormat) -> Vec<String> {
+    Vec::new()
 }
 
 fn runtime_required_obligation_count(metadata: &crate::CompileMetadata) -> usize {

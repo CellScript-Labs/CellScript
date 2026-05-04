@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
+const repoRoot = path.resolve(root, "..", "..");
 
 const requiredFiles = [
   "package.json",
@@ -23,6 +24,8 @@ for (const relative of requiredFiles) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const cargoToml = fs.readFileSync(path.join(repoRoot, "Cargo.toml"), "utf8");
+const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 const grammar = JSON.parse(fs.readFileSync(path.join(root, "syntaxes/cellscript.tmLanguage.json"), "utf8"));
 const languageConfig = JSON.parse(fs.readFileSync(path.join(root, "language-configuration.json"), "utf8"));
 const snippets = JSON.parse(fs.readFileSync(path.join(root, "snippets/cellscript.json"), "utf8"));
@@ -31,8 +34,12 @@ if (pkg.name !== "cellscript-vscode") {
   throw new Error(`unexpected package name: ${pkg.name}`);
 }
 
-if (pkg.version !== "0.15.0") {
-  throw new Error(`unexpected extension version: ${pkg.version}`);
+if (!cargoVersion) {
+  throw new Error("unable to read root Cargo.toml package version");
+}
+
+if (pkg.version !== cargoVersion) {
+  throw new Error(`extension version ${pkg.version} does not match crate version ${cargoVersion}`);
 }
 
 if (!pkg.repository?.url?.includes("tsukifune-kosei/CellScript")) {

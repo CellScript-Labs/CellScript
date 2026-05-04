@@ -13,7 +13,8 @@ action inspect(
     expected_lock_hash: Hash,
     expected_type_hash: Hash,
     relative_distance: i32
-) -> u64 {
+) -> u64
+where
     let input = source::group_input(0)
     let output = source::output(0)
     let owner_output = source::output(1)
@@ -70,15 +71,14 @@ action inspect(
     let withdrawal_flag = if is_withdrawal_request_data { 1 } else { 0 }
     let dao_type_flag = if has_dao_type { 1 } else { 0 }
     return capacity + occupied + unoccupied + data_size + output_index + out_point_index + out_point_hash_low + lock_hash_low + type_hash_low + rate + input_rate + dao_type_flag + deposit_flag + withdrawal_flag + low + high + absolute_since + relative_since
-}
 
-action verify_xudt_mint_delta(delta: u128) {
+action verify_xudt_mint_delta(delta: u128)
+where
     xudt::require_group_amount_minted(delta)
-}
 
-action verify_xudt_burn_delta(delta: u128) {
+action verify_xudt_burn_delta(delta: u128)
+where
     xudt::require_group_amount_burned(delta)
-}
 
 lock guard(token: protected Token) -> bool {
     require ckb::current_role() == 1
@@ -100,9 +100,9 @@ resource Token has store, create, consume {
     amount: u64
 }
 
-action noop() -> u64 {
-    0
-}
+action noop() -> u64
+where
+    return 0
 "#;
 
 const XUDT_GROUP_AMOUNT_BRIDGE: &str = r#"
@@ -119,9 +119,9 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify() {
+action verify()
+where
     xudt::require_group_amount_conserved()
-}
 "#;
 
 const XUDT_GROUP_AMOUNT_BRIDGE_MISSING_HELPER: &str = r#"
@@ -138,8 +138,9 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify() {
-}
+action verify()
+where
+    require true
 "#;
 
 const XUDT_GROUP_AMOUNT_DELTA_BRIDGE: &str = r#"
@@ -163,13 +164,13 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify_mint(minted: u128) {
+action verify_mint(minted: u128)
+where
     xudt::require_group_amount_minted(minted)
-}
 
-action verify_burn(burned: u128) {
+action verify_burn(burned: u128)
+where
     xudt::require_group_amount_burned(burned)
-}
 "#;
 
 const XUDT_GROUP_AMOUNT_DELTA_MISSING_HELPER: &str = r#"
@@ -186,8 +187,9 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify() {
-}
+action verify()
+where
+    require true
 "#;
 
 const C256_PROGRAM: &str = r#"
@@ -200,7 +202,8 @@ action check_limit_order_product(
     right_multiplier: u128,
     fee_amount: u128,
     fee_multiplier: u128
-) {
+)
+where
     c256::require_product_lte(left_amount, left_multiplier, right_amount, right_multiplier)
     c256::require_product_eq(left_amount, left_multiplier, left_amount, left_multiplier)
     c256::require_sum2_products_lte(
@@ -215,7 +218,6 @@ action check_limit_order_product(
         left_amount, left_multiplier,
         fee_amount, fee_multiplier
     )
-}
 "#;
 
 const U128_LOCAL_PROGRAM: &str = r#"
@@ -225,14 +227,14 @@ fn add_u128(left: u128, right: u128) -> u128 {
     return left + right
 }
 
-action verify_computed_mint_delta(left: u128, right: u128) {
+action verify_computed_mint_delta(left: u128, right: u128)
+where
     let base: u128 = add_u128(left, right)
     let reduced: u128 = base - 1
     let product: u128 = reduced * 2
     let quotient: u128 = product / 2
     assert_invariant(quotient >= left, "u128 comparison must use high limb")
     xudt::require_group_amount_minted(quotient)
-}
 "#;
 
 const SIGNED_I32_PROGRAM: &str = r#"
@@ -243,13 +245,13 @@ struct MetaPoint {
     relative_index: i32
 }
 
-action signed_relative_order(left: i32, right: i32) -> bool {
+action signed_relative_order(left: i32, right: i32) -> bool
+where
     return left < right
-}
 
-action signed_field_order(point: MetaPoint, right: i32) -> bool {
+action signed_field_order(point: MetaPoint, right: i32) -> bool
+where
     return point.relative_index < right
-}
 "#;
 
 #[test]

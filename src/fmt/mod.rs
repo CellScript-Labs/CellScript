@@ -94,9 +94,6 @@ impl Formatter {
             }
             Item::Receipt(receipt) => {
                 self.format_type_id_attr(receipt.type_id.as_ref());
-                if let Some(lifecycle) = &receipt.lifecycle {
-                    self.push_line(&format!("#[lifecycle({})]", lifecycle.states.join(", ")));
-                }
                 self.format_receipt_def(receipt)
             }
             Item::Struct(struct_def) => {
@@ -111,10 +108,11 @@ impl Formatter {
                     struct_def.capacity_floor.as_ref(),
                 )
             }
+            Item::Flow(machine) => self.format_flow(machine),
             Item::Invariant(invariant) => self.format_invariant(invariant),
             Item::Const(constant) => {
                 self.push_line(&format!(
-                    "const {}: {} = {};",
+                    "const {}: {} = {}",
                     constant.name,
                     format_type(&constant.ty),
                     self.format_expr(&constant.value)
@@ -167,6 +165,27 @@ impl Formatter {
                 Ok(())
             }
         }
+    }
+
+    fn format_flow(&mut self, machine: &FlowDef) -> Result<()> {
+        let header = if let Some(name) = &machine.name {
+            format!("flow {} for {}.{} {{", name, machine.target.base, machine.target.field)
+        } else {
+            format!("flow {}.{} {{", machine.target.base, machine.target.field)
+        };
+        self.push_line(&header);
+        self.indent_level += 1;
+        for transition in &machine.transitions {
+            let mut line = format!("{} -> {}", transition.from, transition.to);
+            if let Some(action) = &transition.action {
+                line.push_str(&format!(" by {}", action));
+            }
+            line.push(';');
+            self.push_line(&line);
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
+        Ok(())
     }
 
     fn format_type_id_attr(&mut self, type_id: Option<&TypeIdentity>) {
@@ -291,16 +310,36 @@ impl Formatter {
 
         let params = action.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
         let mut signature = format!("{} {}({})", keyword, action.name, params);
-        if let Some(return_type) = &action.return_type {
+        if !action.outputs.is_empty() {
+            signature.push_str(&format!(" -> {}", format_action_outputs(&action.outputs)));
+        } else if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
-        self.push_line(&format!("{} {{", signature));
+        self.push_line(&signature);
+        if action.state_edges.len() == 1 {
+            self.indent_level += 1;
+            self.push_line(&format_action_state_edge("transition ", &action.state_edges[0]));
+            self.indent_level -= 1;
+        } else if !action.state_edges.is_empty() {
+            self.indent_level += 1;
+            self.push_line("transition {");
+            self.indent_level += 1;
+            for state_edge in &action.state_edges {
+                self.push_line(&format_action_state_edge("", state_edge));
+            }
+            self.indent_level -= 1;
+            self.push_line("}");
+            self.indent_level -= 1;
+        }
+        if action.body.is_empty() {
+            return Ok(());
+        }
+        self.push_line("where");
         self.indent_level += 1;
         for stmt in &action.body {
             self.format_stmt(stmt);
         }
         self.indent_level -= 1;
-        self.push_line("}");
         Ok(())
     }
 
@@ -440,7 +479,11 @@ impl Formatter {
                     .map(|(name, value)| self.format_field_initializer(name, value))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let mut rendered = format!("create {} {{ {} }}", create.ty, fields);
+                let mut rendered = if let Some(target) = &create.target {
+                    format!("create {} = {} {{ {} }}", target, create.ty, fields)
+                } else {
+                    format!("create {} {{ {} }}", create.ty, fields)
+                };
                 if let Some(lock) = &create.lock {
                     rendered.push_str(&format!(" with_lock({})", self.format_expr(lock)));
                 }
@@ -484,9 +527,28 @@ impl Formatter {
                 )
             }
             Expr::Assert(assert_expr) => {
-                format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
+                format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
-            Expr::Require(require_expr) => format!("require {}", self.format_expr(&require_expr.condition)),
+            Expr::Require(require_expr) => {
+                if let Some(message) = &require_expr.message {
+                    format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                } else {
+                    format!("require {}", self.format_expr(&require_expr.condition))
+                }
+            }
+            Expr::RequireBlock(require_block) => {
+                if require_block.expressions.len() == 1 {
+                    // Single-expression require block: format as single-line
+                    format!("require {{ {} }}", self.format_expr(&require_block.expressions[0]))
+                } else {
+                    let inner = require_block.expressions.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join("\n");
+                    format!("require {{\n{}\n}}", inner)
+                }
+            }
+            Expr::Preserve(preserve) => {
+                let fields = preserve.fields.join("\n");
+                format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
+            }
             Expr::Block(stmts) => {
                 let inner = stmts
                     .iter()
@@ -523,6 +585,16 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("match {} {{ {} }}", self.format_expr(&match_expr.expr), arms)
+            }
+            Expr::StdlibCall(call) => {
+                let args = call.args.iter().map(|arg| self.format_expr(arg)).collect::<Vec<_>>().join(", ");
+                let base = format!("std::{}::{}({})", call.namespace, call.name, args);
+                if call.preserve_fields.is_empty() {
+                    base
+                } else {
+                    let fields = call.preserve_fields.join("\n");
+                    format!("{} {{\n{}\n}}", base, fields)
+                }
             }
         }
     }
@@ -631,38 +703,41 @@ fn format_param(param: &Param) -> String {
     if param.is_ref {
         rendered.push('&');
     }
+    match param.source {
+        ParamSource::Input => rendered.push_str("input "),
+        ParamSource::Output => rendered.push_str("output "),
+        ParamSource::Protected => rendered.push_str("protected "),
+        ParamSource::Witness => rendered.push_str("witness "),
+        ParamSource::LockArgs => rendered.push_str("lock_args "),
+        ParamSource::Default if param.is_read_ref => rendered.push_str("read "),
+        ParamSource::Default => {}
+    }
     rendered.push_str(&param.name);
     rendered.push_str(": ");
-    match param.source {
-        ParamSource::Protected => {
-            rendered.push_str("protected ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Witness => {
-            rendered.push_str("witness ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::LockArgs => {
-            rendered.push_str("lock_args ");
-            rendered.push_str(&format_type(&param.ty));
-        }
-        ParamSource::Default if param.is_read_ref => {
-            rendered.push_str("read_ref ");
-            let ty = match &param.ty {
-                Type::Ref(inner) => inner.as_ref(),
-                other => other,
-            };
-            rendered.push_str(&format_type(ty));
-        }
-        ParamSource::Default => {
-            rendered.push_str(&format_type(&param.ty));
-        }
-    }
+    let ty = match (&param.source, &param.ty) {
+        (ParamSource::Protected, Type::Ref(inner)) => inner.as_ref(),
+        (ParamSource::Default, Type::Ref(inner)) if param.is_read_ref => inner.as_ref(),
+        _ => &param.ty,
+    };
+    rendered.push_str(&format_type(ty));
     rendered
+}
+
+fn format_action_outputs(outputs: &[ActionOutput]) -> String {
+    if outputs.len() == 1 {
+        format!("{}: {}", outputs[0].name, format_type(&outputs[0].ty))
+    } else {
+        format!(
+            "({})",
+            outputs.iter().map(|output| format!("{}: {}", output.name, format_type(&output.ty))).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> String {
+    let path = &state_edge.path;
+    let to_path = &state_edge.to_path;
+    format!("{}{}.{}: {} -> {}.{}: {}", prefix, path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to)
 }
 
 fn format_binding_pattern(pattern: &BindingPattern) -> String {
@@ -756,17 +831,17 @@ mod tests {
         let source = r#"
 module demo
 
-action add(x: u64, y: u64) -> u64 {
+action add(x: u64, y: u64) -> u64
+where
     let z = x + y
     return z
-}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {"));
+        assert!(formatted.contains("action add(x: u64, y: u64) -> u64\nwhere"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
     }
@@ -781,15 +856,184 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token {
-    create Token { amount: amount, symbol: symbol }
-}
+action mint(amount: u64, symbol: [u8; 8]) -> token: Token
+where
+    create token = Token { amount: amount, symbol: symbol }
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
-        assert!(formatted.contains("create Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("create token = Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_uses_canonical_assert_and_no_const_semicolon() {
+        let source = r#"
+module demo
+
+const LIMIT: u64 = 10;
+
+action check(x: u64) -> bool
+where
+    assert_invariant(x < LIMIT, "too large");
+    require x > 0, "zero"
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("const LIMIT: u64 = 10\n"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("assert(x < LIMIT, \"too large\")"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("require x > 0, \"zero\""), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("assert_invariant"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("const LIMIT: u64 = 10;"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_round_trips_preserve_block() {
+        let source = r#"
+module demo
+
+resource Offer has store {
+    seller: u64
+    price: u64
+    state: u8
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action fill(input: Offer) -> (output: Offer)
+    transition input.state: Live -> output.state: Filled
+where
+    preserve output from input {
+        seller
+        price
+    }
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("preserve"), "formatted output should contain 'preserve':\n{}", formatted);
+        assert!(formatted.contains("from input"), "formatted output should contain 'from input':\n{}", formatted);
+        assert!(formatted.contains("seller"), "formatted output should contain 'seller':\n{}", formatted);
+
+        // Round-trip: re-parse and re-format
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for preserve block");
+    }
+
+    #[test]
+    fn format_action_transition_block_for_multiple_edges() {
+        let source = r#"
+module demo
+
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
+    transition {
+        input.state: Live -> output.state: Filled
+        receipt.state: Open -> next_receipt.state: Closed
+    }
+where
+    require output.owner == input.owner
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("transition {\n"), "formatted output should use a transition block:\n{}", formatted);
+        assert!(
+            formatted.contains("input.state: Live -> output.state: Filled"),
+            "formatted output should contain the first transition edge:\n{}",
+            formatted
+        );
+        assert!(
+            formatted.contains("receipt.state: Open -> next_receipt.state: Closed"),
+            "formatted output should contain the second transition edge:\n{}",
+            formatted
+        );
+    }
+
+    #[test]
+    fn format_round_trips_require_block() {
+        let source = r#"
+module demo
+
+action check(x: u64, y: u64) -> u64
+where
+    require {
+        x > 0
+        y > 0
+    }
+    return x + y
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("require {"), "formatted output should contain 'require {{':\n{}", formatted);
+
+        // Round-trip: re-parse and re-format
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for require block");
+    }
+
+    #[test]
+    fn format_single_expr_require_block_uses_compact_form() {
+        let source = r#"
+module demo
+
+action check(x: u64) -> u64
+where
+    require {
+        x > 0
+    }
+    return x
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        // Single-expression require block should format compactly
+        assert!(formatted.contains("require {"), "formatted output should contain 'require {{':\n{}", formatted);
+    }
+
+    #[test]
+    fn format_round_trips_stdlib_lifecycle_field_block() {
+        let source = r#"
+module demo
+
+resource Coin has store, transfer {
+    amount: u64
+    nonce: u64
+}
+
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) {
+        amount
+        nonce
+    }
+"#;
+
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).expect("formatted stdlib lifecycle block should parse");
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for stdlib lifecycle block");
+        assert!(
+            !formatted.contains("amount, nonce"),
+            "stdlib field blocks use newline-separated field names, not comma-separated lists:\n{}",
+            formatted
+        );
     }
 
     #[test]

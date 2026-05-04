@@ -10,7 +10,7 @@ pub fn module() -> CkbStdlibModule {
         script_type: "type".to_string(),
         proof_plan_trigger: "type_group".to_string(),
         proof_plan_scope: "group".to_string(),
-        proof_plan_reads: vec!["group_input".to_string(), "group_output".to_string()],
+        proof_plan_reads: vec!["input".to_string(), "group_output".to_string()],
         builder_assumptions: vec!["type_id_builder_plan".to_string()],
         compatibility_fixture: "type-id".to_string(),
         stability: "schema-stub".to_string(),
@@ -28,6 +28,6 @@ pub fn functions() -> Vec<ProtocolFunction> {
         return_type: Some(IrType::Array(Box::new(IrType::U8), 32)),
         proof_plan_trigger: "type_group".to_string(),
         proof_plan_scope: "group".to_string(),
-        proof_plan_reads: vec!["group_input".to_string(), "group_output".to_string()],
+        proof_plan_reads: vec!["input".to_string(), "group_output".to_string()],
     }]
 }

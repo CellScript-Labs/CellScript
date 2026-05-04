@@ -1,10 +1,10 @@
 You can write CellScript with any text editor and the `cellc` CLI. The LSP and
-VS Code extension make that loop shorter. Parse errors, type errors, lifecycle
-mistakes, symbols, hovers, formatting, and compiler-backed reports can show up
-while you work instead of after a long command sequence.
+VS Code extension make that loop shorter. Parse errors, type errors,
+flow mistakes, symbols, hovers, formatting, and compiler-backed reports
+can show up while you work instead of after a long command sequence.
 
 The useful thing to remember is that editor feedback is not a separate language
-implementation. It is tied to the same parser, type checker, lifecycle checks,
+implementation. It is tied to the same parser, type checker, state-transition checks,
 and lowering metadata used by `cellc`.
 
 ## What You Will Learn
@@ -20,10 +20,11 @@ and lowering metadata used by `cellc`.
 The LSP implementation supports the editor features you expect while writing a
 contract:
 
-- diagnostics for parse, type, lifecycle, and lowering errors;
-- hover information for actions, receipts, fields, local variables, lifecycle
+- diagnostics for parse, type, flow, and lowering errors;
+- hover information for actions, receipts, fields, local variables, flow
   states, and lowering metadata;
-- keyword, type, symbol, field, and local completions;
+- keyword, type, symbol, field, local, enum variant, and qualified flow
+  state completions such as `Ticket::Active`;
 - go-to-definition;
 - find-references;
 - workspace rename with identifier-boundary checks;

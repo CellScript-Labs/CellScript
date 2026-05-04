@@ -49,7 +49,8 @@ const NON_EXECUTABLE_MODEL_ASSUMPTIONS: [(&str, &str, &str); 3] = [
 const VM_HARNESS_WITNESS_ARGS_PROGRAM: &str = r#"
 module vm_harness_witness_args
 
-action test_witness_args() -> u64 {
+action test_witness_args() -> u64
+where
     let view = source::input(0)
     let size = witness::size(view)
     ckb::require_witness_size_at_least(view, 16)
@@ -65,7 +66,6 @@ action test_witness_args() -> u64 {
         return 3
     }
     return 0
-}
 "#;
 
 const VM_HARNESS_WITNESS_ARGS_ACTION: &str = "test_witness_args";
@@ -73,11 +73,11 @@ const VM_HARNESS_WITNESS_ARGS_ACTION: &str = "test_witness_args";
 const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_PROGRAM: &str = r#"
 module vm_harness_witness_size_too_small
 
-action test_witness_size_too_small() -> u64 {
+action test_witness_size_too_small() -> u64
+where
     let view = source::input(0)
     ckb::require_witness_size_at_least(view, 17)
     return 0
-}
 "#;
 
 const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_small";
@@ -85,14 +85,14 @@ const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_sm
 const VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM: &str = r#"
 module vm_harness_witness_short_lock
 
-action test_witness_short_lock_zero_padded() -> u64 {
+action test_witness_short_lock_zero_padded() -> u64
+where
     let view = source::input(0)
     let lock_field = witness::lock(view)
     if lock_field != Hash::zero() {
         return 1
     }
     return 0
-}
 "#;
 
 const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero_padded";
@@ -100,7 +100,8 @@ const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero
 const VM_HARNESS_WITNESS_TYPED_FIELDS_PROGRAM: &str = r#"
 module vm_harness_witness_typed_fields
 
-action test_witness_typed_fields() -> u64 {
+action test_witness_typed_fields() -> u64
+where
     let view = source::input(0)
     let lock_field = witness::lock(view)
     let input_type = witness::input_type(view)
@@ -124,7 +125,6 @@ action test_witness_typed_fields() -> u64 {
         return 6
     }
     return 0
-}
 "#;
 
 const VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION: &str = "test_witness_typed_fields";
@@ -132,14 +132,14 @@ const VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION: &str = "test_witness_typed_fields"
 const VM_HARNESS_WITNESS_MALFORMED_PROGRAM: &str = r#"
 module vm_harness_witness_malformed
 
-action test_witness_malformed() -> u64 {
+action test_witness_malformed() -> u64
+where
     let view = source::input(0)
     let lock_field = witness::lock(view)
     if lock_field == Hash::zero() {
         return 1
     }
     return 0
-}
 "#;
 
 const VM_HARNESS_WITNESS_MALFORMED_ACTION: &str = "test_witness_malformed";
@@ -326,7 +326,8 @@ const DEPOSIT_PHASE1_CELLSCRIPT_ACTION: &str = "test_deposit_phase1";
 const DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_deposit_phase1
 
-action test_deposit_phase1() -> u64 {
+action test_deposit_phase1() -> u64
+where
     let deposit = source::output(0)
     let receipt = source::group_output(0)
     let is_deposit = dao::is_deposit_data(deposit)
@@ -342,13 +343,13 @@ action test_deposit_phase1() -> u64 {
         return 9
     }
     return 0
-}
 "#;
 const DEPOSIT_PHASE1_UPPER_BOUND_CELLSCRIPT_ACTION: &str = "test_deposit_phase1_upper_bound";
 const DEPOSIT_PHASE1_UPPER_BOUND_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_deposit_phase1_upper_bound
 
-action test_deposit_phase1_upper_bound() -> u64 {
+action test_deposit_phase1_upper_bound() -> u64
+where
     let deposit = source::output(0)
     let receipt = source::group_output(0)
     let is_deposit = dao::is_deposit_data(deposit)
@@ -367,22 +368,22 @@ action test_deposit_phase1_upper_bound() -> u64 {
         return 9
     }
     return 0
-}
 "#;
 const NON_EMPTY_ARGS_CELLSCRIPT_ACTION: &str = "test_non_empty_args";
 const NON_EMPTY_ARGS_CELLSCRIPT_PROGRAM: &str = r#"
 module diff_non_empty_args
 
-action test_non_empty_args() -> u64 {
+action test_non_empty_args() -> u64
+where
     ckb::require_cell_type_args_empty(source::output(0))
     return 0
-}
 "#;
 const MINT_FROM_RECEIPT_CELLSCRIPT_ACTION: &str = "test_mint_from_receipt";
 const MINT_FROM_RECEIPT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_mint_from_receipt
 
-action test_mint_from_receipt() -> u64 {
+action test_mint_from_receipt() -> u64
+where
     ckb::require_current_script_args_empty()
     let receipt_input = source::group_input(0)
     let input_rate = dao::input_accumulated_rate(receipt_input)
@@ -400,13 +401,13 @@ action test_mint_from_receipt() -> u64 {
         return 33
     }
     return 0
-}
 "#;
 const MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION: &str = "test_mint_from_receipt_receipt_data_size";
 const MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_mint_from_receipt_receipt_data_size
 
-action test_mint_from_receipt_receipt_data_size() -> u64 {
+action test_mint_from_receipt_receipt_data_size() -> u64
+where
     ckb::require_current_script_args_empty()
     let receipt_input = source::group_input(0)
     let receipt_size = ckb::cell_data_size(receipt_input)
@@ -428,13 +429,13 @@ action test_mint_from_receipt_receipt_data_size() -> u64 {
         return 33
     }
     return 0
-}
 "#;
 const RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_ACTION: &str = "test_receipt_group_under_mint";
 const RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_group_under_mint
 
-action test_receipt_group_under_mint() -> u64 {
+action test_receipt_group_under_mint() -> u64
+where
     ckb::require_current_script_args_empty()
     let first_receipt_input = source::group_input(0)
     let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
@@ -457,13 +458,13 @@ action test_receipt_group_under_mint() -> u64 {
         return 33
     }
     return 0
-}
 "#;
 const RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION: &str = "test_receipt_group_receipt_data_size";
 const RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_group_receipt_data_size
 
-action test_receipt_group_receipt_data_size() -> u64 {
+action test_receipt_group_receipt_data_size() -> u64
+where
     ckb::require_current_script_args_empty()
     let first_receipt_input = source::group_input(0)
     let first_receipt_size = ckb::cell_data_size(first_receipt_input)
@@ -494,7 +495,6 @@ action test_receipt_group_receipt_data_size() -> u64 {
         return 33
     }
     return 0
-}
 "#;
 const RECEIPT_WITHOUT_DEPOSIT_DIFF_SCENARIO: &str = "differential: receipt without deposit original vs CellScript agree";
 const RECEIPT_WITHOUT_DEPOSIT_INPUT_CAPACITY: u64 = 200_000_000_000;
@@ -504,20 +504,21 @@ const RECEIPT_WITHOUT_DEPOSIT_CELLSCRIPT_ACTION: &str = "test_receipt_needs_depo
 const RECEIPT_WITHOUT_DEPOSIT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_without_deposit
 
-action test_receipt_needs_deposit() -> u64 {
+action test_receipt_needs_deposit() -> u64
+where
     let receipt = source::group_output(0)
     let receipt_size = ckb::cell_data_size(receipt)
     if receipt_size == 0 {
         return 9
     }
     return 10
-}
 "#;
 const DUPLICATE_RECEIPT_OUTPUT_CELLSCRIPT_ACTION: &str = "test_duplicate_receipt_output";
 const DUPLICATE_RECEIPT_OUTPUT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_duplicate_receipt_output
 
-action test_duplicate_receipt_output() -> u64 {
+action test_duplicate_receipt_output() -> u64
+where
     ckb::require_current_script_args_empty()
     let deposit = source::output(0)
     let is_deposit = dao::is_deposit_data(deposit)
@@ -535,7 +536,6 @@ action test_duplicate_receipt_output() -> u64 {
         return 9
     }
     return 10
-}
 "#;
 const IMMATURE_REDEEM_CELLSCRIPT_ACTION: &str = "test_immature_redeem_since";
 const IMMATURE_REDEEM_REQUIRED_EPOCH: u64 = 360;
@@ -576,7 +576,8 @@ const DAO_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_since";
 const DAO_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal
 
-action test_dao_withdrawal_since() -> u64 {
+action test_dao_withdrawal_since() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -585,13 +586,13 @@ action test_dao_withdrawal_since() -> u64 {
     }
     dao::require_input_since_at_least(input, 2306942530136048371)
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_capacity";
 const DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_capacity
 
-action test_dao_withdrawal_capacity() -> u64 {
+action test_dao_withdrawal_capacity() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -618,13 +619,13 @@ action test_dao_withdrawal_capacity() -> u64 {
         return 48
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_HEADER_LINEAGE_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_header_lineage";
 const DAO_WITHDRAWAL_HEADER_LINEAGE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_header_lineage
 
-action test_dao_withdrawal_header_lineage() -> u64 {
+action test_dao_withdrawal_header_lineage() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -637,13 +638,13 @@ action test_dao_withdrawal_header_lineage() -> u64 {
         return 40
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_WITNESS_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header_witness";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_WITNESS_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header_witness
 
-action test_dao_withdrawal_deposit_header_witness() -> u64 {
+action test_dao_withdrawal_deposit_header_witness() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -657,13 +658,13 @@ action test_dao_withdrawal_deposit_header_witness() -> u64 {
         return 41
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type";
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_witness_input_type
 
-action test_dao_withdrawal_witness_input_type() -> u64 {
+action test_dao_withdrawal_witness_input_type() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -681,13 +682,13 @@ action test_dao_withdrawal_witness_input_type() -> u64 {
         return 41
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type_width";
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_witness_input_type_width
 
-action test_dao_withdrawal_witness_input_type_width() -> u64 {
+action test_dao_withdrawal_witness_input_type_width() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -709,13 +710,13 @@ action test_dao_withdrawal_witness_input_type_width() -> u64 {
         return 41
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header
 
-action test_dao_withdrawal_deposit_header() -> u64 {
+action test_dao_withdrawal_deposit_header() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -733,13 +734,13 @@ action test_dao_withdrawal_deposit_header() -> u64 {
         return 41
     }
     return 0
-}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_OOB_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header_oob";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_OOB_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header_oob
 
-action test_dao_withdrawal_deposit_header_oob() -> u64 {
+action test_dao_withdrawal_deposit_header_oob() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -753,12 +754,12 @@ action test_dao_withdrawal_deposit_header_oob() -> u64 {
         return 41
     }
     return 0
-}
 "#;
 const IMMATURE_REDEEM_CELLSCRIPT_PROGRAM: &str = r#"
 module ckb_vm_immature_redeem
 
-action test_immature_redeem_since() -> u64 {
+action test_immature_redeem_since() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let is_withdrawal = dao::is_withdrawal_request_data(input)
@@ -769,13 +770,13 @@ action test_immature_redeem_since() -> u64 {
     dao::require_input_since_at_least(input, required_since)
     dao::require_input_relative_epoch_since_at_least(input, 360, 0, 1)
     return 0
-}
 "#;
 const LIMIT_ORDER_CELLSCRIPT_ACTION: &str = "test_limit_order_value";
 const LIMIT_ORDER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_limit_order
 
-action test_limit_order_value() -> u64 {
+action test_limit_order_value() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let output = source::output(0)
@@ -803,13 +804,13 @@ action test_limit_order_value() -> u64 {
         }
     }
     return 0
-}
 "#;
 const LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_ACTION: &str = "test_limit_order_udt_to_ckb_value";
 const LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_limit_order_udt_to_ckb
 
-action test_limit_order_udt_to_ckb_value() -> u64 {
+action test_limit_order_udt_to_ckb_value() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let output = source::output(0)
@@ -837,59 +838,59 @@ action test_limit_order_udt_to_ckb_value() -> u64 {
         }
     }
     return 0
-}
 "#;
 const OWNED_OWNER_CELLSCRIPT_ACTION: &str = "test_owned_owner_pairing";
 const OWNED_OWNER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner
 
-action test_owned_owner_pairing() -> u64 {
+action test_owned_owner_pairing() -> u64
+where
     ckb::require_current_script_args_empty()
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
     return 0
-}
 "#;
 const OWNED_OWNER_OUTPUT_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_pairing";
 const OWNED_OWNER_OUTPUT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output
 
-action test_owned_owner_output_pairing() -> u64 {
+action test_owned_owner_output_pairing() -> u64
+where
     ckb::require_current_script_args_empty()
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
     return 0
-}
 "#;
 const OWNED_OWNER_SCRIPT_MISUSE_CELLSCRIPT_ACTION: &str = "test_owned_owner_script_misuse";
 const OWNED_OWNER_SCRIPT_MISUSE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_script_misuse
 
-action test_owned_owner_script_misuse() -> u64 {
+action test_owned_owner_script_misuse() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::input(0)
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(input, current_script_hash)
     ckb::require_cell_type_hash(input, current_script_hash)
     return 7
-}
 "#;
 const OWNED_OWNER_OUTPUT_SCRIPT_MISUSE_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_script_misuse";
 const OWNED_OWNER_OUTPUT_SCRIPT_MISUSE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output_script_misuse
 
-action test_owned_owner_output_script_misuse() -> u64 {
+action test_owned_owner_output_script_misuse() -> u64
+where
     ckb::require_current_script_args_empty()
     let output = source::output(0)
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(output, current_script_hash)
     ckb::require_cell_type_hash(output, current_script_hash)
     return 7
-}
 "#;
 const OWNED_OWNER_OUTPUT_NOT_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_not_withdrawal";
 const OWNED_OWNER_OUTPUT_NOT_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output_not_withdrawal
 
-action test_owned_owner_output_not_withdrawal() -> u64 {
+action test_owned_owner_output_not_withdrawal() -> u64
+where
     ckb::require_current_script_args_empty()
     let output = source::output(0)
     let current_script_hash: Hash = ckb::current_script_hash()
@@ -903,13 +904,13 @@ action test_owned_owner_output_not_withdrawal() -> u64 {
         return 6
     }
     return 0
-}
 "#;
 const OWNED_OWNER_NOT_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_owned_owner_not_withdrawal";
 const OWNED_OWNER_NOT_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_not_withdrawal
 
-action test_owned_owner_not_withdrawal() -> u64 {
+action test_owned_owner_not_withdrawal() -> u64
+where
     ckb::require_current_script_args_empty()
     let input = source::input(0)
     let has_dao = dao::has_dao_type(input)
@@ -921,7 +922,6 @@ action test_owned_owner_not_withdrawal() -> u64 {
         return 6
     }
     return 0
-}
 "#;
 
 const OWNED_OWNER_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_related_type_hash_mismatch";
@@ -931,7 +931,8 @@ fn owned_owner_related_type_hash_mismatch_cellscript_program(expected_related_ty
         r#"
 module differential_owned_owner_related_type_hash_mismatch
 
-action test_owned_owner_related_type_hash_mismatch() -> u64 {{
+action test_owned_owner_related_type_hash_mismatch() -> u64
+where
     ckb::require_current_script_args_empty()
     let owned = source::input(0)
     let owner = source::input(1)
@@ -944,7 +945,6 @@ action test_owned_owner_related_type_hash_mismatch() -> u64 {{
     }}
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
     return 0
-}}
 "#
     )
 }
@@ -956,7 +956,8 @@ fn owned_owner_output_related_type_hash_mismatch_cellscript_program(expected_rel
         r#"
 module differential_owned_owner_output_related_type_hash_mismatch
 
-action test_owned_owner_output_related_type_hash_mismatch() -> u64 {{
+action test_owned_owner_output_related_type_hash_mismatch() -> u64
+where
     ckb::require_current_script_args_empty()
     let owned = source::output(0)
     let owner = source::output(1)
@@ -969,7 +970,6 @@ action test_owned_owner_output_related_type_hash_mismatch() -> u64 {{
     }}
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
     return 0
-}}
 "#
     )
 }
@@ -981,7 +981,8 @@ fn owned_owner_output_related_data_rule_mismatch_cellscript_program(expected_rel
         r#"
 module differential_owned_owner_output_related_data_rule_mismatch
 
-action test_owned_owner_output_related_data_rule_mismatch() -> u64 {{
+action test_owned_owner_output_related_data_rule_mismatch() -> u64
+where
     ckb::require_current_script_args_empty()
     let owned = source::output(0)
     let owner = source::output(1)
@@ -998,7 +999,6 @@ action test_owned_owner_output_related_data_rule_mismatch() -> u64 {{
     }}
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
     return 0
-}}
 "#
     )
 }
@@ -1010,7 +1010,8 @@ fn owned_owner_related_data_rule_mismatch_cellscript_program(expected_related_ty
         r#"
 module differential_owned_owner_related_data_rule_mismatch
 
-action test_owned_owner_related_data_rule_mismatch() -> u64 {{
+action test_owned_owner_related_data_rule_mismatch() -> u64
+where
     ckb::require_current_script_args_empty()
     let owned = source::input(0)
     let owner = source::input(1)
@@ -1027,7 +1028,6 @@ action test_owned_owner_related_data_rule_mismatch() -> u64 {{
     }}
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
     return 0
-}}
 "#
     )
 }
@@ -1157,10 +1157,35 @@ fn ickb_production_equivalence_claim_requires_executed_evidence() {
     );
 }
 
+const UPDATE_ICKB_DIFF_MATRIX_ENV: &str = "CELLSCRIPT_UPDATE_ICKB_DIFF_MATRIX";
+
+fn matrix_path() -> Utf8PathBuf {
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("benchmarks").join("ickb_diff").join("matrix.json")
+}
+
 fn read_matrix() -> Value {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("benchmarks").join("ickb_diff").join("matrix.json");
+    let path = matrix_path();
     let content = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
     serde_json::from_str(&content).unwrap_or_else(|err| panic!("failed to parse {path}: {err}"))
+}
+
+fn maybe_update_matrix_execution(scenario: &str, execution: &Value) -> bool {
+    if std::env::var(UPDATE_ICKB_DIFF_MATRIX_ENV).as_deref() != Ok("1") {
+        return false;
+    }
+    let path = matrix_path();
+    let mut matrix = read_matrix();
+    let row = matrix["rows"]
+        .as_array_mut()
+        .expect("rows")
+        .iter_mut()
+        .find(|row| row["scenario"].as_str() == Some(scenario))
+        .unwrap_or_else(|| panic!("missing matrix row for {scenario}"));
+    row["execution"] = execution.clone();
+    let mut encoded = serde_json::to_string_pretty(&matrix).expect("matrix should serialize");
+    encoded.push('\n');
+    std::fs::write(&path, encoded).unwrap_or_else(|err| panic!("failed to update {path}: {err}"));
+    true
 }
 
 fn assert_required_evidence_list(matrix: &Value) {
@@ -9307,6 +9332,9 @@ fn assert_matrix_execution_matches(scenario: &str, execution: &Value) {
     assert_eq!(row["ckb_vm_execution"], true, "{scenario}");
     assert_eq!(row["original_ickb_executed"], true, "{scenario}");
     assert_eq!(row["full_differential"], true, "{scenario}");
+    if maybe_update_matrix_execution(scenario, execution) {
+        return;
+    }
     assert_eq!(
         execution_with_dynamic_context_hashes(&row["execution"]),
         execution_with_dynamic_context_hashes(execution),

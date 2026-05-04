@@ -6,6 +6,9 @@ on:
     branches:
       - main
       - master
+      - "nightly-*"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
@@ -51,6 +54,9 @@ jobs:
           printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' > "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
           cargo test --locked --manifest-path Cargo.toml -- --test-threads=1
 
+      - name: Run syntax combination audit
+        run: ./scripts/cellscript_syntax_combo_audit.sh ci
+
       - name: Run clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
@@ -72,3 +78,11 @@ jobs:
           name: cellscript-backend-shape-report
           if-no-files-found: error
           path: /tmp/cellscript-backend-shape/
+
+      - name: Upload syntax combination audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cellscript-syntax-combo-audit
+          if-no-files-found: ignore
+          path: target/syntax-combo-audit/

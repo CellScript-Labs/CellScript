@@ -32,6 +32,12 @@ struct Cli {
     #[arg(long)]
     target_profile: Option<String>,
 
+    #[arg(long, value_name = "VERSION", conflicts_with = "primitive_strict")]
+    primitive_compat: Option<String>,
+
+    #[arg(long, value_name = "VERSION", conflicts_with = "primitive_compat")]
+    primitive_strict: Option<String>,
+
     #[arg(long, value_name = "ACTION")]
     entry_action: Option<String>,
 
@@ -215,7 +221,7 @@ fn main() {
         debug: cli.debug,
         target: cli.target,
         target_profile: cli.target_profile,
-        primitive_compat: None,
+        primitive_compat: resolve_primitive_compat(cli.primitive_compat, cli.primitive_strict),
     };
 
     if cli.entry_action.is_some() && cli.entry_lock.is_some() {
@@ -264,6 +270,14 @@ fn main() {
             print_cli_error(&e);
             process::exit(1);
         }
+    }
+}
+
+fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
+    if strict.is_some() {
+        strict
+    } else {
+        compat
     }
 }
 

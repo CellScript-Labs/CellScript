@@ -29,7 +29,8 @@ struct Snapshot {
     amount: u64,
 }
 
-action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool {
+action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool
+where
     let mut owners = Vec::with_capacity(2)
     owners.push(owner)
     owners.insert(0, candidate)
@@ -39,14 +40,13 @@ action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapsho
     snapshots.push(snapshot)
 
     return owners.contains(owner) && snapshots.len() == 1
-}
 
-resource Blob has store, transfer {
+resource Blob has store, create, consume, replace {
     owner: Address,
     data: Vec<u8>,
 }
 
-resource FixedVotes has store, transfer {
+resource FixedVotes has store, create, consume, replace {
     owner: Address,
     votes: [u64; 4],
 }
@@ -55,18 +55,18 @@ resource FixedVotes has store, transfer {
 Avoid claiming production support for shapes like:
 
 ```cellscript
-resource NestedDynamic has store, transfer {
+resource NestedDynamic has store, create, consume, replace {
     rows: Vec<Vec<u8>>,
 }
 
-resource Token has store, transfer {
+resource Token has store, create, consume, replace {
     owner: Address,
     amount: u64,
 }
 
-action hidden_ownership(tokens: Vec<Token>) -> u64 {
+action hidden_ownership(tokens: Vec<Token>) -> u64
+where
     return tokens.len()
-}
 ```
 
 Use the support matrix for the current status:

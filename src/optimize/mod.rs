@@ -70,6 +70,7 @@ impl Optimizer {
                 | Item::Shared(_)
                 | Item::Receipt(_)
                 | Item::Struct(_)
+                | Item::Flow(_)
                 | Item::Invariant(_)
                 | Item::Enum(_)
                 | Item::Use(_) => {}
@@ -221,7 +222,7 @@ impl Optimizer {
                     fields.push((name.clone(), self.optimize_expr(value)?));
                 }
                 let lock = create.lock.as_ref().map(|lock| self.optimize_expr(lock)).transpose()?.map(Box::new);
-                Ok(Expr::Create(CreateExpr { ty: create.ty.clone(), fields, lock, span: create.span }))
+                Ok(Expr::Create(CreateExpr { target: create.target.clone(), ty: create.ty.clone(), fields, lock, span: create.span }))
             }
             Expr::Consume(consume) => {
                 Ok(Expr::Consume(ConsumeExpr { expr: Box::new(self.optimize_expr(&consume.expr)?), span: consume.span }))
@@ -249,9 +250,19 @@ impl Optimizer {
                 message: Box::new(self.optimize_expr(&assert.message)?),
                 span: assert.span,
             })),
-            Expr::Require(require) => {
-                Ok(Expr::Require(RequireExpr { condition: Box::new(self.optimize_expr(&require.condition)?), span: require.span }))
+            Expr::Require(require) => Ok(Expr::Require(RequireExpr {
+                condition: Box::new(self.optimize_expr(&require.condition)?),
+                message: require.message.as_ref().map(|message| self.optimize_expr(message)).transpose()?.map(Box::new),
+                span: require.span,
+            })),
+            Expr::RequireBlock(require_block) => {
+                let mut optimized = Vec::with_capacity(require_block.expressions.len());
+                for expr in &require_block.expressions {
+                    optimized.push(self.optimize_expr(expr)?);
+                }
+                Ok(Expr::RequireBlock(RequireBlockExpr { expressions: optimized, span: require_block.span }))
             }
+            Expr::Preserve(preserve) => Ok(Expr::Preserve(preserve.clone())),
             Expr::Block(stmts) => Ok(Expr::Block(self.with_child_scope(|this| this.optimize_stmts(stmts))?)),
             Expr::Tuple(items) => {
                 let mut optimized = Vec::with_capacity(items.len());
@@ -304,6 +315,7 @@ impl Optimizer {
                 }
                 Ok(Expr::Match(MatchExpr { expr: Box::new(expr), arms, span: match_expr.span }))
             }
+            Expr::StdlibCall(_) => Ok(expr.clone()),
         }
     }
 
@@ -592,7 +604,18 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
             collect_call_names_from_expr(&assert.condition, names);
             collect_call_names_from_expr(&assert.message, names);
         }
-        Expr::Require(require) => collect_call_names_from_expr(&require.condition, names),
+        Expr::Require(require) => {
+            collect_call_names_from_expr(&require.condition, names);
+            if let Some(message) = &require.message {
+                collect_call_names_from_expr(message, names);
+            }
+        }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_call_names_from_expr(expr, names);
+            }
+        }
+        Expr::Preserve(_) => {}
         Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {
@@ -620,7 +643,13 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
                 collect_call_names_from_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::Call(_) => {}
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::Call(_)
+        | Expr::StdlibCall(_) => {}
     }
 }
 
@@ -710,7 +739,12 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
             collect_names_by_walking_expr(&assert.condition, names);
             collect_names_by_walking_expr(&assert.message, names);
         }
-        Expr::Require(require) => collect_names_by_walking_expr(&require.condition, names),
+        Expr::Require(require) => {
+            collect_names_by_walking_expr(&require.condition, names);
+            if let Some(message) = &require.message {
+                collect_names_by_walking_expr(message, names);
+            }
+        }
         Expr::Block(stmts) => {
             for stmt in stmts {
                 collect_used_names_from_stmt(stmt, names);
@@ -742,13 +776,19 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_names_by_walking_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                collect_names_by_walking_expr(expr, names);
+            }
+        }
+        Expr::Preserve(_) => {}
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::StdlibCall(_) => {}
     }
 }
 
 fn expr_is_pure_inlineable(expr: &Expr) -> bool {
     match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => true,
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::StdlibCall(_) => true,
         Expr::Binary(binary) => expr_is_pure_inlineable(&binary.left) && expr_is_pure_inlineable(&binary.right),
         Expr::Unary(unary) => expr_is_pure_inlineable(&unary.expr),
         Expr::Call(call) => expr_is_pure_inlineable(&call.func) && call.args.iter().all(expr_is_pure_inlineable),
@@ -778,7 +818,9 @@ fn expr_is_pure_inlineable(expr: &Expr) -> bool {
         | Expr::CreateUnique(_)
         | Expr::ReplaceUnique(_)
         | Expr::Assert(_)
-        | Expr::Require(_) => false,
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_) => false,
     }
 }
 
@@ -863,9 +905,21 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
                 .collect(),
             span: match_expr.span,
         }),
-        Expr::Require(require) => {
-            Expr::Require(RequireExpr { condition: Box::new(substitute_expr(&require.condition, substitutions)), span: require.span })
-        }
+        Expr::Require(require) => Expr::Require(RequireExpr {
+            condition: Box::new(substitute_expr(&require.condition, substitutions)),
+            message: require.message.as_ref().map(|message| Box::new(substitute_expr(message, substitutions))),
+            span: require.span,
+        }),
+        Expr::RequireBlock(require_block) => Expr::RequireBlock(RequireBlockExpr {
+            expressions: require_block.expressions.iter().map(|e| substitute_expr(e, substitutions)).collect(),
+            span: require_block.span,
+        }),
+        Expr::Preserve(preserve) => Expr::Preserve(PreserveExpr {
+            output_name: preserve.output_name.clone(),
+            input_name: preserve.input_name.clone(),
+            fields: preserve.fields.clone(),
+            span: preserve.span,
+        }),
         Expr::Create(_)
         | Expr::Consume(_)
         | Expr::Transfer(_)
@@ -880,7 +934,8 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
         | Expr::Integer(_)
         | Expr::Bool(_)
         | Expr::String(_)
-        | Expr::ByteString(_) => expr.clone(),
+        | Expr::ByteString(_)
+        | Expr::StdlibCall(_) => expr.clone(),
     }
 }
 
@@ -927,6 +982,8 @@ mod tests {
                 name: "run".to_string(),
                 params: Vec::new(),
                 return_type: None,
+                outputs: Vec::new(),
+                state_edges: Vec::new(),
                 body: vec![Stmt::If(IfStmt {
                     condition: Expr::Bool(false),
                     then_branch: vec![Stmt::Expr(Expr::Destroy(DestroyExpr {
@@ -994,6 +1051,8 @@ mod tests {
                     name: "run".to_string(),
                     params: Vec::new(),
                     return_type: Some(Type::U64),
+                    outputs: Vec::new(),
+                    state_edges: Vec::new(),
                     body: vec![
                         Stmt::Let(LetStmt {
                             pattern: BindingPattern::Name("unused_local".to_string()),

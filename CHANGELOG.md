@@ -1,7 +1,107 @@
 # Changelog
 
-## 0.13.0 - Unreleased
+## 0.16.0 - 2026-05-04
 
+- Add the scoped metadata-assurance release surface: operational semantics,
+  ProofPlan soundness checks, builder-assumption metadata, transaction-shape
+  validation, solver templates, deployment reports, proof diffs, profiling,
+  transaction traces, and audit bundles.
+- Add `--primitive-strict=0.16`, which includes the 0.15 primitive vocabulary
+  rules and rejects metadata-only/runtime-required ProofPlan gaps in strict
+  assurance mode.
+- Add descriptive standard CKB compatibility fixture manifests for sUDT, xUDT,
+  ACP, Cheque, Omnilock, NervosDAO since/epoch behavior, Type ID,
+  ScriptGroup, and `outputs_data` shapes.
+- Add CKB stdlib protocol module schema stubs for sUDT, xUDT, TYPE_ID, HTLC,
+  Cheque, ACP, and DAO-facing descriptors while keeping executable protocol
+  lowering deferred.
+- Carry the 0.15 proof/invariant scope forward without overstating it:
+  aggregate invariant lowering, full ProofPlan soundness proofs, macro-only
+  lowering, covenant stdlib helpers, strict address/script type separation,
+  entry role syntax, versioned layout migration, and executable fixture
+  matrices remain tracked for later releases.
+- Merge the 0.15 strict syntax and example cleanup into the 0.16 assurance
+  branch, including canonical `transition`/`where` action syntax, kernel-effect
+  capabilities, stdlib lifecycle metadata, and VS Code packaging dry-runs.
+
+## 0.15.0 - 2026-05-04
+
+- Add scoped invariant declarations with explicit trigger, scope, reads,
+  coverage, and runtime-obligation metadata for CKB covenant auditing.
+- Add Covenant ProofPlan records and `cellc explain-proof` so action, lock,
+  invariant, aggregate, identity, and lifecycle obligations are inspectable in
+  human-readable and JSON form.
+- Add aggregate invariant primitives such as `assert_sum`,
+  `assert_conserved`, `assert_delta`, `assert_distinct`, and
+  `assert_singleton`; these currently emit metadata-only runtime obligations
+  until executable aggregate verifier lowering is promoted.
+- Promote cell identity policies and identity-aware lifecycle forms through
+  `identity(...)`, `create_unique`, and `replace_unique`, including TYPE_ID,
+  field, script-args, and singleton-type metadata.
+- Add explicit destruction-policy forms and carry destruction policy through
+  IR/codegen while keeping bare `destroy` available as the default policy.
+- Reset resource capabilities from protocol verbs to 0.15 kernel effects such
+  as `create`, `consume`, `replace`, `burn`, `relock`, `retarget_type`, and
+  `read_ref`.
+- Add `--primitive-compat 0.14` and `--primitive-strict 0.15` migration modes
+  across direct `cellc` compilation and package commands, with CS0150-CS0160
+  diagnostics for legacy `transfer` and `destroy` capabilities.
+- Allow direct lifecycle operations to be authorized by kernel-effect
+  equivalents: `transfer` accepts `replace + relock`, and `destroy` accepts
+  `consume + burn`.
+- Convert canonical bundled examples, language examples, README examples, wiki
+  tutorials, and release gates to strict 0.15 kernel-effect capabilities.
+- Extend strict acceptance and syntax-combination gates so bundled examples
+  compile directly under `--primitive-strict 0.15`, and update release
+  documentation to keep 0.15 P0 scope separate from deferred 0.16 proof
+  soundness and compatibility-suite work.
+
+## 0.13.2 - 2026-05-03
+
+- Complete syntax-governance layering for lifecycle semantics by keeping
+  `claim`, `settle`, and `transfer` out of the executable core expression
+  surface and implementing the corresponding stdlib patterns explicitly.
+- Implement `std::cell::same_lock`, `std::cell::preserve_lock`, and
+  `std::cell::preserve_capacity` through canonical cell metadata verifier
+  checks.
+- Make `std::lifecycle::transfer`, `std::receipt::claim`, and
+  `std::lifecycle::settle` expand to consumed inputs, locked named outputs,
+  and complete output field preservation.
+- Harden preserve and require sugar so preserved fields are type-equivalent
+  to their canonical require expansion and anonymous require blocks remain
+  pure boolean verifier constraints.
+- Remove the remaining compiler-level claim witness/signature special cases
+  and reserve the old claim-signature runtime error code.
+- Add example and editor-tooling coverage for the stdlib lifecycle and cell
+  metadata helper surface.
+- Add an executable syntax-combination audit runner for parser/formatter/type
+  checking/lowering metadata/codegen oracles, wire the quick audit into local
+  gates, and run the broader CI matrix in GitHub Actions and the full release
+  gate.
+- Make CI run on nightly branches and version tags, and add syntax-audit mode
+  contracts so accidental coverage shrinkage fails closed.
+- Sync the 0.13 roadmap/release scope with the 0.13.2 governance boundary and
+  add a release-gate check that keeps those docs aligned.
+- Pin VS Code extension packaging to `@vscode/vsce` and make local VSIX
+  packaging dry-runs part of the release gate.
+- Document the syntax-combination audit as a reusable release acceptance
+  preflight that runs before builder-backed CKB acceptance.
+- Finalize the 0.13.2 release notes under `docs/releases/`, add a docs map, and
+  move historical 0.13 planning documents into `docs/archive/0.13/`.
+
+## 0.13.0 - 2026-04-30
+
+- Complete the internal RISC-V ELF assembler branch surface used by current
+  codegen, including `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `beqz`,
+  `bnez`, and branch relaxation coverage.
+- Harden the stack-backed `Vec<T>` helper boundary so unsupported receivers,
+  invalid `extend_from_slice` element types, and unrefined `Vec::new()` slice
+  extension cases fail at compile time instead of drifting into hidden runtime
+  paths.
+- Add `examples/language/order_book.cell` as a non-production language example
+  for local stack-backed order vectors.
+- Add the CKB release-gate wrapper script and document the difference between
+  quick compile-only evidence and full production acceptance.
 - Add builder-backed local CKB valid-spend and invalid-spend acceptance coverage
   for all 16 bundled lock entries, in the same production gate as the 43 action
   flows.
@@ -91,6 +191,8 @@
 - Made external RISC-V toolchains explicit opt-in via `CELLSCRIPT_RISCV_CC` or
   `CELLSCRIPT_RISCV_AS`/`CELLSCRIPT_RISCV_LD`, so production ELF output and
   backend shape budgets no longer depend on tools accidentally present in PATH.
+- Hardened those external toolchain overrides to require absolute paths to
+  existing executable files instead of accepting relative command names.
 - Rebased the multisig bundled-example ELF budget on the deterministic internal
   ELF artifact size while keeping the assembly text/CFG budgets unchanged.
 - Removed the executable Wasm pseudo-lowering path; the Wasm module now remains
@@ -98,6 +200,11 @@
   code.
 - Removed empty module doc comments and simplified duplicated verifier branches
   reported by clippy.
+- Kept lifecycle state storage explicit in cell data while allowing lifecycle
+  state names in `create` initializers and qualified expressions such as
+  `Ticket::Active`, avoiding hidden layout changes and numeric state
+  boilerplate.
+- Added LSP completions for qualified lifecycle states such as `Ticket::Active`.
 - Clarified README CLI docs that `cellc test` is a compiler/policy harness, not
   trusted runtime execution.
 - Removed the old CKB acceptance policy exception path so the CKB target

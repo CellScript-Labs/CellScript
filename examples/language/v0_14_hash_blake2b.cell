@@ -1,0 +1,6 @@
+module cellscript::language::v0_14_hash_blake2b
+
+lock blake2b_matches(witness input: Hash, witness expected: Hash) -> bool {
+    let actual = hash_blake2b(input)
+    require actual == expected
+}

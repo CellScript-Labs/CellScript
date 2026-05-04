@@ -27,7 +27,7 @@ verifier obligations, runtime requirements, and target-profile policy flags.
 
 The language is intentionally narrow: it is not a new VM, and it is not an
 account-storage contract language. CellScript gives protocol authors a typed
-way to describe assets, shared Cell state, receipts, lifecycle transitions,
+way to describe assets, shared Cell state, receipts, explicit state transitions,
 locks, and transaction-shaped effects — while still mapping directly to the
 Cell model used by CKB.
 
@@ -45,10 +45,12 @@ scripts force authors to work close to the wire format:
 - preserve linear asset semantics by convention rather than by the compiler
 
 CellScript raises that programming model to explicit language constructs:
-`resource`, `shared`, `receipt`, `action`, `lock`, `consume`, `create`,
-`read_ref`, `transfer`, `destroy`, `claim`, and `settle`. These constructs are
-not metaphors — they lower directly to the Cell transaction shape that the
-target chain already executes.
+`resource`, `shared`, `receipt`, `action`, `lock`, source qualifiers such as
+`read`, `protected`, `witness`, and `lock_args`, and Cell effects such as
+`consume`, `create`, and `destroy`. Higher-level lifecycle patterns such as
+`std::lifecycle::transfer`, `std::receipt::claim`, and
+`std::lifecycle::settle` expand into those explicit effects instead of living
+as compiler-core verbs.
 
 ## Current Status
 
@@ -63,7 +65,7 @@ It is suitable for:
 
 It is not yet recommended for unaudited mainnet deployment without manual
 review. The current focus is developer-readiness, diagnostics, ProofPlan /
-metadata visibility, and CKB target-profile stability.
+metadata assurance, and CKB target-profile stability.
 
 ## Quick Start
 
@@ -81,10 +83,10 @@ Compile your first contract:
 cellc examples/token.cell
 
 # Emit a RISC-V ELF for CKB
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
 
 # Emit a RISC-V ELF for CKB, with a specific entry action
-cellc examples/nft.cell --target riscv64-elf --target-profile ckb --entry-action transfer
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --entry-action transfer
 ```
 
 Start a package:
@@ -118,11 +120,101 @@ creates, consumes, assumes, and exposes to CKB-facing policy tooling.
 
 ---
 
+## Target Profiles
+
+CellScript now supports CKB as its only target profile:
+
+| Profile | When to use | What you get |
+|---|---|---|
+| `ckb` | CKB mainnet artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
+
+> The `ckb` profile is production-gated for the bundled CellScript suite. It
+> emits raw CKB ckb-vm artifacts, uses CKB syscall
+> and Molecule/BLAKE2b conventions, and rejects unsupported shapes through
+> normal target-profile policy.
+
+```bash
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc check --target-profile ckb
+```
+
+Use `--primitive-strict 0.15` when checking only the kernel-effect migration
+boundary. Use `--primitive-strict 0.16` for the current assurance gate, which
+adds mandatory ProofPlan soundness checks.
+
+## Core Model
+
+CellScript programs are written as verifier constraints over proposed Cell
+transformations:
+
+| Concept | What it compiles to |
+|---|---|
+| `resource T { ... }` | A linear Cell-backed asset (`CellOutput` + `outputs_data[i]`) |
+| `shared T { ... }` | Shared state Cell, read via `CellDep` or updated by consume + create |
+| `receipt T { ... }` | A single-use proof Cell (deposits, vesting, votes, liquidity) |
+| `consume value` | Spend a transaction input |
+| `create output = T { ... }` | Constrain a named proposed output Cell with typed data |
+| `read param: T` / `read_ref<T>()` | Load a read-only CellDep-backed value |
+| `action` | Type-script transition logic → compiled to RISC-V |
+| `lock` | Lock-script authorization logic → compiled to RISC-V |
+| Local `let` values | Transaction-local computation; never persistent storage |
+
+> **Key rule:** only `create` materializes persistent state. Ordinary local
+> values do not become Cells unless explicitly created as `resource`,
+> `shared`, or `receipt`.
+
+## Language Features
+
+- **Cell-native resources** — `resource` values are linear. They cannot be
+  copied, silently dropped, or hidden inside ordinary values. Every resource
+  must reach an explicit lifecycle or output-binding role: for example
+  `consume`, `destroy`, a declared successor output, or a compiler-recognized
+  stdlib lifecycle pattern that expands to `consume` plus output constraints.
+- **Explicit shared state** — `shared` marks contention-sensitive protocol
+  state (pools, registries, configuration Cells). Reads and writes stay
+  visible to metadata and tooling.
+- **Receipts as stateful proofs** — `receipt` is a single-use Cell that proves
+  an operation happened and can later be consumed directly or through an explicit
+  stdlib claim/settlement pattern.
+- **Capability gates** — `has store, create, consume, replace, burn, relock`
+  makes asset permissions explicit in kernel-effect terms instead of protocol
+  verbs.
+- **Declarative flows** — state remains explicit schema data, while
+  `flow Name for Type.field { A -> B by action; }` or compact
+  `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
+  shape separates topology, state edge, and proof obligations:
+  `action(old: T) -> new: T`, `transition old.field: A -> new.field: B`, then a
+  `where` proof block with explicit `require` constraints. Explicit `output`
+  parameters and `consume`/`create` actions remain accepted, but the signature
+  direction is the normal input-to-output surface. Multiple state edges may be
+  grouped in a non-empty `transition { ... }` block.
+  Each state field has exactly one flow declaration; split/partial flow merging
+  is not supported.
+- **Scoped proof blocks** — action proof logic lives under `where`; `transition` is an
+  action-level state edge declaration before `where`, not a statement inside
+  conditional proof logic. The type checker rejects asymmetric branch
+  constraints when an output field is required in one proof branch but not its
+  siblings.
+- **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
+  `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
+- **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
+  and shared touch domains so block builders can reason about independent work.
+- **Typed schema metadata** — Cell data layout, type identity, source hashes,
+  runtime accesses, and verifier obligations are emitted as machine-readable
+  metadata.
+- **RISC-V output** — the executable target is ckb-vm-compatible RISC-V
+  assembly or ELF. CellScript does not introduce a separate VM.
+- **Package-aware compilation** — packages use `Cell.toml`, local modules,
+  source roots, and local path dependencies.
+- **Policy gates** — build, check, metadata, and artifact verification can
+  reject outputs that violate the selected target or deployment policy.
+
 ## Example
 
 A module contains schema declarations and executable entries. Persistent values
 are declared as `resource`, `shared`, or `receipt`; executable logic as `action`
-or `lock`; effects are written with explicit lifecycle operations.
+or `lock`; effects are written with explicit Cell operations and state
+transition clauses.
 
 **Declarations:**
 
@@ -133,7 +225,7 @@ struct Config {
     threshold: u64
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -143,7 +235,7 @@ shared Pool has store {
     ckb_reserve: u64
 }
 
-receipt VestingGrant has store, claim {
+receipt VestingGrant has store, create, consume {
     beneficiary: Address
     amount: u64
     unlock_epoch: u64
@@ -153,30 +245,31 @@ struct Wallet {
     owner: Address
 }
 
-lock owner_only(wallet: &Wallet, signer: Address) -> bool {
-    wallet.owner == signer
+lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
+    require wallet.owner == claimed_owner
 }
 ```
 
 **Effects:**
 
 ```cellscript
-action move_token(token: Token, to: Address) -> Token {
-    assert_invariant(token.amount > 0, "empty token")
+action move_token(token: Token, to: Address) -> next_token: Token
+where
+    assert(token.amount > 0, "empty token")
 
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 ```
 
-The compiler treats `consume`, `create`, `transfer`, `destroy`, `claim`,
-`settle`, and `read_ref` as **Cell effects**, not ordinary function calls. Those
-effects are reflected in metadata so CKB admission policy,
-schema decoding, and artifact verification can audit the generated script.
+The compiler treats `consume`, `create`, `destroy`, action-boundary source
+parameters, expression-level `read_ref<T>()`, and compiler-recognized stdlib
+lifecycle patterns as **Cell effects**, not ordinary opaque function calls.
+Those effects are reflected in metadata so CKB admission policy, schema
+decoding, and artifact verification can audit the generated script.
 
 **Scoped invariants and ProofPlan metadata:**
 
@@ -203,7 +296,7 @@ views.
 ```cellscript
 module ckb::fungible_token
 
-resource Token has store, transfer, destroy {
+resource Token has store, create, consume, replace, burn, relock {
     amount: u64
     symbol: [u8; 8]
 }
@@ -214,30 +307,32 @@ resource MintAuthority has store {
     minted: u64
 }
 
-action mint(auth: &mut MintAuthority, to: Address, amount: u64) -> Token {
-    assert_invariant(auth.minted + amount <= auth.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+where
+    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
-    auth.minted = auth.minted + amount
+    require auth_after.token_symbol == auth_before.token_symbol
+    require auth_after.max_supply == auth_before.max_supply
+    require auth_after.minted == auth_before.minted + amount
 
-    create Token {
+    create token = Token {
         amount: amount,
-        symbol: auth.token_symbol
+        symbol: auth_before.token_symbol
     } with_lock(to)
-}
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
     consume token
 
-    create Token {
+    create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
-}
 
-action burn(token: Token) {
-    assert_invariant(token.amount > 0, "cannot burn zero")
+action burn(token: Token)
+where
+    assert(token.amount > 0, "cannot burn zero")
     destroy token
-}
 ```
 
 **Bundled protocol examples:**
@@ -245,117 +340,21 @@ action burn(token: Token) {
 | Example | What it shows |
 |---|---|
 | `examples/token.cell` | Mint, transfer, burn, guarded same-symbol merge |
-| `examples/timelock.cell` | Time-gated state transitions, delayed claim paths |
+| `examples/timelock.cell` | Time-gated release checks, delayed claim paths |
 | `examples/multisig.cell` | Authorization thresholds, signature-oriented locks |
 | `examples/nft.cell` | Unique assets, metadata, ownership transfer |
-| `examples/vesting.cell` | Receipt-style grants and claim lifecycle |
+| `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
 | `examples/launch.cell` | Launch/pool composition patterns |
 
----
-
-## Editor Support
-
-CellScript includes production-style local language tooling for early users:
-
-- **In-process LSP** — diagnostics, completions, hover, go-to-definition,
-  references, rename, formatting, and metadata-oriented code actions. The
-  compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
-  `tower-lsp` JSON-RPC transport over stdio.
-- **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
-  compiler-backed formatting, scratch compilation, metadata/constraints/production
-  reports, CKB target-profile arguments, and status-bar feedback. It shells out to
-  `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
-  CI gates.
-
-- [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
-- [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
-- [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
-- [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Mutate and replacement outputs](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_MUTATE_AND_REPLACEMENT_OUTPUTS.md)
-- [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
-- [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
-- [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
-- [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
-- [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
-- [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ROADMAP.md)
-- [0.13 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_13_ROADMAP.md)
-- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_15_ROADMAP.md)
-- [0.16 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
-- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
-
-## Target Profiles
-
-CellScript now supports CKB as its only target profile:
-
-| Profile | When to use | What you get |
-|---|---|---|
-| `ckb` | CKB mainnet artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
-
-> The `ckb` profile is production-gated for the bundled CellScript suite. It
-> emits raw CKB ckb-vm artifacts, uses CKB syscall
-> and Molecule/BLAKE2b conventions, and rejects unsupported shapes through
-> normal target-profile policy.
-
-```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb
-cellc check --target-profile ckb
-```
-
-## Core Model
-
-CellScript programs are written in terms of Cell lifecycle operations:
-
-| Concept | What it compiles to |
-|---|---|
-| `resource T { ... }` | A linear Cell-backed asset (`CellOutput` + `outputs_data[i]`) |
-| `shared T { ... }` | Shared state Cell, read via `CellDep` or updated by consume + create |
-| `receipt T { ... }` | A single-use proof Cell (deposits, vesting, votes, liquidity) |
-| `consume value` | Spend a transaction input |
-| `create T { ... }` | Create a new output Cell with typed data |
-| `read_ref T` | Load a read-only CellDep-backed value |
-| `action` | Type-script transition logic → compiled to RISC-V |
-| `lock` | Lock-script authorization logic → compiled to RISC-V |
-| Local `let` values | Transaction-local computation; never persistent storage |
-
-> **Key rule:** only `create` materializes persistent state. Ordinary local
-> values do not become Cells unless explicitly created as `resource`,
-> `shared`, or `receipt`.
-
-## Language Features
-
-- **Cell-native resources** — `resource` values are linear. They cannot be
-  copied, silently dropped, or hidden inside ordinary values. Every resource
-  must be consumed, transferred, returned, claimed, settled, or destroyed.
-- **Explicit shared state** — `shared` marks contention-sensitive protocol
-  state (pools, registries, configuration Cells). Reads and writes stay
-  visible to metadata and tooling.
-- **Receipts as stateful proofs** — `receipt` is a single-use Cell that proves
-  an operation happened and can later be claimed or settled.
-- **Capability gates** — `has store, transfer, destroy` makes asset permissions
-  explicit instead of implicit.
-- **Lifecycle rules** — `#[lifecycle(...)]` lets a Cell-backed value describe a
-  state machine, e.g. `Granted -> Claimable -> FullyClaimed`.
-- **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
-  `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
-- **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
-  and shared touch domains so block builders can reason about independent work.
-- **Typed schema metadata** — Cell data layout, type identity, source hashes,
-  runtime accesses, and verifier obligations are emitted as machine-readable
-  metadata.
-- **RISC-V output** — the executable target is ckb-vm-compatible RISC-V
-  assembly or ELF. CellScript does not introduce a separate VM.
-- **Package-aware compilation** — packages use `Cell.toml`, local modules,
-  source roots, and local path dependencies.
-- **Policy gates** — build, check, metadata, and artifact verification can
-  reject outputs that violate the selected target or deployment policy.
+Non-production language examples live under `examples/language/`. They compile
+and exercise compiler/tooling surfaces, but they are not part of the seven-file
+CKB production acceptance matrix. `registry.cell` covers bounded local
+`Vec<Address>` / `Vec<Hash>` helpers; `examples/registry.cell` keeps that
+surface available from the top-level examples directory. `order_book.cell` is a
+local stack-backed order-vector sketch and does not claim persistent order-book
+semantics. The v0.14 language examples cover CKB source/witness, capacity/time,
+TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
 
 ## Comparison
 
@@ -367,7 +366,7 @@ chain-specific VM:
 |---|---|---|---|---|
 | Execution target | RISC-V ELF / asm on ckb-vm | EVM bytecode | Move bytecode | FuelVM bytecode |
 | State model | Typed Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
-| Asset model | Native `resource`, lifecycle, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
+| Asset model | Native `resource`, state transitions, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
 | Linear ownership | Compiler-enforced | No | Yes (abilities) | No general user-defined |
 | Shared state | Explicit `shared` Cells | Implicit contract storage | Shared objects (some chains) | No shared Cell analogue |
 | Reentrancy | No callback-style reentrancy | Common risk surface | Lower by design | Lower predicate risk |
@@ -377,6 +376,49 @@ chain-specific VM:
 Compared with hand-written CKB scripts, CellScript keeps the same
 runtime substrate but replaces raw byte and syscall programming with typed Cell
 operations, linear checking, schema metadata, and policy-verifiable artifacts.
+
+---
+
+## Editor Support
+
+CellScript includes production-style local language tooling for early users:
+
+- **In-process LSP** — diagnostics, completions, hover, go-to-definition,
+  references, rename, formatting, and metadata-oriented code actions. The
+  compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
+  `tower-lsp` JSON-RPC transport over stdio. Completions include flow
+  states after `Type::`.
+- **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
+  compiler-backed formatting, scratch compilation, metadata/constraints/production
+  reports, CKB target-profile arguments, and status-bar feedback. It shells out to
+  `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
+  CI gates.
+
+- [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
+- [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
+- [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
+- [Historical signature-direction execution plan](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
+- [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
+- [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
+- [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
+- [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
+- [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Standard library](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
+- [Operational semantics](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md)
+- [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
+- [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
+- [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
+- [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
+- [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
+- [0.16 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_16_ROADMAP.md)
+- [0.16 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
 
 ---
 
@@ -391,7 +433,7 @@ crate (`cellscript`) with its own `mod.rs` entry point under `src/`.
 graph LR
     Source["Source (.cell)"] --> Lexer
     Lexer --> Parser
-    Parser --> TypeCheck["Type Checker\n+ Lifecycle"]
+    Parser --> TypeCheck["Type Checker\n+ State Checks"]
     TypeCheck --> IRLower["IR Lowering\n+ Optimize"]
     IRLower --> Codegen["Codegen (RISC-V)"]
     IRLower --> Metadata["Metadata (JSON)"]
@@ -408,18 +450,18 @@ line/column span for diagnostics.
 **2. Parsing** (`parser/`)
 Builds an AST from the token stream. The AST models the full surface:
 `resource`, `shared`, `receipt`, `struct`, `enum`, `action`, `lock`,
-`function`, `use`, `const`, capability gates, lifecycle annotations, and all
-statement/expression forms.
+`function`, `use`, `const`, capability gates, declarative flows,
+action `transition` clauses, and all statement/expression forms.
 
-**3. Semantic analysis** (`types/` + `lifecycle/`)
+**3. Semantic analysis** (`types/` + state-transition checks)
 - *Type checking* — enforces linear resource semantics: every
-  `resource`/`receipt` value must be consumed, transferred, destroyed, claimed,
-  or settled before the action body exits. Also validates shared-state
+  `resource`/`receipt` value must reach an explicit lifecycle or
+  output-binding role before the action body exits. Also validates shared-state
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
-- *Lifecycle checking* — validates `#[lifecycle(...)]` state machines on
-  receipts: legal state transitions, integer state-field types, and static
-  create-site checks.
+- *State transition checking* — validates explicit state fields,
+  `flow` transition graphs, action `transition` clauses, legal state
+  transitions, and static create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)
 - *`resolve/`* — builds per-module symbol tables and resolves `use` imports
@@ -427,8 +469,8 @@ statement/expression forms.
 - *`ir/`* — lowers the typed AST into a flat, RISC-V-oriented intermediate
   representation (`IrAction`, `IrLock`, `IrPureFn`, `IrTypeDef`) with explicit
   Cell-effect instructions (`IrConsume`, `IrCreate`, `IrReadRef`,
-  `IrTransfer`, `IrDestroy`, `IrClaim`, `IrSettle`), witness/layout slot
-  assignments, and verifier obligations.
+  `IrDestroy`), cell-metadata equality checks, witness/layout slot assignments,
+  and verifier obligations.
 - *`optimize/`* — syntax-local constant folding and dead-branch pruning when
   `-O1+` is set. Intentionally conservative to preserve resource semantics.
 
@@ -465,8 +507,8 @@ CKB cycle/capacity estimates.
 
 | Module | What it does |
 |---|---|
-| **Stdlib** (`stdlib/`) | Built-in functions that lower to ckb-vm syscalls and small runtime helpers: `syscall_load_tx_hash`, `syscall_load_script_hash`, `syscall_load_cell`, `syscall_load_header`, cycle/time helpers, and math helpers. Module-injected, not linked separately. |
-| **Collections** (`stdlib/collections.rs`) | Vector-like ops (push, length, get) that lower to Cell output data region writes/reads with bounds checks. |
+| **Stdlib** (`stdlib/`) | Built-in functions and compiler-recognized patterns that lower to explicit verifier effects: lifecycle helpers such as `std::lifecycle::transfer`, `std::receipt::claim`, and `std::lifecycle::settle`; cell metadata helpers such as `std::cell::preserve_type`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity`; plus ckb-vm syscall/runtime helpers. Module-injected, not linked separately. |
+| **Collections** (`stdlib/collections.rs`) | Bounded stack-backed `Vec<T: FixedWidth>` helpers for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Cell-backed collection ownership remains unsupported. |
 
 ### Tooling Surface
 
@@ -498,7 +540,7 @@ treated as deployable.
 ```mermaid
 flowchart TB
     Source[".cell source + Cell.toml\n--target-profile ckb"] --> Frontend["Lexer + parser\nstable source spans"]
-    Frontend --> Semantics["Type + lifecycle checks\nlinear resources, lock-only require,\nprotected/witness/lock_args classification"]
+    Frontend --> Semantics["Type + state checks\nlinear resources, verifier require,\ninput/output/protected/witness/lock_args classification"]
     Semantics --> Policy["CKB policy gate\nfail closed on unsupported runtime or state shapes"]
 
     subgraph Rules["CKB profile rules"]
@@ -525,7 +567,7 @@ flowchart TB
 
 This separates three boundaries:
 
-- **compiler boundary** — parse, type/lifecycle checks, CKB policy rejection, IR,
+- **compiler boundary** — parse, type/state checks, CKB policy rejection, IR,
   codegen, and metadata;
 - **artifact boundary** — `cellc verify-artifact` proves the artifact, sidecar,
   source hash, target profile, and selected policy flags agree;
@@ -658,6 +700,9 @@ cellscript/
 └── editors/
     └── vscode-cellscript/
 ```
+
+Development style and backend/codegen rules are tracked in
+[`CODING_STYLE.md`](CODING_STYLE.md).
 
 ## License
 

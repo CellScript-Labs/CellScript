@@ -1,9 +1,10 @@
 # CellScript v0.14 Roadmap
 
-**Status**: Feature-complete beta scope
-**Updated**: 2026-04-28
+**Status**: Draft (Pending Team Review)
 **Scope**: CKB Semantic Completeness, Source/Witness Ergonomics, and Bounded Verifier Composition
-**Dependencies**: v0.13 released (bounded value-vector helpers, zero-cost abstractions, CLI ergonomics)
+**Dependencies**: v0.13.2 released (explicit action model, bounded value-vector
+helpers, stdlib syntax governance, syntax-combination audit, and full
+builder-backed/stateful CKB release evidence)
 
 ---
 
@@ -13,13 +14,47 @@
 
 CellScript's evolution follows a deliberate maturity curve:
 
-- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, mutate replacement outputs, low-level time helpers, dep cell reads).
-- **v0.13** — Performance and expressiveness: bounded value-vector helpers, zero-cost abstractions (deserialization specialization, inlining, DCE, const propagation), CLI ergonomics.
-- **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and WASM simulation backend.
+- **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, output preservation checks, low-level time helpers, dep cell reads).
+- **v0.13** — Stable explicit verifier surface: signature-direction action model, bounded value-vector helpers, stdlib lifecycle/Cell metadata patterns, syntax-combination gates, and builder-backed plus stateful CKB release evidence.
+- **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and the intentional `move` -> `transition` syntax cleanup. The WASM simulation backend remains a P2/stretch track unless explicitly promoted.
 
-v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, and Spawn/IPC. It should not re-plan v0.13 bounded generics, repeat v0.12 production evidence, or start the v0.15 primitive-kernel reset.
+v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, Spawn/IPC, and action-level `transition` state edges. It should not re-plan v0.13 bounded generics, repeat 0.13 stateful production evidence as new scope, or start the v0.15 primitive-kernel reset.
 
 v0.14 provides low-level Spawn/IPC and CKB Source/Witness semantics. It does not define the full protocol composability model. The higher-level question of trigger, scope, reads, coverage, and builder assumptions is intentionally deferred to v0.15's Scoped Invariants and Covenant ProofPlan.
+
+---
+
+## Current Nightly Exploration Snapshot
+
+The `nightly-0.14` branch carries the prior `feat/ckb-surface` exploration as a
+working CKB semantic-completeness surface:
+
+| Track | Current nightly status |
+|---|---|
+| Spawn/IPC surface | Implemented as bounded verifier helper calls with metadata-visible runtime accesses. |
+| Spawn/IPC fd safety | Type checker rejects statically visible use-after-close, double-close, and leaked fd paths. |
+| Source views | `source::input`, `source::output`, `source::cell_dep`, `source::header_dep`, `source::group_input`, and `source::group_output` are typed and metadata-visible. |
+| Witness fields | `witness::raw`, `witness::lock`, `witness::input_type`, and `witness::output_type` are explicit CKB witness surfaces. |
+| Lock args source | Fixed-width `lock_args` parameters decode executing `Script.args`; this is data-source binding only, not signer authority. |
+| ScriptGroup metadata | Actions and locks expose entry kind, active group kind, selected Source surfaces, and group-scoped Source usage; metadata validation rejects missing or mismatched ScriptGroup/runtime-access records. |
+| outputs/outputs_data binding | CKB create outputs record index-aligned output-data bindings and metadata validation rejects missing or mismatched bindings. |
+| TYPE_ID/script references | TYPE_ID output plans, spawn targets, and read_ref CellDep references are surfaced in `constraints.ckb.script_references`; metadata validation rejects malformed, missing, duplicate, or extra script-reference records. |
+| Since/time/capacity | Declarative since/time helpers and `with_capacity_floor(shannons)` are metadata-visible; CKB constraints summary, capacity-floor records, and capacity-evidence flags are checked against compiler metadata, while builder capacity evidence remains required. |
+| Dynamic BLAKE2b | `hash_blake2b(input: Hash) -> Hash` lowers to a real CKB-profile Blake2b-256 RISC-V helper with CKB default personalization and metadata-visible `CKB_BLAKE2B` access. |
+| Examples | Language examples cover delegate verification, Spawn/IPC pipelines, witness/source views, TYPE_ID creation, capacity/time policy, dynamic Blake2b hashing, and canonical lock-boundary style. |
+| WASM simulation | Not covered by the current nightly release surface. `src/wasm` is still audit-only and rejects executable action/lock modules. |
+
+### Current Coverage Gaps
+
+The current `nightly-0.14` branch covers the implemented CKB semantic surface,
+but it does not yet cover every broader roadmap aspiration:
+
+| Gap | Current status |
+|---|---|
+| Executable browser/WASM simulation | Deferred. Existing WASM support is an audit-only scaffold. |
+| TYPE_ID continue transaction fixtures | Not covered as a CKB transaction fixture. Current coverage is TYPE_ID metadata, create output plans, duplicate stable type_id rejection, and missing/mismatched metadata-plan rejection. |
+| ScriptGroup/outputs_data CKB transaction negative fixtures | ScriptGroup/runtime-access and outputs_data metadata validation exist; a dedicated CKB positive/negative transaction fixture matrix remains open. |
+| Full script-reference dep registry linkage | Script references are surfaced in metadata; full registry-backed dep resolution remains an integration track. |
 
 ---
 
@@ -32,26 +67,43 @@ The following capabilities are already delivered and will not be re-planned:
 - ✅ Entry witness ABI (CSARGv1) for CellScript action/lock parameters
 - ✅ Scheduler witness ABI and claim witness runtime loading/signature metadata
 - ✅ secp256k1 signature verification
-- ✅ MutatePattern + MutateTransitionOp (Set/Add/Sub/Append)
+- ✅ Output transition patterns (Set/Add/Sub/Append)
 - ✅ type_hash / lock_hash preservation
 - ✅ Low-level `ckb::input_since()` and CKB header epoch helper APIs
 - ✅ Timelock fixtures and runtime since validation for profile time/timestamp
-- ✅ Dep cell typed reads for declared `read_ref<T>` CellDep paths
+- ✅ Dep cell typed reads for declared action-boundary `read` parameters and expression-level `read_ref<T>()` CellDep paths
 - ✅ 43/43 production actions, 7/7 bundled examples deployed
 - ✅ Molecule ABI manifest, metadata schema 29
 - ✅ Package manager local workflow (registry fail-closed)
 - ✅ LSP: JSON-RPC stdio + VS Code integration
 
-### v0.13 Deliverables (Performance + Expressiveness)
+### v0.13 Deliverables (Stable Explicit Verifier Surface)
 
 - ✅ Stack-backed fixed-width value-vector helpers for checked `Vec<T>` paths
 - ✅ Metadata and `cellc explain-generics` for concrete checked vector instantiations
+- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `transition` state edges
+- ✅ Non-empty multi-edge `transition { ... }` blocks for compactly declaring several explicit state edges without moving proof logic into `where`
+- ✅ `preserve` sugar and anonymous `require` blocks with canonical verifier expansion and pure-boolean enforcement
+- ✅ Compiler-recognized stdlib patterns for lifecycle and Cell metadata:
+  `std::lifecycle::transfer`, `std::receipt::claim`,
+  `std::lifecycle::settle`, `std::cell::same_lock`,
+  `std::cell::preserve_lock`, and `std::cell::preserve_capacity`
+- ✅ Syntax-combination audit methodology and quick/CI gates across parser,
+  formatter, type checking, lowering, metadata, and codegen
+- ✅ Builder-backed CKB action and lock acceptance, including valid-spend and
+  invalid-spend lock matrices
+- ✅ Stateful local CKB release evidence: 7 end-to-end business scenarios, 20
+  action-branch scenarios, 46 committed stateful steps, and 43/43 production
+  acceptance actions covered
 - ✅ Deserialization code specialization
 - ✅ Function inlining for safe pure helpers
 - ✅ Dead code elimination + constant propagation
 - ✅ CLI: `cellc new`, `build` default O1, error codes with `cellc explain`
 - ✅ Hash type DSL exposure (`with_default_hash_type`)
-- ✅ Clear fail-closed boundary for `Option<T>`, phantom asset tags, generic interfaces/templates, full maps, and cell-backed collection ownership
+- ✅ Metadata schema 30
+- ✅ Clear fail-closed boundary for `Option<T>`, phantom asset tags, generic
+  interfaces/templates, full maps, cell-backed collection ownership, hidden
+  signer authority, and hidden sighash defaults
 
 ---
 
@@ -86,21 +138,21 @@ Full protocol composability remains a v0.15+ ProofPlan / scoped-invariant concer
 
 **Basic spawn — launch a child script for verification**:
 ```cellscript
-action verify_with_delegate(proof: Proof) {
+action verify_with_delegate(proof: Proof)
+where
     let result = spawn("secp256k1_verifier", args: [proof.pubkey, proof.signature])
-    assert_invariant(result == 0, "delegate verification failed")
-}
+    assert(result == 0, "delegate verification failed")
 ```
 
 **Pipe-based verification chain**:
 ```cellscript
-action multi_step_verify(data: VerifyData) {
+action multi_step_verify(data: VerifyData)
+where
     let (read_fd, write_fd) = pipe()
     spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
     let hash_result = wait()
-    assert_invariant(hash_result == 0, "hash check failed")
-}
+    assert(hash_result == 0, "hash check failed")
 ```
 
 **Implementation Path**:
@@ -127,7 +179,7 @@ action multi_step_verify(data: VerifyData) {
 
 #### 2. Structured CKB WitnessArgs and Source Views 🔴
 
-**Problem**: CellScript has entry witness bytes and claim witness loading, but CKB's standard `WitnessArgs { lock, input_type, output_type }` structure is still not a first-class DSL concept. CKB lock/type scripts also rely on precise Source selection (`Input`, `Output`, `CellDep`, `HeaderDep`, and group-scoped variants). Today this is mostly implicit in lowering.
+**Problem**: CellScript has entry witness bytes, but CKB's standard `WitnessArgs { lock, input_type, output_type }` structure is still not a first-class DSL concept. CKB lock/type scripts also rely on precise Source selection (`Input`, `Output`, `CellDep`, `HeaderDep`, and group-scoped variants). Today this is mostly implicit in lowering.
 
 **Why It Matters**:
 - Standard lock scripts read signatures from `WitnessArgs.lock`.
@@ -138,16 +190,16 @@ action multi_step_verify(data: VerifyData) {
 **DSL Design**:
 
 ```cellscript
-lock standard_lock(pubkey_hash: Hash160) -> bool {
+lock standard_lock(lock_args args: OwnerArgs, witness sig: RecoverableSignature) -> bool {
     let sig = witness::lock<RecoverableSignature>(source: source::group_input(0))
     let sighash = env::sighash_all(source: source::group_input(0))
-    return secp256k1_verify(pubkey_hash, sig, sighash)
+    return secp256k1_verify(args.pubkey_hash, sig, sighash)
 }
 
-action prove_type_transition(state: &mut State) {
+action prove_type_transition(state_before: State) -> state_after: State
+where
     let proof = witness::input_type<TransitionProof>(source: source::group_input(0))
-    assert_invariant(verify_transition(proof, state), "bad transition proof")
-}
+    assert(verify_transition(proof, state_before, state_after), "bad transition proof")
 ```
 
 **Implementation Items**:
@@ -194,12 +246,12 @@ action prove_type_transition(state: &mut State) {
 **3b. Profile-gated hash policy**
 - Keep existing hash-domain metadata explicit; do not silently make portable code depend on different hash algorithms.
 - Add `hash_chain(data)` only for code that intentionally wants the active profile's canonical data hash.
-- Keep explicit CKB Blake2b helpers profile-gated by linked implementation availability.
+- Keep explicit CKB Blake2b helpers profile-gated and metadata-visible.
 
-**3c. Dynamic CKB BLAKE2b implementation decision**
+**3c. Dynamic CKB BLAKE2b fixed-Hash support**
 - v0.13 scoped BLAKE2b to builder/release tooling, not a guaranteed in-script stdlib.
-- v0.14 must decide whether any bundled v0.14 example truly needs dynamic in-script BLAKE2b.
-- If yes, promote the real RISC-V implementation to P1 with test vectors and cycle limits; if no, defer it and reject `hash_blake2b()` in on-chain code with a precise diagnostic.
+- v0.14 promotes `hash_blake2b(input: Hash) -> Hash` for 32-byte runtime digest inputs.
+- Arbitrary byte-slice and resource serialization hashing remain deferred until their ABI and serialization contract are specified.
 
 **3d. Profile Script Mapping Registry Design**
 - Standard scripts (secp256k1, multisig, etc.) may have different `code_hash` values across target profiles
@@ -227,11 +279,11 @@ action prove_type_transition(state: &mut State) {
 |------|---------|
 | ScriptGroup metadata | Emit entry kind, active lock/type group kind, selected Source surfaces, and group-scoped Source usage for every CKB entry |
 | Source conformance tests | Cover `Input`, `Output`, `CellDep`, `HeaderDep`, `GroupInput`, `GroupOutput`, out-of-bounds access, and wrong-profile access |
-| Output data binding | Emit output-data index obligations for every create/mutate output; reject metadata where output data is detached from the output cell index |
+| Output data binding | Emit output-data index obligations for every created or updated output; reject metadata where output data is detached from the output cell index |
 | TYPE_ID metadata validation MVP | For `#[type_id]` under CKB profile, validate output index, first-input args source, one-input/one-output group rule, duplicate output rejection, and missing-plan rejection |
 | Acceptance fixtures | Add positive/negative fixture transactions for ScriptGroup views, outputs_data mismatch, and TYPE_ID create/continue failure cases |
 
-**Boundary**: This is not the v0.15 identity lifecycle redesign. v0.14 validates CKB transaction-shape facts and existing TYPE_ID metadata plans. It does not add new identity primitives, destruction policies, or protocol macro lowering.
+**Boundary**: This is not the v0.15 identity-policy redesign. v0.14 validates CKB transaction-shape facts and existing TYPE_ID metadata plans. It does not add new identity primitives, destruction policies, or protocol macro lowering.
 
 **Risk**: **HIGH** — Mis-modeling ScriptGroup or TYPE_ID behavior creates false confidence in CKB strict mode
 **Depends on**: Structured CKB WitnessArgs and Source Views (#2), Target Profile Formalization (#3)
@@ -257,22 +309,22 @@ resource Token has store, transfer, destroy {
 
 **Action-level explicit capacity control**:
 ```cellscript
-action transfer_with_fee(token: Token, fee: u64) {
+action transfer_with_fee(token: Token, fee: u64) -> next_token: Token
+where
     let freed_cap = consume token
-    assert_invariant(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
-    create Token { amount: token.amount } with_lock(recipient)
+    assert(freed_cap >= occupied_capacity(Token) + fee, "insufficient for fee")
+    create next_token = Token { amount: token.amount } with_lock(recipient)
     // remaining capacity implicitly becomes miner fee
-}
 ```
 
 **Implementation Items**:
 
 | Item | Details |
 |------|---------|
-| `@capacity_floor(...)` annotation | Parser + AST attribute node + validation; support explicit shannons and compiler-computed floors |
+| `with_capacity_floor(...)` declaration | Parser + AST capability node + validation; support explicit shannons. Compiler-computed floors remain builder/acceptance evidence for now. |
 | `occupied_capacity(T)` const fn | Compile-time constant: field sizes + overhead |
-| Capacity floor check insertion | Compiler auto-inserts `assert(capacity >= floor)` on every `create` |
-| Builder integration | Auto change-output generation when excess capacity exists |
+| Capacity floor check insertion | Metadata and constraints expose required floors; automatic verifier insertion remains future work unless separately promoted. |
+| Builder integration | Existing acceptance measures occupied capacity and tx size; automatic change-output generation remains future builder work. |
 
 **Risk**: **LOW** — Additive syntax, no breaking changes
 **Depends on**: Transaction Builder Integration (#10) for full change-output automation; standalone static checks can land earlier
@@ -286,12 +338,12 @@ action transfer_with_fee(token: Token, fee: u64) {
 **DSL Design**:
 
 ```cellscript
-action claim_after_ckb_timeout(htlc: HtlcReceipt) {
+action claim_after_ckb_timeout(htlc: HtlcReceipt)
+where
     require_maturity(blocks: 100)          // CKB: block-number delta
     require_time(after: Timestamp(target)) // CKB: absolute timestamp since
     require_epoch(relative: EpochFraction(10, 0, 1)) // CKB-only epoch since
-    claim htlc
-}
+    consume htlc
 ```
 
 **Profile-gated Compilation**:
@@ -316,13 +368,14 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 
 ---
 
-#### 7. Conditional `hash_blake2b()` Stdlib 🟡
+#### 7. `hash_blake2b()` Fixed-Hash Runtime Helper ✅
 
-> Tracked as part of Target Profile Formalization (#3c) and promoted only when a concrete compatibility target requires it.
+> Tracked as part of Target Profile Formalization (#3c) and promoted for the v0.14 CKB compatibility surface.
 
-- Add `hash_blake2b()` to stdlib only if a v0.14 bundled example or CKB compatibility target requires dynamic in-script BLAKE2b.
-- Must link a real RISC-V BLAKE2b implementation; stubs are forbidden.
-- Must pass production gates: known test vectors, cycle reporting, and CKB profile fail-closed behavior when unavailable.
+- `hash_blake2b(input: Hash) -> Hash` is supported for runtime 32-byte digest inputs.
+- The helper uses CKB Blake2b-256 personalization `ckb-default-hash`.
+- Stubs are forbidden; the codegen path emits an executable RISC-V mixing helper and stores the 32-byte result in a caller-owned buffer.
+- Wider byte-slice/resource serialization hashing remains out of scope until its ABI and Molecule serialization contract are specified.
 
 **Risk**: **MEDIUM**
 **Depends on**: Target Profile Formalization (#3)
@@ -339,7 +392,7 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 |------|---------|
 | Script reference metadata | Emit `code_hash`, `hash_type`, `args`, dep source, and resolved profile for lock/type/spawn targets |
 | HashType validation | Accept only CKB-supported hash types under CKB profile; reject unknown or profile-incompatible values |
-| Dep-cell linkage checks | Verify every script reference used by `spawn`, lock/type metadata, or `read_ref` has a resolvable CellDep/DepGroup path |
+| Dep-cell linkage checks | Verify every script reference used by `spawn`, lock/type metadata, action-boundary `read` parameters, or expression-level `read_ref<T>()` has a resolvable CellDep/DepGroup path |
 | Audit output | Include script reference table in generated audit docs and metadata validation errors |
 
 **Boundary**: This does not split `Address`, `LockScript`, and `LockHash` in the type system. That is v0.15. v0.14 only makes CKB artifact references precise and auditable.
@@ -357,6 +410,11 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 
 **Goal**: CellScript → WASM compilation for browser-side script simulation and testing.
 **Non-Goal**: On-chain WASM execution. RISC-V remains the on-chain target.
+
+**Current nightly boundary**: Not covered. The current WASM module is audit-only
+and rejects executable action/lock lowering. This track must not be described as
+release-covered until it has executable tests and documented CKB/WASM divergence
+rules.
 
 **Implementation Items**:
 - WASM codegen backend (parallel to existing RISC-V backend)
@@ -390,6 +448,19 @@ action claim_after_ckb_timeout(htlc: HtlcReceipt) {
 **Problem**: Complex scripts depend on multiple dep cells (shared libraries, data cells, verifier scripts). Current dep cell handling is manual and flat.
 
 **Implementation Items**:
+
+#### 12. Surface Ergonomics Backlog 🟢
+
+**Problem**: v0.13 intentionally prioritizes verifier correctness and explicit CKB semantics over syntax sugar. Several useful ergonomic features are good candidates for v0.14 design, but they are not v0.13 correctness blockers.
+
+**Deferred from the 0.13 syntax audit**:
+- Optional source-level `transfer token { ... } with_lock(to)` sugar remains deferred. v0.13.2 already provides compiler-recognized stdlib lifecycle patterns such as `std::lifecycle::transfer`, which expand to explicit `consume` + named output constraints.
+- `create_each` or bounded batch-create sugar that compiles to statically auditable repeated `create` operations.
+- Named tuple returns such as `-> (royalty: Payment, seller: Payment)` for readability without changing ABI layout.
+- `Option<T>` / `Result<T, E>` as an explicit optional/error model, including type checking, lowering, ABI representation, and match-pattern support.
+- Attribute-form hash type declarations such as `#[default_hash_type(Data1)]` as a possible spelling alongside or instead of `with_default_hash_type(Data1)`.
+
+**Boundary**: These items must not hide Cell layout, invent recoverable verifier errors casually, or weaken fail-closed semantics. Each item needs parser, type checker, lowering, codegen, formatter, LSP, docs, and regression coverage before promotion.
 - DepGroup dynamic composition: declare a group of related dep cells
 - Multi-module CellDep dependency graph: compiler resolves transitive deps
 - Shared code cell version locking: pin dep cell `out_point` in manifest
@@ -421,18 +492,18 @@ v0.14 introduces Spawn/IPC and profile formalization at the DSL layer. Periphera
 | Metric | Target |
 |--------|--------|
 | All CKB-targeted bundled examples compile under CKB profile | ✅ Required |
-| At least 2 spawn-based examples in bundled examples | ✅ Required |
+| At least 2 spawn-based language examples | ✅ Required |
 | Structured `WitnessArgs.lock/input_type/output_type` examples pass under CKB profile | ✅ Required |
 | Source global/group view tests pass under CKB strict mode | ✅ Required |
 | ScriptGroup metadata matches CKB lock/type group fixtures | ✅ Required |
 | `outputs` ↔ `outputs_data` binding tests reject detached or mismatched output data | ✅ Required |
-| CKB TYPE_ID metadata validation covers create/continue/duplicate/missing-plan cases | ✅ Required |
-| CKB `require_epoch` absolute and relative since tests match consensus encoding | ✅ Required |
-| Capacity static verification covers 100% of `create` operations | ✅ Required |
-| Script reference metadata includes `code_hash`, `hash_type`, `args`, and CellDep linkage | ✅ Required |
+| CKB TYPE_ID metadata validation covers create, duplicate stable type_id, and missing/mismatched metadata-plan cases | ✅ Required |
+| CKB `require_epoch_after` and `require_epoch_relative` tests match the expected metadata/runtime surface | ✅ Required |
+| Capacity floor metadata covers 100% of declared `with_capacity_floor` operations and rejects mismatched top-level constraint records | ✅ Required |
+| Script reference metadata includes `code_hash`, `hash_type`, `args`, declared dep source, and exact expected-vs-actual metadata validation | ✅ Required |
 | Zero regression on v0.12 production evidence | ✅ Required |
-| Profile hash policy rejects unavailable dynamic BLAKE2b cleanly | ✅ Required |
-| `hash_blake2b()` passes known test vectors if promoted | Conditional |
+| Profile hash policy exposes dynamic fixed-Hash BLAKE2b with metadata-visible `CKB_BLAKE2B` access | ✅ Required |
+| `hash_blake2b(input: Hash)` compiles to assembly/ELF and is covered by the real `timelock.cell` `lock_id_commitment` valid/invalid CKB lock-spend flow | ✅ Required |
 | Profile semantic spec published | ✅ Required |
 
 ### Profile CI Gate
@@ -452,14 +523,16 @@ done
 |----------|-----------|
 | Epoch support outside CKB profile | Epoch is CKB-specific and must not leak into portable semantics. |
 | On-chain WASM execution | RISC-V remains the on-chain target. WASM is for browser simulation only. |
-| Breaking changes to existing DSL syntax | All new features are additive. Existing `.cell` files must compile without modification. |
+| Reopening the action model beyond state-edge spelling | Signature-direction outputs, `where`, named `create`, and stdlib lifecycle patterns stay intact; v0.14 only renames action-level state edges from legacy `move` to `transition` and rejects the old spelling. |
+| Broad breaking DSL changes | v0.14 intentionally makes the `move` -> `transition` cleanup without compatibility aliases; other 0.13.2 syntax should remain stable unless separately justified. |
 | Primitive kernel reset | v0.15 owns protocol-macro lowering, ProofPlan unification, and core primitive redesign. |
-| Moving `transfer` / `claim` / `settle` / `shared` out of the compiler core | v0.14 may improve metadata and strict-mode checks, but does not change the primitive surface. |
+| Reintroducing compiler-core `transfer` / `claim` / `settle` verbs | v0.13.2 removed these from the executable core; v0.14 may add source sugar only when it expands to auditable stdlib/core effects. |
 | `Address` / `LockScript` / `LockHash` type-system split | v0.14 records precise CKB script references; v0.15 owns semantic type separation. |
 | Destruction-policy redesign | Bare `destroy` behavior is not redefined in v0.14; explicit destruction policies are v0.15 scope. |
 | Formal verification | Future milestone (v0.16+). v0.14 focuses on bounded verifier composition, not proof. |
 | `T: CellBacked` / `T: Linear` generic constraints | Deferred to v0.15+ per the phased generics plan from v0.13. |
 | Full generic `HashMap<K, V>` | Remains fail-closed per v0.13 boundary. |
+| Recoverable verifier error model by default | CellScript remains a verifier DSL: failed validation rejects the transaction. Optional/error types require an explicit design before source-level use. |
 
 ---
 
@@ -518,9 +591,9 @@ done
 
 ### Risk 6: Dynamic BLAKE2b Scope Creep 🟡
 
-**Scenario**: Dynamic in-script BLAKE2b becomes a default v0.14 requirement even though v0.13 explicitly scoped CKB BLAKE2b to builder/release tooling unless a concrete contract needs it.
+**Scenario**: Dynamic in-script BLAKE2b scope expands from fixed 32-byte digest hashing into arbitrary byte-slice or resource serialization hashing without a stable ABI.
 
-**Mitigation**: Keep a design gate. If no v0.14 example needs dynamic BLAKE2b, only ship diagnostics/profile policy. If promoted, require real RISC-V implementation, test vectors, cycle reporting, and production gate evidence.
+**Mitigation**: Keep v0.14 scoped to `hash_blake2b(input: Hash) -> Hash`. Any wider hashing surface must define byte ownership, length ABI, serialization, vectors, cycle limits, and production gate evidence before promotion.
 
 ---
 
@@ -545,9 +618,9 @@ done
 
 ### Risk 9: TYPE_ID MVP Scope Creep 🟡
 
-**Scenario**: v0.14 TYPE_ID validation turns into a full identity/lifecycle primitive redesign.
+**Scenario**: v0.14 TYPE_ID validation turns into a full identity-policy primitive redesign.
 
-**Mitigation**: v0.14 only validates existing `#[type_id]` metadata plans and CKB transaction-shape facts. New identity policies, explicit lifecycle primitives, and destruction-policy redesign remain v0.15 scope.
+**Mitigation**: v0.14 only validates existing `#[type_id]` metadata plans and CKB transaction-shape facts. New identity policies and destruction-policy redesign remain v0.15 scope.
 
 ---
 
@@ -555,10 +628,11 @@ done
 
 ### CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md
 
-v0.14 **extends** the production plan:
+v0.14 **extends** the 0.13.2 production plan:
 
-- ✅ CKB production gate remains 43/43+ actions
-- ✅ 7+ bundled examples remain regression test suite (extended with spawn examples)
+- ✅ CKB production gate remains 43/43+ actions, with stateful coverage for every production acceptance action
+- ✅ 7+ bundled examples remain regression test suite (extended only when new v0.14 features are production-gated)
+- ✅ Stateful business-flow acceptance remains a full release requirement
 - ✅ Molecule ABI remains public format
 - ✅ Registry remains fail-closed
 - **New**: Profile semantic spec becomes a mandatory production artifact
@@ -599,7 +673,7 @@ cargo run -p cellscript -- explain-profile ckb
 
 | Example | Pattern | Features Exercised |
 |---------|---------|-------------------|
-| `delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, `assert_invariant` |
+| `delegate_verify.cell` | Lock script spawns external verifier | `spawn`, `wait`, `assert` |
 | `multi_step_pipeline.cell` | Pipe-connected verification chain | `spawn`, `pipe`, `pipe_write`, `wait` |
 | `witness_args_lock.cell` | CKB-style lock reads `WitnessArgs.lock` | `witness::lock<T>`, `source::group_input(0)`, signature verification |
 | `script_group_type_transition.cell` | Type script reads group input/output views | ScriptGroup metadata, `source::group_input`, `source::group_output` |
@@ -613,8 +687,8 @@ cargo run -p cellscript -- explain-profile ckb
 ## 🎉 Summary
 
 **v0.12 proved CellScript can compile production-grade cell contracts.**
-**v0.13 proved CellScript runs efficiently with strong developer ergonomics.**
-**v0.14 proves CellScript exposes bounded verifier composition, and the target-profile model is formally complete for the current beta scope.**
+**v0.13 proved CellScript has a stable explicit verifier surface with strict CKB release evidence.**
+**v0.14 will prove CellScript exposes bounded verifier composition, and the target-profile model is formally complete.**
 
 v0.14 delivers:
 
@@ -622,8 +696,8 @@ v0.14 delivers:
 - **CKB Semantic Completeness**: Structured `WitnessArgs`, explicit Source views, CKB epoch since, and formalized profiles (CKB/Portable)
 - **CKB Transaction Conformance**: ScriptGroup metadata, outputs_data binding, TYPE_ID metadata validation MVP, and strict script-reference records
 - **Declarative Safety**: `@capacity_floor`, `occupied_capacity(T)`, `require_maturity`, `require_time`, `require_epoch`
-- **Hash Policy Clarity**: Profile-aware hash-domain metadata and conditional dynamic BLAKE2b support only when production-gated
-- **Simulation**: WASM backend for browser-side testing (P2)
+- **Hash Policy Clarity**: Profile-aware hash-domain metadata and fixed-Hash dynamic BLAKE2b support with production-gated evidence
+- **Simulation**: Deferred P2. WASM remains audit-only until executable browser-side tests exist.
 
 **Expected Outcomes**:
 - Bounded verifier reuse patterns unlocked (delegate verify, multi-step pipelines)
@@ -636,5 +710,5 @@ v0.14 delivers:
 ---
 
 *Document End.*
-*Status: Feature-complete beta scope*
-*Prerequisites*: [CELLSCRIPT_0_13_ROADMAP.md](CELLSCRIPT_0_13_ROADMAP.md), [CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md](../docs/CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md)
+*Status: Draft (Pending Team Review)*
+*Prerequisites*: [CELLSCRIPT_0_13_RELEASE_SCOPE.md](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md](../docs/CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md)
