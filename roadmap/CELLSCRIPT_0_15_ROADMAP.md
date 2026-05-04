@@ -52,7 +52,7 @@ Do not re-plan v0.14:
 - TYPE_ID metadata validation MVP
 - target profile formalization
 - declarative capacity/time/since syntax
-- dynamic BLAKE2b decision
+- wider byte-slice/resource Blake2b hashing beyond v0.14 fixed-Hash support
 - WASM backend
 - builder integration
 - advanced CellDep/DepGroup patterns

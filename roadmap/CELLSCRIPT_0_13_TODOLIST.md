@@ -84,10 +84,9 @@ by existing fixed-width machinery):
 - [x] Applied `protected`, `witness`, and `require` to bundled lock examples so
   the guarded input Cell view, witness data, and lock failure predicate are
   visible in source.
-- [x] Split examples by audience: clean business examples live in
-  `examples/business` and flat `examples/*.cell`; profiled production
-  acceptance copies live in `examples/acceptance`; `registry.cell` is mirrored
-  under `examples/language`.
+- [x] Consolidated bundled examples into one checked-in source: top-level
+  `examples/*.cell` is the canonical business and production acceptance input;
+  `examples/language/*.cell` remains for compiler/tooling coverage.
 - [x] Refreshed LSP completions and the VS Code grammar/snippets for the
   lock-boundary syntax.
 - [x] Implemented fixed-width `lock_args` binding from the executing lock
@@ -233,10 +232,9 @@ Notes:
   - [x] builder-backed on-chain lock valid-spend and invalid-spend matrix for
     all bundled production locks. The matrix is now part of the CKB production
     acceptance report instead of a compile-only claim.
-  - [x] split examples by audience: clean canonical business examples live in
-    `examples/business` and flat `examples/*.cell`; profiled production
-    acceptance copies live in `examples/acceptance`; `registry.cell` is mirrored
-    under `examples/language`.
+  - [x] consolidated bundled examples into one checked-in source: top-level
+    `examples/*.cell` is canonical and acceptance compiles it directly;
+    `examples/language/*.cell` remains for compiler/tooling coverage.
 
 ---
 

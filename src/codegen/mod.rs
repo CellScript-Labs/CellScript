@@ -140,7 +140,12 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_epoch_relative"
             | "__ckb_occupied_capacity"
             | "__ckb_hash_chain"
+            | "__ckb_hash_blake2b"
     )
+}
+
+fn is_ckb_fixed_hash_helper(func: &str) -> bool {
+    matches!(func, "__ckb_hash_chain" | "__ckb_hash_blake2b")
 }
 
 #[derive(Debug, Clone)]
@@ -5026,6 +5031,16 @@ impl CodeGenerator {
         }
     }
 
+    fn emit_fixed_byte_source_pointer_or_const_to(&mut self, dest_reg: &str, source: &ExpectedFixedByteSource) -> bool {
+        if let ExpectedFixedByteSource::Const(bytes) = source {
+            let label = self.const_data_label_for_bytes(bytes.clone());
+            self.emit(format!("la {}, {}", dest_reg, label));
+            true
+        } else {
+            self.emit_fixed_byte_source_pointer_to(dest_reg, source)
+        }
+    }
+
     fn emit_fixed_byte_mismatch_fail(&mut self, mismatch_label: &str, fail_code: CellScriptRuntimeError) {
         let done_label = self.fresh_label("fixed_byte_verify_done");
         self.emit(format!("j {}", done_label));
@@ -6305,7 +6320,7 @@ impl CodeGenerator {
     }
 
     fn record_instruction_fixed_byte_local(&self, instruction: &IrInstruction, offsets: &mut HashMap<usize, usize>) {
-        let mut record = |var: &IrVar| {
+        let record = |offsets: &mut HashMap<usize, usize>, var: &IrVar| {
             if var.ty == IrType::U128 {
                 offsets.insert(var.id, 16);
             }
@@ -6328,10 +6343,13 @@ impl CodeGenerator {
             | IrInstruction::CollectionNew { dest, .. }
             | IrInstruction::Move { dest, .. }
             | IrInstruction::Tuple { dest, .. }
-            | IrInstruction::Binary { dest, .. } => record(dest),
-            IrInstruction::Call { dest, .. } => {
+            | IrInstruction::Binary { dest, .. } => record(offsets, dest),
+            IrInstruction::Call { dest, func, .. } => {
                 if let Some(dest) = dest {
-                    record(dest);
+                    if is_ckb_fixed_hash_helper(func) && dest.ty == IrType::Hash {
+                        offsets.insert(dest.id, 32);
+                    }
+                    record(offsets, dest);
                 }
             }
             IrInstruction::StoreVar { .. }
@@ -8094,7 +8112,49 @@ impl CodeGenerator {
         true
     }
 
+    fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !is_ckb_fixed_hash_helper(func) {
+            return Ok(false);
+        }
+        self.emit(format!("# call {}", func));
+        let Some(dest) = dest else {
+            self.emit("# cellscript abi: fail closed because hash helper result has no destination");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(arg) = args.first() else {
+            self.emit("# cellscript abi: fail closed because hash helper is missing input");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: fail closed because hash helper output buffer was not allocated");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(source) = self.expected_fixed_byte_source(arg, 32) else {
+            self.emit("# cellscript abi: fail closed because hash helper input is not a 32-byte value");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        self.emit_prepare_fixed_byte_source(&source, 32, "hash_blake2b input");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+            self.emit("# cellscript abi: fail closed because hash helper input pointer is not materializable");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+        self.emit_sp_addi("a1", dest_offset);
+        self.emit("call __ckb_hash_blake2b");
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(true)
+    }
+
     fn emit_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<()> {
+        if self.emit_ckb_fixed_hash_call(dest, func, args)? {
+            return Ok(());
+        }
         if func.contains("::") {
             return Err(CompileError::new(
                 format!(
@@ -8692,7 +8752,6 @@ impl CodeGenerator {
             ("__ckb_require_epoch_after", "CKB absolute epoch since"),
             ("__ckb_require_epoch_relative", "CKB relative epoch since"),
             ("__ckb_occupied_capacity", "compile-visible occupied capacity floor"),
-            ("__ckb_hash_chain", "active-profile hash-chain helper"),
         ] {
             if !referenced_helpers.contains(name) {
                 continue;
@@ -8707,6 +8766,193 @@ impl CodeGenerator {
                 self.emit("ret");
             }
         }
+
+        if referenced_helpers.contains("__ckb_hash_chain") {
+            self.emit_global("__ckb_hash_chain");
+            self.emit_label("__ckb_hash_chain");
+            self.emit("# cellscript abi: hash_chain aliases CKB Blake2b-256 over one 32-byte Hash input");
+            if !enabled {
+                self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            } else {
+                self.emit("j __ckb_hash_blake2b");
+            }
+        }
+        if referenced_helpers.contains("__ckb_hash_chain") || referenced_helpers.contains("__ckb_hash_blake2b") {
+            self.emit_runtime_blake2b_hash32(enabled);
+        }
+    }
+
+    fn emit_runtime_blake2b_hash32(&mut self, enabled: bool) {
+        self.emit_global("__ckb_hash_blake2b");
+        self.emit_label("__ckb_hash_blake2b");
+        self.emit("# cellscript abi: CKB Blake2b-256 helper; a0=input[32], a1=output[32], returns a0=0");
+        if !enabled {
+            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+
+        const IV: [u64; 8] = [
+            0x6a09e667f3bcc908,
+            0xbb67ae8584caa73b,
+            0x3c6ef372fe94f82b,
+            0xa54ff53a5f1d36f1,
+            0x510e527fade682d1,
+            0x9b05688c2b3e6c1f,
+            0x1f83d9abfb41bd6b,
+            0x5be0cd19137e2179,
+        ];
+        const SIGMA: [[usize; 16]; 12] = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+            [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+            [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+            [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+            [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+            [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+            [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+            [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+            [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        ];
+
+        const H_BASE: usize = 0;
+        const V_BASE: usize = 64;
+        const M_BASE: usize = 192;
+        const FRAME: usize = 320;
+
+        let personal0 = u64::from_le_bytes(*b"ckb-defa");
+        let personal1 = u64::from_le_bytes(*b"ult-hash");
+        let h = [IV[0] ^ 0x01010020, IV[1], IV[2], IV[3], IV[4], IV[5], IV[6] ^ personal0, IV[7] ^ personal1];
+
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        for (index, value) in h.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, H_BASE + index * 8);
+        }
+        for index in 0..4 {
+            self.emit_blake2b_load_input_word(index, M_BASE + index * 8);
+        }
+        for index in 4..16 {
+            self.emit_stack_store("zero", M_BASE + index * 8);
+        }
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_store("t0", V_BASE + index * 8);
+        }
+        for (index, value) in IV.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, V_BASE + (index + 8) * 8);
+        }
+        self.emit_stack_load("t0", V_BASE + 12 * 8);
+        self.emit("xori t0, t0, 32");
+        self.emit_stack_store("t0", V_BASE + 12 * 8);
+        self.emit_stack_load("t0", V_BASE + 14 * 8);
+        self.emit("xori t0, t0, -1");
+        self.emit_stack_store("t0", V_BASE + 14 * 8);
+
+        for round in SIGMA {
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 4, 8, 12, round[0], round[1]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 5, 9, 13, round[2], round[3]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 6, 10, 14, round[4], round[5]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 7, 11, 15, round[6], round[7]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 5, 10, 15, round[8], round[9]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 6, 11, 12, round[10], round[11]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 7, 8, 13, round[12], round[13]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 4, 9, 14, round[14], round[15]);
+        }
+
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_load("t1", V_BASE + index * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_load("t1", V_BASE + (index + 8) * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_store("t0", H_BASE + index * 8);
+        }
+        for index in 0..4 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit(format!("sd t0, {}(a1)", index * 8));
+        }
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("li a0, 0");
+        self.emit("ret");
+    }
+
+    fn emit_blake2b_store_const(&mut self, value: u64, stack_offset: usize) {
+        self.emit(format!("li t0, 0x{:016x}", value));
+        self.emit_stack_store("t0", stack_offset);
+    }
+
+    fn emit_blake2b_load_input_word(&mut self, word_index: usize, stack_offset: usize) {
+        self.emit("li t0, 0");
+        for byte_index in 0..8 {
+            let absolute = word_index * 8 + byte_index;
+            self.emit(format!("lbu t1, {}(a0)", absolute));
+            if byte_index > 0 {
+                self.emit(format!("slli t1, t1, {}", byte_index * 8));
+            }
+            self.emit("or t0, t0, t1");
+        }
+        self.emit_stack_store("t0", stack_offset);
+    }
+
+    fn emit_blake2b_rotr(&mut self, register: &str, bits: usize) {
+        self.emit(format!("srli t1, {}, {}", register, bits));
+        self.emit(format!("slli {}, {}, {}", register, register, 64 - bits));
+        self.emit(format!("or {}, {}, t1", register, register));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_blake2b_g(&mut self, v_base: usize, m_base: usize, a: usize, b: usize, c: usize, d: usize, mx: usize, my: usize) {
+        let va = v_base + a * 8;
+        let vb = v_base + b * 8;
+        let vc = v_base + c * 8;
+        let vd = v_base + d * 8;
+        let vmx = m_base + mx * 8;
+        let vmy = m_base + my * 8;
+
+        self.emit_stack_load("t0", va);
+        self.emit_stack_load("t1", vb);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_load("t1", vmx);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", va);
+        self.emit_stack_load("t0", vd);
+        self.emit_stack_load("t1", va);
+        self.emit("xor t0, t0, t1");
+        self.emit_blake2b_rotr("t0", 32);
+        self.emit_stack_store("t0", vd);
+
+        self.emit_stack_load("t0", vc);
+        self.emit_stack_load("t1", vd);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", vc);
+        self.emit_stack_load("t0", vb);
+        self.emit_stack_load("t1", vc);
+        self.emit("xor t0, t0, t1");
+        self.emit_blake2b_rotr("t0", 24);
+        self.emit_stack_store("t0", vb);
+
+        self.emit_stack_load("t0", va);
+        self.emit_stack_load("t1", vb);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_load("t1", vmy);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", va);
+        self.emit_stack_load("t0", vd);
+        self.emit_stack_load("t1", va);
+        self.emit("xor t0, t0, t1");
+        self.emit_blake2b_rotr("t0", 16);
+        self.emit_stack_store("t0", vd);
+
+        self.emit_stack_load("t0", vc);
+        self.emit_stack_load("t1", vd);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", vc);
+        self.emit_stack_load("t0", vb);
+        self.emit_stack_load("t1", vc);
+        self.emit("xor t0, t0, t1");
+        self.emit_blake2b_rotr("t0", 63);
+        self.emit_stack_store("t0", vb);
     }
 
     fn emit_runtime_memcmp_fixed(&mut self) {
@@ -9074,6 +9320,7 @@ enum Instruction {
     Sub { rd: u8, rs1: u8, rs2: u8 },
     And { rd: u8, rs1: u8, rs2: u8 },
     Or { rd: u8, rs1: u8, rs2: u8 },
+    Xor { rd: u8, rs1: u8, rs2: u8 },
     Mul { rd: u8, rs1: u8, rs2: u8 },
     Div { rd: u8, rs1: u8, rs2: u8 },
     Rem { rd: u8, rs1: u8, rs2: u8 },
@@ -10066,6 +10313,11 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
         }),
+        "xor" => Ok(Instruction::Xor {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
         "mul" => Ok(Instruction::Mul {
             rd: parse_register(arg(&args, 0)?)?,
             rs1: parse_register(arg(&args, 1)?)?,
@@ -10241,6 +10493,9 @@ fn encode_instruction(
         }
         Instruction::Or { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b110, *rs1, *rs2, 0b0000000).to_le_bytes())
+        }
+        Instruction::Xor { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b100, *rs1, *rs2, 0b0000000).to_le_bytes())
         }
         Instruction::Mul { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b000, *rs1, *rs2, 0b0000001).to_le_bytes())
@@ -10821,6 +11076,7 @@ mod tests {
         ("srli", "srli s8, a0, 1"),
         ("sub", "sub t1, a0, a1"),
         ("sw", "sw t1, 12(sp)"),
+        ("xor", "xor a0, a0, a1"),
         ("xori", "xori s3, a0, 1"),
     ];
 
@@ -10860,7 +11116,6 @@ mod tests {
         ("srl", "srl a0, a0, a1"),
         ("subw", "subw a0, a0, a1"),
         ("tail", "tail target"),
-        ("xor", "xor a0, a0, a1"),
     ];
 
     #[test]

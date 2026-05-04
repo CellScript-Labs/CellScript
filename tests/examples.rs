@@ -8,7 +8,6 @@ use cellscript::{
 
 const BUNDLED_EXAMPLES: [&str; 7] =
     ["amm_pool.cell", "launch.cell", "multisig.cell", "nft.cell", "timelock.cell", "token.cell", "vesting.cell"];
-const PROFILED_ACCEPTANCE_EXAMPLES: [&str; 3] = ["multisig.cell", "nft.cell", "timelock.cell"];
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
@@ -16,7 +15,7 @@ const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("launch.cell", 30 * 1024),
     ("multisig.cell", 84 * 1024),
     ("nft.cell", 54 * 1024),
-    ("timelock.cell", 44 * 1024),
+    ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
     ("vesting.cell", 22 * 1024),
 ];
@@ -89,16 +88,16 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 10_900,
+            max_lines: 16_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 22,
-            max_text_bytes: 40 * 1024,
+            max_text_bytes: 64 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 3_600,
+            max_cond_branch_abs_distance: 4_300,
             max_machine_blocks: 1_900,
-            max_machine_block_bytes: 320,
+            max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_100,
-            max_call_edges: 280,
+            max_call_edges: 380,
             max_unreachable_machine_blocks: 1_850,
         },
     ),
@@ -180,47 +179,38 @@ fn example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(name)
 }
 
-fn business_example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("business").join(name)
-}
-
-fn acceptance_example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("acceptance").join(name)
-}
-
 fn language_example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("language").join(name)
 }
 
 #[test]
-fn business_examples_are_free_of_profile_hint_noise() {
+fn canonical_examples_are_the_single_checked_in_business_source() {
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    assert!(!examples_root.join("business").exists(), "examples/business should not be checked in");
+    assert!(!examples_root.join("acceptance").exists(), "examples/acceptance should not be checked in");
+
     for example in BUNDLED_EXAMPLES {
         let flat_path = example_path(example);
-        let business_path = business_example_path(example);
         let flat = std::fs::read_to_string(&flat_path).unwrap_or_else(|err| panic!("failed to read {flat_path}: {err}"));
-        let business = std::fs::read_to_string(&business_path).unwrap_or_else(|err| panic!("failed to read {business_path}: {err}"));
-        let normalized_business = business.replace("module cellscript::business::", "module cellscript::");
-        assert_eq!(
-            flat, normalized_business,
-            "{business_path} should mirror the top-level business example except for its duplicate-safe module namespace"
-        );
         assert!(!flat.contains("#[effect("), "{flat_path} should not expose effect profile attributes");
         assert!(!flat.contains("#[scheduler_hint("), "{flat_path} should not expose scheduler profile attributes");
+        compile_file(&flat_path, CompileOptions::default())
+            .unwrap_or_else(|err| panic!("canonical example {example} should compile: {}", err.message));
     }
 }
 
 #[test]
-fn acceptance_examples_preserve_profile_metadata_surface() {
+fn release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts() {
     for example in BUNDLED_EXAMPLES {
-        compile_file(acceptance_example_path(example), CompileOptions::default())
-            .unwrap_or_else(|err| panic!("acceptance example {example} should compile: {}", err.message));
-    }
-
-    for example in PROFILED_ACCEPTANCE_EXAMPLES {
-        let path = acceptance_example_path(example);
+        let path = example_path(example);
         let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        assert!(source.contains("#[effect("), "{path} should preserve effect profile attributes");
-        assert!(source.contains("#[scheduler_hint("), "{path} should preserve scheduler profile attributes");
+        assert!(!source.contains("Hash::zero()"), "{path} should not use placeholder hash constants");
+        assert!(!source.contains("fn hash_wallet"), "{path} should not hide wallet identity behind stub hashing");
+        assert!(!source.contains("fn hash_lock"), "{path} should not hide lock identity behind stub hashing");
+        assert!(
+            !source.contains("{ { {") && !source.contains("} } }"),
+            "{path} should not contain formatter/parser artifact brace nesting"
+        );
     }
 }
 
@@ -1219,7 +1209,7 @@ fn token_mint_authority_input_output_binding_is_explicit() {
 
 #[test]
 fn nft_core_actions_expose_action_specific_builder_metadata() {
-    let result = compile_file(acceptance_example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
+    let result = compile_file(example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
 
     let mint = action(&result.metadata, "mint");
@@ -1263,8 +1253,7 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
 
 #[test]
 fn timelock_core_actions_expose_time_and_release_metadata() {
-    let result =
-        compile_file(acceptance_example_path("timelock.cell"), CompileOptions::default()).expect("timelock example should compile");
+    let result = compile_file(example_path("timelock.cell"), CompileOptions::default()).expect("timelock example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("timelock asm should be utf8");
 
     let create_absolute_lock = action(&result.metadata, "create_absolute_lock");
@@ -1355,12 +1344,19 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
         "timelock helper calls should preserve schema pointer length through ref/deref aliases:\n{}",
         asm
     );
+
+    let lock_id_commitment =
+        result.metadata.locks.iter().find(|lock| lock.name == "lock_id_commitment").expect("timelock lock_id_commitment metadata");
+    assert!(
+        lock_id_commitment.ckb_runtime_accesses.iter().any(|access| access.operation == "hash-blake2b"),
+        "timelock lock_id_commitment should cover real CKB Blake2b runtime access: {:?}",
+        lock_id_commitment.ckb_runtime_accesses
+    );
 }
 
 #[test]
 fn multisig_core_actions_expose_threshold_flow_metadata() {
-    let result =
-        compile_file(acceptance_example_path("multisig.cell"), CompileOptions::default()).expect("multisig example should compile");
+    let result = compile_file(example_path("multisig.cell"), CompileOptions::default()).expect("multisig example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("multisig asm should be utf8");
 
     let create_wallet = action(&result.metadata, "create_wallet");
@@ -1379,9 +1375,10 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
         asm
     );
     assert!(
-        asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.threshold index=1 size=1")
-            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.nonce index=2 size=8")
-            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.created_at index=3 size=8"),
+        asm.contains("# cellscript abi: verify output Molecule table bytes field MultisigWallet.wallet_id index=0 size=32")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.threshold index=2 size=1")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.nonce index=3 size=8")
+            && asm.contains("# cellscript abi: verify output Molecule table scalar field MultisigWallet.created_at index=4 size=8"),
         "multisig create_wallet should verify fixed fields through Molecule table offsets, not fixed-struct offsets:\n{}",
         asm
     );

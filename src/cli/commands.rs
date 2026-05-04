@@ -1453,7 +1453,7 @@ impl CommandExecutor {
                 "script references keep code_hash, hash_type, and args visible",
                 "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
                 "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
-                "Dynamic hash_blake2b is unavailable until a real linked RISC-V implementation is selected"
+                "hash_blake2b(input: Hash) uses CKB Blake2b-256; wider byte serialization hashing remains out of scope"
             ],
         });
         if args.json {

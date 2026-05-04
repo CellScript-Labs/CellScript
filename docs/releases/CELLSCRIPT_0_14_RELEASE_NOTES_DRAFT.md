@@ -111,9 +111,18 @@ capacity, measure consensus transaction size, and keep acceptance reports.
 
 ### Dynamic BLAKE2b Policy
 
-Dynamic in-script `hash_blake2b` remains fail-closed until a real linked
-RISC-V implementation, test vectors, cycle evidence, and profile policy are
-present. `hash_chain` remains metadata-visible for supported profile use.
+Dynamic fixed-hash Blake2b is now part of the CKB profile surface:
+
+```cellscript
+let digest = hash_blake2b(input_hash)
+```
+
+`hash_blake2b(input: Hash) -> Hash` lowers to an executable RISC-V
+Blake2b-256 helper using CKB's `ckb-default-hash` personalization. The runtime
+access is metadata-visible as `CKB_BLAKE2B`, and production acceptance covers it
+through the real `timelock.cell` `lock_id_commitment` lock with valid and
+invalid local CKB lock-spend transactions. Arbitrary byte-slice or resource
+serialization hashing is still out of scope until its ABI is specified.
 
 ### Examples And Tooling
 
@@ -146,6 +155,9 @@ helpers, `ckb::*`, and `env::sighash_all`.
 - The canonical style example was moved into `examples/language/` so the flat
   production bundled example set remains exactly the seven CKB acceptance
   contracts.
+- Top-level `examples/*.cell` is the single checked-in bundled business source,
+  and production acceptance compiles those canonical examples directly instead
+  of mirrored `business` or `acceptance` copies.
 
 ## Intentional Boundaries
 
@@ -155,7 +167,8 @@ helpers, `ckb::*`, and `env::sighash_all`.
 - implicit signer derivation from `Address`;
 - hidden sighash defaults;
 - `protects T { self ... }` sugar;
-- dynamic in-script BLAKE2b;
+- arbitrary byte-slice or resource-serialization Blake2b hashing beyond
+  `hash_blake2b(input: Hash) -> Hash`;
 - full generic maps or cell-backed collection ownership;
 - ProofPlan trigger/scope/coverage semantics, which remain 0.15 scope.
 

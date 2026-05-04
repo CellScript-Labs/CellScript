@@ -20,15 +20,29 @@ run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
 
-Lock coverage now runs in the same production acceptance flow: all 16 bundled
+Lock coverage now runs in the same production acceptance flow: all 17 bundled
 locks strict-compile under the CKB profile and are exercised with builder-backed
 local CKB valid-spend and invalid-spend transactions. The production report keeps
 the matrix explicit in `lock_acceptance_scope.onchain_lock_spend_matrix_scope`.
 
-`examples/language/registry.cell`, its top-level compatibility mirror
-`examples/registry.cell`, and `examples/language/order_book.cell` are not part
+`examples/registry.cell`, `examples/language/registry.cell`, and
+`examples/language/order_book.cell` are not part
 of the seven-example CKB production action matrix. They are 0.13
 language/tooling examples for bounded local `Vec<T>` helper behavior.
+
+## Cell Lifecycle Vocabulary
+
+The examples use lifecycle words with fixed audit meaning:
+
+- `read`: reference an existing Cell without spending it.
+- `consume`: spend an input Cell as evidence for a transition, settlement, or
+  successor output.
+- `destroy`: terminally spend an input Cell with no successor of the same
+  logical object; the type must expose `destroy`.
+- `create`: require a named output Cell to appear with the declared data and,
+  when specified, lock.
+- `preserve`: local sugar for field equality; it lowers to ordinary verifier
+  constraints and does not imply transaction semantics.
 
 ## `token.cell`
 
@@ -301,13 +315,14 @@ Strict-compiled locks:
 flowchart LR
     A["can_unlock_lock"] --> B["Height reached predicate"]
     C["is_owner"] --> D["Owner predicate"]
-    E["asset_matches"] --> F["Locked asset hash predicate"]
-    G["emergency_approved"] --> H["Approval count predicate"]
-    I["not_expired"] --> J["Still locked predicate"]
+    E["lock_id_commitment"] --> F["CKB Blake2b lock-id commitment predicate"]
+    G["asset_matches"] --> H["Locked asset hash predicate"]
+    I["emergency_approved"] --> J["Approval count predicate"]
+    K["not_expired"] --> L["Still locked predicate"]
 ```
 
 CKB acceptance status: all ten actions are builder-backed and run on-chain. The
-five locks strict-compile and have builder-backed valid-spend and invalid-spend
+six locks strict-compile and have builder-backed valid-spend and invalid-spend
 cases.
 
 ## `vesting.cell`

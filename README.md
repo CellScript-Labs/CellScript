@@ -339,9 +339,9 @@ where
 Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
 CKB production acceptance matrix. `registry.cell` covers bounded local
-`Vec<Address>` / `Vec<Hash>` helpers; the top-level `examples/registry.cell` is
-a compatibility mirror of that language example. `order_book.cell` is a local
-stack-backed order-vector sketch and does not claim persistent order-book
+`Vec<Address>` / `Vec<Hash>` helpers; `examples/registry.cell` keeps that
+surface available from the top-level examples directory. `order_book.cell` is a
+local stack-backed order-vector sketch and does not claim persistent order-book
 semantics.
 
 ## Comparison

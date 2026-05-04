@@ -36,5 +36,6 @@ Empty bytes are the pinned vector:
 let data_hash = cellscript::ckb_blake2b256(artifact_bytes);
 ```
 
-This does not imply arbitrary in-script dynamic Blake2b support. It is the
-builder and release-evidence surface, not a general on-chain hashing primitive.
+The v0.14 CKB profile also supports `hash_blake2b(input: Hash) -> Hash` for
+runtime 32-byte digest inputs. Arbitrary byte-slice and resource serialization
+hashing remain separate ABI work.

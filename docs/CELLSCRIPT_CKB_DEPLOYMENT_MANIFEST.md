@@ -64,8 +64,10 @@ Empty bytes must hash to:
 
 The same algorithm is available to Rust tooling as
 `cellscript::ckb_blake2b256`. This is the supported builder/release helper
-surface. It is not an in-script syscall and does not claim arbitrary dynamic
-on-chain hashing unless the artifact links a real RISC-V Blake2b implementation.
+surface. Under the v0.14 CKB profile, `hash_blake2b(input: Hash) -> Hash`
+also lowers to an executable in-script RISC-V Blake2b-256 helper for 32-byte
+digest inputs. It does not claim arbitrary byte-slice or resource serialization
+hashing.
 
 ## Constraints Output
 

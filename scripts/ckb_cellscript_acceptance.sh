@@ -301,7 +301,7 @@ LOCK_ACCEPTANCE_SCOPE = {
     "pending_onchain_lock_spend_matrix": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock_when_promoted": ["valid_spend", "invalid_spend"],
@@ -316,7 +316,7 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "onchain_lock_spend_matrix_scope": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
@@ -329,21 +329,10 @@ TRUNCATE = 12000
 UNEXPECTED_PROFILE_TRAILER = bytes.fromhex("53504f5241424900")
 
 examples_dir = repo_root / "examples"
-business_examples_dir = examples_dir / "business"
-acceptance_examples_dir = examples_dir / "acceptance"
 language_examples_dir = examples_dir / "language"
 
-def business_example_path(name):
-    source = business_examples_dir / name
-    if source.is_file():
-        return source
+def production_example_path(name):
     return examples_dir / name
-
-def acceptance_example_path(name):
-    source = acceptance_examples_dir / name
-    if source.is_file():
-        return source
-    return business_example_path(name)
 
 def language_example_path(name):
     source = language_examples_dir / name
@@ -356,14 +345,12 @@ actual_flat_examples = sorted(
     for path in examples_dir.glob("*.cell")
     if path.is_file() and path.name not in NON_PRODUCTION_EXAMPLES
 )
-actual_business_examples = sorted(path.name for path in business_examples_dir.glob("*.cell") if path.is_file())
-actual_acceptance_examples = sorted(path.name for path in acceptance_examples_dir.glob("*.cell") if path.is_file())
 if actual_flat_examples != sorted(EXAMPLES):
-    raise SystemExit(f"flat bundled examples changed: expected {sorted(EXAMPLES)}, found {actual_flat_examples}")
-if actual_business_examples != sorted(EXAMPLES):
-    raise SystemExit(f"business examples changed: expected {sorted(EXAMPLES)}, found {actual_business_examples}")
-if actual_acceptance_examples != sorted(EXAMPLES):
-    raise SystemExit(f"acceptance examples changed: expected {sorted(EXAMPLES)}, found {actual_acceptance_examples}")
+    raise SystemExit(f"canonical bundled examples changed: expected {sorted(EXAMPLES)}, found {actual_flat_examples}")
+for stale_dir in ("business", "acceptance"):
+    stale_path = examples_dir / stale_dir
+    if stale_path.exists():
+        raise SystemExit(f"stale checked-in example mirror directory must be removed: {stale_path.relative_to(repo_root)}")
 for name in NON_PRODUCTION_EXAMPLES:
     if not language_example_path(name).is_file():
         raise SystemExit(f"missing non-production language example: {name}")
@@ -1104,6 +1091,7 @@ for action, source in AMM_ACTION_SOURCES.items():
     )
 
 MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
+    wallet_id: Hash
     signer_a: Address
     signer_b: Address
     threshold: u8
@@ -1112,7 +1100,7 @@ MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
 }
 
 receipt Proposal has destroy {
-    wallet_hash: Hash
+    wallet_id: Hash
     proposal_id: u64
     proposer: Address
     operation: u8
@@ -1140,13 +1128,14 @@ receipt ExecutionRecord {
 
 MULTISIG_ACTION_SOURCES = {
     "create_wallet": """
-action create_wallet(signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet
+action create_wallet(wallet_id: Hash, signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet
 where
     assert_invariant(signer_a != signer_b, "duplicate signer")
     assert_invariant(threshold >= 2, "threshold too low")
     assert_invariant(threshold <= 2, "threshold too high")
 
     create wallet = MultisigWallet {
+        wallet_id: wallet_id,
         signer_a: signer_a,
         signer_b: signer_b,
         threshold: threshold,
@@ -1162,6 +1151,7 @@ where
 
     let proposal_id = wallet_before.nonce + 1
 
+    require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signer_a == wallet_before.signer_a
     require wallet_after.signer_b == wallet_before.signer_b
     require wallet_after.threshold == wallet_before.threshold
@@ -1169,7 +1159,7 @@ where
     require wallet_after.created_at == wallet_before.created_at
 
     create proposal = Proposal {
-        wallet_hash: Hash::zero(),
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 0,
@@ -1187,7 +1177,7 @@ where
     assert_invariant(current_time < proposal_before.expires_at, "proposal expired")
     assert_invariant(proposal_before.signature_count < proposal_before.required_signatures, "already enough signatures")
 
-    require proposal_after.wallet_hash == proposal_before.wallet_hash
+    require proposal_after.wallet_id == proposal_before.wallet_id
     require proposal_after.proposal_id == proposal_before.proposal_id
     require proposal_after.proposer == proposal_before.proposer
     require proposal_after.operation == proposal_before.operation
@@ -1213,6 +1203,7 @@ where
 
     let proposal_id = wallet_before.nonce + 1
 
+    require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signer_a == wallet_before.signer_a
     require wallet_after.signer_b == wallet_before.signer_b
     require wallet_after.threshold == wallet_before.threshold
@@ -1220,7 +1211,7 @@ where
     require wallet_after.created_at == wallet_before.created_at
 
     create proposal = Proposal {
-        wallet_hash: Hash::zero(),
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 1,
@@ -1241,6 +1232,7 @@ where
 
     let proposal_id = wallet_before.nonce + 1
 
+    require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signer_a == wallet_before.signer_a
     require wallet_after.signer_b == wallet_before.signer_b
     require wallet_after.threshold == wallet_before.threshold
@@ -1248,7 +1240,7 @@ where
     require wallet_after.created_at == wallet_before.created_at
 
     create proposal = Proposal {
-        wallet_hash: Hash::zero(),
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 2,
@@ -1269,6 +1261,7 @@ where
 
     let proposal_id = wallet_before.nonce + 1
 
+    require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signer_a == wallet_before.signer_a
     require wallet_after.signer_b == wallet_before.signer_b
     require wallet_after.threshold == wallet_before.threshold
@@ -1276,7 +1269,7 @@ where
     require wallet_after.created_at == wallet_before.created_at
 
     create proposal = Proposal {
-        wallet_hash: Hash::zero(),
+        wallet_id: wallet_before.wallet_id,
         proposal_id: proposal_id,
         proposer: proposer,
         operation: 3,
@@ -1359,7 +1352,7 @@ ORIGINAL_SCOPED_ACTIONS = {
 
 ORIGINAL_SCOPED_LOCKS = {
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-    "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+    "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
     "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
     "vesting.cell": ["vesting_admin"],
 }
@@ -1411,7 +1404,7 @@ EXPECTED_SOURCE_ACTIONS = {
 EXPECTED_SOURCE_LOCKS = {
     "token.cell": [],
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-    "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "emergency_approved", "not_expired"],
+    "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "emergency_approved", "not_expired"],
     "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
     "vesting.cell": ["vesting_admin"],
     "amm_pool.cell": [],
@@ -1446,7 +1439,7 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 def source_entries(name, keyword):
-    text = acceptance_example_path(name).read_text(encoding="utf-8")
+    text = production_example_path(name).read_text(encoding="utf-8")
     pattern = re.compile(rf"^\s*{keyword}\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
     return pattern.findall(text)
 
@@ -1611,7 +1604,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
 validate_source_coverage_matrix()
 
 def strict_original_compile(name):
-    source = acceptance_example_path(name)
+    source = production_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
     result = run([cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "-o", artifact], env=internal_assembler_env())
     policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
@@ -1676,7 +1669,7 @@ for name in EXAMPLES:
     record = {
         "name": name,
         "kind": "bundled-example-strict-original",
-        "source": str(acceptance_example_path(name)),
+        "source": str(production_example_path(name)),
         "strict_original_ckb_compile": strict,
     }
     bundled_examples.append(record)
@@ -1684,7 +1677,7 @@ for name in EXAMPLES:
         bundled_example_deployment_artifacts.append({
             "name": name,
             "kind": "bundled-example-strict-original",
-            "source": str(acceptance_example_path(name)),
+            "source": str(production_example_path(name)),
             "artifact": strict["artifact"],
         })
 
@@ -1698,7 +1691,7 @@ for action in TOKEN_ACTION_SOURCES:
         artifact_root / f"token_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("token.cell"))
+    record["original_source"] = str(production_example_path("token.cell"))
     token_action_artifacts.append(record)
 
 nft_action_artifacts = []
@@ -1711,7 +1704,7 @@ for action in NFT_ACTION_SOURCES:
         artifact_root / f"nft_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("nft.cell"))
+    record["original_source"] = str(production_example_path("nft.cell"))
     nft_action_artifacts.append(record)
 
 timelock_action_artifacts = []
@@ -1724,7 +1717,7 @@ for action in TIMELOCK_ACTION_SOURCES:
         artifact_root / f"timelock_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("timelock.cell"))
+    record["original_source"] = str(production_example_path("timelock.cell"))
     timelock_action_artifacts.append(record)
 
 amm_action_artifacts = []
@@ -1737,7 +1730,7 @@ for action in AMM_ACTION_SOURCES:
         artifact_root / f"amm_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("amm_pool.cell"))
+    record["original_source"] = str(production_example_path("amm_pool.cell"))
     amm_action_artifacts.append(record)
 
 multisig_action_artifacts = []
@@ -1750,7 +1743,7 @@ for action in MULTISIG_ACTION_SOURCES:
         artifact_root / f"multisig_{action}.elf",
     )
     record["action"] = action
-    record["original_source"] = str(acceptance_example_path("multisig.cell"))
+    record["original_source"] = str(production_example_path("multisig.cell"))
     multisig_action_artifacts.append(record)
 
 original_scoped_action_artifacts = []
@@ -1759,13 +1752,13 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
         record = compile_artifact(
             f"{example_name}:{action}",
             "original-scoped-action-strict",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
             entry_args=["--entry-action", action],
         )
         record["example"] = example_name
         record["action"] = action
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_artifacts.append(record)
 
 launch_action_artifacts = [
@@ -1853,13 +1846,13 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
         record = compile_artifact(
             f"{example_name}:{lock}",
             "original-scoped-lock-strict",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
             entry_args=["--entry-lock", lock],
         )
         record["example"] = example_name
         record["lock"] = lock
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_lock_artifacts.append(record)
 
 original_scoped_action_fail_closed = []
@@ -1867,13 +1860,13 @@ for example_name, actions in ORIGINAL_SCOPED_ACTION_FAIL_CLOSED.items():
     for action in actions:
         record = strict_scoped_compile(
             f"{example_name}:{action}",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             "--entry-action",
             action,
         )
         record["example"] = example_name
         record["action"] = action
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_fail_closed.append(record)
 
 original_scoped_lock_fail_closed = []
@@ -1881,13 +1874,13 @@ for example_name, locks in ORIGINAL_SCOPED_LOCK_FAIL_CLOSED.items():
     for lock in locks:
         record = strict_scoped_compile(
             f"{example_name}:{lock}",
-            acceptance_example_path(example_name),
+            production_example_path(example_name),
             "--entry-lock",
             lock,
         )
         record["example"] = example_name
         record["lock"] = lock
-        record["original_source"] = str(acceptance_example_path(example_name))
+        record["original_source"] = str(production_example_path(example_name))
         original_scoped_lock_fail_closed.append(record)
 
 expected_original_scoped_action_count = sum(len(actions) for actions in ORIGINAL_SCOPED_ACTIONS.values())
@@ -1979,13 +1972,11 @@ report = {
     "non_production_examples": NON_PRODUCTION_EXAMPLES,
     "example_scope": EXAMPLE_SCOPE,
     "example_source_layout": {
-        "canonical_business_examples": str(business_examples_dir),
-        "flat_business_compatibility_examples": str(examples_dir),
-        "production_acceptance_examples": str(acceptance_examples_dir),
+        "canonical_bundled_examples": str(examples_dir),
         "language_examples": str(language_examples_dir),
-        "profiled_acceptance_metadata_note": (
-            "Production acceptance compiles examples/acceptance when present so "
-            "canonical business examples can stay free of effect and scheduler hints."
+        "canonical_examples_note": (
+            "Production acceptance compiles the checked-in top-level examples/*.cell directly. "
+            "examples/business and examples/acceptance are intentionally not part of the checked-in source layout."
         ),
     },
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
@@ -2178,7 +2169,7 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "onchain_lock_spend_matrix_scope": {
         "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
         "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
-        "timelock.cell": ["can_unlock_lock", "is_owner", "asset_matches", "not_expired", "emergency_approved"],
+        "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
         "vesting.cell": ["vesting_admin"],
     },
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
@@ -2478,12 +2469,15 @@ def royalty_payment_data(token_id, recipient, amount):
         raise RuntimeError(f"RoyaltyPayment recipient must be exactly 32 bytes, got {len(recipient)}")
     return token_id.to_bytes(8, "little") + recipient + amount.to_bytes(8, "little")
 
-def timelock_data(owner, lock_type, unlock_height, created_at):
+def timelock_data(owner, lock_type, unlock_height, created_at, lock_id=None):
+    if lock_id is not None and len(lock_id) != 32:
+        raise RuntimeError(f"TimeLock lock_id must be exactly 32 bytes, got {len(lock_id)}")
     if len(owner) != 32:
         raise RuntimeError(f"TimeLock owner must be exactly 32 bytes, got {len(owner)}")
     if not 0 <= lock_type <= 255:
         raise RuntimeError(f"TimeLock lock_type must fit in u8, got {lock_type}")
-    return owner + bytes([lock_type]) + unlock_height.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    payload = owner + bytes([lock_type]) + unlock_height.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return payload if lock_id is None else lock_id + payload
 
 def locked_asset_data(amount, lock_hash):
     if len(lock_hash) != 32:
@@ -2544,16 +2538,20 @@ def release_record_data(lock_hash, released_at, released_by):
         raise RuntimeError(f"ReleaseRecord released_by must be exactly 32 bytes, got {len(released_by)}")
     return lock_hash + released_at.to_bytes(8, "little") + released_by
 
-def multisig_wallet_data(signer_a, signer_b, threshold, nonce, created_at):
+def multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, nonce, created_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"MultisigWallet wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(signer_a) != 32:
         raise RuntimeError(f"MultisigWallet signer_a must be exactly 32 bytes, got {len(signer_a)}")
     if len(signer_b) != 32:
         raise RuntimeError(f"MultisigWallet signer_b must be exactly 32 bytes, got {len(signer_b)}")
     if not 0 <= threshold <= 255:
         raise RuntimeError(f"MultisigWallet threshold must fit in u8, got {threshold}")
-    return signer_a + signer_b + bytes([threshold]) + nonce.to_bytes(8, "little") + created_at.to_bytes(8, "little")
+    return wallet_id + signer_a + signer_b + bytes([threshold]) + nonce.to_bytes(8, "little") + created_at.to_bytes(8, "little")
 
-def multisig_wallet_molecule_data(signers, threshold, nonce, created_at):
+def multisig_wallet_molecule_data(wallet_id, signers, threshold, nonce, created_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"MultisigWallet wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(signers) < 2:
         raise RuntimeError(f"MultisigWallet signers must contain at least 2 entries, got {len(signers)}")
     for signer in signers:
@@ -2562,15 +2560,16 @@ def multisig_wallet_molecule_data(signers, threshold, nonce, created_at):
     if not 0 <= threshold <= 255:
         raise RuntimeError(f"MultisigWallet threshold must fit in u8, got {threshold}")
     return molecule_table([
+        wallet_id,
         molecule_fixvec(signers),
         bytes([threshold]),
         nonce.to_bytes(8, "little"),
         created_at.to_bytes(8, "little"),
     ])
 
-def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at, state=0):
-    if len(wallet_hash) != 32:
-        raise RuntimeError(f"Proposal wallet_hash must be exactly 32 bytes, got {len(wallet_hash)}")
+def multisig_proposal_molecule_data(wallet_id, proposal_id, proposer, operation, target, amount, data, signatures, required_signatures, created_at, expires_at, state=0):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"Proposal wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(proposer) != 32:
         raise RuntimeError(f"Proposal proposer must be exactly 32 bytes, got {len(proposer)}")
     if len(target) != 32:
@@ -2589,7 +2588,7 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
             raise RuntimeError(f"Proposal signature bytes must be exactly 64 bytes, got {len(signature)}")
         encoded_signatures.append(signer + signature)
     return molecule_table([
-        wallet_hash,
+        wallet_id,
         proposal_id.to_bytes(8, "little"),
         proposer,
         bytes([operation]),
@@ -2603,9 +2602,9 @@ def multisig_proposal_molecule_data(wallet_hash, proposal_id, proposer, operatio
         bytes([state]),
     ])
 
-def multisig_proposal_data(wallet_hash, proposal_id, proposer, operation, target, amount, required_signatures, signature_count, created_at, expires_at):
-    if len(wallet_hash) != 32:
-        raise RuntimeError(f"Proposal wallet_hash must be exactly 32 bytes, got {len(wallet_hash)}")
+def multisig_proposal_data(wallet_id, proposal_id, proposer, operation, target, amount, required_signatures, signature_count, created_at, expires_at):
+    if len(wallet_id) != 32:
+        raise RuntimeError(f"Proposal wallet_id must be exactly 32 bytes, got {len(wallet_id)}")
     if len(proposer) != 32:
         raise RuntimeError(f"Proposal proposer must be exactly 32 bytes, got {len(proposer)}")
     if len(target) != 32:
@@ -2617,7 +2616,7 @@ def multisig_proposal_data(wallet_hash, proposal_id, proposer, operation, target
     if not 0 <= signature_count <= 255:
         raise RuntimeError(f"Proposal signature_count must fit in u8, got {signature_count}")
     return (
-        wallet_hash
+        wallet_id
         + proposal_id.to_bytes(8, "little")
         + proposer
         + bytes([operation])
@@ -3202,21 +3201,24 @@ def lock_spend_case_specs(example, lock_name, lock_script):
         }
 
     proposal_valid = multisig_proposal_molecule_data(
-        zero_hash, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a), (addr_b, signature_b)], 2, 10, 2000
+        hash_a, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a), (addr_b, signature_b)], 2, 10, 2000
     )
     proposal_missing_signature = multisig_proposal_molecule_data(
-        zero_hash, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a)], 2, 10, 2000
+        hash_a, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a)], 2, 10, 2000
     )
     nft_valid = nft_data(1, addr_a, hash_a, addr_b, 250)
     asset_type_native = molecule_table([bytes([0])])
-    time_lock_valid = timelock_data(addr_a, 0, 100, 10)
-    emergency_valid = emergency_release_molecule_data(zero_hash, addr_a, b"operator review", 10, [addr_a, addr_b])
+    time_lock_valid = timelock_data(addr_a, 0, 100, 10, lock_id=hash_a)
+    lock_seed = bytes([0x66]) * 32
+    committed_lock_id = hashlib.blake2b(lock_seed, digest_size=32, person=b"ckb-default-hash").digest()
+    time_lock_committed = timelock_data(addr_a, 0, 100, 10, lock_id=committed_lock_id)
+    emergency_valid = emergency_release_molecule_data(hash_a, addr_a, b"operator review", 10, [addr_a, addr_b])
 
     cases = {
         ("multisig.cell", "is_signer_lock"): {
-            "valid_cells": [cell(multisig_wallet_molecule_data([addr_a, addr_b], 2, 0, 10))],
+            "valid_cells": [cell(multisig_wallet_molecule_data(hash_a, [addr_a, addr_b], 2, 0, 10))],
             "valid_witnesses": [entry_witness(addr_a)],
-            "invalid_cells": [cell(multisig_wallet_molecule_data([addr_a, addr_b], 2, 0, 10))],
+            "invalid_cells": [cell(multisig_wallet_molecule_data(hash_a, [addr_a, addr_b], 2, 0, 10))],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
         ("multisig.cell", "can_execute"): {
@@ -3285,8 +3287,14 @@ def lock_spend_case_specs(example, lock_name, lock_script):
             "invalid_cells": [cell(time_lock_valid)],
             "invalid_witnesses": [entry_witness(addr_c)],
         },
+        ("timelock.cell", "lock_id_commitment"): {
+            "valid_cells": [cell(time_lock_committed)],
+            "valid_witnesses": [entry_witness(lock_seed)],
+            "invalid_cells": [cell(time_lock_committed)],
+            "invalid_witnesses": [entry_witness(hash_b)],
+        },
         ("timelock.cell", "asset_matches"): {
-            "valid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, zero_hash))],
+            "valid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_a))],
             "valid_read_deps": [cell(time_lock_valid)],
             "valid_witnesses": [entry_witness(), "0x"],
             "invalid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_b))],
@@ -4105,7 +4113,7 @@ def run_multisig_action(action_record, always_success_dep):
     signer_b = decode_hex(script_hash(always_success_lock("0x55")), 32)
     signer_c = decode_hex(script_hash(always_success_lock("0x56")), 32)
     target = decode_hex(script_hash(always_success_lock("0x57")), 32)
-    wallet_hash = bytes(32)
+    wallet_id = decode_hex(script_hash(always_success_lock("0x58")), 32)
     cell_deps = [always_success_dep, code["code_cell_dep"]]
 
     result = {
@@ -4128,7 +4136,7 @@ def run_multisig_action(action_record, always_success_dep):
         signer_b,
         signer_c,
         target,
-        wallet_hash,
+        wallet_id,
         cell_deps,
     )
     initial = multisig_case["initial"]
@@ -4161,7 +4169,7 @@ def run_multisig_action(action_record, always_success_dep):
     })
     return result
 
-def build_multisig_action_case(action_record, cellscript_lock, wallet_type, proposal_type, confirmation_type, execution_type, signer_a, signer_b, signer_c, target, wallet_hash, cell_deps):
+def build_multisig_action_case(action_record, cellscript_lock, wallet_type, proposal_type, confirmation_type, execution_type, signer_a, signer_b, signer_c, target, wallet_id, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
 
@@ -4169,9 +4177,9 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         current_time = 10
         signers = [signer_a, signer_b]
         signers_payload = molecule_fixvec(signers)
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, current_time) if original_scoped else multisig_wallet_data(signer_a, signer_b, 2, 0, current_time)
-        malformed_wallet_payload = multisig_wallet_molecule_data(signers, 1, 0, current_time) if original_scoped else multisig_wallet_data(signer_a, signer_b, 1, 0, current_time)
-        witness = entry_witness(molecule_bytes(signers_payload), bytes([2]), current_time) if original_scoped else entry_witness(signer_a, signer_b, bytes([2]), current_time)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, current_time) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, 2, 0, current_time)
+        malformed_wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 1, 0, current_time) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, 1, 0, current_time)
+        witness = entry_witness(wallet_id, molecule_bytes(signers_payload), bytes([2]), current_time) if original_scoped else entry_witness(wallet_id, signer_a, signer_b, bytes([2]), current_time)
         initial = create_script_locked_cells(
             "multisig.create_wallet",
             [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
@@ -4187,7 +4195,7 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         initial_nonce = 0
         proposal_id = 1
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, threshold, initial_nonce, 10) if original_scoped else multisig_wallet_data(signer_a, signer_b, threshold, initial_nonce, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, threshold, initial_nonce, 10) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, initial_nonce, 10)
         initial = create_script_locked_cells(
             f"multisig.{action}",
             [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": wallet_type, "data": wallet_payload}],
@@ -4223,11 +4231,11 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
             data_payload = bytes([new_threshold])
             witness = entry_witness(signer_a, bytes([new_threshold]), current_time)
             malformed_witness = entry_witness(signer_a, bytes([3]), current_time)
-        output_wallet_payload = multisig_wallet_molecule_data(signers, threshold, proposal_id, 10) if original_scoped else multisig_wallet_data(signer_a, signer_b, threshold, proposal_id, 10)
+        output_wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, threshold, proposal_id, 10) if original_scoped else multisig_wallet_data(wallet_id, signer_a, signer_b, threshold, proposal_id, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, operation, proposal_target, amount, data_payload, [], threshold, current_time, current_time + 1440)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, operation, proposal_target, amount, data_payload, [], threshold, current_time, current_time + 1440)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, operation, proposal_target, amount, threshold, 0, current_time, current_time + 1440)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, operation, proposal_target, amount, threshold, 0, current_time, current_time + 1440)
         )
         outputs = [
             {"capacity": hex_u64(700 * 100_000_000), "lock": cellscript_lock, "type": wallet_type},
@@ -4242,16 +4250,16 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         signature_a = bytes([0xA5]) * 64
         signature_b = bytes([0xB6]) * 64
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 1, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 1, 20, 2000)
         )
         output_proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
         )
         input_cells = [
             {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
@@ -4272,11 +4280,11 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
         signature_a = bytes([0xA5]) * 64
         signature_b = bytes([0xB6]) * 64
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
         proposal_payload = (
-            multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
+            multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, 20, 2000)
             if original_scoped
-            else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
+            else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 2, 20, 2000)
         )
         input_cells = [
             {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
@@ -4291,8 +4299,8 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
     elif action == "cancel_proposal":
         proposal_id = 9
         signers = [signer_a, signer_b]
-        wallet_payload = multisig_wallet_molecule_data(signers, 2, 0, 10)
-        proposal_payload = multisig_proposal_molecule_data(wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [], 2, 20, 2000) if original_scoped else multisig_proposal_data(wallet_hash, proposal_id, signer_a, 0, target, 500, 2, 0, 20, 2000)
+        wallet_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10)
+        proposal_payload = multisig_proposal_molecule_data(wallet_id, proposal_id, signer_a, 0, target, 500, b"", [], 2, 20, 2000) if original_scoped else multisig_proposal_data(wallet_id, proposal_id, signer_a, 0, target, 500, 2, 0, 20, 2000)
         input_cells = [
             {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": proposal_type, "data": proposal_payload},
             {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": wallet_type, "data": wallet_payload},
@@ -4718,6 +4726,19 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
     flow_state = 0 if original_scoped else None
+    lock_id = decode_hex(script_hash(cellscript_type), 32)
+
+    def scoped_lock_id():
+        return lock_id if original_scoped else bytes(32)
+
+    def scoped_timelock_data(owner_value, lock_type, unlock_height, created_at):
+        return timelock_data(
+            owner_value,
+            lock_type,
+            unlock_height,
+            created_at,
+            lock_id=lock_id if original_scoped else None,
+        )
 
     if action == "create_absolute_lock":
         current_height = 50
@@ -4728,10 +4749,10 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        witness = [entry_witness(owner, unlock_height, current_height)]
+        witness = [entry_witness(lock_id, owner, unlock_height, current_height)] if original_scoped else [entry_witness(owner, unlock_height, current_height)]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, unlock_height, current_height).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, unlock_height + 1, current_height).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, unlock_height, current_height).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, unlock_height + 1, current_height).hex()], cell_deps, witness)
     elif action == "create_relative_lock":
         current_height = 50
         lock_period = 25
@@ -4741,16 +4762,16 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        witness = [entry_witness(owner, lock_period, current_height)]
+        witness = [entry_witness(lock_id, owner, lock_period, current_height)] if original_scoped else [entry_witness(owner, lock_period, current_height)]
         outputs = [{"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 1, current_height + lock_period, current_height).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 1, current_height + lock_period + 1, current_height).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 1, current_height + lock_period, current_height).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 1, current_height + lock_period + 1, current_height).hex()], cell_deps, witness)
     elif action == "lock_asset":
         unlock_height = 500
         created_at = 1
         amount = 42
         asset_type_payload = molecule_bytes(bytes([0]))
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount, lock_hash) if original_scoped else locked_asset_data(amount, lock_hash)
         malformed_locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount + 1, lock_hash) if original_scoped else locked_asset_data(amount + 1, lock_hash)
         locked_asset_type = always_success_lock("0x20")
@@ -4758,7 +4779,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             "timelock.lock_asset",
             [
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
-                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
             ],
             cell_deps,
         )
@@ -4775,13 +4796,13 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         unlock_height = 100
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         request_type = always_success_lock("0x21")
         initial = create_script_locked_cells(
             "timelock.request_release",
             [
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
-                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
             ],
             cell_deps,
         )
@@ -4798,14 +4819,14 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         unlock_height = 500
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         reason_payload = molecule_bytes(b"emergency release")
         emergency_type = always_success_lock("0x22")
         initial = create_script_locked_cells(
             "timelock.request_emergency_release",
             [
                 {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""},
-                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": always_success_lock(), "type": cellscript_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
             ],
             cell_deps,
         )
@@ -4821,7 +4842,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         valid_tx = transaction(inputs, outputs, ["0x" + emergency_payload.hex(), "0x"], action_cell_deps, witness)
         malformed_tx = transaction(inputs, outputs, ["0x" + malformed_emergency_payload.hex(), "0x"], action_cell_deps, witness)
     elif action == "approve_emergency_release":
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         requester = owner
         requested_at = 120
         initial_approvals = 1
@@ -4849,19 +4870,19 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         created_at = 1
         initial = create_script_locked_cells(
             "timelock.extend_lock",
-            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": timelock_data(owner, 0, initial_unlock_height, created_at)}],
+            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": cellscript_type, "data": scoped_timelock_data(owner, 0, initial_unlock_height, created_at)}],
             cell_deps,
         )
         input_cell = initial["cells"][0]
         outputs = [{"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
         witness = [entry_witness(additional_period, owner, current_height)]
-        valid_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, initial_unlock_height + additional_period, created_at).hex()], cell_deps, witness)
-        malformed_tx = transaction(input_cell, outputs, ["0x" + timelock_data(owner, 0, initial_unlock_height + additional_period + 1, created_at).hex()], cell_deps, witness)
+        valid_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, initial_unlock_height + additional_period, created_at).hex()], cell_deps, witness)
+        malformed_tx = transaction(input_cell, outputs, ["0x" + scoped_timelock_data(owner, 0, initial_unlock_height + additional_period + 1, created_at).hex()], cell_deps, witness)
     elif action == "execute_release":
         unlock_height = 100
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         time_lock_type = always_success_lock("0x01")
         locked_asset_type = always_success_lock("0x02")
         release_request_type = always_success_lock("0x03")
@@ -4871,7 +4892,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         initial = create_script_locked_cells(
             "timelock.execute_release",
             [
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": locked_asset_type, "data": locked_asset_payload},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": release_request_type, "data": release_request_data(lock_hash, owner, 120, state=flow_state)},
             ],
@@ -4885,7 +4906,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         unlock_height = 500
         current_height = 125
         created_at = 1
-        lock_hash = bytes(32)
+        lock_hash = scoped_lock_id()
         time_lock_type = always_success_lock("0x11")
         locked_asset_type = always_success_lock("0x12")
         emergency_type = always_success_lock("0x13")
@@ -4898,7 +4919,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         initial = create_script_locked_cells(
             "timelock.execute_emergency_release",
             [
-                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": timelock_data(owner, 0, unlock_height, created_at)},
+                {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": time_lock_type, "data": scoped_timelock_data(owner, 0, unlock_height, created_at)},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": locked_asset_type, "data": locked_asset_payload},
                 {"capacity": 300 * 100_000_000, "lock": cellscript_lock, "type": emergency_type, "data": emergency_payload},
             ],
@@ -4911,6 +4932,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
     elif action == "batch_create_locks":
         current_height = 50
         owners = [owner, bytes([0x51]) * 32, bytes([0x52]) * 32, bytes([0x53]) * 32]
+        lock_ids = [lock_id, bytes([0x61]) * 32, bytes([0x62]) * 32, bytes([0x63]) * 32]
         unlock_heights = [100, 110, 120, 130]
         initial = create_script_locked_cells(
             "timelock.batch_create_locks",
@@ -4925,15 +4947,15 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type},
         ]
         outputs_data = [
-            "0x" + timelock_data(owners[0], 0, unlock_heights[0], current_height).hex(),
-            "0x" + timelock_data(owners[1], 0, unlock_heights[1], current_height).hex(),
-            "0x" + timelock_data(owners[2], 0, unlock_heights[2], current_height).hex(),
-            "0x" + timelock_data(owners[3], 0, unlock_heights[3], current_height).hex(),
+            "0x" + timelock_data(owners[0], 0, unlock_heights[0], current_height, lock_id=lock_ids[0] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[1], 0, unlock_heights[1], current_height, lock_id=lock_ids[1] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[2], 0, unlock_heights[2], current_height, lock_id=lock_ids[2] if original_scoped else None).hex(),
+            "0x" + timelock_data(owners[3], 0, unlock_heights[3], current_height, lock_id=lock_ids[3] if original_scoped else None).hex(),
         ]
-        witness = [entry_witness(fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)]
+        witness = [entry_witness(fixed_hash_array4(lock_ids), fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)] if original_scoped else [entry_witness(fixed_address_array4(owners), fixed_u64_array4(unlock_heights), current_height)]
         valid_tx = transaction(input_cell, outputs, outputs_data, cell_deps, witness)
         malformed_outputs_data = list(outputs_data)
-        malformed_outputs_data[1] = "0x" + timelock_data(owners[1], 0, unlock_heights[1] + 1, current_height).hex()
+        malformed_outputs_data[1] = "0x" + timelock_data(owners[1], 0, unlock_heights[1] + 1, current_height, lock_id=lock_ids[1] if original_scoped else None).hex()
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, witness)
     else:
         raise RuntimeError(f"unsupported TimeLock action harness: {action}")
@@ -5400,7 +5422,7 @@ def run_stateful_timelock_release(always_success_dep):
     request_type = always_success_lock("0xb3")
     record_type = always_success_lock("0xb4")
     owner = actions["execute_release"]["lock_hash"]
-    lock_hash = bytes(32)
+    lock_id = decode_hex(script_hash(time_lock_type), 32)
     asset_type_payload = bytes([0])
     current_height = 50
     unlock_height = 100
@@ -5416,9 +5438,9 @@ def run_stateful_timelock_release(always_success_dep):
     tx1 = transaction(
         create_input,
         [{"capacity": hex_u64(300 * 100_000_000), "lock": actions["execute_release"]["lock"], "type": time_lock_type}],
-        ["0x" + timelock_data(owner, 0, unlock_height, current_height).hex()],
+        ["0x" + timelock_data(owner, 0, unlock_height, current_height, lock_id=lock_id).hex()],
         actions["create_absolute_lock"]["cell_deps"],
-        [entry_witness(owner, unlock_height, current_height)],
+        [entry_witness(lock_id, owner, unlock_height, current_height)],
     )
     step = run_stateful_step(scenario, "create_absolute_lock_for_release", tx1, [create_input])
     steps.append(step)
@@ -5438,7 +5460,7 @@ def run_stateful_timelock_release(always_success_dep):
             {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ],
         [
-            "0x" + locked_asset_molecule_data(asset_type_payload, 42, lock_hash).hex(),
+            "0x" + locked_asset_molecule_data(asset_type_payload, 42, lock_id).hex(),
             "0x",
         ],
         [time_lock_dep] + actions["lock_asset"]["cell_deps"],
@@ -5461,7 +5483,7 @@ def run_stateful_timelock_release(always_success_dep):
             {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ],
         [
-            "0x" + release_request_data(lock_hash, owner, release_height, state=0).hex(),
+            "0x" + release_request_data(lock_id, owner, release_height, state=0).hex(),
             "0x",
         ],
         [time_lock_dep] + actions["request_release"]["cell_deps"],
@@ -5474,7 +5496,7 @@ def run_stateful_timelock_release(always_success_dep):
     tx4 = transaction(
         [time_lock_cell, locked_asset_cell, request_cell],
         [{"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": record_type}],
-        ["0x" + release_record_data(lock_hash, release_height, owner).hex()],
+        ["0x" + release_record_data(lock_id, release_height, owner).hex()],
         actions["execute_release"]["cell_deps"],
         [entry_witness(owner, release_height), "0x", "0x"],
     )
@@ -5926,7 +5948,7 @@ def run_stateful_multisig_execution(always_success_dep):
     target = decode_hex(script_hash(always_success_lock("0xf6")), 32)
     signature_a = bytes([0xa5]) * 64
     signature_b = bytes([0xb6]) * 64
-    wallet_hash = bytes(32)
+    wallet_id = decode_hex(script_hash(wallet_type), 32)
     signers = [signer_a, signer_b]
     proposal_id = 1
     created_at = 20
@@ -5935,30 +5957,30 @@ def run_stateful_multisig_execution(always_success_dep):
 
     wallet_initial = create_script_locked_cells(
         "stateful.multisig.wallet_input",
-        [{"capacity": 1000 * 100_000_000, "lock": actions["create_wallet"]["lock"], "type": None, "data": b""}],
+        [{"capacity": 2000 * 100_000_000, "lock": actions["create_wallet"]["lock"], "type": None, "data": b""}],
         actions["create_wallet"]["cell_deps"],
     )
     wallet_input = wallet_initial["cells"][0]
     tx1 = transaction(
         wallet_input,
-        [{"capacity": hex_u64(1000 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type}],
-        ["0x" + multisig_wallet_molecule_data(signers, 2, 0, 10).hex()],
+        [{"capacity": hex_u64(2000 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type}],
+        ["0x" + multisig_wallet_molecule_data(wallet_id, signers, 2, 0, 10).hex()],
         actions["create_wallet"]["cell_deps"],
-        [entry_witness(molecule_bytes(molecule_fixvec(signers)), bytes([2]), 10)],
+        [entry_witness(wallet_id, molecule_bytes(molecule_fixvec(signers)), bytes([2]), 10)],
     )
     step = run_stateful_step(scenario, "create_wallet_for_proposal", tx1, [wallet_input])
     steps.append(step)
     wallet_for_propose = output_cell_from_tx(step["commit"], tx1, 0)
 
     proposal_payload = multisig_proposal_molecule_data(
-        wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [], 2, created_at, expires_at
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [], 2, created_at, expires_at
     )
-    wallet_after_payload = multisig_wallet_molecule_data(signers, 2, proposal_id, 10)
+    wallet_after_payload = multisig_wallet_molecule_data(wallet_id, signers, 2, proposal_id, 10)
     tx2 = transaction(
         wallet_for_propose,
         [
-            {"capacity": hex_u64(200 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type},
-            {"capacity": hex_u64(800 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["propose_transfer"]["lock"], "type": wallet_type},
+            {"capacity": hex_u64(1500 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
         ],
         ["0x" + wallet_after_payload.hex(), "0x" + proposal_payload.hex()],
         actions["propose_transfer"]["cell_deps"],
@@ -5971,13 +5993,13 @@ def run_stateful_multisig_execution(always_success_dep):
     proposal0 = output_cell_from_tx(step["commit"], tx2, 1)
 
     proposal1_payload = multisig_proposal_molecule_data(
-        wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, created_at, expires_at
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a)], 2, created_at, expires_at
     )
     tx3 = transaction(
         proposal0,
         [
-            {"capacity": hex_u64(650 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
-            {"capacity": hex_u64(150 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
+            {"capacity": hex_u64(1200 * 100_000_000), "lock": actions["add_signature"]["lock"], "type": proposal_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
         ],
         [
             "0x" + proposal1_payload.hex(),
@@ -5991,13 +6013,13 @@ def run_stateful_multisig_execution(always_success_dep):
     proposal1 = output_cell_from_tx(step["commit"], tx3, 0)
 
     proposal2_payload = multisig_proposal_molecule_data(
-        wallet_hash, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, created_at, expires_at
+        wallet_id, proposal_id, signer_a, 0, target, 500, b"", [(signer_a, signature_a), (signer_b, signature_b)], 2, created_at, expires_at
     )
     tx4 = transaction(
         proposal1,
         [
-            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["execute_proposal"]["lock"], "type": proposal_type},
-            {"capacity": hex_u64(150 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
+            {"capacity": hex_u64(900 * 100_000_000), "lock": actions["execute_proposal"]["lock"], "type": proposal_type},
+            {"capacity": hex_u64(300 * 100_000_000), "lock": always_success_lock(), "type": confirmation_type},
         ],
         [
             "0x" + proposal2_payload.hex(),
@@ -6012,7 +6034,7 @@ def run_stateful_multisig_execution(always_success_dep):
 
     tx5 = transaction(
         proposal2,
-        [{"capacity": hex_u64(200 * 100_000_000), "lock": always_success_lock(), "type": execution_type}],
+        [{"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": execution_type}],
         ["0x" + execution_record_data(proposal_id, signer_a, 40, 1).hex()],
         [wallet_dep] + actions["execute_proposal"]["cell_deps"],
         [entry_witness(signer_a, 40)],

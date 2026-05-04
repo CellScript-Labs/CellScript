@@ -46,11 +46,13 @@ where
     let now = env::current_timepoint()
     assert(now >= grant.cliff_timepoint, "cliff not reached")
     assert(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
-    let vested_total = if now >= grant.end_timepoint { { { { grant.total_amount } } } } else { { { { let elapsed = now - grant.cliff_timepoint let period = grant.end_timepoint - grant.cliff_timepoint grant.total_amount * elapsed / period } } } }
+    let elapsed = now - grant.cliff_timepoint
+    let vesting_period = grant.end_timepoint - grant.cliff_timepoint
+    let vested_total = if now >= grant.end_timepoint { grant.total_amount } else { grant.total_amount * elapsed / vesting_period }
     let claimable = vested_total - grant.claimed_amount
     assert(claimable > 0, "nothing to claim")
     consume grant
-    let new_state: u8 = if vested_total == grant.total_amount { { { { VestingGrant::FullyClaimed } } } } else { { { { VestingGrant::Claimable } } } }
+    let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
     create tokens = Token { amount: claimable, symbol: grant.token_symbol } with_lock(grant.beneficiary)
     create updated_grant = VestingGrant { state: new_state, beneficiary: grant.beneficiary, total_amount: grant.total_amount, claimed_amount: grant.claimed_amount + claimable, grant_timepoint: grant.grant_timepoint, cliff_timepoint: grant.cliff_timepoint, end_timepoint: grant.end_timepoint, token_symbol: grant.token_symbol } with_lock(grant.beneficiary)
 
@@ -60,11 +62,9 @@ where
     assert(is_vesting_admin(config, claimed_admin), "not admin")
     assert(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
     let now = env::current_timepoint()
-    let vested = if now >= grant.end_timepoint { { { { grant.total_amount } } } } else { { { if now >= grant.cliff_timepoint {
-    { let elapsed = now - grant.cliff_timepoint let period = grant.end_timepoint - grant.cliff_timepoint grant.total_amount * elapsed / period }
-} else {
-    { 0 }
-} } } }
+    let elapsed = if now >= grant.cliff_timepoint { now - grant.cliff_timepoint } else { 0 }
+    let vesting_period = grant.end_timepoint - grant.cliff_timepoint
+    let vested = if now >= grant.end_timepoint { grant.total_amount } else { grant.total_amount * elapsed / vesting_period }
     let unclaimed_vested = vested - grant.claimed_amount
     let unvested = grant.total_amount - vested
     consume grant

@@ -4011,10 +4011,11 @@ impl<'a> TypeChecker<'a> {
                         return Ok(Type::Hash);
                     }
                     "hash_blake2b" => {
-                        return Err(CompileError::new(
-                            "hash_blake2b is not available in on-chain CellScript until a real CKB-profile RISC-V implementation is linked; use hash_chain or builder-side ckb-hash tooling",
-                            call.span,
-                        ));
+                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                        if arg_types[0] != Type::Hash {
+                            return Err(CompileError::new("hash_blake2b expects Hash input", call.span));
+                        }
+                        return Ok(Type::Hash);
                     }
                     _ => {}
                 }

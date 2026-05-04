@@ -3747,6 +3747,15 @@ impl IrGenerator {
                 "hash_chain" if call.args.len() == 1 => {
                     self.lower_simple_runtime_call("__ckb_hash_chain", "hash_chain", IrType::Hash, &call.args, current, blocks, vars)
                 }
+                "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_blake2b",
+                    "hash_blake2b",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "Vec::new" if call.args.is_empty() => {
                     let dest = self.new_var("vec_new_tmp", IrType::Named("Vec".to_string()));
                     self.block_mut(blocks, current).instructions.push(IrInstruction::CollectionNew {

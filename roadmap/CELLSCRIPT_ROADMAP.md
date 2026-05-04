@@ -67,7 +67,8 @@ boundaries:
   Spawn/IPC ABI, since semantics, CellDep ABI, script reference ABI,
   outputs/outputs_data ABI, capacity floor ABI, TYPE_ID ABI, and tx version;
 - declarative since/time and capacity surfaces;
-- fail-closed dynamic BLAKE2b policy until a real linked implementation exists.
+- fixed-Hash dynamic BLAKE2b via `hash_blake2b(input: Hash) -> Hash` with a
+  real CKB-profile RISC-V helper and metadata-visible `CKB_BLAKE2B` access.
 
 Detailed status:
 
@@ -181,7 +182,8 @@ Future work:
 - keep wiki links rendered through GitHub Wiki URLs;
 - add recipes when new stable language patterns land;
 - keep release notes in `docs/releases/` and roadmap files in `roadmap/`, separate from tutorial pages;
-- keep examples split by audience: business, language, and acceptance.
+- keep top-level `examples/*.cell` as the single checked-in bundled business
+  source, with `examples/language/*.cell` for compiler/tooling coverage.
 
 Source documents:
 

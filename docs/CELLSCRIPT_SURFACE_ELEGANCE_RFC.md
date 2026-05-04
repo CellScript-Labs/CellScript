@@ -86,8 +86,8 @@ authorization semantics:
   initializers, including empty `[]` as the existing `Vec::new()` path when the
   expected `Vec<T>` type is known;
 - the `protected`, `witness`, and `require` lock-boundary classification syntax;
-- business/language/acceptance example directories, with profiled metadata kept
-  in acceptance examples;
+- single-source bundled examples at top-level `examples/*.cell`, with
+  acceptance-only metadata kept in runner configuration or generated evidence;
 - LSP and VS Code grammar/snippet updates for the new syntax.
 
 The security-sensitive boundary remains deliberately narrow:
@@ -391,10 +391,11 @@ action or witness data.
 
 ## Example Layout
 
-The target organization is:
+The checked-in organization is intentionally single-source for bundled
+business examples:
 
 ```text
-examples/business/
+examples/
   token.cell
   amm_pool.cell
   launch.cell
@@ -402,28 +403,20 @@ examples/business/
   nft.cell
   multisig.cell
   timelock.cell
+  registry.cell
 
 examples/language/
   registry.cell
-  bounded_vec.cell
-
-examples/acceptance/
-  token.cell
-  amm_pool.cell
-  launch.cell
-  vesting.cell
-  nft.cell
-  multisig.cell
-  timelock.cell
+  order_book.cell
+  ...
 ```
 
-The flat `examples/*.cell` files remain as compatibility mirrors of the
-canonical business examples. CKB production acceptance compiles
-`examples/acceptance/*.cell` when that directory is present, so scheduler and
-effect-profile metadata can stay out of reader-facing business files.
-Subdirectory copies use scoped module namespaces (`cellscript::business::*`,
-`cellscript::acceptance::*`, and `cellscript::language::*`) so they can coexist
-with the canonical top-level modules during compiler module loading.
+The top-level `examples/*.cell` files are the canonical bundled source used by
+the production acceptance runner. `examples/business` and `examples/acceptance`
+are no longer checked in; any acceptance-only metadata belongs in runner
+configuration or generated files under `target/`, not in mirrored source copies.
+`examples/language/*.cell` remains for language and tooling coverage outside
+the seven-example CKB production matrix.
 
 ## Canonical Style Example
 
@@ -474,7 +467,7 @@ This list is the living implementation tracker for the RFC.
 | First-class verified signer abstraction | Deferred | Only after explicit verification primitives are proven and documented. |
 | Hidden sighash defaults | Rejected | Digest mode and signature scope must be visible. |
 | Implicit `Address` as signer | Rejected | Address values do not become authorization proofs by name. |
-| Business/language/acceptance example directory split | Done | `examples/business` holds clean canonical examples, `examples/acceptance` holds production/profiled examples, and `examples/language` holds `registry.cell`. Flat `examples/*.cell` remains a compatibility mirror for existing commands. |
+| Single-source bundled examples | Done | Top-level `examples/*.cell` is the canonical checked-in bundled business source. `examples/business` and `examples/acceptance` are intentionally absent; acceptance metadata is runner/generated evidence. `examples/language/*.cell` remains for language/tooling coverage. |
 | `examples/language/canonical_style.cell` | Done | Provides a compact idiomatic reference for module style, capabilities, field shorthand, `[]`, `&mut` replacement, and lock-boundary classification. |
 | Action production acceptance | Done | Existing bundled action acceptance remains builder-backed. |
 | Lock valid-spend and invalid-spend matrix | Done | Existing bundled locks are exercised through builder-backed local CKB transactions. |

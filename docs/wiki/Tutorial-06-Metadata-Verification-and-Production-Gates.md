@@ -199,17 +199,19 @@ valid transactions, malformed rejection, measured cycles, consensus-serialized
 transaction size, occupied-capacity evidence, no under-capacity outputs, bundled
 example deployment, and a passed final production hardening gate.
 
-The production gate compiles `examples/acceptance/*.cell` when present. Those
-files intentionally retain scheduler and effect-profile metadata while the
-seven bundled top-level production examples and `examples/business/*.cell`
-remain the cleaner business reading surface.
+The production gate compiles the seven checked-in top-level
+`examples/*.cell` bundled examples directly. Those files are the single
+canonical business source and the cleaner reading surface; there are no
+checked-in `examples/business` or `examples/acceptance` mirrors. Acceptance-only
+profile/effect/scheduler metadata belongs in runner configuration or generated
+files under `target/`.
 
 Lock behavior coverage is machine-readable through
 `lock_acceptance_scope.onchain_lock_spend_matrix_scope`; each listed lock must
 have both valid-spend and invalid-spend evidence.
 
-`examples/language/registry.cell`, its top-level compatibility mirror
-`examples/registry.cell`, and `examples/language/order_book.cell` are
+`examples/registry.cell`, `examples/language/registry.cell`, and
+`examples/language/order_book.cell` are
 bounded-collection language examples covered by compiler/tooling tests, not by
 the bundled CKB production matrix.
 

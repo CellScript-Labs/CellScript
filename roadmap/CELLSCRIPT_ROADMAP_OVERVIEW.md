@@ -200,9 +200,11 @@ where
     create recovered = Token { amount: htlc.amount } with_lock(htlc.beneficiary)
 ```
 
-### 4.7 Conditional hash_blake2b() Support (P1)
+### 4.7 Fixed-Hash hash_blake2b() Support (P1)
 
-> **Note:** `hash_blake2b()` will be provided conditionally — only when a concrete v0.14 contract requires CKB-native BLAKE2B hashing and passes the production gate. Otherwise, the compiler will emit a profile-level diagnostic and reject on-chain usage.
+> **Status:** v0.14 supports `hash_blake2b(input: Hash) -> Hash` for runtime
+> 32-byte digest inputs. Wider byte-slice and resource serialization hashing
+> remains out of scope until its ABI is specified.
 
 - CKB-native BLAKE2B hash function (with `"ckb-default-hash"` personalization)
 - CKB Blake2b helper support selected by the CKB target profile

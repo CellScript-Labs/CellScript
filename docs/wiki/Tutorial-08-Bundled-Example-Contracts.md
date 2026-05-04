@@ -18,18 +18,14 @@ example.
 | `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
 | `examples/launch.cell` | Launch/pool composition patterns. |
 
-The top-level `examples/*.cell` files are the clean business reading surface.
-`examples/business/*.cell` mirrors that clean surface explicitly.
-`examples/acceptance/*.cell` carries production/profile metadata such as
-`#[effect(...)]` and `#[scheduler_hint(...)]`; the CKB acceptance script uses
-those profiled copies when generating release evidence.
+The top-level `examples/*.cell` files are the canonical bundled business
+source. They are both the clean reading surface and the source compiled by the
+CKB acceptance runner. There are no checked-in `examples/business` or
+`examples/acceptance` mirrors; acceptance-only profile/effect/scheduler
+metadata belongs in runner configuration or generated files under `target/`.
 
-Subdirectory copies use `cellscript::business::*` and
-`cellscript::acceptance::*` module namespaces so they can coexist with the
-top-level examples during module loading.
-
-`examples/language/registry.cell`, its top-level compatibility mirror
-`examples/registry.cell`, and `examples/language/order_book.cell` are
+`examples/registry.cell`, `examples/language/registry.cell`, and
+`examples/language/order_book.cell` are
 intentionally outside the bundled production matrix. They are
 bounded-collection language examples for local stack-backed `Vec<T>` helpers,
 covered by compiler/tooling tests rather than CKB production action acceptance.

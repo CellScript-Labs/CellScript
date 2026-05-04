@@ -711,8 +711,12 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     }
     validate_type_identity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
+    validate_ckb_constraints_summary_metadata(metadata)?;
     validate_ckb_output_data_binding_metadata(metadata)?;
     validate_ckb_type_id_output_metadata(metadata)?;
+    validate_ckb_runtime_access_metadata(metadata)?;
+    validate_ckb_script_group_metadata(metadata)?;
+    validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
     validate_source_metadata(metadata)?;
@@ -1613,6 +1617,187 @@ fn validate_capacity_floor_metadata(metadata: &CompileMetadata) -> Result<()> {
             (None, None) => {}
         }
     }
+    let expected_floors = expected_ckb_capacity_floor_metadata(metadata);
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        if expected_floors.is_empty() {
+            return Ok(());
+        }
+        return Err(CompileError::without_span(
+            "metadata has type-level capacity floors but is missing constraints.ckb.declared_capacity_floors",
+        ));
+    };
+    let mut expected = ckb_capacity_floor_fingerprints(expected_floors.iter());
+    let mut actual = ckb_capacity_floor_fingerprints(ckb_constraints.declared_capacity_floors.iter());
+    expected.sort();
+    actual.sort();
+    if actual != expected {
+        let missing = ckb_capacity_floor_multiset_difference(&expected, &actual);
+        let extra = ckb_capacity_floor_multiset_difference(&actual, &expected);
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.declared_capacity_floors do not match type-level capacity floors; missing={:?}; extra={:?}",
+            missing, extra
+        )));
+    }
+    Ok(())
+}
+
+fn expected_ckb_capacity_floor_metadata(metadata: &CompileMetadata) -> Vec<CkbCapacityFloorMetadata> {
+    metadata
+        .types
+        .iter()
+        .filter_map(|ty| {
+            ty.capacity_floor_shannons.map(|shannons| CkbCapacityFloorMetadata {
+                type_name: ty.name.clone(),
+                shannons,
+                source: ty.capacity_floor_source.clone().unwrap_or_else(|| "dsl-with_capacity_floor".to_string()),
+                status: "builder-must-preserve-output-capacity-at-or-above-floor".to_string(),
+            })
+        })
+        .collect()
+}
+
+type CkbCapacityFloorFingerprint = (String, u64, String, String);
+
+fn ckb_capacity_floor_fingerprints<'a>(
+    floors: impl Iterator<Item = &'a CkbCapacityFloorMetadata>,
+) -> Vec<CkbCapacityFloorFingerprint> {
+    floors.map(|floor| (floor.type_name.clone(), floor.shannons, floor.source.clone(), floor.status.clone())).collect()
+}
+
+fn ckb_capacity_floor_multiset_difference(
+    left: &[CkbCapacityFloorFingerprint],
+    right: &[CkbCapacityFloorFingerprint],
+) -> Vec<CkbCapacityFloorFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
+}
+
+fn validate_ckb_constraints_summary_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let profile_is_ckb = TargetProfile::from_name(&metadata.target_profile.name)? == TargetProfile::Ckb;
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        if profile_is_ckb && (metadata.artifact_hash.is_some() || metadata.artifact_size_bytes.is_some()) {
+            return Err(CompileError::without_span("metadata is missing constraints.ckb for the ckb target profile"));
+        }
+        return Ok(());
+    };
+
+    let created_output_count = metadata
+        .actions
+        .iter()
+        .map(|action| action.create_set.len())
+        .chain(metadata.locks.iter().map(|lock| lock.create_set.len()))
+        .sum::<usize>();
+    let mutated_output_count = metadata
+        .actions
+        .iter()
+        .map(|action| action.mutate_set.len())
+        .chain(metadata.locks.iter().map(|lock| lock.mutate_set.len()))
+        .sum::<usize>();
+    let capacity_planning_required = created_output_count > 0 || mutated_output_count > 0;
+    let uses_input_since = metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "ckb-input-since");
+    let uses_header_epoch = metadata.runtime.ckb_runtime_features.iter().any(|feature| feature.starts_with("ckb-header-epoch-"));
+
+    validate_ckb_summary_value("created_output_count", ckb_constraints.created_output_count, created_output_count)?;
+    validate_ckb_summary_value("mutated_output_count", ckb_constraints.mutated_output_count, mutated_output_count)?;
+    validate_ckb_summary_value(
+        "transaction_runtime_input_requirement_count",
+        ckb_constraints.transaction_runtime_input_requirement_count,
+        metadata.runtime.transaction_runtime_input_requirements.len(),
+    )?;
+    validate_ckb_summary_bool("uses_input_since", ckb_constraints.uses_input_since, uses_input_since)?;
+    validate_ckb_summary_bool("uses_header_epoch", ckb_constraints.uses_header_epoch, uses_header_epoch)?;
+    validate_ckb_summary_bool("capacity_planning_required", ckb_constraints.capacity_planning_required, capacity_planning_required)?;
+    validate_ckb_summary_bool(
+        "occupied_capacity_measurement_required",
+        ckb_constraints.occupied_capacity_measurement_required,
+        capacity_planning_required,
+    )?;
+
+    let mut expected_features = metadata.runtime.ckb_runtime_features.clone();
+    let mut actual_features = ckb_constraints.ckb_runtime_features.clone();
+    expected_features.sort();
+    actual_features.sort();
+    if actual_features != expected_features {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.ckb_runtime_features {:?} do not match runtime.ckb_runtime_features {:?}",
+            actual_features, expected_features
+        )));
+    }
+
+    let expected_capacity_policy_surface = if expected_ckb_capacity_floor_metadata(metadata).is_empty() {
+        if capacity_planning_required {
+            "builder/runtime-required; declarative-dsl-capacity-not-yet-first-class"
+        } else {
+            "not-applicable"
+        }
+    } else {
+        "dsl-declared-capacity-floor; builder/runtime-required-for-change-and-measurement"
+    };
+    if ckb_constraints.capacity_policy_surface != expected_capacity_policy_surface {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_policy_surface '{}' does not match expected '{}'",
+            ckb_constraints.capacity_policy_surface, expected_capacity_policy_surface
+        )));
+    }
+
+    let evidence = &ckb_constraints.capacity_evidence_contract;
+    if !evidence.required {
+        return Err(CompileError::without_span("metadata constraints.ckb.capacity_evidence_contract.required must be true"));
+    }
+    validate_ckb_summary_bool(
+        "capacity_evidence_contract.occupied_capacity_measurement_required",
+        evidence.occupied_capacity_measurement_required,
+        capacity_planning_required,
+    )?;
+    validate_ckb_summary_bool("capacity_evidence_contract.tx_size_measurement_required", evidence.tx_size_measurement_required, true)?;
+    let expected_capacity_status =
+        if capacity_planning_required { "builder-occupied-capacity-measurement-required" } else { "code-cell-data-lower-bound" };
+    if ckb_constraints.capacity_status != expected_capacity_status {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_status '{}' does not match expected '{}'",
+            ckb_constraints.capacity_status, expected_capacity_status
+        )));
+    }
+    let expected_evidence_status = if capacity_planning_required {
+        "builder-must-attach-occupied-capacity-and-tx-size-evidence"
+    } else {
+        "builder-must-attach-tx-size-evidence-code-cell-lower-bound-available"
+    };
+    if evidence.status != expected_evidence_status {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.capacity_evidence_contract.status '{}' does not match expected '{}'",
+            evidence.status, expected_evidence_status
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ckb_summary_value(field: &str, actual: usize, expected: usize) -> Result<()> {
+    if actual != expected {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.{} {} does not match expected {}",
+            field, actual, expected
+        )));
+    }
+    Ok(())
+}
+
+fn validate_ckb_summary_bool(field: &str, actual: bool, expected: bool) -> Result<()> {
+    if actual != expected {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.{} {} does not match expected {}",
+            field, actual, expected
+        )));
+    }
     Ok(())
 }
 
@@ -1797,6 +1982,397 @@ fn validate_ckb_type_id_create_set_metadata(
     }
 
     Ok(())
+}
+
+fn validate_ckb_runtime_access_metadata(metadata: &CompileMetadata) -> Result<()> {
+    validate_ckb_runtime_access_list("runtime", "module", &metadata.runtime.ckb_runtime_accesses)?;
+    for action in &metadata.actions {
+        validate_ckb_runtime_access_list("action", &action.name, &action.ckb_runtime_accesses)?;
+    }
+    for function in &metadata.functions {
+        validate_ckb_runtime_access_list("function", &function.name, &function.ckb_runtime_accesses)?;
+    }
+    for lock in &metadata.locks {
+        validate_ckb_runtime_access_list("lock", &lock.name, &lock.ckb_runtime_accesses)?;
+    }
+
+    let mut expected_runtime_accesses = Vec::new();
+    for action in &metadata.actions {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(action.ckb_runtime_accesses.iter()));
+    }
+    for function in &metadata.functions {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(function.ckb_runtime_accesses.iter()));
+    }
+    for lock in &metadata.locks {
+        expected_runtime_accesses.extend(ckb_runtime_access_fingerprints(lock.ckb_runtime_accesses.iter()));
+    }
+    let mut actual_runtime_accesses = ckb_runtime_access_fingerprints(metadata.runtime.ckb_runtime_accesses.iter());
+    expected_runtime_accesses.sort();
+    actual_runtime_accesses.sort();
+    if actual_runtime_accesses != expected_runtime_accesses {
+        let missing = ckb_runtime_access_multiset_difference(&expected_runtime_accesses, &actual_runtime_accesses);
+        let extra = ckb_runtime_access_multiset_difference(&actual_runtime_accesses, &expected_runtime_accesses);
+        return Err(CompileError::without_span(format!(
+            "metadata runtime.ckb_runtime_accesses do not match action/function/lock runtime metadata; missing={:?}; extra={:?}",
+            missing, extra
+        )));
+    }
+    Ok(())
+}
+
+type CkbRuntimeAccessFingerprint = (String, String, String, usize, String);
+
+fn ckb_runtime_access_fingerprints<'a>(
+    accesses: impl Iterator<Item = &'a CkbRuntimeAccessMetadata>,
+) -> Vec<CkbRuntimeAccessFingerprint> {
+    accesses
+        .map(|access| (access.operation.clone(), access.syscall.clone(), access.source.clone(), access.index, access.binding.clone()))
+        .collect()
+}
+
+fn ckb_runtime_access_multiset_difference(
+    left: &[CkbRuntimeAccessFingerprint],
+    right: &[CkbRuntimeAccessFingerprint],
+) -> Vec<CkbRuntimeAccessFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
+}
+
+fn validate_ckb_runtime_access_list(scope: &str, name: &str, accesses: &[CkbRuntimeAccessMetadata]) -> Result<()> {
+    for (index, access) in accesses.iter().enumerate() {
+        let prefix = format!("metadata {} '{}' ckb_runtime_accesses[{}]", scope, name, index);
+        for (field, value) in [
+            ("operation", access.operation.as_str()),
+            ("syscall", access.syscall.as_str()),
+            ("source", access.source.as_str()),
+            ("binding", access.binding.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        if !is_known_ckb_runtime_source(&access.source) {
+            return Err(CompileError::without_span(format!(
+                "{}.source '{}' is not a known CKB runtime source",
+                prefix, access.source
+            )));
+        }
+        if !is_known_ckb_runtime_syscall(&access.syscall) {
+            return Err(CompileError::without_span(format!(
+                "{}.syscall '{}' is not a known CKB runtime syscall surface",
+                prefix, access.syscall
+            )));
+        }
+        if !ckb_runtime_syscall_allows_source(&access.syscall, &access.source) {
+            return Err(CompileError::without_span(format!(
+                "{} syscall '{}' does not allow source '{}'",
+                prefix, access.syscall, access.source
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_known_ckb_runtime_source(source: &str) -> bool {
+    matches!(
+        source,
+        "Input"
+            | "Output"
+            | "CellDep"
+            | "HeaderDep"
+            | "GroupInput"
+            | "GroupOutput"
+            | "GroupCellDep"
+            | "GroupHeaderDep"
+            | "Witness"
+            | "ScriptArgs"
+            | "Process"
+            | "Profile"
+    )
+}
+
+fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
+    matches!(
+        syscall,
+        "LOAD_CELL"
+            | "LOAD_INPUT_BY_FIELD"
+            | "LOAD_SCRIPT_ARGS"
+            | "SOURCE_VIEW"
+            | "LOAD_WITNESS"
+            | "LOAD_WITNESS_ARGS_LOCK"
+            | "LOAD_WITNESS_ARGS_INPUT_TYPE"
+            | "LOAD_WITNESS_ARGS_OUTPUT_TYPE"
+            | "CKB_SIGHASH_ALL"
+            | "CAPACITY_POLICY"
+            | "CKB_BLAKE2B"
+            | "SPAWN"
+            | "WAIT"
+            | "PROCESS_ID"
+            | "PIPE"
+            | "PIPE_WRITE"
+            | "PIPE_READ"
+            | "INHERITED_FD"
+            | "CLOSE"
+    )
+}
+
+fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
+    match syscall {
+        "LOAD_CELL" => matches!(source, "Input" | "Output" | "CellDep" | "GroupInput" | "GroupOutput"),
+        "LOAD_INPUT_BY_FIELD" | "CKB_SIGHASH_ALL" => source == "GroupInput",
+        "LOAD_SCRIPT_ARGS" => source == "ScriptArgs",
+        "SOURCE_VIEW" => matches!(source, "Input" | "Output" | "CellDep" | "HeaderDep" | "GroupInput" | "GroupOutput"),
+        "LOAD_WITNESS" => source == "Witness",
+        "LOAD_WITNESS_ARGS_LOCK" | "LOAD_WITNESS_ARGS_INPUT_TYPE" => source == "GroupInput",
+        "LOAD_WITNESS_ARGS_OUTPUT_TYPE" => source == "GroupOutput",
+        "CAPACITY_POLICY" => source == "Output",
+        "CKB_BLAKE2B" => source == "Profile",
+        "SPAWN" => source == "CellDep",
+        "WAIT" | "PROCESS_ID" | "PIPE" | "PIPE_WRITE" | "PIPE_READ" | "INHERITED_FD" | "CLOSE" => source == "Process",
+        _ => false,
+    }
+}
+
+fn validate_ckb_script_group_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let target_profile = TargetProfile::from_name(&metadata.target_profile.name)?;
+    for action in &metadata.actions {
+        validate_ckb_entry_script_group_metadata(
+            "action",
+            &action.name,
+            &action.ckb_runtime_accesses,
+            action.ckb_script_group.as_ref(),
+            target_profile,
+        )?;
+    }
+    for lock in &metadata.locks {
+        validate_ckb_entry_script_group_metadata(
+            "lock",
+            &lock.name,
+            &lock.ckb_runtime_accesses,
+            lock.ckb_script_group.as_ref(),
+            target_profile,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_ckb_entry_script_group_metadata(
+    entry_kind: &str,
+    name: &str,
+    accesses: &[CkbRuntimeAccessMetadata],
+    actual: Option<&CkbScriptGroupMetadata>,
+    target_profile: TargetProfile,
+) -> Result<()> {
+    let expected = ckb_script_group_metadata(entry_kind, accesses, target_profile);
+    match (actual, expected) {
+        (None, None) => Ok(()),
+        (Some(_), None) => Err(CompileError::without_span(format!(
+            "metadata {} '{}' has ckb_script_group outside the ckb target profile",
+            entry_kind, name
+        ))),
+        (None, Some(_)) => {
+            Err(CompileError::without_span(format!("metadata {} '{}' is missing ckb_script_group metadata", entry_kind, name)))
+        }
+        (Some(actual), Some(expected)) if actual == &expected => Ok(()),
+        (Some(actual), Some(expected)) => Err(CompileError::without_span(format!(
+            "metadata {} '{}' ckb_script_group does not match runtime access metadata; expected={:?}; actual={:?}",
+            entry_kind, name, expected, actual
+        ))),
+    }
+}
+
+fn validate_ckb_script_reference_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let profile_is_ckb = TargetProfile::from_name(&metadata.target_profile.name)? == TargetProfile::Ckb;
+    let Some(ckb_constraints) = metadata.constraints.ckb.as_ref() else {
+        return Ok(());
+    };
+
+    for (index, reference) in ckb_constraints.script_references.iter().enumerate() {
+        let prefix = format!("metadata constraints.ckb.script_references[{}]", index);
+        for (field, value) in [
+            ("scope", reference.scope.as_str()),
+            ("purpose", reference.purpose.as_str()),
+            ("name", reference.name.as_str()),
+            ("dep_source", reference.dep_source.as_str()),
+            ("profile", reference.profile.as_str()),
+            ("status", reference.status.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        if !profile_is_ckb {
+            return Err(CompileError::without_span(format!("{} is present outside the ckb target profile", prefix)));
+        }
+        if reference.profile != "ckb" {
+            return Err(CompileError::without_span(format!(
+                "{}.profile '{}' does not match expected 'ckb'",
+                prefix, reference.profile
+            )));
+        }
+
+        match reference.purpose.as_str() {
+            "type-id-create-output" => {
+                let Some(code_hash) = reference.code_hash.as_deref() else {
+                    return Err(CompileError::without_span(format!("{}.code_hash is required for TYPE_ID script references", prefix)));
+                };
+                if !is_canonical_hash_hex(code_hash) {
+                    return Err(CompileError::without_span(format!(
+                        "{}.code_hash '{}' is not a canonical 32-byte lowercase hex hash",
+                        prefix, code_hash
+                    )));
+                }
+                let expected_code_hash = hex_encode(&CKB_TYPE_ID_CODE_HASH);
+                if code_hash != expected_code_hash {
+                    return Err(CompileError::without_span(format!(
+                        "{}.code_hash '{}' does not match expected TYPE_ID code hash '{}'",
+                        prefix, code_hash, expected_code_hash
+                    )));
+                }
+                let Some(hash_type) = reference.hash_type.as_deref() else {
+                    return Err(CompileError::without_span(format!("{}.hash_type is required for TYPE_ID script references", prefix)));
+                };
+                validate_ckb_hash_type(hash_type)
+                    .map_err(|err| CompileError::without_span(format!("{}.hash_type is invalid: {}", prefix, err.message)))?;
+                if hash_type != CKB_TYPE_ID_HASH_TYPE {
+                    return Err(CompileError::without_span(format!(
+                        "{}.hash_type '{}' does not match expected '{}'",
+                        prefix, hash_type, CKB_TYPE_ID_HASH_TYPE
+                    )));
+                }
+                if reference.args.as_deref() != Some(CKB_TYPE_ID_ARGS_SOURCE) {
+                    return Err(CompileError::without_span(format!(
+                        "{}.args {:?} does not match expected '{}'",
+                        prefix, reference.args, CKB_TYPE_ID_ARGS_SOURCE
+                    )));
+                }
+                if reference.dep_source != CKB_TYPE_ID_OUTPUT_SOURCE {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' does not match expected '{}'",
+                        prefix, reference.dep_source, CKB_TYPE_ID_OUTPUT_SOURCE
+                    )));
+                }
+                if reference.status != "builder-must-install-type-id-script" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'builder-must-install-type-id-script'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            "spawn-target" => {
+                if reference.code_hash.is_some() || reference.hash_type.is_some() || reference.args.is_some() {
+                    return Err(CompileError::without_span(format!(
+                        "{} must leave code_hash/hash_type/args unset until the builder resolves the spawn target",
+                        prefix
+                    )));
+                }
+                if reference.dep_source != "CellDep-or-DepGroup" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' does not match expected 'CellDep-or-DepGroup'",
+                        prefix, reference.dep_source
+                    )));
+                }
+                if reference.status != "runtime-required-builder-resolved" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'runtime-required-builder-resolved'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            "read-ref-cell-dep" => {
+                if reference.code_hash.is_some() || reference.hash_type.is_some() || reference.args.is_some() {
+                    return Err(CompileError::without_span(format!(
+                        "{} must leave code_hash/hash_type/args unset for runtime CellDep reads",
+                        prefix
+                    )));
+                }
+                let Some(index_text) = reference.dep_source.strip_prefix("CellDep#") else {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' must use CellDep#<index>",
+                        prefix, reference.dep_source
+                    )));
+                };
+                if index_text.parse::<usize>().is_err() {
+                    return Err(CompileError::without_span(format!(
+                        "{}.dep_source '{}' has an invalid CellDep index",
+                        prefix, reference.dep_source
+                    )));
+                }
+                if reference.status != "checked-runtime-load-cell-dep" {
+                    return Err(CompileError::without_span(format!(
+                        "{}.status '{}' does not match expected 'checked-runtime-load-cell-dep'",
+                        prefix, reference.status
+                    )));
+                }
+            }
+            other => {
+                return Err(CompileError::without_span(format!(
+                    "{}.purpose '{}' is not a known CKB script-reference purpose",
+                    prefix, other
+                )));
+            }
+        }
+    }
+
+    let mut expected_refs = ckb_script_reference_fingerprints(ckb_script_reference_metadata(metadata).iter());
+    let mut actual_refs = ckb_script_reference_fingerprints(ckb_constraints.script_references.iter());
+    expected_refs.sort();
+    actual_refs.sort();
+    if actual_refs != expected_refs {
+        let missing_refs = ckb_script_reference_multiset_difference(&expected_refs, &actual_refs);
+        let extra_refs = ckb_script_reference_multiset_difference(&actual_refs, &expected_refs);
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.script_references do not match the compiled CKB runtime metadata; missing={:?}; extra={:?}",
+            missing_refs, extra_refs
+        )));
+    }
+
+    Ok(())
+}
+
+type CkbScriptReferenceFingerprint = (String, String, String, Option<String>, Option<String>, Option<String>, String, String, String);
+
+fn ckb_script_reference_fingerprints<'a>(
+    refs: impl Iterator<Item = &'a CkbScriptReferenceMetadata>,
+) -> Vec<CkbScriptReferenceFingerprint> {
+    refs.map(|reference| {
+        (
+            reference.scope.clone(),
+            reference.purpose.clone(),
+            reference.name.clone(),
+            reference.code_hash.clone(),
+            reference.hash_type.clone(),
+            reference.args.clone(),
+            reference.dep_source.clone(),
+            reference.profile.clone(),
+            reference.status.clone(),
+        )
+    })
+    .collect()
+}
+
+fn ckb_script_reference_multiset_difference(
+    left: &[CkbScriptReferenceFingerprint],
+    right: &[CkbScriptReferenceFingerprint],
+) -> Vec<CkbScriptReferenceFingerprint> {
+    let mut right_remaining = right.to_vec();
+    let mut diff = Vec::new();
+    for item in left {
+        if let Some(position) = right_remaining.iter().position(|candidate| candidate == item) {
+            right_remaining.remove(position);
+        } else {
+            diff.push(item.clone());
+        }
+    }
+    diff
 }
 
 fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
@@ -2102,7 +2678,7 @@ pub struct CkbRuntimeAccessMetadata {
     pub binding: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CkbScriptGroupMetadata {
     pub entry_kind: String,
     pub group_kind: String,
@@ -10203,6 +10779,9 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_chain" => {
                     features.insert("profile-hash-chain".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
+                    features.insert("ckb-blake2b".to_string());
+                }
                 _ => {}
             }
         }
@@ -10442,6 +11021,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_occupied_capacity" => Some(("occupied-capacity", "CAPACITY_POLICY", "Output", "occupied_capacity")),
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
+        "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
         _ => None,
     }
 }

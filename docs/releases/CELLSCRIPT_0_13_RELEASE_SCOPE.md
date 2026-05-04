@@ -29,7 +29,7 @@ For the broader plan, see [CellScript Roadmap](../../roadmap/CELLSCRIPT_ROADMAP.
 | Stack-backed `Vec<T>` helpers | Done | Covers fixed-width local vectors and helper matrix. |
 | Contextual `Vec<T>` literals | Done | `[]` and `[x, y]` work only when the expected type is `Vec<T>`; empty `[]` lowers through the existing `Vec::new()` path. |
 | Field shorthand | Done | `field` lowers as `field: field` for create and struct literals. |
-| Example canonicalization | Done | Business, language, and acceptance examples are split by audience. |
+| Example canonicalization | Done | Top-level `examples/*.cell` is the single checked-in bundled business source; language examples stay under `examples/language`. |
 | Lock classification syntax | Done | `protected`, `witness`, fixed-width `lock_args`, and pure verifier-boundary `require` constraints are implemented and documented. |
 | `lock_args` | Done | Fixed-width lock parameters are decoded from the executing script's `Script.args`; explicit signature verification is still deferred. |
 | Stdlib lifecycle and Cell metadata patterns | Done | `std::lifecycle::transfer`, `std::receipt::claim`, `std::lifecycle::settle`, `std::cell::same_lock`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity` lower to explicit verifier obligations. |
@@ -94,8 +94,8 @@ Implemented:
 - DSL-native `has` capability declarations;
 - create and struct field shorthand;
 - contextual `Vec<T>` literals;
-- cleaner top-level and `examples/business` examples;
-- profiled `examples/acceptance` copies for release evidence;
+- top-level `examples/*.cell` as the single checked-in bundled business source;
+- production acceptance that compiles those canonical examples directly;
 - `examples/language/registry.cell` for collection helper coverage;
 - LSP and VS Code grammar/snippet updates.
 

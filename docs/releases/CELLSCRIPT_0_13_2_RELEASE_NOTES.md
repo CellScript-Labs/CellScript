@@ -78,21 +78,18 @@ New in 0.13:
 - Negative type-check coverage for unsupported helper/type combinations.
 - Stable fail-closed metadata names for unsupported collection paths.
 - `examples/language/registry.cell` documents supported local `Vec<Address>` /
-  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support. The
-  top-level `examples/registry.cell` remains a compatibility mirror. It is a
-  compiler/tooling language example, not part of the seven-example CKB
-  production action acceptance matrix.
+  `Vec<Hash>` helper usage without implying full `HashMap<K, V>` support.
+  `examples/registry.cell` keeps that collection surface available from the
+  top-level examples directory. These are compiler/tooling language examples,
+  not part of the seven-example CKB production action acceptance matrix.
 - `examples/language/order_book.cell` is a non-production language example for
   local stack-backed order vectors. It compiles through the bounded `Vec<T>`
   helper surface, but it does not persist orders as Cells, prove map membership,
   settle assets, or enforce exchange-level authorization.
-- The canonical business examples are now mirrored under `examples/business/`,
-  while production/profile metadata lives under `examples/acceptance/`. The CKB
-  acceptance script compiles the profiled copies when present, keeping
-  `#[effect(...)]` and `#[scheduler_hint(...)]` out of reader-facing business
-  files without dropping release evidence. Subdirectory copies use scoped module
-  namespaces so they can coexist with the canonical top-level examples during
-  module loading.
+- Top-level `examples/*.cell` is now the single checked-in bundled business
+  source. The CKB acceptance script compiles those canonical examples directly;
+  acceptance-only profile/effect/scheduler metadata belongs in runner
+  configuration or generated files under `target/`, not mirrored source copies.
 - Runtime and constraints metadata expose each checked stack-backed
   fixed-width `Vec<T>` instantiation, including scope, element type/width,
   backing capacity, status, and helper set. Constructor helpers now preserve
@@ -179,8 +176,8 @@ Completed syntax delta from the `0.12` tag:
 - Bundled locks use `protected`, `witness`, `lock_args`, and `require` to
   distinguish guarded input Cell views, typed script args, transaction witness
   data, and script failure predicates.
-- Clean business examples are separated from profiled acceptance examples, while
-  the flat `examples/*.cell` files remain compatibility mirrors.
+- Top-level `examples/*.cell` is the canonical bundled business source and the
+  direct input to production acceptance.
 - LSP completions plus VS Code grammar and snippets are refreshed for the new
   source qualifiers, named outputs, `flow`, `move`, and named
   `create` syntax.

@@ -36,8 +36,8 @@ swap, clear
 `cellc explain-generics` exposes each checked instantiation, including element
 type, element width, backing model, helper set, and constructor provenance.
 
-`examples/language/registry.cell`, its top-level compatibility mirror
-`examples/registry.cell`, and `examples/language/order_book.cell` are
+`examples/registry.cell`, `examples/language/registry.cell`, and
+`examples/language/order_book.cell` are
 compiler/tooling examples for this local helper surface. They are not part of
 the bundled CKB production action acceptance matrix.
 
