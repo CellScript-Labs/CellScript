@@ -24,11 +24,12 @@ CKB acceptance runner. There are no checked-in `examples/business` or
 `examples/acceptance` mirrors; acceptance-only profile/effect/scheduler
 metadata belongs in runner configuration or generated files under `target/`.
 
-`examples/registry.cell`, `examples/language/registry.cell`, and
-`examples/language/order_book.cell` are
-intentionally outside the bundled production matrix. They are
-bounded-collection language examples for local stack-backed `Vec<T>` helpers,
-covered by compiler/tooling tests rather than CKB production action acceptance.
+`examples/registry.cell` and every checked-in `examples/language/*.cell` file
+are intentionally outside the bundled production matrix. They are language
+examples for compiler/tooling surfaces such as local stack-backed `Vec<T>`,
+stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and
+dynamic BLAKE2b. They are covered by compiler/tooling tests rather than CKB
+production action acceptance.
 
 For a visual business-flow map of every bundled example, see
 [`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).

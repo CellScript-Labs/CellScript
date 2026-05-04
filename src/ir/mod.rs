@@ -5329,7 +5329,7 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> (output: Offer)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     preserve output from input {
         seller

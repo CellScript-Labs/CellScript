@@ -16,9 +16,9 @@ CellScript's evolution follows a deliberate maturity curve:
 
 - **v0.12** — Production closure: proved CellScript can compile production-grade cell contracts (43/43 actions, 7/7 examples, entry witness ABI, output preservation checks, low-level time helpers, dep cell reads).
 - **v0.13** — Stable explicit verifier surface: signature-direction action model, bounded value-vector helpers, stdlib lifecycle/Cell metadata patterns, syntax-combination gates, and builder-backed plus stateful CKB release evidence.
-- **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, and declarative capacity syntax. The WASM simulation backend remains a P2/stretch track unless explicitly promoted.
+- **v0.14** — CKB semantic completeness and bounded verifier composition: structured `WitnessArgs`, profile-aware `since`/epoch time constraints, explicit Source views, ScriptGroup/transaction-shape conformance, bounded verifier reuse via Spawn/IPC, formalized target profiles, declarative capacity syntax, and the intentional `move` -> `transition` syntax cleanup. The WASM simulation backend remains a P2/stretch track unless explicitly promoted.
 
-v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, and Spawn/IPC. It should not re-plan v0.13 bounded generics, reopen 0.13.2 syntax governance, repeat 0.13 stateful production evidence as new scope, or start the v0.15 primitive-kernel reset.
+v0.14 closes the remaining DSL-level semantic gaps between CKB VM reality and CellScript source code: CKB witness structure, CKB epoch-based `since`, Source transaction/group views, ScriptGroup/outputs_data conformance, TYPE_ID metadata validation MVP, Spawn/IPC, and action-level `transition` state edges. It should not re-plan v0.13 bounded generics, repeat 0.13 stateful production evidence as new scope, or start the v0.15 primitive-kernel reset.
 
 v0.14 provides low-level Spawn/IPC and CKB Source/Witness semantics. It does not define the full protocol composability model. The higher-level question of trigger, scope, reads, coverage, and builder assumptions is intentionally deferred to v0.15's Scoped Invariants and Covenant ProofPlan.
 
@@ -81,7 +81,8 @@ The following capabilities are already delivered and will not be re-planned:
 
 - ✅ Stack-backed fixed-width value-vector helpers for checked `Vec<T>` paths
 - ✅ Metadata and `cellc explain-generics` for concrete checked vector instantiations
-- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `move` state edges
+- ✅ Signature-direction action model with named outputs, `where` proof scopes, and explicit field-to-field `transition` state edges
+- ✅ Non-empty multi-edge `transition { ... }` blocks for compactly declaring several explicit state edges without moving proof logic into `where`
 - ✅ `preserve` sugar and anonymous `require` blocks with canonical verifier expansion and pure-boolean enforcement
 - ✅ Compiler-recognized stdlib patterns for lifecycle and Cell metadata:
   `std::lifecycle::transfer`, `std::receipt::claim`,
@@ -456,7 +457,6 @@ rules.
 - Optional source-level `transfer token { ... } with_lock(to)` sugar remains deferred. v0.13.2 already provides compiler-recognized stdlib lifecycle patterns such as `std::lifecycle::transfer`, which expand to explicit `consume` + named output constraints.
 - `create_each` or bounded batch-create sugar that compiles to statically auditable repeated `create` operations.
 - Named tuple returns such as `-> (royalty: Payment, seller: Payment)` for readability without changing ABI layout.
-- Multi-field `move` sugar for compactly declaring several field transitions while preserving explicit guards.
 - `Option<T>` / `Result<T, E>` as an explicit optional/error model, including type checking, lowering, ABI representation, and match-pattern support.
 - Attribute-form hash type declarations such as `#[default_hash_type(Data1)]` as a possible spelling alongside or instead of `with_default_hash_type(Data1)`.
 
@@ -523,8 +523,8 @@ done
 |----------|-----------|
 | Epoch support outside CKB profile | Epoch is CKB-specific and must not leak into portable semantics. |
 | On-chain WASM execution | RISC-V remains the on-chain target. WASM is for browser simulation only. |
-| Reopening the 0.13 action model | Signature-direction outputs, `where`, explicit `move`, named `create`, and stdlib lifecycle patterns are already stable 0.13 surface. |
-| Breaking changes to existing DSL syntax | All new features are additive. Existing 0.13.2 `.cell` files must compile without modification. |
+| Reopening the action model beyond state-edge spelling | Signature-direction outputs, `where`, named `create`, and stdlib lifecycle patterns stay intact; v0.14 only renames action-level state edges from legacy `move` to `transition` and rejects the old spelling. |
+| Broad breaking DSL changes | v0.14 intentionally makes the `move` -> `transition` cleanup without compatibility aliases; other 0.13.2 syntax should remain stable unless separately justified. |
 | Primitive kernel reset | v0.15 owns protocol-macro lowering, ProofPlan unification, and core primitive redesign. |
 | Reintroducing compiler-core `transfer` / `claim` / `settle` verbs | v0.13.2 removed these from the executable core; v0.14 may add source sugar only when it expands to auditable stdlib/core effects. |
 | `Address` / `LockScript` / `LockHash` type-system split | v0.14 records precise CKB script references; v0.15 owns semantic type separation. |

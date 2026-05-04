@@ -80,12 +80,12 @@ flow GrantFlow for VestingGrant.state {
 
 Bind each action to the transition it is allowed to prove. The semantic core is
 an input-to-output verifier signature: the left side names consumed input Cell
-views, the right side names proposed output Cell bindings, and `move` names both
-state fields explicitly.
+views, the right side names proposed output Cell bindings, and `transition`
+names both state fields explicitly.
 
 ```cellscript
 action unlock_grant(input: VestingGrant) -> output: VestingGrant
-    move input.state: Granted -> output.state: Claimable
+    transition input.state: Granted -> output.state: Claimable
 where
     require input.beneficiary == output.beneficiary
     require input.total_amount == output.total_amount
@@ -95,22 +95,22 @@ where
 `flow Type.field { ... }` is the compact form when the flow does not
 need a separate name. The compiler keeps the state field explicit in Molecule
 layout, lowers enum states to their ordinal values, verifies old/new state at
-runtime, and rejects action `move` clauses that are not declared in the state graph. A
+runtime, and rejects action `transition` clauses that are not declared in the state graph. A
 state field may have only one flow declaration, so keep all legal edges for
 that field in one named or compact flow block.
 
 Output binding is deterministic. Named action outputs are bound to transaction
 outputs in signature order, starting at `Output#0`. A field-to-field transition such as
-`move input.state: A -> output.state: B` names both the input and proposed output
+`transition input.state: A -> output.state: B` names both the input and proposed output
 directly. Existing `consume input` plus `create output = T { ... }` remains
 accepted as front-end sugar for the same verifier shape.
 
-Action proof logic is scoped by `where`. Put `move` clauses before `where` and
+Action proof logic is scoped by `where`. Put `transition` clauses before `where` and
 keep proof obligations below it:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.price == input.price
     require output.seller == input.seller

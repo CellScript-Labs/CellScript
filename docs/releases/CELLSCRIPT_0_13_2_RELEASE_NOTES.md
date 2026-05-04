@@ -6,6 +6,10 @@
 
 **Release tag**: `v0.13.2`
 
+Historical note: the 0.14 implementation branch renames action-level state
+edges from `move` to `transition` and rejects legacy `move`. This 0.13.2
+document keeps the source spelling that exists at the `v0.13.2` tag.
+
 ## Release Boundary
 
 CellScript 0.13.2 closes the 0.13 stable line. It includes the original 0.13

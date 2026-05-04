@@ -16061,7 +16061,7 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> output: Ticket
-    move ticket.state: Created -> output.state: Active
+    transition ticket.state: Created -> output.state: Active
 where
     create output = Ticket {
         state: Active,
@@ -16102,7 +16102,7 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> output: Ticket
-    move ticket.state: Created -> output.state: Active
+    transition ticket.state: Created -> output.state: Active
 where
     assert_invariant(ticket.state < Ticket::Active, "already active")
     create output = Ticket {
@@ -21141,7 +21141,7 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     let amount = input.amount
     create output = Offer {
@@ -21165,8 +21165,8 @@ where
             "missing explicit flow runtime transition marker:\n{}",
             asm
         );
-        assert!(asm.contains("li t3, 1"), "action move should check source state Live=1:\n{}", asm);
-        assert!(asm.contains("li t3, 2"), "action move should check target state Filled=2:\n{}", asm);
+        assert!(asm.contains("li t3, 1"), "action transition should check source state Live=1:\n{}", asm);
+        assert!(asm.contains("li t3, 2"), "action transition should check target state Filled=2:\n{}", asm);
     }
 
     #[test]
@@ -21191,7 +21191,7 @@ flow Offer.state {
 }
 
 action accept(input input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require input.amount == output.amount
     create output = Offer {
@@ -21220,8 +21220,8 @@ where
             "core output parameter should bind deterministically to Output#0:\n{}",
             asm
         );
-        assert!(asm.contains("li t3, 0"), "core move should check source state Live=0:\n{}", asm);
-        assert!(asm.contains("li t3, 1"), "core move should check target state Filled=1:\n{}", asm);
+        assert!(asm.contains("li t3, 0"), "core transition should check source state Live=0:\n{}", asm);
+        assert!(asm.contains("li t3, 1"), "core transition should check target state Filled=1:\n{}", asm);
     }
 
     #[test]
@@ -21245,7 +21245,7 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     if input.price > 0 {
         require output.price == input.price
@@ -21279,7 +21279,7 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     if input.price > 0 {
         require output.price == input.price
@@ -21344,7 +21344,7 @@ flow Offer.state {
 }
 
 action cancel(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Cancelled
+    transition input.state: Live -> output.state: Cancelled
 where
     require input.amount == output.amount
 "#;
@@ -21400,7 +21400,7 @@ flow Offer.state {
 }
 
 action accept_sugar(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     let amount = input.amount
     create output = Offer {
@@ -21409,7 +21409,7 @@ where
     }
 
 action accept_core(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require input.amount == output.amount
 "#;
@@ -21453,7 +21453,7 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer
-    move old.state: Live -> new.state: Filled
+    transition old.state: Live -> new.state: Filled
 where
     create new = Offer {
         state: OfferState::Filled,
@@ -21527,12 +21527,12 @@ flow Offer.state {
 }
 
 action accept(old: Offer) -> new: Offer
-    move old.state: Live -> new.state: Cancelled
+    transition old.state: Live -> new.state: Cancelled
 where
         require old.amount == new.amount
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("must declare the exact field-to-field move"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21619,7 +21619,7 @@ flow OfferFlow for Offer.status {
 }
 
 action accept(input: Offer) -> output: Offer
-    move input.status: Live -> output.status: Filled
+    transition input.status: Live -> output.status: Filled
 where
     let amount = input.amount
     create output = Offer {
@@ -21694,7 +21694,7 @@ flow Offer.state {
 }
 
 action reset(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Created
+    transition input.state: Live -> output.state: Created
 where
     let amount = input.amount
     create output = Offer {
@@ -21726,7 +21726,7 @@ flow Offer.state {
 }
 
 action accept(input: &Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     create output = Offer {
         state: OfferState::Filled,
@@ -21768,7 +21768,7 @@ where
     }
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("must declare the exact field-to-field move"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21792,7 +21792,7 @@ flow Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     create output = Offer {
         state: OfferState::Filled,

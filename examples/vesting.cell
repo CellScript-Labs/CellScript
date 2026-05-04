@@ -41,7 +41,7 @@ where
     create grant = VestingGrant { state: Granted, beneficiary, total_amount: tokens.amount, claimed_amount: 0, grant_timepoint: now, cliff_timepoint: now + config.cliff_period, end_timepoint: now + config.total_vesting_period, token_symbol: config.token_symbol } with_lock(beneficiary)
 
 action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant)
-    move grant.state: Claimable -> updated_grant.state: FullyClaimed
+    transition grant.state: Claimable -> updated_grant.state: FullyClaimed
 where
     let now = env::current_timepoint()
     assert(now >= grant.cliff_timepoint, "cliff not reached")

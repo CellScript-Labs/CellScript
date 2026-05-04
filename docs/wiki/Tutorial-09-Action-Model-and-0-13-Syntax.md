@@ -20,7 +20,7 @@ This tutorial explains the syntax introduced and tightened in the 0.13 surface:
 - signature-direction actions: `action(old: T) -> new: T`;
 - named output bindings: `-> (next: T, receipt: R)`;
 - `where` proof blocks;
-- singular state edges with colons: `move old.state: A -> new.state: B`;
+- singular state edges with colons: `transition old.state: A -> new.state: B`;
 - prefix source qualifiers: `read`, `protected`, `witness`, and `lock_args`;
 - named output constraints: `create out = T { ... }`;
 - explicit lifecycle verbs: `consume` and `destroy`.
@@ -338,20 +338,20 @@ Rules to remember:
 - keep all legal edges for that field in one place;
 - `by action_name` optionally binds an edge to the action that is allowed to
   prove it;
-- an action `move` must match an edge declared by the flow;
+- an action `transition` must match an edge declared by the flow;
 - if a flow edge says `Live -> Filled by fill_offer`, then `fill_offer` must
   prove that exact edge, not just any edge on the same field.
 
 This avoids a common audit problem: state edges scattered across unrelated
 actions.
 
-## `move` Declares The State Edge
+## `transition` Declares The State Edge
 
-Use singular `move`, with colons before state values:
+Use singular `transition`, with colons before state values:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.price == input.price
     require output.seller == input.seller
@@ -368,24 +368,41 @@ The edge Live -> Filled must be declared in Offer.state's flow.
 The colon matters. It separates the field path from the required state value:
 
 ```cellscript
-move input.state: Live -> output.state: Filled
+transition input.state: Live -> output.state: Filled
 ```
 
 This is easier to scan than:
 
 ```cellscript
-move input.state Live -> output.state Filled
+transition input.state Live -> output.state Filled
 ```
 
 The latter is not the 0.13 syntax.
 
-## `move` Is Not Proof Logic
+When an action declares more than one independent state edge, use a non-empty
+block:
 
-`move` belongs between the action signature and `where`:
+```cellscript
+action settle(input: Offer, receipt: Receipt)
+    -> (output: Offer, next_receipt: Receipt)
+    transition {
+        input.state: Live -> output.state: Filled
+        receipt.state: Open -> next_receipt.state: Closed
+    }
+where
+    require output.seller == input.seller
+```
+
+An empty `transition {}` block is rejected. It would claim a state-edge section
+without naming any edge.
+
+## `transition` Is Not Proof Logic
+
+`transition` belongs between the action signature and `where`:
 
 ```cellscript
 action settle(input: Position) -> output: Position
-    move input.phase: Open -> output.phase: Settled
+    transition input.phase: Open -> output.phase: Settled
 where
     require output.owner == input.owner
 ```
@@ -395,11 +412,11 @@ Do not put it inside `where`:
 ```cellscript
 action settle(input: Position) -> output: Position
 where
-    move input.phase: Open -> output.phase: Settled
+    transition input.phase: Open -> output.phase: Settled
     require output.owner == input.owner
 ```
 
-The reason is conceptual. A `move` is an edge declaration. It tells the compiler
+The reason is conceptual. A `transition` is an edge declaration. It tells the compiler
 which state transition this action claims to prove. It should not hide inside
 conditional proof logic.
 
@@ -408,13 +425,13 @@ actions when the guards are different:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.seller == input.seller
     require output.price == input.price
 
 action cancel_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Cancelled
+    transition input.state: Live -> output.state: Cancelled
 where
     require output.seller == input.seller
     require output.price == input.price
@@ -483,7 +500,7 @@ visible constraints.
 | Syntax | Responsibility |
 |---|---|
 | `action(input...) -> output...` | Transaction topology. |
-| `move input.state: A -> output.state: B` | State edge. |
+| `transition input.state: A -> output.state: B` | State edge. |
 | `require output.field == input.field` | Field preservation or accounting proof. |
 | `create output = T { ... }` | Proposed output data and lock constraint. |
 | `consume` / `destroy` | Consumption intent. |
@@ -694,7 +711,7 @@ not in compiler-core expression verbs. Review their expansion as explicit
 
 ## `require` Is The Atomic Proof Constraint
 
-`move` declares a state edge. It does not prove authorization, payment,
+`transition` declares a state edge. It does not prove authorization, payment,
 capacity, conservation, or field preservation.
 
 Those belong in `require`:
@@ -702,7 +719,7 @@ Those belong in `require`:
 ```cellscript
 action accept_offer(input: Offer, payment: Token)
     -> (output: Offer, seller_payment: Token)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require payment.amount == input.price
     require payment.symbol == input.payment_symbol
@@ -722,7 +739,7 @@ where
 This is the intended style:
 
 ```text
-Use move for state.
+Use transition for state.
 Use require for proof.
 Use lifecycle verbs for consumed inputs.
 Use create for proposed outputs.
@@ -734,7 +751,7 @@ Conditional proof logic is allowed, but it should be visually explicit:
 
 ```cellscript
 action settle(input: Position) -> output: Position
-    move input.phase: Open -> output.phase: Settled
+    transition input.phase: Open -> output.phase: Settled
 where
     let reward = dao_reward(input.deposit_header, current_header)
 
@@ -796,7 +813,7 @@ Publish moves `Created` to `Live`:
 
 ```cellscript
 action publish(input: Offer) -> output: Offer
-    move input.state: Created -> output.state: Live
+    transition input.state: Created -> output.state: Live
 where
     require output.seller == input.seller
     require output.buyer == input.buyer
@@ -809,7 +826,7 @@ Fill moves `Live` to `Filled`, consumes payment, and creates seller payment:
 ```cellscript
 action fill(input: Offer, payment: Token, buyer: Address)
     -> (output: Offer, seller_payment: Token)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require payment.amount == input.price
     require payment.symbol == input.payment_symbol
@@ -831,7 +848,7 @@ Cancel moves `Live` to `Cancelled`:
 
 ```cellscript
 action cancel(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Cancelled
+    transition input.state: Live -> output.state: Cancelled
 where
     require output.seller == input.seller
     require output.buyer == input.buyer
@@ -843,7 +860,7 @@ The pattern is consistent:
 
 1. The signature says which Cells are input evidence and which Cells are output
    evidence.
-2. `move` says which state edge is being proved.
+2. `transition` says which state edge is being proved.
 3. `where` contains proof logic.
 4. `require` states field preservation and accounting.
 5. `consume` and `create` classify concrete Cell effects.
@@ -873,21 +890,22 @@ action mint(auth: MintAuthority, to: Address, amount: u64)
     -> (next_auth: MintAuthority, token: Token)
 ```
 
-### `moves` Became `move`
+### Legacy `move` Became `transition`
 
 Old:
 
 ```cellscript
 moves input.state Live -> output.state Filled
+move input.state: Live -> output.state: Filled
 ```
 
 New:
 
 ```cellscript
-move input.state: Live -> output.state: Filled
+transition input.state: Live -> output.state: Filled
 ```
 
-The singular form matches the other action-level verifier clauses. The colons
+The action-level `transition` form names the state edge directly. The colons
 make field/value boundaries clear.
 
 ### Action Braces Became `where`
@@ -981,8 +999,8 @@ When writing 0.13-style actions, use this checklist:
 - Use `read`, `protected`, `witness`, and `lock_args` as prefix source
   qualifiers.
 - Keep ordinary scalar arguments as ordinary parameters.
-- Put `move` clauses before `where`.
-- Use `move field: From -> field: To`, with colons.
+- Put `transition` clauses before `where`.
+- Use `transition field: From -> field: To`, with colons.
 - Put proof logic under `where`.
 - Use `require` for authorization, field preservation, accounting, and
   conservation checks.
@@ -1001,7 +1019,7 @@ The 0.13 action model can be summarized like this:
 Signature is transaction topology.
 State is explicit data.
 Flow declares legal state edges.
-Move binds an action to one edge.
+Transition binds an action to one edge.
 Where scopes the proof.
 Require states verifier constraints.
 Create constrains proposed outputs.

@@ -158,6 +158,10 @@ helpers, `ckb::*`, and `env::sighash_all`.
 - Top-level `examples/*.cell` is the single checked-in bundled business source,
   and production acceptance compiles those canonical examples directly instead
   of mirrored `business` or `acceptance` copies.
+- Action state edges now use the action-level `transition` clause. Legacy
+  `move` spelling is rejected instead of preserved as a compatibility alias.
+  Single-edge and non-empty `transition { ... }` block forms lower to the same
+  state-transition metadata.
 
 ## Intentional Boundaries
 

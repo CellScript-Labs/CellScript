@@ -254,7 +254,9 @@ where
 不属于七个文件的 CKB production acceptance matrix。`registry.cell` 覆盖
 bounded local `Vec<Address>` / `Vec<Hash>` helper；顶层
 `examples/registry.cell` 是这个语言示例的兼容镜像。`order_book.cell` 是
-local stack-backed order vector 草图，不宣称持久化 order-book 语义。
+local stack-backed order vector 草图，不宣称持久化 order-book 语义。v0.14
+language examples 覆盖 CKB source/witness、capacity/time、TYPE_ID、Spawn/IPC
+和 dynamic BLAKE2b 等编译器/工具面。
 
 ## 对比
 
@@ -342,8 +344,8 @@ graph LR
 **2. 语法解析**（`parser/`）
 从 token 流构建 AST。AST 建模完整 CellScript 表面语法：`resource`、
 `shared`、`receipt`、`struct`、`enum`、`action`、`lock`、`function`、
-`use`、`const`、capability gates、声明式 flow、action `move`
-子句、`where` proof block，以及所有语句/表达式形式。
+`use`、`const`、capability gates、声明式 flow、action `transition`
+子句和非空 `transition { ... }` block、`where` proof block，以及所有语句/表达式形式。
 
 **3. 语义分析**（`types/` + `flow/`）
 - *类型检查* — 强制线性资源语义：每个 `resource`/`receipt` 值在 action
@@ -351,7 +353,7 @@ graph LR
   shared-state 可变性规则、capability gates、effect 分类（`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`）和调用签名。
 - *状态转换检查* — 验证显式 state 字段、`flow` 转换图、action
-  `move` 子句、合法状态转换、静态 create-site 检查，以及 `where`
+  `transition` 子句、合法状态转换、静态 create-site 检查，以及 `where`
   proof block 中的分支输出字段约束一致性。
 
 **4. IR 降低**（`ir/` + `optimize/` + `resolve/`）

@@ -9,14 +9,14 @@
     "description": "Create a CellScript action with a where proof block"
   },
   "State Transition Action": {
-    "prefix": "action-move",
+    "prefix": "action-transition",
     "body": [
       "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}",
-      "    move ${2}.${5:state}: ${6:Created} -> ${4}.${5}: ${7:Live}",
+      "    transition ${2}.${5:state}: ${6:Created} -> ${4}.${5}: ${7:Live}",
       "where",
       "    require ${8:${4}.owner == ${2}.owner}"
     ],
-    "description": "Create an action with an explicit state move"
+    "description": "Create an action with an explicit state transition"
   },
   "Lock": {
     "prefix": "lock",
@@ -72,10 +72,10 @@
     ],
     "description": "Constrain a named output with a lock"
   },
-  "Move": {
-    "prefix": "move",
+  "Transition": {
+    "prefix": "transition",
     "body": [
-      "move ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2}: ${5:Live}"
+      "transition ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2}: ${5:Live}"
     ],
     "description": "Declare a field-to-field state transition"
   },

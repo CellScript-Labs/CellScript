@@ -51,7 +51,7 @@ If you already know what you need, jump directly:
 3. [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects):
    understand how values move through a Cell transaction.
 4. [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax):
-   learn the signature-direction action model, `where`, `move`, named outputs,
+   learn the signature-direction action model, `where`, `transition`, named outputs,
    and source qualifiers.
 5. [Standard Library](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-10-Standard-Library):
    use stdlib lifecycle, Cell metadata, accounting, runtime, and collection

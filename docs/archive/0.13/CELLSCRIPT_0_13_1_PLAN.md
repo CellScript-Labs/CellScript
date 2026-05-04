@@ -24,7 +24,7 @@ A transaction proposes a Cell transformation.
 An action verifies whether that transformation is allowed.
 ```
 
-In this model, an `action` is not a method call, not an account-storage mutation, and not a runtime constructor. It is a typed verifier case: it names the input evidence, names the proposed output evidence, and proves the relationship between them. The 0.13 tutorial already frames this explicitly: signature direction describes transaction topology, `where` scopes proof obligations, `move` declares a state edge, `require` states verifier constraints, and `create` constrains proposed outputs.
+In this model, an `action` is not a method call, not an account-storage mutation, and not a runtime constructor. It is a typed verifier case: it names the input evidence, names the proposed output evidence, and proves the relationship between them. The 0.13 tutorial already frames this explicitly: signature direction describes transaction topology, `where` scopes proof obligations, `transition` declares a state edge, `require` states verifier constraints, and `create` constrains proposed outputs.
 
 0.13.1 does **not** change this model.
 
@@ -121,7 +121,7 @@ Before:
 ```cellscript
 action fill(input: Offer, payment: Token, buyer: Address)
     -> (output: Offer, seller_payment: Token)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.seller == input.seller
     require output.price == input.price
@@ -144,7 +144,7 @@ After:
 ```cellscript
 action fill(input: Offer, payment: Token, buyer: Address)
     -> (output: Offer, seller_payment: Token)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     preserve output from input {
         seller
@@ -432,7 +432,7 @@ methodology in `docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`.
 The governance model classifies language features into four layers:
 
 ```text
-Layer 1: Core Verifier Syntax   — action, flow, move, where, require, create, consume, destroy
+Layer 1: Core Verifier Syntax   — action, flow, transition, where, require, create, consume, destroy
 Layer 2: Local Explicit Sugar    — preserve, anonymous require block
 Layer 3: Standard-Library Patterns — claim, settle, transfer, conserve, cell metadata helpers
 Layer 4: Avoided                — policy primitives, preserve all/except
@@ -650,7 +650,7 @@ using both features is:
 ```cellscript
 action fill(input: Offer, payment: Token, buyer: Address)
     -> (output: Offer, seller_payment: Token)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     preserve output from input {
         seller

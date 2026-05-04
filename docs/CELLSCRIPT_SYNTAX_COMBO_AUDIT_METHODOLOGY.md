@@ -301,7 +301,7 @@ Use a weighted grammar, not unconstrained random strings.
 1. Start from minimal templates that compile.
 2. Apply one feature from each chosen axis.
 3. Apply one adversarial mutation:
-   - move syntax into wrong scope;
+   - transition syntax into wrong scope;
    - swap source qualifier;
    - omit one preserved field;
    - change one field type;

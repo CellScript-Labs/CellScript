@@ -45,14 +45,15 @@ syntax forms you will see in the examples:
 | `protected cell: T` | Lock-guarded input Cell view. |
 | `witness arg: T` | Decoded witness data. |
 | `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
-| `move old.state: A -> new.state: B` | Explicit field-to-field state edge. |
+| `transition old.state: A -> new.state: B` | Explicit field-to-field state edge. |
+| `transition { ... }` | Non-empty block form for multiple explicit state edges. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
 | `require condition, "message"` | Action or lock verifier guard with an optional message. |
 | `assert(condition, "message")` | Internal checked assertion. |
 | `let mut xs: Vec<Hash> = []` | Typed empty local `Vec<T>` literal. |
 
 Names such as `old`, `new`, `input`, and `output` are ordinary bindings. The
-semantics come from the action side, source qualifier, `move`, `create`, and
+semantics come from the action side, source qualifier, `transition`, `create`, and
 `require` clauses. Do not use `&mut` on action-boundary Cell parameters; Cell
 updates are expressed by naming the input and proposed output Cell.
 
@@ -247,13 +248,13 @@ views:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require input.price == output.price
     require input.seller == output.seller
 ```
 
-The `move` clause only proves the state edge. Authorization, preservation, and
+The `transition` clause only proves the state edge. Authorization, preservation, and
 conservation checks still belong in explicit `require` statements.
 
 Consume/create-style actions remain valid as front-end sugar:

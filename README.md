@@ -193,13 +193,14 @@ transformations:
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
   shape separates topology, state edge, and proof obligations:
-  `action(old: T) -> new: T`, `move old.field: A -> new.field: B`, then a
+  `action(old: T) -> new: T`, `transition old.field: A -> new.field: B`, then a
   `where` proof block with explicit `require` constraints. Explicit `output`
   parameters and `consume`/`create` actions remain accepted, but the signature
-  direction is the normal input-to-output surface.
+  direction is the normal input-to-output surface. Multiple state edges may be
+  grouped in a non-empty `transition { ... }` block.
   Each state field has exactly one flow declaration; split/partial flow merging
   is not supported.
-- **Scoped proof blocks** — action proof logic lives under `where`; `move` is an
+- **Scoped proof blocks** — action proof logic lives under `where`; `transition` is an
   action-level state edge declaration before `where`, not a statement inside
   conditional proof logic. The type checker rejects asymmetric branch
   constraints when an output field is required in one proof branch but not its
@@ -342,7 +343,8 @@ CKB production acceptance matrix. `registry.cell` covers bounded local
 `Vec<Address>` / `Vec<Hash>` helpers; `examples/registry.cell` keeps that
 surface available from the top-level examples directory. `order_book.cell` is a
 local stack-backed order-vector sketch and does not claim persistent order-book
-semantics.
+semantics. The v0.14 language examples cover CKB source/witness, capacity/time,
+TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
 
 ## Comparison
 
@@ -436,7 +438,7 @@ line/column span for diagnostics.
 Builds an AST from the token stream. The AST models the full surface:
 `resource`, `shared`, `receipt`, `struct`, `enum`, `action`, `lock`,
 `function`, `use`, `const`, capability gates, declarative flows,
-action `move` clauses, and all statement/expression forms.
+action `transition` clauses, and all statement/expression forms.
 
 **3. Semantic analysis** (`types/` + state-transition checks)
 - *Type checking* — enforces linear resource semantics: every
@@ -445,7 +447,7 @@ action `move` clauses, and all statement/expression forms.
   mutability rules, capability gates, effect classification (`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`), and call signatures.
 - *State transition checking* — validates explicit state fields,
-  `flow` transition graphs, action `move` clauses, legal state
+  `flow` transition graphs, action `transition` clauses, legal state
   transitions, and static create-site checks.
 
 **4. IR lowering** (`ir/` + `optimize/` + `resolve/`)

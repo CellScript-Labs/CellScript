@@ -67,11 +67,11 @@ split across compiler metadata, builders, and production evidence.
 | Gap | Current status | Required direction |
 |---|---|---|
 | Signer authorization | `witness Address` parameters can prove equality only inside explicit lock predicates such as `vesting_admin`; `lock_args Address` now exposes script-args data, but neither value proves witness-sighash ownership by itself. | Add explicit script-hash policy, sighash verification, and later first-class verified signer binding. |
-| Lock behavior | All 16 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
+| Lock behavior | All 17 bundled locks are strict-compiled and covered by builder-backed local CKB valid-spend and invalid-spend transactions. | Keep the matrix mandatory and extend it when new locks enter the bundled production scope. |
 | Explicit Cell updates | Metadata exposes input/output access through action signatures and `require` constraints; source no longer looks like in-place account storage. | Keep continuity policy explicit for type id, lock, data schema, and capacity. |
 | Capacity policy | Capacity evidence is builder/runtime-required and validated by reports. | Promote common capacity requirements into declarative DSL policy where practical. |
 | Timelock policy | since/header/runtime features are visible in metadata. | Make since/header assumptions more directly declarative and statically auditable. |
-| Collection examples | `examples/registry.cell`, `examples/language/registry.cell`, and `examples/language/order_book.cell` cover bounded local Vec language behavior. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |
+| Language examples | `examples/registry.cell` and every checked-in `examples/language/*.cell` file cover compiler/tooling surfaces such as bounded local Vec behavior, stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and dynamic BLAKE2b. | Keep them outside production CKB scope unless promoted into builder-backed chain evidence. |
 
 The most important correction is to avoid overstating what action coverage
 proves. The current production run proves transaction shape, Cell data layout,

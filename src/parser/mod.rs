@@ -87,6 +87,7 @@ impl<'a> Parser<'a> {
             TokenKind::Action => Some("action".to_string()),
             TokenKind::Lock => Some("lock".to_string()),
             TokenKind::Where => Some("where".to_string()),
+            TokenKind::Transition => Some("transition".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
             TokenKind::Transfer => Some("transfer".to_string()),
@@ -1046,8 +1047,11 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             match &self.current().kind {
-                TokenKind::Identifier(name) if name == "move" => {
+                TokenKind::Transition => {
                     state_edges.extend(self.parse_action_state_edges()?);
+                }
+                TokenKind::Identifier(name) if name == "move" => {
+                    return Err(CompileError::new("state edge clauses use 'transition', not legacy 'move'", self.current().span));
                 }
                 _ => break,
             }
@@ -1106,63 +1110,42 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
-        if !matches!(&self.current().kind, TokenKind::Identifier(name) if name == "move") {
+        if !self.check(&TokenKind::Transition) {
             return Ok(Vec::new());
         }
 
         let mut edges = Vec::new();
-        while matches!(&self.current().kind, TokenKind::Identifier(name) if name == "move") {
+        while self.check(&TokenKind::Transition) {
             self.advance();
+            self.skip_newlines();
+            if self.check(&TokenKind::LBrace) {
+                let block_span = self.current().span;
+                self.advance();
+                let mut block_edge_count = 0usize;
+                loop {
+                    self.skip_newlines();
+                    if self.check(&TokenKind::RBrace) {
+                        if block_edge_count == 0 {
+                            return Err(CompileError::new("transition block must contain at least one state edge", block_span));
+                        }
+                        self.advance();
+                        break;
+                    }
+                    if self.check(&TokenKind::Eof) {
+                        return Err(CompileError::new("unterminated transition block", self.current().span));
+                    }
+                    edges.push(self.parse_action_state_edge()?);
+                    block_edge_count += 1;
+                    self.consume_optional_semi();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.skip_newlines();
+                continue;
+            }
             loop {
-                let start_span = self.current().span;
-                let first = self.parse_name_path()?;
-                if !self.check(&TokenKind::Dot) {
-                    return Err(CompileError::new(
-                        "state move must use an explicit input field path: move input.state: From -> output.state: To",
-                        start_span,
-                    ));
-                }
-                self.advance();
-                let field = self.parse_name()?;
-                let path_span = Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column);
-                let path = StateFieldPath { base: first, field, span: path_span };
-                if !self.check(&TokenKind::Colon) {
-                    return Err(CompileError::new(
-                        "state move must put ':' before the source state: move input.state: From -> output.state: To",
-                        self.current().span,
-                    ));
-                }
-                self.advance();
-                let from = self.parse_name_path()?;
-                self.expect(TokenKind::Arrow)?;
-                let to_start_span = self.current().span;
-                let to_first = self.parse_name_path()?;
-                if !self.check(&TokenKind::Dot) {
-                    return Err(CompileError::new(
-                        "state move must use an explicit output field path: move input.state: From -> output.state: To",
-                        to_start_span,
-                    ));
-                }
-                self.advance();
-                let to_field = self.parse_name()?;
-                let to_path_span = Span::new(to_start_span.start, self.current().span.end, to_start_span.line, to_start_span.column);
-                let to_path = StateFieldPath { base: to_first, field: to_field, span: to_path_span };
-                if !self.check(&TokenKind::Colon) {
-                    return Err(CompileError::new(
-                        "state move must put ':' before the target state: move input.state: From -> output.state: To",
-                        self.current().span,
-                    ));
-                }
-                self.advance();
-                let to = self.parse_name_path()?;
-                let end_span = self.current().span;
-                edges.push(ActionStateEdge {
-                    path,
-                    to_path,
-                    from,
-                    to,
-                    span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-                });
+                edges.push(self.parse_action_state_edge()?);
 
                 if self.check(&TokenKind::Comma) {
                     self.advance();
@@ -1174,6 +1157,58 @@ impl<'a> Parser<'a> {
         }
 
         Ok(edges)
+    }
+
+    fn parse_action_state_edge(&mut self) -> Result<ActionStateEdge> {
+        let start_span = self.current().span;
+        let first = self.parse_name_path()?;
+        if !self.check(&TokenKind::Dot) {
+            return Err(CompileError::new(
+                "state transition must use an explicit input field path: transition input.state: From -> output.state: To",
+                start_span,
+            ));
+        }
+        self.advance();
+        let field = self.parse_name()?;
+        let path_span = Span::new(start_span.start, self.current().span.end, start_span.line, start_span.column);
+        let path = StateFieldPath { base: first, field, span: path_span };
+        if !self.check(&TokenKind::Colon) {
+            return Err(CompileError::new(
+                "state transition must put ':' before the source state: transition input.state: From -> output.state: To",
+                self.current().span,
+            ));
+        }
+        self.advance();
+        let from = self.parse_name_path()?;
+        self.expect(TokenKind::Arrow)?;
+        let to_start_span = self.current().span;
+        let to_first = self.parse_name_path()?;
+        if !self.check(&TokenKind::Dot) {
+            return Err(CompileError::new(
+                "state transition must use an explicit output field path: transition input.state: From -> output.state: To",
+                to_start_span,
+            ));
+        }
+        self.advance();
+        let to_field = self.parse_name()?;
+        let to_path_span = Span::new(to_start_span.start, self.current().span.end, to_start_span.line, to_start_span.column);
+        let to_path = StateFieldPath { base: to_first, field: to_field, span: to_path_span };
+        if !self.check(&TokenKind::Colon) {
+            return Err(CompileError::new(
+                "state transition must put ':' before the target state: transition input.state: From -> output.state: To",
+                self.current().span,
+            ));
+        }
+        self.advance();
+        let to = self.parse_name_path()?;
+        let end_span = self.current().span;
+        Ok(ActionStateEdge {
+            path,
+            to_path,
+            from,
+            to,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
     }
 
     fn parse_fn(&mut self) -> Result<FnDef> {
@@ -1255,7 +1290,7 @@ impl<'a> Parser<'a> {
 
         if self.check(&TokenKind::Ref) {
             return Err(CompileError::new(
-                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T` plus `move` and `require` constraints for Cell state updates",
+                "parameter modifier 'ref' is reserved but unsupported; use '&T' for read-only helper views, or `action(before: T) -> after: T` plus `transition` and `require` constraints for Cell state updates",
                 self.current().span,
             ));
         }
@@ -2412,7 +2447,7 @@ where
     }
 
     #[test]
-    fn test_parse_flow_and_action_move_clause() {
+    fn test_parse_flow_and_action_transition_clause() {
         let input = r#"
 module test
 
@@ -2422,7 +2457,7 @@ flow OfferFlow for Offer.state {
 }
 
 	action accept(input: Offer) -> output: Offer
-	    move input.state: Live -> output.state: Filled
+	    transition input.state: Live -> output.state: Filled
 	where
     require output.state == OfferState::Filled
 "#;
@@ -2443,18 +2478,73 @@ flow OfferFlow for Offer.state {
     }
 
     #[test]
-    fn test_rejects_move_clause_without_state_colons() {
+    fn test_parse_action_transition_block() {
+        let input = r#"
+module test
+
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
+    transition {
+        input.state: Live -> output.state: Filled
+        receipt.state: Open -> next_receipt.state: Closed
+    }
+where
+    require output.state == OfferState::Filled
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+        assert_eq!(action.state_edges.len(), 2);
+        assert_eq!(action.state_edges[0].path.base, "input");
+        assert_eq!(action.state_edges[1].path.base, "receipt");
+        assert_eq!(action.state_edges[1].to_path.base, "next_receipt");
+    }
+
+    #[test]
+    fn test_rejects_empty_transition_block() {
         let input = r#"
 module test
 
 action accept(input: Offer) -> output: Offer
-    move input.state Live -> output.state Filled
+    transition {
+    }
 where
     require output.state == OfferState::Filled
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("state move must put ':' before the source state"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("transition block must contain at least one state edge"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_legacy_move_clause() {
+        let input = r#"
+module test
+
+action accept(input: Offer) -> output: Offer
+    move input.state: Live -> output.state: Filled
+where
+    require output.state == OfferState::Filled
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("use 'transition', not legacy 'move'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_transition_clause_without_state_colons() {
+        let input = r#"
+module test
+
+action accept(input: Offer) -> output: Offer
+    transition input.state Live -> output.state Filled
+where
+    require output.state == OfferState::Filled
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("state transition must put ':' before the source state"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -2659,7 +2749,7 @@ resource Offer has store {
 }
 
 action fill(input: Offer) -> (output: Offer)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     preserve output from input {
         seller

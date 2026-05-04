@@ -652,7 +652,7 @@ impl LspServer {
             ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
-            ("move", "move ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2:state}: ${5:Live}"),
+            ("transition", "transition ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2:state}: ${5:Live}"),
             (
                 "lock",
                 "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    require ${6} == ${2}.owner\n    require ${4} == ${6}\n    $0\n}",
@@ -1016,11 +1016,11 @@ impl LspServer {
             for param in params {
                 if param.name == symbol {
                     let note = if param.is_mut {
-                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates should be modeled with `action(before: T) -> after: T` plus `move` and `require` constraints."
+                        "\n\nLeading `mut` only applies to local-style mutable value bindings; Cell state updates should be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints."
                     } else if param.source == ParamSource::Input {
                         "\n\n`input` marks a consumed transaction input Cell explicitly. Omitting it is equivalent for Cell-backed action parameters."
                     } else if param.source == ParamSource::Output {
-                        "\n\n`output` marks a proposed transaction output Cell. Use `move input.state: Live -> output.state: Filled` for state transitions and `require` for field continuity."
+                        "\n\n`output` marks a proposed transaction output Cell. Use `transition input.state: Live -> output.state: Filled` for state transitions and `require` for field continuity."
                     } else if param.source == ParamSource::LockArgs {
                         "\n\n`lock_args` is decoded from the executing lock Script.args bytes."
                     } else {
@@ -2253,7 +2253,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "flow"));
         assert!(keywords.iter().any(|k| k.label == "input"));
         assert!(!keywords.iter().any(|k| k.label == "output"));
-        assert!(keywords.iter().any(|k| k.label == "move"));
+        assert!(keywords.iter().any(|k| k.label == "transition"));
+        assert!(!keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(!keywords.iter().any(|k| k.label == "transfer"));
         assert!(keywords.iter().any(|k| k.label == "std::cell::same_lock"));
@@ -2341,7 +2342,7 @@ flow OtherTicket.state {
 }
 
 action activate(ticket: Ticket) -> active_ticket: Ticket
-    move ticket.state: Created -> active_ticket.state: Active
+    transition ticket.state: Created -> active_ticket.state: Active
 where
     assert_invariant(ticket.state < Ticket::Closed, "closed")
     require active_ticket.state == Ticket::Active
@@ -2391,7 +2392,7 @@ flow OfferFlow for Offer.state {
 }
 
 action accept(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.state == Offer::Filled
     require output.amount == input.amount
@@ -2507,7 +2508,7 @@ flow Ticket.state {
 }
 
 action activate(ticket: Ticket) -> active_ticket: Ticket
-    move ticket.state: Created -> active_ticket.state: Active
+    transition ticket.state: Created -> active_ticket.state: Active
 where
     let active = Ticket::Active
     require active_ticket.state == active

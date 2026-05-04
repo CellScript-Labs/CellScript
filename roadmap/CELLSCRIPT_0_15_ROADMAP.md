@@ -641,7 +641,7 @@ claim_proof(
 **Problem**
 
 One-to-one updates are explicit in 0.13 through signature-directed
-`action(before: T) -> after: T` topology and `move`/`require` constraints, but
+`action(before: T) -> after: T` topology and `transition`/`require` constraints, but
 split, merge, and rebalance transactions still need a first-class way to
 declare cardinality and pairing policy. Those shapes should not fall back to
 compiler guessing or scattered consume/create reconstruction.

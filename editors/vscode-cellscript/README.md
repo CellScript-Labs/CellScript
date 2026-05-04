@@ -44,12 +44,12 @@ outside the LSP scope.
 
 - `.cell` file association
 - TextMate syntax highlighting for the current 0.13 action model (`where`
-  proof blocks, `move input.state: A -> output.state: B`, `flow`, named
+  proof blocks, `transition input.state: A -> output.state: B`, `flow`, named
   output `create out = T { ... }`, and source qualifiers such as `read`,
   `protected`, `witness`, and `lock_args`)
 - comment, bracket, auto-close, and folding configuration
 - snippets for resources, shared state, receipts, flows, action proof blocks,
-  field-to-field state moves, locks, source-qualified parameters, effects,
+  field-to-field state transitions, locks, source-qualified parameters, effects,
   named output `create ... = ... with_lock`, anonymous `require` blocks,
   `preserve` blocks, and stdlib lifecycle/cell metadata helpers
 - 0.14 lock-boundary snippets and highlighting for `protected`, `lock_args`,
@@ -63,7 +63,7 @@ surface:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.price == input.price
     require output.seller == input.seller

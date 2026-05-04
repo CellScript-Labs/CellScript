@@ -1318,7 +1318,7 @@ flow VestingGrant.state {
 }
 
 action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant)
-    move grant.state: Claimable -> updated_grant.state: FullyClaimed
+    transition grant.state: Claimable -> updated_grant.state: FullyClaimed
 where
     let now = env::current_timepoint()
 

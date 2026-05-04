@@ -127,6 +127,7 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::Usage: scripts/ckb_cellscript_acceptance.sh'
         'scripts/ckb_cellscript_acceptance.sh::strict-original-ckb'
         'scripts/ckb_cellscript_acceptance.sh::bundled_examples_exact_order'
+        'scripts/ckb_cellscript_acceptance.sh::language_examples_exact_order'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
         'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'

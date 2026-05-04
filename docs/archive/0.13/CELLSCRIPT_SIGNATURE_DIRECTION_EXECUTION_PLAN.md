@@ -22,7 +22,7 @@ Adopt the signature-direction surface as the canonical action model:
 
 ```cellscript
 action fill_offer(input: Offer) -> output: Offer
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     require output.price == input.price
     require output.seller == input.seller
@@ -34,11 +34,11 @@ Meaning:
 |---|---|
 | `input: Offer` | consumed input cell view |
 | `-> output: Offer` | proposed output cell binding |
-| `move input.state: Live -> output.state: Filled` | explicit state edge constraint |
+| `transition input.state: Live -> output.state: Filled` | explicit state edge constraint |
 | `where` | proof block |
 | `require` | verifier constraint |
 
-The signature defines the input/output topology. `move` defines state edges.
+The signature defines the input/output topology. `transition` defines state edges.
 Lifecycle verbs define how consumed inputs are used. Source qualifiers define
 non-default data sources.
 
@@ -161,22 +161,33 @@ Rules:
 - `by action` must match the exact action edge;
 - enum order is ABI-sensitive until explicit discriminants are supported.
 
-### State Move
+### State Transition
 
-Use singular `move`, not `moves`.
+Use `transition`, not legacy `move` or `moves`.
 
 ```cellscript
-move input.state: Live -> output.state: Filled
+transition input.state: Live -> output.state: Filled
 ```
+
+Multiple explicit edges use a block:
+
+```cellscript
+transition {
+    input.state: Live -> output.state: Filled
+    receipt.state: Open -> next_receipt.state: Closed
+}
+```
+
+The block form must contain at least one edge.
 
 Rules:
 
 - the source and target state values must be preceded by `:`;
-- `move` appears after the action signature and before `where`;
-- `move` is not proof logic and is not allowed inside `where`, `if`, or `match`;
+- `transition` appears after the action signature and before `where`;
+- `transition` is not proof logic and is not allowed inside `where`, `if`, or `match`;
 - the full field-to-field form is canonical.
 
-Do not add short `move input.state: Live -> Filled` until successor-output
+Do not add short `transition input.state: Live -> Filled` until successor-output
 resolution is formally specified.
 
 ### Named Output Creation
@@ -213,7 +224,7 @@ Consumed inputs must reach an explicit lifecycle or output-binding role.
 |---|---|
 | `consume x` | ordinary protocol consumption or value transformation |
 | `destroy x` | terminal resource destruction |
-| `move x.state: A -> y.state: B` | state successor relation |
+| `transition x.state: A -> y.state: B` | state successor relation |
 
 Do not infer destruction from silence:
 
@@ -235,7 +246,7 @@ lowering, formatter, LSP, examples, docs, and tests:
 - signature direction defines action input/output topology;
 - named returns define proposed output cells;
 - `where` is the action proof block;
-- singular `move` with colon syntax defines state edges;
+- `transition` with colon syntax defines state edges;
 - `flow` is the public state topology primitive;
 - source qualifiers are prefix forms: `read`, `witness`, `protected`,
   `lock_args`;
@@ -245,7 +256,7 @@ lowering, formatter, LSP, examples, docs, and tests:
   core (see syntax governance document);
 - ordinary `fn` parameters have no cell source semantics;
 - action-boundary `&mut` is not part of the public cell transformation model;
-- continuity is expressed by `require` constraints and state `move`, not by a
+- continuity is expressed by `require` constraints and state `transition`, not by a
   separate lineage keyword.
 
 ## Rejected
@@ -254,8 +265,9 @@ These forms should not be kept as compatibility surface:
 
 | Rejected form | Reason |
 |---|---|
-| plural `moves` | inconsistent with other imperative verifier clauses; current surface uses singular `move` |
-| `move old.state Live -> new.state Filled` | state values need `:` for readability and parser clarity |
+| `move old.state: Live -> new.state: Filled` | legacy spelling is rejected; use `transition` |
+| plural `moves` | legacy spelling; current surface uses `transition` |
+| `transition old.state Live -> new.state Filled` | state values need `:` for readability and parser clarity |
 | action body braces as canonical action proof scope | `where` better separates transition declarations from proof obligations |
 | `&mut T` at action boundary | implies in-place mutation instead of input/output cell transformation |
 | `x: read_ref T` | source qualifier belongs before the binding: `read x: T` |
@@ -271,8 +283,7 @@ These are reasonable, but should be separate implementation tracks rather than
 |---|---|
 | `transfer token { ... } with_lock(to)` | removed; use `consume` + `create` with explicit field mapping instead |
 | `create_each` | useful batch-create sugar; needs static expansion and output obligation checks |
-| multi-field `move` sugar | useful only after single-edge proof obligations are fully stable |
-| short `move input.state: A -> B` | requires deterministic successor inference in multi-output actions |
+| short `transition input.state: A -> B` | requires deterministic successor inference in multi-output actions |
 | `Option<T>` | useful for lookup/membership, but affects typecheck, ABI, pattern matching, and lowering |
 | `Result<T, E>` | verifier failure is normally transaction rejection; recoverable errors need a stricter design |
 | explicit enum discriminants | important for ABI stability; needs parser/typecheck/metadata/formatter support |
@@ -286,9 +297,9 @@ These are reasonable, but should be separate implementation tracks rather than
 Strict mode should reject:
 
 - input resource with no lifecycle verb and no output successor;
-- `move` edge not declared in the relevant `flow`;
+- `transition` edge not declared in the relevant `flow`;
 - `flow ... by action` that does not exactly match the action's explicit
-  `move` edge;
+  `transition` edge;
 - `claim` on a non-claimable value;
 - `destroy` without a destroy capability;
 - lifecycle verbs applied to `read`, `witness`, `protected`, or `lock_args`
@@ -365,14 +376,14 @@ where
 
 ### Vesting Claim
 
-Use multiple explicit `move` clauses only when the action really permits
+Use multiple explicit `transition` clauses only when the action really permits
 multiple declared state edges. Otherwise split the action into separate
 transition-specific actions.
 
 ```cellscript
 action claim_vested(grant: VestingGrant)
     -> (tokens: Token, next_grant: VestingGrant)
-    move grant.state: Claimable -> next_grant.state: FullyClaimed
+    transition grant.state: Claimable -> next_grant.state: FullyClaimed
 where
     consume grant
 
@@ -394,7 +405,7 @@ shared arithmetic and separate actions for distinct state edges.
 ### Parser And Formatter
 
 - enforce `where` action proof blocks;
-- enforce singular `move`;
+- enforce `transition`;
 - require `:` before both state values;
 - parse named returns as output bindings;
 - parse prefix source qualifiers;
@@ -408,7 +419,7 @@ shared arithmetic and separate actions for distinct state edges.
 - keep scalar parameters ordinary;
 - ensure `fn` has no cell source semantics;
 - reject lifecycle effects on read-only sources;
-- validate `move` edges against `flow`;
+- validate `transition` edges against `flow`;
 - validate `by action` against exact action edge;
 - enforce lifecycle classification for consumed inputs;
 - enforce named output creation.
@@ -430,7 +441,7 @@ shared arithmetic and separate actions for distinct state edges.
 - remove action-boundary `&T` and `&mut T`;
 - use `read x: T` for CellDep/reference inputs;
 - document `fn` as value-only helper boundary;
-- show `flow`, `move`, lifecycle verbs, and `where` together in one canonical
+- show `flow`, `transition`, lifecycle verbs, and `where` together in one canonical
   example;
 - keep deferred ergonomics in roadmap, not tutorial mainline.
 
@@ -439,7 +450,7 @@ shared arithmetic and separate actions for distinct state edges.
 ```text
 State is data.
 Signature is topology.
-Move is a state edge.
+Transition is a state edge.
 Lifecycle verbs classify consumption.
 Where is proof.
 Require is the atomic verifier constraint.

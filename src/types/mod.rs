@@ -675,7 +675,7 @@ impl<'a> TypeChecker<'a> {
                 if !has_exact_move {
                     return Err(CompileError::new(
                         format!(
-                            "state transition action '{}' is bound to '{}.{} {} -> {}' and must declare the exact field-to-field move",
+                            "state transition action '{}' is bound to '{}.{} {} -> {}' and must declare the exact field-to-field transition",
                             action.name, spec.type_name, spec.field_name, transition.from, transition.to
                         ),
                         transition.span,
@@ -1283,7 +1283,7 @@ impl<'a> TypeChecker<'a> {
                 if previous_output != to_path.base {
                     return Err(CompileError::new(
                         format!(
-                            "state move binding '{}' points to both '{}' and '{}'; split/merge lineage is not supported",
+                            "state transition binding '{}' points to both '{}' and '{}'; split/merge lineage is not supported",
                             from_path.base, previous_output, to_path.base
                         ),
                         state_edge.span,
@@ -1294,7 +1294,7 @@ impl<'a> TypeChecker<'a> {
                 if previous_input != from_path.base {
                     return Err(CompileError::new(
                         format!(
-                            "state move output '{}' is reached from both '{}' and '{}'; split/merge lineage is not supported",
+                            "state transition output '{}' is reached from both '{}' and '{}'; split/merge lineage is not supported",
                             to_path.base, previous_input, from_path.base
                         ),
                         state_edge.span,
@@ -1308,10 +1308,10 @@ impl<'a> TypeChecker<'a> {
             let to_path = &state_edge.to_path;
             let ty = env
                 .lookup(&path.base)
-                .ok_or_else(|| CompileError::new(format!("unknown state move binding '{}'", path.base), path.span))?;
+                .ok_or_else(|| CompileError::new(format!("unknown state transition binding '{}'", path.base), path.span))?;
             let Some(param) = action.params.iter().find(|param| param.name == path.base) else {
                 return Err(CompileError::new(
-                    format!("state move binding '{}' must name an action input parameter", path.base),
+                    format!("state transition binding '{}' must name an action input parameter", path.base),
                     path.span,
                 ));
             };
@@ -1321,25 +1321,27 @@ impl<'a> TypeChecker<'a> {
             {
                 return Err(CompileError::new(
                     format!(
-                        "state move binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, output, or read parameter",
+                        "state transition binding '{}' must be an owned Cell input parameter, not a reference, witness, lock_args, protected, output, or read parameter",
                         path.base
                     ),
                     path.span,
                 ));
             }
             let type_name = Self::base_type_name(ty)
-                .ok_or_else(|| CompileError::new(format!("state move binding '{}' is not a named state type", path.base), path.span))?
+                .ok_or_else(|| {
+                    CompileError::new(format!("state transition binding '{}' is not a named state type", path.base), path.span)
+                })?
                 .to_string();
             let Some(output_binding) = output_bindings.get(&to_path.base) else {
                 return Err(CompileError::new(
-                    format!("state move output binding '{}' must be a named action return", to_path.base),
+                    format!("state transition output binding '{}' must be a named action return", to_path.base),
                     to_path.span,
                 ));
             };
             if output_binding.type_name != type_name {
                 return Err(CompileError::new(
                     format!(
-                        "state move input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
+                        "state transition input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
                         path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
                     ),
                     state_edge.span,
@@ -1352,7 +1354,7 @@ impl<'a> TypeChecker<'a> {
             if spec.field_name != path.field {
                 return Err(CompileError::new(
                     format!(
-                        "state move field '{}.{}' does not match declared flow field '{}.{}'",
+                        "state transition field '{}.{}' does not match declared flow field '{}.{}'",
                         path.base, path.field, type_name, spec.field_name
                     ),
                     path.span,
@@ -1361,7 +1363,7 @@ impl<'a> TypeChecker<'a> {
             if spec.field_name != to_path.field {
                 return Err(CompileError::new(
                     format!(
-                        "state move output field '{}.{}' does not match declared flow field '{}.{}'",
+                        "state transition output field '{}.{}' does not match declared flow field '{}.{}'",
                         to_path.base, to_path.field, type_name, spec.field_name
                     ),
                     to_path.span,
@@ -1766,7 +1768,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `move` and `require` constraints in {} '{}'",
+                    "`&mut` Cell parameters are not valid at callable boundaries; use `action(before: T) -> after: T` plus `transition` and `require` constraints in {} '{}'",
                     callable_kind, callable_name
                 ),
                 param.span,
@@ -1839,7 +1841,7 @@ impl<'a> TypeChecker<'a> {
         if callable_kind != "action" && self.type_contains_cell_backed_value(&param.ty) {
             return Err(CompileError::new(
                 format!(
-                    "{} '{}' parameter '{}' cannot use owned cell-backed type {}; use a read-only '&T' parameter for predicate/helper reads or move ownership transitions into an action",
+                    "{} '{}' parameter '{}' cannot use owned cell-backed type {}; use a read-only '&T' parameter for predicate/helper reads or transition ownership in an action",
                     callable_kind,
                     callable_name,
                     param.name,
@@ -1858,7 +1860,7 @@ impl<'a> TypeChecker<'a> {
         if param.is_read_ref || matches!(param.ty, Type::Ref(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' is a read-only reference; Cell state updates must be modeled with `action(before: T) -> after: T` plus `move` and `require` constraints",
+                    "parameter '{}' is a read-only reference; Cell state updates must be modeled with `action(before: T) -> after: T` plus `transition` and `require` constraints",
                     param.name
                 ),
                 param.span,
@@ -1867,7 +1869,7 @@ impl<'a> TypeChecker<'a> {
         if matches!(param.ty, Type::MutRef(_)) {
             return Err(CompileError::new(
                 format!(
-                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(before: T) -> after: T` plus `move` and `require` constraints",
+                    "parameter '{}' cannot use `&mut` Cell syntax; use `action(before: T) -> after: T` plus `transition` and `require` constraints",
                     param.name
                 ),
                 param.span,

@@ -212,17 +212,21 @@ impl Formatter {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
         self.push_line(&signature);
-        self.indent_level += 1;
-        for state_edge in &action.state_edges {
-            let path = &state_edge.path;
-            let to_path = &state_edge.to_path;
-            let edge = format!(
-                "move {}.{}: {} -> {}.{}: {}",
-                path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to
-            );
-            self.push_line(&edge);
+        if action.state_edges.len() == 1 {
+            self.indent_level += 1;
+            self.push_line(&format_action_state_edge("transition ", &action.state_edges[0]));
+            self.indent_level -= 1;
+        } else if !action.state_edges.is_empty() {
+            self.indent_level += 1;
+            self.push_line("transition {");
+            self.indent_level += 1;
+            for state_edge in &action.state_edges {
+                self.push_line(&format_action_state_edge("", state_edge));
+            }
+            self.indent_level -= 1;
+            self.push_line("}");
+            self.indent_level -= 1;
         }
-        self.indent_level -= 1;
         if action.body.is_empty() {
             return Ok(());
         }
@@ -536,6 +540,12 @@ fn format_action_outputs(outputs: &[ActionOutput]) -> String {
     }
 }
 
+fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> String {
+    let path = &state_edge.path;
+    let to_path = &state_edge.to_path;
+    format!("{}{}.{}: {} -> {}.{}: {}", prefix, path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to)
+}
+
 fn format_binding_pattern(pattern: &BindingPattern) -> String {
     match pattern {
         BindingPattern::Name(name) => name.clone(),
@@ -701,7 +711,7 @@ flow Offer.state {
 }
 
 action fill(input: Offer) -> (output: Offer)
-    move input.state: Live -> output.state: Filled
+    transition input.state: Live -> output.state: Filled
 where
     preserve output from input {
         seller
@@ -721,6 +731,36 @@ where
         let module2 = parser::parse(&tokens2).unwrap();
         let formatted2 = format_default(&module2).unwrap();
         assert_eq!(formatted, formatted2, "formatter round-trip failed for preserve block");
+    }
+
+    #[test]
+    fn format_action_transition_block_for_multiple_edges() {
+        let source = r#"
+module demo
+
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
+    transition {
+        input.state: Live -> output.state: Filled
+        receipt.state: Open -> next_receipt.state: Closed
+    }
+where
+    require output.owner == input.owner
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("transition {\n"), "formatted output should use a transition block:\n{}", formatted);
+        assert!(
+            formatted.contains("input.state: Live -> output.state: Filled"),
+            "formatted output should contain the first transition edge:\n{}",
+            formatted
+        );
+        assert!(
+            formatted.contains("receipt.state: Open -> next_receipt.state: Closed"),
+            "formatted output should contain the second transition edge:\n{}",
+            formatted
+        );
     }
 
     #[test]

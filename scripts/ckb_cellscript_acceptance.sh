@@ -286,13 +286,26 @@ NON_PRODUCTION_EXAMPLES = [
     # bundled-contract matrix.
     "registry.cell",
 ]
+LANGUAGE_EXAMPLES = [
+    "canonical_style.cell",
+    "order_book.cell",
+    "registry.cell",
+    "stdlib.cell",
+    "v0_14_capacity_time.cell",
+    "v0_14_ckb_type_id_create.cell",
+    "v0_14_delegate_verify.cell",
+    "v0_14_hash_blake2b.cell",
+    "v0_14_multi_step_pipeline.cell",
+    "v0_14_witness_source.cell",
+]
 EXAMPLE_SCOPE = {
     "production_bundled_examples": EXAMPLES,
-    "non_production_language_examples": NON_PRODUCTION_EXAMPLES,
+    "non_production_top_level_examples": NON_PRODUCTION_EXAMPLES,
+    "non_production_language_examples": LANGUAGE_EXAMPLES,
     "production_scope_note": (
         "Only production_bundled_examples are deployed and action-exercised by this CKB production "
-        "acceptance report. non_production_language_examples are covered by compiler/tooling tests unless "
-        "they are promoted into production_bundled_examples."
+        "acceptance report. non_production_top_level_examples and non_production_language_examples are "
+        "covered by compiler/tooling tests unless they are promoted into production_bundled_examples."
     ),
 }
 LOCK_ACCEPTANCE_SCOPE = {
@@ -347,12 +360,28 @@ actual_flat_examples = sorted(
 )
 if actual_flat_examples != sorted(EXAMPLES):
     raise SystemExit(f"canonical bundled examples changed: expected {sorted(EXAMPLES)}, found {actual_flat_examples}")
+actual_non_production_examples = sorted(
+    path.name
+    for path in examples_dir.glob("*.cell")
+    if path.is_file() and path.name in NON_PRODUCTION_EXAMPLES
+)
+if actual_non_production_examples != sorted(NON_PRODUCTION_EXAMPLES):
+    raise SystemExit(
+        f"non-production top-level examples changed: expected {sorted(NON_PRODUCTION_EXAMPLES)}, "
+        f"found {actual_non_production_examples}"
+    )
+actual_language_examples = sorted(path.name for path in language_examples_dir.glob("*.cell") if path.is_file())
+if actual_language_examples != sorted(LANGUAGE_EXAMPLES):
+    raise SystemExit(f"language examples changed: expected {sorted(LANGUAGE_EXAMPLES)}, found {actual_language_examples}")
 for stale_dir in ("business", "acceptance"):
     stale_path = examples_dir / stale_dir
     if stale_path.exists():
         raise SystemExit(f"stale checked-in example mirror directory must be removed: {stale_path.relative_to(repo_root)}")
 for name in NON_PRODUCTION_EXAMPLES:
-    if not language_example_path(name).is_file():
+    if not (examples_dir / name).is_file():
+        raise SystemExit(f"missing non-production top-level example: {name}")
+for name in LANGUAGE_EXAMPLES:
+    if not (language_examples_dir / name).is_file():
         raise SystemExit(f"missing non-production language example: {name}")
 
 source_root = run_dir / "generated-sources"
@@ -1970,6 +1999,8 @@ report = {
     "bundled_examples_exact_order": EXAMPLES,
     "bundled_examples_count": len(EXAMPLES),
     "non_production_examples": NON_PRODUCTION_EXAMPLES,
+    "language_examples_exact_order": LANGUAGE_EXAMPLES,
+    "language_examples_count": len(LANGUAGE_EXAMPLES),
     "example_scope": EXAMPLE_SCOPE,
     "example_source_layout": {
         "canonical_bundled_examples": str(examples_dir),
@@ -2694,6 +2725,11 @@ def get_block_by_number(number):
         raise RuntimeError(f"block number not found: {number}")
     return block
 
+RESERVED_SPENDABLE_OUTPOINTS = set()
+
+def spendable_outpoint_key(tx_hash, index):
+    return (tx_hash, int(index))
+
 def find_spendable_cellbase(max_blocks=64):
     generated = []
     for _ in range(max_blocks):
@@ -2706,6 +2742,8 @@ def find_spendable_cellbase(max_blocks=64):
             for index, output in enumerate(outputs):
                 capacity = int(output["capacity"], 16)
                 if capacity > 0:
+                    if spendable_outpoint_key(cellbase["hash"], index) in RESERVED_SPENDABLE_OUTPOINTS:
+                        continue
                     live_status = wait_live_cell(cellbase["hash"], index)
                     if live_status and live_status.get("status") == "live":
                         return {
@@ -2731,6 +2769,8 @@ def collect_spendable_cellbases(min_capacity, max_cells=256):
             f"collected {total_capacity:#x} capacity from {len(cells)} cellbase cells, "
             f"need at least {min_capacity:#x}"
         )
+    for cell in cells:
+        RESERVED_SPENDABLE_OUTPOINTS.add(spendable_outpoint_key(cell["tx_hash"], cell["index"]))
     return {
         "cells": cells,
         "total_capacity": total_capacity,
@@ -2904,6 +2944,8 @@ def submit_and_commit(tx, label, max_blocks=64):
         last_status = tx_status
         if tx_status.get("status") == "committed":
             return {"tx_hash": tx_hash, "generated_blocks_after_submit": generated, "status": tx_status}
+        if tx_status.get("status") == "rejected":
+            raise RuntimeError(f"{label} was rejected while waiting for commit: {tx_hash}; last_status={tx_status}")
         rpc("generate_block")
         time.sleep(0.05)
     raise RuntimeError(f"{label} was not committed after {max_blocks} generated blocks: {tx_hash}; last_status={last_status}")
@@ -2941,6 +2983,54 @@ def assert_live(tx_hash, index, label):
         raise RuntimeError(f"{label} is not live: {result}")
     return result
 
+def is_transient_dead_outpoint_error(error):
+    message = str(error)
+    return "Resolve failed Dead(OutPoint" in message or "Dead(OutPoint" in message
+
+def code_cell_deploy_transaction(deploy_input, artifact, always_success_dep):
+    return transaction(
+        deploy_input,
+        [
+            {
+                "capacity": hex_u64(deploy_input["total_capacity"]),
+                "lock": always_success_lock(),
+                "type": None,
+            }
+        ],
+        ["0x" + artifact.hex()],
+        [always_success_dep],
+    )
+
+def submit_code_cell_deploy_with_fresh_funding(
+    name,
+    artifact,
+    always_success_dep,
+    label_suffix,
+    measure_dry_run=False,
+    max_attempts=4,
+):
+    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        deploy_input = collect_spendable_cellbases(deploy_min_capacity)
+        deploy_tx = code_cell_deploy_transaction(deploy_input, artifact, always_success_dep)
+        try:
+            valid_deploy_dry_run = rpc("dry_run_transaction", [deploy_tx]) if measure_dry_run else None
+            deploy_result = submit_and_commit(deploy_tx, f"{name} {label_suffix}")
+            return {
+                "deploy_input": deploy_input,
+                "deploy_tx": deploy_tx,
+                "valid_deploy_dry_run": valid_deploy_dry_run,
+                "code_cell_deploy": deploy_result,
+                "deploy_attempts": attempt,
+            }
+        except RuntimeError as error:
+            last_error = error
+            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+                continue
+            raise
+    raise RuntimeError(f"{name} {label_suffix} failed after {max_attempts} attempts: {last_error}")
+
 def run_artifact(artifact_record, always_success_dep):
     name = artifact_record["name"]
     artifact_path = pathlib.Path(artifact_record["artifact"])
@@ -2960,21 +3050,9 @@ def run_artifact(artifact_record, always_success_dep):
     if result["artifact_has_unexpected_profile_trailer"]:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
 
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
-    )
-    deploy_result = submit_and_commit(deploy_tx, f"{name} code-cell deploy")
+    deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "code-cell deploy")
+    deploy_input = deploy["deploy_input"]
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} code cell")
     code_dep = {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"}
     result.update({
@@ -2982,6 +3060,7 @@ def run_artifact(artifact_record, always_success_dep):
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": code_dep,
+        "deploy_attempts": deploy["deploy_attempts"],
     })
 
     create_input = collect_spendable_cellbases(100 * 100_000_000, max_cells=1)
@@ -3072,30 +3151,23 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
     if result["artifact_has_unexpected_profile_trailer"]:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
 
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
+    deploy = submit_code_cell_deploy_with_fresh_funding(
+        name,
+        artifact,
+        always_success_dep,
+        "bundled-example code-cell deploy",
+        measure_dry_run=True,
     )
-    valid_deploy_dry_run = rpc("dry_run_transaction", [deploy_tx])
-    deploy_result = submit_and_commit(deploy_tx, f"{name} bundled-example code-cell deploy")
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} bundled-example code cell")
     result.update({
-        "deploy_input": deploy_input,
-        "valid_deploy_dry_run": valid_deploy_dry_run,
-        "measured_constraints": measure_release_constraints(deploy_tx, valid_deploy_dry_run),
+        "deploy_input": deploy["deploy_input"],
+        "valid_deploy_dry_run": deploy["valid_deploy_dry_run"],
+        "measured_constraints": measure_release_constraints(deploy["deploy_tx"], deploy["valid_deploy_dry_run"]),
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
+        "deploy_attempts": deploy["deploy_attempts"],
         "status": "passed",
     })
     return result
@@ -3103,29 +3175,18 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
 def deploy_code_cell(name, artifact_path, always_success_dep):
     artifact = pathlib.Path(artifact_path).read_bytes()
     artifact_ckb_data_hash = data_hash(artifact)
-    deploy_min_capacity = (len(artifact) + 1_000) * 100_000_000
-    deploy_input = collect_spendable_cellbases(deploy_min_capacity)
-    deploy_tx = transaction(
-        deploy_input,
-        [
-            {
-                "capacity": hex_u64(deploy_input["total_capacity"]),
-                "lock": always_success_lock(),
-                "type": None,
-            }
-        ],
-        ["0x" + artifact.hex()],
-        [always_success_dep],
-    )
-    deploy_result = submit_and_commit(deploy_tx, f"{name} action code-cell deploy")
+    deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "action code-cell deploy")
+    deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} action code cell")
     return {
         "artifact": str(artifact_path),
         "artifact_size_bytes": len(artifact),
         "artifact_ckb_data_hash_blake2b": artifact_ckb_data_hash,
+        "deploy_input": deploy["deploy_input"],
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
+        "deploy_attempts": deploy["deploy_attempts"],
     }
 
 def create_script_locked_cells(label, cells, cell_deps):

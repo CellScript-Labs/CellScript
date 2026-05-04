@@ -93,7 +93,7 @@ if (typeof snippets !== "object" || snippets === null || Object.keys(snippets).l
 for (const keyword of [
   "where",
   "flow",
-  "move",
+  "transition",
   "read",
   "invariant",
   "input",
@@ -109,7 +109,7 @@ for (const keyword of [
 
 for (const snippet of [
   "where",
-  "move ${1:input}.${2:state}:",
+  "transition ${1:input}.${2:state}:",
   "create ${1:output} =",
   "protected ${2:cell}:",
   "witness ${4:arg}:",
@@ -181,7 +181,7 @@ if (/\bbeta\b|\bthin\b|placeholder|metadata-only/i.test(readme)) {
 
 for (const requiredReadmePhrase of [
   "where proof blocks",
-  "move input.state: A -> output.state: B",
+  "transition input.state: A -> output.state: B",
   "create output = T",
   "read name: T"
 ]) {

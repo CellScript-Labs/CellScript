@@ -30,16 +30,16 @@ For each named input/output transition, generated metadata records:
 - input cell data binding
 - output cell data binding
 - scheduler-visible input/output access for shared state
-- field reads needed by `require` and `move`
-- declared state transition edges from `flow`/`move`
+- field reads needed by `require` and `transition`
+- declared state transition edges from `flow`/`transition`
 
 The compiler does not inject a hidden state field, does not alter Molecule
 layout behind the source schema, and does not use a narrative lineage keyword.
 If a state transition
-crosses two variables, the full field-to-field `move` names both sides:
+crosses two variables, the full field-to-field `transition` names both sides:
 
 ```cellscript
-move before.state: Live -> after.state: Filled
+transition before.state: Live -> after.state: Filled
 ```
 
 For non-state continuity, write the required preservation or arithmetic
@@ -55,7 +55,7 @@ Current production transition checks are ordinary source requirements:
 | Set | `require after.owner == new_owner` |
 | Add | `require after.balance == before.balance + delta` |
 | Sub | `require after.balance == before.balance - delta` |
-| State edge | `move before.state: A -> after.state: B` |
+| State edge | `transition before.state: A -> after.state: B` |
 
 Unsupported runtime shapes must remain fail-closed and must use a registered
 runtime error code.
