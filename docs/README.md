@@ -55,6 +55,13 @@ bundled `.cell` examples. These are not release notes.
 may point to release notes and active reference docs, but they should not
 duplicate full release notes.
 
+Active later-stage roadmap notes that live under `docs/` because they are tied
+to branch-specific evidence or forward design:
+
+- `0.17/CELLSCRIPT_0_17_ROADMAP.md`
+- `CELLSCRIPT_0_18_ROADMAP.md`
+- `CELLSCRIPT_0_19_ROADMAP.md`
+
 ## Archive
 
 `docs/archive/` contains historical plans and superseded execution documents.

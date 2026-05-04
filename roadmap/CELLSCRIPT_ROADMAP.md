@@ -25,6 +25,9 @@ The current project direction is simple:
 | 0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | 0.15 release scope | `feat/proofplan-invariants` adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, macro provenance, and identity-aware lifecycle forms. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
 | 0.16 release scope | `feat/assurance-tooling` implements the scoped metadata-assurance release: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
+| 0.17 release scope | `research/protocol-equivalence` closes the scoped iCKB protocol-semantics milestone with partial CKB VM differential evidence and an explicit `NOT_PROVEN` production-equivalence gate. | [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/0.17/ickb_final_report.md) |
+| 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
+| 0.19 planning scope | Package/deployment registry, lockfile-bound provenance, and CellScript Action Builder architecture. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -121,6 +124,74 @@ Detailed status:
 
 - [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md)
 - [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
+
+### 0.17: iCKB-Grade Protocol Semantics
+
+0.17 moves the protocol-equivalence track from design/model evidence into
+executable CKB-facing semantics:
+
+- `--primitive-strict=0.17`;
+- HeaderDep SourceViews and DAO accumulated-rate/maturity checks;
+- xUDT group amount conserved/minted/burned helpers;
+- current script hash, script args/hash guards, OutPoint and MetaPoint bridge
+  helpers;
+- C256 helper lowering and executable local `u128` materialization;
+- iCKB benchmark specs and partial CKB VM differential evidence;
+- fail-closed production-equivalence gate with
+  `PARTIAL_CKB_VM_EXECUTION` / `NOT_PROVEN` status.
+
+The 0.17 milestone does not claim full iCKB production equivalence. It closes
+the major semantic gaps and records the remaining proof closure work for 0.18.
+
+Detailed status:
+
+- [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
+- [iCKB final report](../docs/0.17/ickb_final_report.md)
+
+### 0.18: First-Class Script API And Equivalence Closure
+
+0.18 should start by replacing helper fragmentation with typed read-only
+ScriptRef / ScriptArgs access:
+
+- `cell.lock.code_hash`, `cell.lock.hash_type`, and args checks;
+- optional type script code/hash/args checks;
+- exact, prefix, suffix, and hash-based script args comparisons;
+- remaining iCKB equivalence prerequisites such as byte-accurate receipt
+  decoding, owner-auth witness fixtures, generic aggregate lowering, and
+  production evidence-manifest closure.
+
+The goal is to make iCKB-style equivalence verification possible without adding
+script construction or deployment solving to the compiler.
+
+Detailed status:
+
+- [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md)
+
+### 0.19: Package Registry And Action Builder
+
+0.19 should turn compiler artifacts into package, deployment, and
+transaction-building infrastructure:
+
+- source/package registry for package identity, source hashes, build recipes,
+  ABI metadata, audit artifacts, and dependency resolution;
+- deployment registry for chain-specific script cells, CellDeps,
+  code_hash/hash_type, artifact hashes, metadata hashes, and package
+  provenance;
+- lockfile-bound provenance across source package, compiler, artifact,
+  metadata, and deployment;
+- CellScript Action Builder as the per-action transaction builder that reads
+  compiler metadata, selects live cells, constructs expected outputs, fills
+  witness data, delegates low-level build/sign/submit work to CCC, and records
+  old output -> new output lineage;
+- stateful flow runner evidence for canonical examples.
+
+Action Builder is the smallest useful kernel of CellFabric. It builds one
+action-shaped transaction; CellFabric remains the later cross-protocol
+intent-DAG composition layer.
+
+Detailed status:
+
+- [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
 
 ### Next Authorization Hardening Track
 
