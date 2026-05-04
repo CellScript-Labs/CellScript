@@ -28,8 +28,76 @@
       }
     ],
     "cell_deps": [
-      { "dep_type": "code", "name": "xudt-type-script-dep" },
-      { "dep_type": "code", "name": "xudt-extension-dep" }
+      {
+        "dep_type": "code",
+        "name": "xudt-type-script-dep"
+      },
+      {
+        "dep_type": "code",
+        "name": "xudt-extension-dep"
+      }
+    ]
+  },
+  "script_group": {
+    "kind": "type",
+    "active_group": "type_group",
+    "script_field": "type_script",
+    "active_script": "xudt-type-script",
+    "group_inputs": [
+      0
+    ],
+    "group_outputs": [
+      0
+    ],
+    "positive": [
+      {
+        "case": "type-script-group-selected",
+        "inputs": [
+          0
+        ],
+        "outputs": [
+          0
+        ],
+        "expected": "accepted-shape"
+      }
+    ],
+    "negative": [
+      {
+        "case": "wrong-script-group-kind",
+        "expected": "reject",
+        "reason": "fixture requires type_group"
+      },
+      {
+        "case": "missing-active-group-cell",
+        "expected": "reject",
+        "reason": "ScriptGroup must contain at least one input or output cell matching the active script"
+      }
+    ]
+  },
+  "outputs_data_matrix": {
+    "positive": [
+      {
+        "case": "outputs-data-index-aligned",
+        "output_index": 0,
+        "outputs_data_index": 0,
+        "data": "0x0000000000000000",
+        "expected": "outputs[i] and outputs_data[i] bind the same cell"
+      }
+    ],
+    "negative": [
+      {
+        "case": "missing-outputs-data-entry",
+        "output_index": 0,
+        "expected": "reject",
+        "reason": "outputs_data must have one entry per output"
+      },
+      {
+        "case": "mismatched-outputs-data-index",
+        "output_index": 0,
+        "outputs_data_index": 1,
+        "expected": "reject",
+        "reason": "outputs and outputs_data are index-aligned"
+      }
     ]
   },
   "expected_behavior": {
@@ -57,11 +125,17 @@
     "proof_plan": {
       "trigger": "type_group",
       "scope": "group",
-      "reads": ["group_input", "group_output", "witness"],
+      "reads": [
+        "group_input",
+        "group_output",
+        "witness"
+      ],
       "coverage": "covered",
       "on_chain_checked": true
     },
-    "builder_assumptions": ["extension-dep-available"],
+    "builder_assumptions": [
+      "extension-dep-available"
+    ],
     "codegen_coverage_status": "covered"
   },
   "cycle_report": {

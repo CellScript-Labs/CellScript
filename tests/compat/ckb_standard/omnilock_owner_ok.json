@@ -7,18 +7,138 @@
   "transaction_shape": {
     "version": 0,
     "inputs": [
-      { "type": "omnilock-cell", "capacity_shannons": 6200000000, "lock_script": "omnilock-lock", "type_script": null, "data": "lock-only-pattern", "witness": "omnilock-compatible-lock-field" }
+      {
+        "type": "omnilock-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "omnilock-lock",
+        "type_script": null,
+        "data": "lock-only-pattern",
+        "witness": "omnilock-compatible-lock-field"
+      }
     ],
     "outputs": [
-      { "type": "omnilock-cell", "capacity_shannons": 6200000000, "lock_script": "omnilock-lock", "type_script": null, "data": "lock-only-pattern" }
+      {
+        "type": "omnilock-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "omnilock-lock",
+        "type_script": null,
+        "data": "lock-only-pattern"
+      }
     ],
-    "cell_deps": [{ "dep_type": "code", "name": "omnilock-script-dep" }, { "dep_type": "code", "name": "secp256k1-dep" }]
+    "cell_deps": [
+      {
+        "dep_type": "code",
+        "name": "omnilock-script-dep"
+      },
+      {
+        "dep_type": "code",
+        "name": "secp256k1-dep"
+      }
+    ]
   },
-  "expected_behavior": { "script_exit_code": 0, "auth": "secp256k1-signature-valid", "cycle_envelope": "within-omnilock-standard-envelope" },
-  "script_args_layout": { "field": "auth_flags_plus_identity_args", "size_bytes": 34, "encoding": "2-byte-auth-flags + 32-byte-identity-hash" },
-  "witness_layout": { "field": "omnilock_compatible_lock_field", "source": "OmnilockEntry", "passthrough": true },
-  "molecule_data_layout": { "field": "lock_only_pattern", "encoding": "no-data-beyond-lock" },
-  "metadata_expectation": { "proof_plan": { "trigger": "lock_group", "scope": "group", "reads": ["group_input", "witness", "lock_args"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": [], "codegen_coverage_status": "covered" },
-  "cycle_report": { "estimated": "within-omnilock-standard-envelope", "source": "acceptance-report" },
-  "capacity_report": { "occupied_capacity_shannons": 6200000000, "tx_size_bytes_estimate": 500, "source": "acceptance-report" }
+  "script_group": {
+    "kind": "lock",
+    "active_group": "lock_group",
+    "script_field": "lock_script",
+    "active_script": "omnilock-lock",
+    "group_inputs": [
+      0
+    ],
+    "group_outputs": [
+      0
+    ],
+    "positive": [
+      {
+        "case": "lock-script-group-selected",
+        "inputs": [
+          0
+        ],
+        "outputs": [
+          0
+        ],
+        "expected": "accepted-shape"
+      }
+    ],
+    "negative": [
+      {
+        "case": "wrong-script-group-kind",
+        "expected": "reject",
+        "reason": "fixture requires lock_group"
+      },
+      {
+        "case": "missing-active-group-cell",
+        "expected": "reject",
+        "reason": "ScriptGroup must contain at least one input or output cell matching the active script"
+      }
+    ]
+  },
+  "outputs_data_matrix": {
+    "positive": [
+      {
+        "case": "outputs-data-index-aligned",
+        "output_index": 0,
+        "outputs_data_index": 0,
+        "data": "lock-only-pattern",
+        "expected": "outputs[i] and outputs_data[i] bind the same cell"
+      }
+    ],
+    "negative": [
+      {
+        "case": "missing-outputs-data-entry",
+        "output_index": 0,
+        "expected": "reject",
+        "reason": "outputs_data must have one entry per output"
+      },
+      {
+        "case": "mismatched-outputs-data-index",
+        "output_index": 0,
+        "outputs_data_index": 1,
+        "expected": "reject",
+        "reason": "outputs and outputs_data are index-aligned"
+      }
+    ]
+  },
+  "expected_behavior": {
+    "script_exit_code": 0,
+    "auth": "secp256k1-signature-valid",
+    "cycle_envelope": "within-omnilock-standard-envelope"
+  },
+  "script_args_layout": {
+    "field": "auth_flags_plus_identity_args",
+    "size_bytes": 34,
+    "encoding": "2-byte-auth-flags + 32-byte-identity-hash"
+  },
+  "witness_layout": {
+    "field": "omnilock_compatible_lock_field",
+    "source": "OmnilockEntry",
+    "passthrough": true
+  },
+  "molecule_data_layout": {
+    "field": "lock_only_pattern",
+    "encoding": "no-data-beyond-lock"
+  },
+  "metadata_expectation": {
+    "proof_plan": {
+      "trigger": "lock_group",
+      "scope": "group",
+      "reads": [
+        "group_input",
+        "witness",
+        "lock_args"
+      ],
+      "coverage": "covered",
+      "on_chain_checked": true
+    },
+    "builder_assumptions": [],
+    "codegen_coverage_status": "covered"
+  },
+  "cycle_report": {
+    "estimated": "within-omnilock-standard-envelope",
+    "source": "acceptance-report"
+  },
+  "capacity_report": {
+    "occupied_capacity_shannons": 6200000000,
+    "tx_size_bytes_estimate": 500,
+    "source": "acceptance-report"
+  }
 }

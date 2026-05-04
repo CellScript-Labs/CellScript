@@ -146,8 +146,9 @@ It covers fixture expectations for sUDT, xUDT, ACP, Cheque,
 Omnilock-compatible locks, NervosDAO since/epoch behavior, and Type ID.
 
 Each suite has descriptive fixture files with transaction shapes,
-expected behavior, script args/witness/molecule data layouts, metadata
-expectations, cycle report envelopes, and capacity reports.
+ScriptGroup matrices, outputs/outputs_data binding matrices, expected behavior,
+script args/witness/molecule data layouts, metadata expectations, cycle report
+envelopes, and capacity reports.
 
 **Note**: These are descriptive fixtures, not executable test runners.
 No test harness validates accepted/rejected cases against CKB or the
@@ -169,9 +170,11 @@ compatibility fixture references, and `schema-stub` status via
 `CkbStdlibModule`/`ProtocolFunction` descriptors.
 
 **Note**: These are schema stubs only — no CellScript source
-implementations, no assembly generation, no ProofPlan pipeline integration,
-and no test coverage. A future release must implement the modules before
-they can be used in production contracts.
+implementations, no assembly generation, and no ProofPlan pipeline integration.
+Descriptor coverage verifies module/function metadata and fixture linkage, but
+there is no executable integration or production CKB evidence yet. A future
+release must implement the modules before they can be used in production
+contracts.
 
 ## Compatibility
 

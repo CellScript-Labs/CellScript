@@ -7,18 +7,131 @@
   "transaction_shape": {
     "version": 0,
     "inputs": [
-      { "type": "any-cell", "capacity_shannons": 6200000000, "lock_script": "creator-lock", "type_script": null, "data": "0x", "witness": "entry-abi-witness" }
+      {
+        "type": "any-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "creator-lock",
+        "type_script": null,
+        "data": "0x",
+        "witness": "entry-abi-witness"
+      }
     ],
     "outputs": [
-      { "type": "type-id-cell", "capacity_shannons": 6200000000, "lock_script": "creator-lock", "type_script": "type-id-script", "data": "typed-output-data" }
+      {
+        "type": "type-id-cell",
+        "capacity_shannons": 6200000000,
+        "lock_script": "creator-lock",
+        "type_script": "type-id-script",
+        "data": "typed-output-data"
+      }
     ],
-    "cell_deps": [{ "dep_type": "code", "name": "type-id-script-dep" }]
+    "cell_deps": [
+      {
+        "dep_type": "code",
+        "name": "type-id-script-dep"
+      }
+    ]
   },
-  "expected_behavior": { "script_exit_code": 0, "type_id": "args == blake2b256(first_input_tx_hash || output_index)", "cycle_envelope": "within-type-id-standard-envelope" },
-  "script_args_layout": { "field": "type_id_args", "size_bytes": 32, "encoding": "blake2b256(first_input_out_point-tx-hash-and-output-index)" },
-  "witness_layout": { "field": "none_beyond_entry_abi", "source": "None", "passthrough": false },
-  "molecule_data_layout": { "field": "typed_output_data", "encoding": "user-defined-type-data" },
-  "metadata_expectation": { "proof_plan": { "trigger": "type_group", "scope": "group", "reads": ["group_input", "group_output"], "coverage": "covered", "on_chain_checked": true }, "builder_assumptions": ["type_id_builder_plan"], "codegen_coverage_status": "covered" },
-  "cycle_report": { "estimated": "within-type-id-standard-envelope", "source": "acceptance-report" },
-  "capacity_report": { "occupied_capacity_shannons": 6200000000, "tx_size_bytes_estimate": 350, "source": "acceptance-report" }
+  "script_group": {
+    "kind": "type",
+    "active_group": "type_group",
+    "script_field": "type_script",
+    "active_script": "type-id-script",
+    "group_inputs": [],
+    "group_outputs": [
+      0
+    ],
+    "positive": [
+      {
+        "case": "type-script-group-selected",
+        "inputs": [],
+        "outputs": [
+          0
+        ],
+        "expected": "accepted-shape"
+      }
+    ],
+    "negative": [
+      {
+        "case": "wrong-script-group-kind",
+        "expected": "reject",
+        "reason": "fixture requires type_group"
+      },
+      {
+        "case": "missing-active-group-cell",
+        "expected": "reject",
+        "reason": "ScriptGroup must contain at least one input or output cell matching the active script"
+      }
+    ]
+  },
+  "outputs_data_matrix": {
+    "positive": [
+      {
+        "case": "outputs-data-index-aligned",
+        "output_index": 0,
+        "outputs_data_index": 0,
+        "data": "typed-output-data",
+        "expected": "outputs[i] and outputs_data[i] bind the same cell"
+      }
+    ],
+    "negative": [
+      {
+        "case": "missing-outputs-data-entry",
+        "output_index": 0,
+        "expected": "reject",
+        "reason": "outputs_data must have one entry per output"
+      },
+      {
+        "case": "mismatched-outputs-data-index",
+        "output_index": 0,
+        "outputs_data_index": 1,
+        "expected": "reject",
+        "reason": "outputs and outputs_data are index-aligned"
+      }
+    ]
+  },
+  "expected_behavior": {
+    "script_exit_code": 0,
+    "type_id": "args == blake2b256(first_input_tx_hash || output_index)",
+    "cycle_envelope": "within-type-id-standard-envelope"
+  },
+  "script_args_layout": {
+    "field": "type_id_args",
+    "size_bytes": 32,
+    "encoding": "blake2b256(first_input_out_point-tx-hash-and-output-index)"
+  },
+  "witness_layout": {
+    "field": "none_beyond_entry_abi",
+    "source": "None",
+    "passthrough": false
+  },
+  "molecule_data_layout": {
+    "field": "typed_output_data",
+    "encoding": "user-defined-type-data"
+  },
+  "metadata_expectation": {
+    "proof_plan": {
+      "trigger": "type_group",
+      "scope": "group",
+      "reads": [
+        "input",
+        "group_output"
+      ],
+      "coverage": "covered",
+      "on_chain_checked": true
+    },
+    "builder_assumptions": [
+      "type_id_builder_plan"
+    ],
+    "codegen_coverage_status": "covered"
+  },
+  "cycle_report": {
+    "estimated": "within-type-id-standard-envelope",
+    "source": "acceptance-report"
+  },
+  "capacity_report": {
+    "occupied_capacity_shannons": 6200000000,
+    "tx_size_bytes_estimate": 350,
+    "source": "acceptance-report"
+  }
 }

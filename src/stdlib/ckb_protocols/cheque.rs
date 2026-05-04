@@ -10,7 +10,7 @@ pub fn module() -> CkbStdlibModule {
         script_type: "lock".to_string(),
         proof_plan_trigger: "lock_group".to_string(),
         proof_plan_scope: "group".to_string(),
-        proof_plan_reads: vec!["group_input".to_string(), "group_output".to_string(), "witness".to_string()],
+        proof_plan_reads: vec!["group_input".to_string(), "output".to_string(), "witness".to_string()],
         builder_assumptions: vec![],
         compatibility_fixture: "cheque".to_string(),
         stability: "schema-stub".to_string(),
@@ -30,7 +30,7 @@ pub fn functions() -> Vec<ProtocolFunction> {
             return_type: None,
             proof_plan_trigger: "lock_group".to_string(),
             proof_plan_scope: "group".to_string(),
-            proof_plan_reads: vec!["group_input".to_string(), "group_output".to_string(), "witness".to_string()],
+            proof_plan_reads: vec!["group_input".to_string(), "output".to_string(), "witness".to_string()],
         },
         ProtocolFunction {
             name: "cheque_refund".to_string(),
