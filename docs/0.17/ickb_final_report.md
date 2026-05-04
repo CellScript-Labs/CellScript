@@ -402,25 +402,29 @@ expected exit code.
 6. First-class checked `u256`/`C256` values. C256 product and two-product-sum
    requirement helpers exist, but not the whole arithmetic/value surface. The
    iCKB-required signed `i32` ABI path now exists.
-8. Real CKB VM fixture runner and original iCKB differential execution.
-9. Population of the production-equivalence evidence manifest with binary
-   hashes, fixture/context hashes, exit codes, cycle counts, transaction size,
-   occupied capacity, fee evidence, and named reject modes.
+7. Production-equivalence manifest closure. Per-row binary hashes,
+   fixture/context hashes, exit codes, cycle counts, transaction size,
+   occupied capacity, fee evidence, and named reject modes are now recorded for
+   the executed differential rows, but the top-level `PROVEN` manifest remains
+   intentionally unset until all selected production scenarios are executable
+   and the non-executable assumption registry is empty.
 
 ## Recommended Next Steps
 
 1. Implement aggregate scan lowering for exact equality and group-by receipt
    matching.
 2. Extend the DAO bridge from epoch maturity checks into full
-   second-withdrawal request/deposit/header lineage and CKB VM execution
-   against original iCKB fixtures.
+   second-withdrawal request/deposit/header lineage with additional
+   original-vs-CellScript CKB VM differential rows.
 3. Add `Script` and `MetaPoint` typed values with source scans and relation
    helpers.
 4. Extend checked `u256`/`C256` from requirement helpers into first-class value
    types and cover the remaining Limit Order min-fill arithmetic.
-5. Integrate CKB testtool or a syscall-capable CKB VM harness.
-6. Run the selected differential matrix against original iCKB binaries and
-   generated CellScript artifacts.
+5. Add production owner-auth witness fixtures and byte-accurate receipt
+   decoding rows before clearing the remaining non-executable assumptions.
+6. Keep the current CKB testtool differential runner strict: every new
+   production-equivalence row must carry measured execution evidence before it
+   can enter the active matrix.
 7. Keep active matrix rows executable-only; any legacy non-executable
    assumption must remain outside the active matrix until it can satisfy
    `docs/0.17/ickb_production_equivalence_gate.md` evidence requirements.

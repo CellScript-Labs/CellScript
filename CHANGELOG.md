@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.0 - 2026-05-04
+
+- Add the research iCKB protocol-equivalence surface with partial CKB VM
+  differential evidence, including 75 original-vs-CellScript executed rows,
+  14 CellScript-only VM rows, 8 original-side VM rows, and an explicit
+  `NOT_PROVEN` production-equivalence gate.
+- Add 0.17 strict CKB protocol helpers for SourceView, DAO accumulated-rate
+  and maturity checks, xUDT group amount helpers, script args/hash guards,
+  MetaPoint/OutPoint relation scans, and C256 product requirements.
+- Add executable iCKB benchmark specs and matrix evidence under
+  `tests/benchmarks`, while keeping iCKB-specific receipt layout and fixture
+  logic out of the generic compiler/runtime surface.
+- Keep production equivalence deliberately unclaimed until owner-auth witness
+  fixtures, byte-accurate receipt decoding, full DAO redeem accounting,
+  generic aggregate lowering, and production manifest closure are complete.
+
 ## 0.16.0 - 2026-05-04
 
 - Add the scoped metadata-assurance release surface: operational semantics,
