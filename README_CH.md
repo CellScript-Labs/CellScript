@@ -314,6 +314,7 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [Mutate append 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
 - [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.14 community update](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
 
 ---
 
