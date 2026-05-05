@@ -117,10 +117,9 @@ Implemented:
   the iCKB oversized-deposit 10% discount formula to compile directly in
   `tests/benchmarks/ickb_specs/ickb_logic.cell`.
 - executable production-equivalence claim gate in
-  `tests/benchmarks/ickb_diff/matrix.json` and `tests/ickb_diff.rs`; current
-  status is `PARTIAL_CKB_VM_EXECUTION` / `NOT_PROVEN`, with three
-  original-vs-CellScript differential rows and remaining iCKB scenarios still
-  model-level.
+  `tests/benchmarks/ickb_diff/matrix.json` and `tests/ickb_diff.rs`; the
+  selected matrix now reaches `EXECUTED_CKB_VM_DIFF` / `PROVEN` with 75
+  original-vs-CellScript differential rows and no active `MODEL` rows.
 - hardened 0.16 assurance paths: ProofPlan obligation origin/scope matching,
   duplicate/semantically incomplete ProofPlan record rejection, cell-access
   source/read consistency checks, concrete builder evidence payload validation,
@@ -700,7 +699,8 @@ Exit criteria: positive and negative benchmark fixtures execute in CKB VM.
 
 - Build or load original iCKB binaries.
 - Run selected matrix against original and generated artifacts.
-- Update differential report from model-level to executed partial.
+- Keep the selected matrix at `EXECUTED_CKB_VM_DIFF` / `PROVEN`; any new
+  selected row must arrive with the same per-row execution evidence.
 
 Exit criteria: no equivalence claim is made without executed evidence.
 The diff matrix may only move from `MODEL_LEVEL_ONLY` to partial executed modes

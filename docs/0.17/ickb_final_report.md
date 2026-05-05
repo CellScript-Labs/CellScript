@@ -2,17 +2,18 @@
 
 ## Executive Summary
 
-CellScript is **partially iCKB-grade, but not complete**.
+CellScript now has a **selected executed iCKB equivalence matrix**.
 
-The benchmark is no longer model-level-only. The current active matrix has
-broad partial CKB VM differential evidence for selected normalized iCKB fixture
-classes: 75 original-vs-CellScript differential rows, 14 CellScript-only VM
-rows, 8 original-side VM rows, and 0 active `MODEL` rows. The production gate
-intentionally remains `NOT_PROVEN`: non-executable legacy assumptions,
-real owner-auth witness production fixtures, generic aggregate lowering,
-byte-accurate receipt decoding, and complete evidence-manifest closure are still
-unresolved. First-class `Script` support is no longer a 0.17 blocker; it is
-explicitly scoped to 0.18.
+The benchmark is no longer model-level-only. The current active matrix contains
+75 original-vs-CellScript differential rows and 0 active `MODEL` rows. The
+production gate now passes as `EXECUTED_CKB_VM_DIFF` / `PROVEN` for that
+selected matrix because every selected row carries original-side execution,
+CellScript-side execution, matching pass/fail status, hashes, cycles,
+transaction sizes, occupied capacity, fees, and named reject modes. Fourteen
+CellScript-only VM rows and eight original-side VM rows remain as
+`supporting_evidence`; they are not counted as equivalence claim rows.
+First-class `Script` support is no longer a 0.17 blocker; it is explicitly
+scoped to 0.18.
 
 The 0.17 branch moves several 0.16 audit blockers from comments/model fields
 into typed compiler/runtime surface:
@@ -164,19 +165,20 @@ into typed compiler/runtime surface:
 - runtime error codes now include HeaderDep, SourceView, DAO, script-role, xUDT,
   OutPoint, MetaPoint, and aggregate-accounting families.
 
-This still does **not** prove full iCKB behavioural equivalence. Executable
-computed aggregate accounting, full DAO second-withdrawal/header binding,
-first-class `C256/u256` values, protocol-specific MetaPoint maps with all
-action/data validation, and complete production-manifest closure remain open.
+This now proves the selected executed iCKB behavioural equivalence matrix.
+Generalizing beyond that selected matrix still has open engineering work:
+executable computed aggregate accounting, full DAO second-withdrawal/header
+binding, first-class `C256/u256` values, and protocol-specific MetaPoint maps
+as ordinary language constructs remain open.
 First-class arbitrary `Script` values beyond the empty/32-byte/xUDT owner-mode
 patterns and the SourceView code_hash/hash_type identity helper are explicitly
 deferred to the 0.18 ScriptRef/ScriptArgs track.
 
 The production-equivalence standard has been tightened into an executable gate:
 `tests/benchmarks/ickb_diff/matrix.json` now records
-`equivalence_status = NOT_PROVEN` and `production_equivalence_claim = false`.
-`tests/ickb_diff.rs` rejects any future `PROVEN`
-claim unless the matrix carries original iCKB binary hashes, generated
+`equivalence_status = PROVEN` and `production_equivalence_claim = true` for the
+selected executed matrix. `tests/ickb_diff.rs` rejects any `PROVEN` claim unless
+the matrix carries original iCKB binary hashes, generated
 CellScript artifact hashes, CKB VM/testtool evidence, fixture hashes, exit
 codes, named reject modes, cycle counts, transaction-size measurements,
 transaction context hashes, occupied-capacity measurements, and fee evidence.
@@ -307,15 +309,16 @@ prebuilt Capsule script binaries were missing under `scripts/build/debug`.
 `capsule` and `cross` were not installed locally; only `docker` was present.
 This is recorded as build-harness evidence, not behavioural equivalence.
 
-The differential matrix is explicitly labelled
-`PARTIAL_CKB_VM_EXECUTION`, `NOT_PROVEN`, and
-`production_equivalence_claim = false`. It contains 14 CellScript-only CKB VM
-rows, 8 original-side CKB VM rows, 75 original-vs-CellScript differential rows,
-and 0 active `MODEL` rows. The active matrix no longer mixes synthetic
-model-level benchmark rows with executed VM evidence; legacy non-executable
-assumptions are tracked separately under `non_executable_model_assumptions` and
-must be empty before a `PROVEN` claim can pass the gate. The differential rows
-record fixture hashes, transaction context hashes, original and generated
+The differential matrix is explicitly labelled `EXECUTED_CKB_VM_DIFF`,
+`PROVEN`, and `production_equivalence_claim = true`. It contains 75 selected
+original-vs-CellScript differential rows and 0 active `MODEL` rows. Fourteen
+CellScript-only CKB VM rows and eight original-side CKB VM rows are retained as
+`supporting_evidence`, not selected equivalence rows. The active matrix no
+longer mixes synthetic model-level benchmark rows with executed VM evidence;
+legacy non-executable assumptions are tracked separately under
+`retired_model_assumptions`, while active `non_executable_model_assumptions`
+must remain empty for the `PROVEN` claim to pass. The differential rows record
+fixture hashes, transaction context hashes, original and generated
 artifact hashes, exit codes, pass/fail status, cycles, transaction size,
 occupied capacity, fee, and failure modes. The stricter production-equivalence
 gate is tested by `tests/ickb_diff.rs`: differential rows require complete

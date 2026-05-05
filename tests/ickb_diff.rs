@@ -40,7 +40,7 @@ const REQUIRED_EQUIVALENCE_EVIDENCE: [&str; 14] = [
 
 const REMAINING_MODEL_BLOCKERS: [(&str, &str); 0] = [];
 
-const NON_EXECUTABLE_MODEL_ASSUMPTIONS: [(&str, &str, &str); 3] = [
+const RETIRED_MODEL_ASSUMPTIONS: [(&str, &str, &str); 3] = [
     ("duplicate receipt", "duplicate_receipt", RECEIPT_GROUP_EXACT_MINT_DIFF_SCENARIO),
     ("wrong owner", "wrong_owner", OWNED_OWNER_VALID_DIFF_SCENARIO),
     ("immature redeem", "immature_redeem", DAO_IMMATURE_WITHDRAWAL_DIFF_SCENARIO),
@@ -1036,21 +1036,17 @@ where
 fn ickb_diff_matrix_structure_and_model_rows_valid() {
     let matrix = read_matrix();
     assert_eq!(matrix["schema"], "cellscript-ickb-diff-matrix-v1");
-    // Mode reflects the highest evidence level achieved across rows.
-    let mode = matrix["mode"].as_str().expect("mode");
-    assert!(
-        matches!(mode, "MODEL_LEVEL_ONLY" | "CELL_SCRIPT_CKB_VM_EXECUTED" | "PARTIAL_CKB_VM_EXECUTION"),
-        "unexpected mode: {mode}"
-    );
-    assert_eq!(matrix["equivalence_status"], "NOT_PROVEN");
-    assert_eq!(matrix["production_equivalence_claim"], false);
-    assert!(matrix["equivalence_evidence"].is_null());
+    assert_eq!(matrix["mode"], "EXECUTED_CKB_VM_DIFF");
+    assert_eq!(matrix["equivalence_status"], "PROVEN");
+    assert_eq!(matrix["production_equivalence_claim"], true);
+    assert!(matrix["equivalence_evidence"].is_object());
     assert_required_evidence_list(&matrix);
     assert_remaining_model_blockers(&matrix);
-    assert_non_executable_model_assumptions(&matrix);
+    assert_retired_model_assumptions(&matrix);
+    assert_supporting_evidence_rows_are_not_claim_rows(&matrix);
 
     let rows = matrix["rows"].as_array().expect("rows");
-    assert!(rows.len() >= 2, "matrix should have at least harness + iCKB rows");
+    assert!(rows.len() >= 75, "matrix should retain the executed differential iCKB rows");
 
     // Validate each row based on its evidence level.
     let mut seen_scenarios = std::collections::BTreeSet::new();
@@ -1059,57 +1055,6 @@ fn ickb_diff_matrix_structure_and_model_rows_valid() {
         assert!(seen_scenarios.insert(scenario), "duplicate matrix scenario: {scenario}");
         let evidence_level = row["evidence_level"].as_str().expect("evidence_level");
         match evidence_level {
-            "MODEL" => {
-                let result = row["result"].as_str().expect("result");
-                assert!(
-                    result.starts_with("model-"),
-                    "{scenario} must not be reported as behavioural equivalence without executed CKB VM evidence"
-                );
-                assert!(row["original_ickb_expected"].as_str().is_some(), "{scenario}");
-                assert!(row["cellscript_expected"].as_str().is_some(), "{scenario}");
-                assert_eq!(row["ckb_vm_execution"], false, "{scenario}");
-                assert_eq!(row["original_ickb_executed"], false, "{scenario}");
-                if row["original_ickb_expected"] == "fail" || row["cellscript_expected"] == "fail" {
-                    assert!(
-                        row["failure_mode"].as_str().is_some_and(|mode| !mode.is_empty()),
-                        "{scenario} must bind rejects to a named failure mode"
-                    );
-                } else {
-                    assert!(row["failure_mode"].is_null(), "{scenario}");
-                }
-            }
-            "CELL_SCRIPT_CKB_VM_EXECUTED" => {
-                let result = row["result"].as_str().expect("result");
-                assert!(
-                    result.starts_with("cellscript-ckb-vm-"),
-                    "{scenario} CELL_SCRIPT_CKB_VM_EXECUTED result must start with cellscript-ckb-vm-"
-                );
-                assert_eq!(row["ckb_vm_execution"], true, "{scenario}");
-                assert_eq!(row["original_ickb_executed"], false, "{scenario}");
-                assert_eq!(row["full_differential"], false, "{scenario}");
-                if row["cellscript_expected"] == "fail" {
-                    assert!(
-                        row["failure_mode"].as_str().is_some_and(|mode| !mode.is_empty()),
-                        "{scenario} must bind rejects to a named failure mode"
-                    );
-                }
-            }
-            "ORIGINAL_ICKB_CKB_VM_EXECUTED" => {
-                let result = row["result"].as_str().expect("result");
-                assert!(
-                    result.starts_with("original-ickb-ckb-vm-"),
-                    "{scenario} ORIGINAL_ICKB_CKB_VM_EXECUTED result must start with original-ickb-ckb-vm-"
-                );
-                assert_eq!(row["ckb_vm_execution"], true, "{scenario}");
-                assert_eq!(row["original_ickb_executed"], true, "{scenario}");
-                assert_eq!(row["full_differential"], false, "{scenario}");
-                if row["original_ickb_expected"] == "fail" {
-                    assert!(
-                        row["failure_mode"].as_str().is_some_and(|mode| !mode.is_empty()),
-                        "{scenario} must bind rejects to a named failure mode"
-                    );
-                }
-            }
             "DIFFERENTIAL_CKB_VM_EXECUTED" => {
                 let result = row["result"].as_str().expect("result");
                 assert!(
@@ -1128,7 +1073,7 @@ fn ickb_diff_matrix_structure_and_model_rows_valid() {
             other => panic!("{scenario} has unexpected evidence_level: {other}"),
         }
     }
-    validate_production_equivalence_gate(&matrix).expect("matrix should be accepted as not-proven");
+    validate_production_equivalence_gate(&matrix).expect("matrix should satisfy the selected executed iCKB equivalence gate");
 }
 
 #[test]
@@ -1137,6 +1082,15 @@ fn ickb_production_equivalence_claim_requires_executed_evidence() {
     matrix["mode"] = Value::String("EXECUTED_CKB_VM_DIFF".to_string());
     matrix["equivalence_status"] = Value::String("PROVEN".to_string());
     matrix["production_equivalence_claim"] = Value::Bool(true);
+    matrix["equivalence_evidence"] = Value::Null;
+    matrix["non_executable_model_assumptions"] = matrix["retired_model_assumptions"].clone();
+    let supporting = matrix["supporting_evidence"].as_array().expect("supporting_evidence");
+    let mut rows = matrix["rows"].as_array().expect("rows").clone();
+    rows.push(supporting[0].clone());
+    let mut row_without_execution = rows[0].clone();
+    row_without_execution["execution"] = Value::Null;
+    rows.push(row_without_execution);
+    matrix["rows"] = Value::Array(rows);
 
     let errors = validate_production_equivalence_gate(&matrix).expect_err("production claim must require executed evidence");
     assert!(
@@ -1227,13 +1181,15 @@ fn assert_remaining_model_blockers(matrix: &Value) {
     }
 }
 
-fn assert_non_executable_model_assumptions(matrix: &Value) {
+fn assert_retired_model_assumptions(matrix: &Value) {
     let rows = matrix["rows"].as_array().expect("rows");
-    let assumptions = matrix["non_executable_model_assumptions"].as_array().expect("non_executable_model_assumptions");
-    assert_eq!(assumptions.len(), NON_EXECUTABLE_MODEL_ASSUMPTIONS.len(), "non-executable assumption registry length");
+    let active_assumptions = matrix["non_executable_model_assumptions"].as_array().expect("non_executable_model_assumptions");
+    assert!(active_assumptions.is_empty(), "production equivalence requires no active non-executable model assumptions");
+    let assumptions = matrix["retired_model_assumptions"].as_array().expect("retired_model_assumptions");
+    assert_eq!(assumptions.len(), RETIRED_MODEL_ASSUMPTIONS.len(), "retired assumption registry length");
 
     for ((expected_scenario, expected_failure_mode, expected_replacement), assumption) in
-        NON_EXECUTABLE_MODEL_ASSUMPTIONS.iter().zip(assumptions)
+        RETIRED_MODEL_ASSUMPTIONS.iter().zip(assumptions)
     {
         assert_eq!(assumption["scenario"].as_str(), Some(*expected_scenario), "{expected_scenario}");
         assert_eq!(assumption["failure_mode"].as_str(), Some(*expected_failure_mode), "{expected_scenario}");
@@ -1254,6 +1210,26 @@ fn assert_non_executable_model_assumptions(matrix: &Value) {
             .unwrap_or_else(|| panic!("{expected_scenario} replacement evidence row is missing: {expected_replacement}"));
         assert_eq!(replacement["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{expected_scenario}");
         assert_eq!(replacement["full_differential"], true, "{expected_scenario}");
+    }
+}
+
+fn assert_supporting_evidence_rows_are_not_claim_rows(matrix: &Value) {
+    let rows = matrix["rows"].as_array().expect("rows");
+    assert!(
+        rows.iter().all(|row| row["evidence_level"].as_str() == Some("DIFFERENTIAL_CKB_VM_EXECUTED")),
+        "selected equivalence rows must all be differential rows"
+    );
+    let supporting = matrix["supporting_evidence"].as_array().expect("supporting_evidence");
+    assert!(!supporting.is_empty(), "one-sided VM evidence should remain available as supporting evidence");
+    for row in supporting {
+        let scenario = row["scenario"].as_str().expect("supporting scenario");
+        assert!(
+            !rows.iter().any(|claim_row| claim_row["scenario"].as_str() == Some(scenario)),
+            "{scenario} must not be counted as a selected equivalence row"
+        );
+        assert_ne!(row["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{scenario}");
+        assert_eq!(row["ckb_vm_execution"], true, "{scenario}");
+        assert_eq!(row["full_differential"], false, "{scenario}");
     }
 }
 

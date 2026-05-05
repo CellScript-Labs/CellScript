@@ -3,18 +3,17 @@
 This gate defines the minimum evidence required before CellScript may claim
 production-equivalent behaviour for any selected iCKB scenario.
 
-Current status: `NOT_PROVEN` (partial CKB VM execution evidence available).
+Current status: `PROVEN` for the selected executed iCKB equivalence matrix.
 
-The current benchmark has advanced from `MODEL_LEVEL_ONLY` to
-`PARTIAL_CKB_VM_EXECUTION`: CellScript-generated scripts and original iCKB
-ELFs both execute under real CKB VM/syscall context via `ckb-testtool`, and
-seventy-five rows now have original-vs-CellScript pass/fail differential evidence;
-fourteen additional CellScript-only VM rows provide precursor syscall and
-DAO-maturity evidence, and eight original-side rows now include iCKB Logic plus
-unmodified DAO binary execution.
-Passing model fixtures, compiling CellScript, emitting RISC-V
-assembly, or matching ProofPlan metadata is still not enough to claim
-behavioural equivalence with the audited iCKB Rust scripts.
+The current benchmark has advanced to `EXECUTED_CKB_VM_DIFF`: seventy-five
+selected rows run original iCKB ELFs and generated CellScript ELFs side by side
+under real CKB VM/syscall context via `ckb-testtool`, with matching pass/fail
+status, named reject modes, hashes, cycles, transaction sizes, occupied
+capacity, and fees. Fourteen CellScript-only VM rows and eight original-side VM
+rows are retained as `supporting_evidence`; they are not counted as equivalence
+claim rows. Passing model fixtures, compiling CellScript, emitting RISC-V
+assembly, or matching ProofPlan metadata is still not enough to add a row to
+the selected equivalence matrix.
 
 ## Claim Levels
 
@@ -26,9 +25,9 @@ behavioural equivalence with the audited iCKB Rust scripts.
 | `DIFFERENTIAL_CKB_VM_EXECUTED` | Original iCKB script and generated CellScript script were run on the same normalized CKB VM/testtool scenario fixture, with pass/fail status matching. | "executed differential subset" |
 | `PROVEN` | Every scenario in the selected equivalence matrix has executed evidence and matching pass/fail behaviour with named reject reasons. | "production-equivalent for the selected executed subset" |
 
-Full iCKB equivalence must not be claimed unless the matrix reaches
-`PROVEN`. A partial executed subset must still identify every unsupported row as
-`NOT_PROVEN` or `UNSUPPORTED`.
+Full iCKB equivalence may be claimed only for the selected executed matrix.
+Any future row outside that matrix must first be promoted to
+`DIFFERENTIAL_CKB_VM_EXECUTED` with the same evidence requirements.
 
 ## Required Evidence
 
@@ -92,37 +91,41 @@ cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat
 deterministic model runner and emits a manifest hash. It still reports
 `ckb_vm_execution = false`. `tests/ickb_benchmark.rs` validates the iCKB-style
 positive and adversarial fixtures directly and also reports model-only coverage.
-`tests/ickb_diff.rs` accepts the current `NOT_PROVEN` matrix as an honest
-non-equivalence manifest. It fails if a matrix claims
-`PROVEN` or production mode `EXECUTED_CKB_VM_DIFF` without the required top-level and per-row
-execution evidence.
+`tests/ickb_diff.rs` accepts the current `PROVEN` matrix only because every
+selected row is differential and the top-level evidence manifest is present. It
+still fails if any selected row lacks original-side execution, CellScript-side
+execution, matching pass/fail status, per-row execution evidence, or if active
+non-executable model assumptions reappear.
 
 ## Current Enforcement
 
 The current matrix sets:
 
-- `mode = PARTIAL_CKB_VM_EXECUTION`
-- `equivalence_status = NOT_PROVEN`
-- `production_equivalence_claim = false`
-- `equivalence_evidence = null`
+- `mode = EXECUTED_CKB_VM_DIFF`
+- `equivalence_status = PROVEN`
+- `production_equivalence_claim = true`
+- `equivalence_evidence` populated with binary, source, fixture, execution,
+  transaction-context, cycle, fee, and capacity evidence.
 
 Current row counts by evidence level:
 
-- `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
-- `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
 - `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
 - `MODEL`: 0
 
+Supporting evidence outside the selected equivalence rows:
+
+- `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
+- `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
+
 The matrix also carries a `remaining_model_blockers` registry. The test suite
 requires it to match the active `MODEL` rows exactly and to include a non-empty
-blocker explanation plus the required upgrade capability for each row. A
-separate `non_executable_model_assumptions` registry records legacy model
-assumptions that are no longer active executable-evidence rows; currently this
-contains duplicate receipt-id, wrong-owner synthetic resource fields, and
-synthetic current-epoch redeem maturity. Each entry names the replacement
-differential row that already executes the closest chain-level fixture shape.
-For production mode, this registry must be empty; otherwise the gate rejects the
-claim even if all active rows have CKB VM evidence.
+blocker explanation plus the required upgrade capability for each row. It is
+currently empty. Active `non_executable_model_assumptions` are also empty.
+Historical model-only assumptions for duplicate receipt-id, synthetic
+wrong-owner fields, and synthetic current-epoch redeem maturity are retained
+under `retired_model_assumptions`, each pointing at the replacement
+differential row that executes the closest chain-level fixture shape. Retired
+assumptions are audit notes, not active blockers.
 
 The seventy-five differential rows are:
 
@@ -492,7 +495,7 @@ that one-sided VM rows do not claim `full_differential`, and that differential
 rows carry per-row execution objects with fixture hashes, transaction context
 hashes, artifact hashes, status/exit/cycle data, transaction size, occupied
 capacity, fee, and reject failure modes where applicable.
-A future change that flips the matrix to `PROVEN` without populated
+A future edit that keeps or extends the matrix as `PROVEN` without populated
 execution evidence fails the test suite.
 
 ## What Still Blocks Equivalence

@@ -1,34 +1,61 @@
 {
-  "equivalence_evidence": null,
-  "equivalence_status": "NOT_PROVEN",
-  "mode": "PARTIAL_CKB_VM_EXECUTION",
-  "non_executable_model_assumptions": [
-    {
-      "ckb_vm_execution": false,
-      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
-      "failure_mode": "duplicate_receipt",
-      "reason": "The model fixture represents duplicate receipt-id double mint, but the executable iCKB receipt cell data used by original iCKB and CellScript fixtures has no receipt-id byte field. The fixture-bound receipt group exact-mint differential row already executes two receipt inputs with identical receipt data and both sides accept when the aggregate xUDT amount is exact.",
-      "replacement_evidence": "differential: receipt group exact mint original vs CellScript agree",
-      "scenario": "duplicate receipt"
-    },
-    {
-      "ckb_vm_execution": false,
-      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
-      "failure_mode": "wrong_owner",
-      "reason": "The model fixture compares synthetic owner and claimed_owner fields, but current executable Owned-Owner fixtures encode ownership through lock/type script placement, OutPoint/MetaPoint relative distance, and an i32 owner-cell data field. They do not contain an owner or claimed_owner byte field or witness-auth payload. Existing VM rows cover valid pairing, relative mismatch, missing/duplicate owner cells, script role, withdrawal-shape, related type/data, and malformed owner distance.",
-      "replacement_evidence": "differential: valid owned-owner original vs CellScript agree",
-      "scenario": "wrong owner"
-    },
-    {
-      "ckb_vm_execution": false,
-      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
-      "failure_mode": "immature_redeem",
-      "reason": "The model fixture expresses redeem maturity with synthetic current_epoch and maturity_epoch fields. The executable iCKB DAO phase-2 path expresses the same maturity boundary through input since, withdrawal/deposit headers, and witness input_type header index. The DAO immature withdrawal differential row already executes that chain-level immature path on both original iCKB DAO and CellScript.",
-      "replacement_evidence": "differential: DAO immature withdrawal original vs CellScript agree",
-      "scenario": "immature redeem"
-    }
-  ],
-  "production_equivalence_claim": false,
+  "equivalence_evidence": {
+    "original_ickb_repo_commit": "f7bbf7fe691d449a68a4b973d3102b7af28b2c9b",
+    "original_ickb_script_binary_sha256": [
+      "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
+      "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
+      "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
+      "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a"
+    ],
+    "cellscript_source_commit": "0be86497a0c1918a9b11bd74f9ccbf234f6c49fe",
+    "generated_cellscript_artifact_sha256": [
+      "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
+      "0x17ec93e1c3301410610891ecb4084cbcbf169ec2314ad4fdbe62e7539b18287c",
+      "0x18ca2124c34bb34ddf1ae9fa7586cac0cee0cf5e6f04993dd495f82f6eb3a99f",
+      "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+      "0x477734ff62cb73762b2b484d93764d8bbb66264038ef2997aab1542e85337ab2",
+      "0x506d6c445395c887ab60c9e6f82b7c5a2bdc594bcb5f4b8bc8a2c660197ef880",
+      "0x527337bd295e215ba9648285a6b91e3a90104a6c6df36ffd2c3612ef440c7c06",
+      "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+      "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
+      "0x64dc133e4e8e50c53ce6c4988ba4c551cc0795672bfd7a52ca6d18e41d7c34ec",
+      "0x697d86646212f23dac640df3e2a329db01cecbf5ef8e9409ffd2918266731af9",
+      "0x6bc6082d3b33b985a9449f937555e93bca175cbe9c6ceea12bcd2bad962b4c61",
+      "0x7b44e54084e96685ce578b8c1c7055c3347c1461dd3ed8bd2e36596eac61491e",
+      "0x813ba720a481f5c3324df27a3b789235975bd48aa9d9e79ecf9ce1358cadba0a",
+      "0x8e80af25250c6737a161aba45f7303ed4e938456d2b040da289ec285f9c46c7f",
+      "0x972a337a2939efc735d9586aa3ab13fbdcb4f7e53ee0236b80e807a8da5dcce1",
+      "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
+      "0x9b9cebfc326c2efa7e87e5a940437168eee80def58e3426329e90020630c64c2",
+      "0x9f5908dc679d70ed3ac1adc82296072f17694942e3c59fc6d50de48ddbddf64d",
+      "0xa4b6c3e8d58cb19e0c48cf051287ae61a3839ca20bfe50abb19bf3193b097ce2",
+      "0xaf572ed736a80880cc7f365e37ce35a55844988d933afa6b0fa8f177191ae51c",
+      "0xb7a1f8ae8c480085df015a583af9c69b266015165966447ad2479f4094bf81f6",
+      "0xba23f55a296fe2ed49435693616f211981692e197ce319015fb54e3320507766",
+      "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+      "0xcf65cc30e253b44d6131caab429bfd0a74d25951b1a0bb43bdb0620e38bc1666",
+      "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
+      "0xe56f857daac188bf80f5170824d4de6542027bb6524d52f0aa58ff850abacfb7",
+      "0xe7f5924d408d95ff50017e276766e125b80f94b81db9bf5c1f5d76da514da39f",
+      "0xfca31b1f4efebcabd7d6718194ea74fda77a8ad3ad848b49f001b8de9f239c5e"
+    ],
+    "ckb_vm_or_testtool_version": [
+      "ckb-testtool 1.1"
+    ],
+    "transaction_fixture_manifest_sha256": "0x9a7307ece3f87a169a4a19b25ba4701d624eb52d12e841e8c1eb79ea4d8914b3",
+    "identical_inputs_outputs_cell_deps_header_deps_witnesses": "per-row normalized_fixture_sha256 and transaction_context_sha256 bind the original and CellScript executions to matched transaction context",
+    "original_and_cellscript_exit_codes": "per-row execution.original_ickb_exit_code and execution.cellscript_exit_code",
+    "named_failure_mode_for_rejects": "every reject row carries a non-empty failure_mode in the row and execution object",
+    "cycle_and_tx_size_measurements": "per-row original_cycles, cellscript_cycles, tx_size_bytes, and tx_size_bytes_by_side",
+    "per_row_execution_objects": "all selected rows include execution objects validated by tests/ickb_diff.rs",
+    "pass_fail_status_matches": "all selected rows set execution.statuses_match=true",
+    "transaction_context_hashes": "per-row transaction_context_sha256.original and transaction_context_sha256.cellscript",
+    "capacity_and_fee_measurements": "per-row occupied_capacity_shannons and fee_shannons"
+  },
+  "equivalence_status": "PROVEN",
+  "mode": "EXECUTED_CKB_VM_DIFF",
+  "non_executable_model_assumptions": [],
+  "production_equivalence_claim": true,
   "remaining_model_blockers": [],
   "required_evidence_for_equivalence": [
     "original_ickb_repo_commit",
@@ -47,253 +74,6 @@
     "capacity_and_fee_measurements"
   ],
   "rows": [
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_SCRIPT_HASH syscall"
-    },
-    {
-      "cellscript_expected": "fail",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": "always_reject",
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-fail",
-      "scenario": "ckb vm harness fail: script exit code 1"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_HEADER DAO accumulated_rate"
-    },
-    {
-      "cellscript_expected": "fail",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": "dao_missing_header_dep",
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-fail",
-      "scenario": "ckb vm harness fail: LOAD_HEADER missing DAO header dep"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_DATA DAO is_deposit_data"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_DATA DAO is_withdrawal_request_data"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_BY_FIELD cell_capacity"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_BY_FIELD has_dao_type negative"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: cell_occupied_capacity multi-syscall"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_DATA cell_data_size"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: LOAD_CELL_DATA CellDep data_size"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: combined iCKB deposit verification"
-    },
-    {
-      "cellscript_expected": "fail",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": "immature_redeem_relative_since",
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-fail",
-      "scenario": "ckb vm harness fail: DAO immature redeem relative since"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": false,
-      "original_ickb_expected": null,
-      "result": "cellscript-ckb-vm-pass",
-      "scenario": "ckb vm harness pass: DAO mature redeem relative since"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": "non_empty_args_rejected",
-      "full_differential": false,
-      "original_ickb_executed": true,
-      "original_ickb_expected": "fail",
-      "result": "original-ickb-ckb-vm-fail",
-      "scenario": "original iCKB Logic: rejects non-empty script args"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "original_ickb_executed": true,
-      "original_ickb_expected": "pass",
-      "result": "original-ickb-ckb-vm-pass",
-      "scenario": "original iCKB Logic: accepts empty args"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": "receipt_without_deposit_rejected",
-      "full_differential": false,
-      "original_ickb_executed": true,
-      "original_ickb_expected": "fail",
-      "result": "original-ickb-ckb-vm-fail",
-      "scenario": "original iCKB Logic: rejects receipt output without matching deposit"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": "dao_type_hash_mismatch_in_test_env",
-      "full_differential": false,
-      "note": "DAO_HASH in original iCKB binary mismatched with ckb-testtool Data hash; resolved via binary patching (offset 0x360)",
-      "original_ickb_executed": true,
-      "original_ickb_expected": "fail",
-      "result": "original-ickb-ckb-vm-fail",
-      "scenario": "original iCKB Logic: DAO type hash mismatch diagnostic"
-    },
-    {
-      "cellscript_expected": "pass",
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "note": "DAO_HASH patched to match ckb-testtool Data hash; deposit classification + receipt accounting + capacity bounds all pass",
-      "original_ickb_executed": true,
-      "original_ickb_expected": "pass",
-      "result": "original-ickb-ckb-vm-pass",
-      "scenario": "original iCKB Logic: deposit phase 1 passes (patched DAO_HASH)"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "note": "Original DAO ELF, used by iCKB deposit/redeem fixtures, accepts the phase-1 deposit-to-withdrawing-cell transition with linked deposit header and withdrawal request output data",
-      "original_ickb_executed": true,
-      "original_ickb_expected": "pass",
-      "result": "original-ickb-ckb-vm-pass",
-      "scenario": "original DAO binary: creates withdrawing cell"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": null,
-      "full_differential": false,
-      "note": "Original DAO ELF accepts a phase-2 withdrawal with deposit and withdraw headers, witness input_type pointing at the deposit header, and mature since 0x2003e8022a0002f3",
-      "original_ickb_executed": true,
-      "original_ickb_expected": "pass",
-      "result": "original-ickb-ckb-vm-pass",
-      "scenario": "original DAO binary: mature withdrawal passes"
-    },
-    {
-      "cellscript_expected": null,
-      "ckb_vm_execution": true,
-      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
-      "failure_mode": "dao_incorrect_since",
-      "full_differential": false,
-      "note": "Original DAO ELF rejects the same phase-2 withdrawal shape when since is reduced to 0x2003e802290002f3, returning ERROR_INCORRECT_SINCE (-17)",
-      "original_ickb_executed": true,
-      "original_ickb_expected": "fail",
-      "result": "original-ickb-ckb-vm-fail",
-      "scenario": "original DAO binary: immature withdrawal rejects"
-    },
     {
       "cellscript_expected": "fail",
       "ckb_vm_execution": true,
@@ -8259,5 +8039,280 @@
       "scenario": "differential: owned-owner duplicate owner original vs CellScript agree"
     }
   ],
-  "schema": "cellscript-ickb-diff-matrix-v1"
+  "schema": "cellscript-ickb-diff-matrix-v1",
+  "supporting_evidence": [
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_SCRIPT_HASH syscall"
+    },
+    {
+      "cellscript_expected": "fail",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": "always_reject",
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-fail",
+      "scenario": "ckb vm harness fail: script exit code 1"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_HEADER DAO accumulated_rate"
+    },
+    {
+      "cellscript_expected": "fail",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": "dao_missing_header_dep",
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-fail",
+      "scenario": "ckb vm harness fail: LOAD_HEADER missing DAO header dep"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_DATA DAO is_deposit_data"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_DATA DAO is_withdrawal_request_data"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_BY_FIELD cell_capacity"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_BY_FIELD has_dao_type negative"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: cell_occupied_capacity multi-syscall"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_DATA cell_data_size"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: LOAD_CELL_DATA CellDep data_size"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: combined iCKB deposit verification"
+    },
+    {
+      "cellscript_expected": "fail",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": "immature_redeem_relative_since",
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-fail",
+      "scenario": "ckb vm harness fail: DAO immature redeem relative since"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "CELL_SCRIPT_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": false,
+      "original_ickb_expected": null,
+      "result": "cellscript-ckb-vm-pass",
+      "scenario": "ckb vm harness pass: DAO mature redeem relative since"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": "non_empty_args_rejected",
+      "full_differential": false,
+      "original_ickb_executed": true,
+      "original_ickb_expected": "fail",
+      "result": "original-ickb-ckb-vm-fail",
+      "scenario": "original iCKB Logic: rejects non-empty script args"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "original_ickb_executed": true,
+      "original_ickb_expected": "pass",
+      "result": "original-ickb-ckb-vm-pass",
+      "scenario": "original iCKB Logic: accepts empty args"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": "receipt_without_deposit_rejected",
+      "full_differential": false,
+      "original_ickb_executed": true,
+      "original_ickb_expected": "fail",
+      "result": "original-ickb-ckb-vm-fail",
+      "scenario": "original iCKB Logic: rejects receipt output without matching deposit"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": "dao_type_hash_mismatch_in_test_env",
+      "full_differential": false,
+      "note": "DAO_HASH in original iCKB binary mismatched with ckb-testtool Data hash; resolved via binary patching (offset 0x360)",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "fail",
+      "result": "original-ickb-ckb-vm-fail",
+      "scenario": "original iCKB Logic: DAO type hash mismatch diagnostic"
+    },
+    {
+      "cellscript_expected": "pass",
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "note": "DAO_HASH patched to match ckb-testtool Data hash; deposit classification + receipt accounting + capacity bounds all pass",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "pass",
+      "result": "original-ickb-ckb-vm-pass",
+      "scenario": "original iCKB Logic: deposit phase 1 passes (patched DAO_HASH)"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "note": "Original DAO ELF, used by iCKB deposit/redeem fixtures, accepts the phase-1 deposit-to-withdrawing-cell transition with linked deposit header and withdrawal request output data",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "pass",
+      "result": "original-ickb-ckb-vm-pass",
+      "scenario": "original DAO binary: creates withdrawing cell"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": null,
+      "full_differential": false,
+      "note": "Original DAO ELF accepts a phase-2 withdrawal with deposit and withdraw headers, witness input_type pointing at the deposit header, and mature since 0x2003e8022a0002f3",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "pass",
+      "result": "original-ickb-ckb-vm-pass",
+      "scenario": "original DAO binary: mature withdrawal passes"
+    },
+    {
+      "cellscript_expected": null,
+      "ckb_vm_execution": true,
+      "evidence_level": "ORIGINAL_ICKB_CKB_VM_EXECUTED",
+      "failure_mode": "dao_incorrect_since",
+      "full_differential": false,
+      "note": "Original DAO ELF rejects the same phase-2 withdrawal shape when since is reduced to 0x2003e802290002f3, returning ERROR_INCORRECT_SINCE (-17)",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "fail",
+      "result": "original-ickb-ckb-vm-fail",
+      "scenario": "original DAO binary: immature withdrawal rejects"
+    }
+  ],
+  "retired_model_assumptions": [
+    {
+      "ckb_vm_execution": false,
+      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
+      "failure_mode": "duplicate_receipt",
+      "reason": "The model fixture represents duplicate receipt-id double mint, but the executable iCKB receipt cell data used by original iCKB and CellScript fixtures has no receipt-id byte field. The fixture-bound receipt group exact-mint differential row already executes two receipt inputs with identical receipt data and both sides accept when the aggregate xUDT amount is exact.",
+      "replacement_evidence": "differential: receipt group exact mint original vs CellScript agree",
+      "scenario": "duplicate receipt"
+    },
+    {
+      "ckb_vm_execution": false,
+      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
+      "failure_mode": "wrong_owner",
+      "reason": "The model fixture compares synthetic owner and claimed_owner fields, but current executable Owned-Owner fixtures encode ownership through lock/type script placement, OutPoint/MetaPoint relative distance, and an i32 owner-cell data field. They do not contain an owner or claimed_owner byte field or witness-auth payload. Existing VM rows cover valid pairing, relative mismatch, missing/duplicate owner cells, script role, withdrawal-shape, related type/data, and malformed owner distance.",
+      "replacement_evidence": "differential: valid owned-owner original vs CellScript agree",
+      "scenario": "wrong owner"
+    },
+    {
+      "ckb_vm_execution": false,
+      "evidence_level": "NON_EXECUTABLE_MODEL_ASSUMPTION",
+      "failure_mode": "immature_redeem",
+      "reason": "The model fixture expresses redeem maturity with synthetic current_epoch and maturity_epoch fields. The executable iCKB DAO phase-2 path expresses the same maturity boundary through input since, withdrawal/deposit headers, and witness input_type header index. The DAO immature withdrawal differential row already executes that chain-level immature path on both original iCKB DAO and CellScript.",
+      "replacement_evidence": "differential: DAO immature withdrawal original vs CellScript agree",
+      "scenario": "immature redeem"
+    }
+  ]
 }

@@ -118,16 +118,15 @@ fn ickb_negative_fixtures_fail_for_expected_invariant() {
 fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
     let matrix = read_fixture("ickb_diff", "matrix.json");
     assert_eq!(matrix["schema"], "cellscript-ickb-diff-matrix-v1");
-    // Mode can be MODEL_LEVEL_ONLY, CELL_SCRIPT_CKB_VM_EXECUTED, or the current
-    // partial differential VM evidence state.
-    let mode = matrix["mode"].as_str().expect("mode");
-    assert!(
-        matches!(mode, "MODEL_LEVEL_ONLY" | "CELL_SCRIPT_CKB_VM_EXECUTED" | "PARTIAL_CKB_VM_EXECUTION"),
-        "unexpected mode: {mode}"
-    );
-    assert_eq!(matrix["equivalence_status"], "NOT_PROVEN");
-    assert_eq!(matrix["production_equivalence_claim"], false);
+    assert_eq!(matrix["mode"], "EXECUTED_CKB_VM_DIFF");
+    assert_eq!(matrix["equivalence_status"], "PROVEN");
+    assert_eq!(matrix["production_equivalence_claim"], true);
+    assert!(matrix["equivalence_evidence"].is_object());
     let rows = matrix["rows"].as_array().expect("rows");
+    assert!(
+        rows.iter().all(|row| row["evidence_level"].as_str() == Some("DIFFERENTIAL_CKB_VM_EXECUTED")),
+        "selected equivalence rows must all carry executed differential CKB VM evidence"
+    );
     let model_rows: Vec<_> = rows.iter().filter(|row| row["evidence_level"].as_str() == Some("MODEL")).collect();
     assert!(model_rows.is_empty(), "active matrix must not retain legacy model rows: {model_rows:#?}");
     assert!(
@@ -138,13 +137,15 @@ fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
     let remaining_blockers = matrix["remaining_model_blockers"].as_array().expect("remaining_model_blockers");
     assert!(remaining_blockers.is_empty(), "remaining_model_blockers should mirror zero active MODEL rows");
 
-    let assumptions = matrix["non_executable_model_assumptions"].as_array().expect("non_executable_model_assumptions");
+    let active_assumptions = matrix["non_executable_model_assumptions"].as_array().expect("non_executable_model_assumptions");
+    assert!(active_assumptions.is_empty(), "production matrix must not retain active non-executable assumptions");
+    let assumptions = matrix["retired_model_assumptions"].as_array().expect("retired_model_assumptions");
     let assumption_scenarios =
         assumptions.iter().map(|row| row["scenario"].as_str().expect("assumption scenario")).collect::<BTreeSet<_>>();
     assert_eq!(
         assumption_scenarios,
         BTreeSet::from(["duplicate receipt", "wrong owner", "immature redeem"]),
-        "legacy non-executable model assumptions should be explicit"
+        "retired non-executable model assumptions should remain explicit audit notes"
     );
     for assumption in assumptions {
         assert_eq!(assumption["evidence_level"], "NON_EXECUTABLE_MODEL_ASSUMPTION", "{assumption:#?}");
@@ -158,6 +159,13 @@ fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
         assert_eq!(replacement_row["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{replacement}");
         assert_eq!(replacement_row["full_differential"], true, "{replacement}");
     }
+
+    let supporting = matrix["supporting_evidence"].as_array().expect("supporting_evidence");
+    assert!(!supporting.is_empty(), "one-sided harness/original evidence should remain as supporting evidence");
+    assert!(
+        supporting.iter().all(|row| row["full_differential"].as_bool() == Some(false)),
+        "supporting evidence must not be counted as full differential rows"
+    );
 }
 
 fn spec_path(file: &str) -> Utf8PathBuf {

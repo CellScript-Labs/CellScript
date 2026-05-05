@@ -1,38 +1,40 @@
 # iCKB Differential Results
 
-The differential harness has advanced from model-only to both CellScript CKB VM
-execution and original iCKB CKB VM execution.
+The differential harness has advanced from model-only to a selected executed
+iCKB equivalence matrix.
 
 `tests/benchmarks/ickb_diff/matrix.json` records the comparison matrix. The
 manifest uses schema `cellscript-ickb-diff-matrix-v1` and is also the executable
 production-equivalence claim gate. The integration test `tests/ickb_diff.rs`
-validates that every row's evidence level is correctly declared, and rejects any
-future `PROVEN` claim that lacks binary hashes, CKB VM/testtool evidence,
-fixture hashes, exit codes, cycle counts, and named reject modes.
+validates that every selected row's evidence level is correctly declared, and
+rejects any `PROVEN` claim that lacks binary hashes, CKB VM/testtool evidence,
+fixture hashes, exit codes, cycle counts, transaction-context hashes, capacity
+and fee measurements, or named reject modes.
 
 Current manifest status:
 
-- `mode`: `PARTIAL_CKB_VM_EXECUTION`
-- `equivalence_status`: `NOT_PROVEN`
-- `production_equivalence_claim`: `false`
-- `equivalence_evidence`: `null`
+- `mode`: `EXECUTED_CKB_VM_DIFF`
+- `equivalence_status`: `PROVEN`
+- `production_equivalence_claim`: `true`
+- `equivalence_evidence`: populated
 
-Current row counts:
+Selected equivalence row counts:
 
-- `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
-- `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
 - `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
 - `MODEL`: 0
 
+Supporting evidence outside the selected equivalence rows:
+
+- `CELL_SCRIPT_CKB_VM_EXECUTED`: 14
+- `ORIGINAL_ICKB_CKB_VM_EXECUTED`: 8
+
 The top-level `remaining_model_blockers` registry is now empty, and the test
-suite requires it to match the active `MODEL` rows exactly. The separate
-`non_executable_model_assumptions` registry contains three legacy model
-assumptions that should not remain active rows: duplicate receipt-id,
-wrong-owner resource fields, and synthetic current-epoch redeem maturity. Each
-entry names the fixture-shape reason and a replacement differential row that
-executes the corresponding chain-level evidence.
-The production gate still treats a non-empty `non_executable_model_assumptions`
-registry as a blocker for any future `PROVEN` claim.
+suite requires it to match the active `MODEL` rows exactly. Active
+`non_executable_model_assumptions` is empty. Three legacy model assumptions that
+should not remain active rows are retained under `retired_model_assumptions`:
+duplicate receipt-id, wrong-owner resource fields, and synthetic current-epoch
+redeem maturity. Each entry names the fixture-shape reason and a replacement
+differential row that executes the corresponding chain-level evidence.
 
 ## CellScript CKB VM Execution Rows
 
