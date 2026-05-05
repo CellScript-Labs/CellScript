@@ -4097,7 +4097,7 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         if let Err(error) = crate::proof_plan::soundness::validate_metadata(metadata, true) {
             violations.push(error.message);
         }
-    } else if args.primitive_compat.as_deref() == Some("0.17") {
+    } else if matches!(args.primitive_compat.as_deref(), Some("0.17" | "0.18")) {
         if let Err(error) = crate::validate_primitive_strict_017_metadata(metadata) {
             violations.push(error.message);
         }
@@ -5174,7 +5174,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -5307,7 +5307,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -5610,7 +5610,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, or 0.17), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
                     ),
             )
             .subcommand(

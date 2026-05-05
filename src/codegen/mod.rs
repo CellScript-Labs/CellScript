@@ -208,6 +208,14 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
             | "__ckb_cell_lock_hash_low"
             | "__ckb_cell_type_hash_low"
+            | "__ckb_cell_lock_code_hash"
+            | "__ckb_cell_type_code_hash"
+            | "__ckb_cell_lock_hash_type"
+            | "__ckb_cell_type_hash_type"
+            | "__ckb_cell_lock_args_empty"
+            | "__ckb_cell_type_args_empty"
+            | "__ckb_cell_lock_args_hash"
+            | "__ckb_cell_type_args_hash"
             | "__ckb_require_cell_lock_hash"
             | "__ckb_require_cell_type_hash"
             | "__ckb_require_current_script_args_empty"
@@ -215,6 +223,10 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_cell_type_args_empty"
             | "__ckb_require_cell_lock_args_hash"
             | "__ckb_require_cell_type_args_hash"
+            | "__ckb_require_cell_lock_args_prefix_hash"
+            | "__ckb_require_cell_type_args_prefix_hash"
+            | "__ckb_require_cell_lock_args_suffix_hash"
+            | "__ckb_require_cell_type_args_suffix_hash"
             | "__ckb_require_cell_lock_script_hash_type"
             | "__ckb_require_cell_type_script_hash_type"
             | "__c256_require_u128_product_lte"
@@ -290,6 +302,25 @@ enum ExpectedFixedByteSource {
     PointerBytes { var_id: usize, width: usize },
     ParamBytes { var_id: usize, size_offset: usize, width: usize },
     LoadedBytes { var_id: usize, size_offset: usize, width: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScriptHashFieldRead {
+    CodeHash,
+    Args32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScriptScalarFieldRead {
+    HashType,
+    ArgsEmpty,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScriptArgsHashRequirementMode {
+    Exact32,
+    Prefix32,
+    Suffix32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3400,6 +3431,20 @@ impl CodeGenerator {
                     }
                     IrInstruction::Call { dest: Some(dest), func, args }
                         if func == "__ckb_current_script_hash" && args.is_empty() && dest.ty == IrType::Hash =>
+                    {
+                        self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
+                        self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
+                        next_cell_slot += RUNTIME_CELL_SLOT_SIZE;
+                    }
+                    IrInstruction::Call { dest: Some(dest), func, args }
+                        if matches!(
+                            func.as_str(),
+                            "__ckb_cell_lock_code_hash"
+                                | "__ckb_cell_type_code_hash"
+                                | "__ckb_cell_lock_args_hash"
+                                | "__ckb_cell_type_args_hash"
+                        ) && args.len() == 1
+                            && dest.ty == IrType::Hash =>
                     {
                         self.cell_buffer_size_offsets.insert(dest.id, next_cell_slot);
                         self.cell_buffer_offsets.insert(dest.id, next_cell_slot + 8);
@@ -9092,6 +9137,9 @@ impl CodeGenerator {
         if self.emit_runtime_current_script_hash_call(dest, func, args)? {
             return Ok(());
         }
+        if self.emit_runtime_cell_script_hash_field_call(dest, func, args)? {
+            return Ok(());
+        }
         if self.emit_runtime_witness_hash_call(dest, func, args)? {
             return Ok(());
         }
@@ -9202,6 +9250,46 @@ impl CodeGenerator {
         Ok(true)
     }
 
+    fn emit_runtime_cell_script_hash_field_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(
+            func,
+            "__ckb_cell_lock_code_hash" | "__ckb_cell_type_code_hash" | "__ckb_cell_lock_args_hash" | "__ckb_cell_type_args_hash"
+        ) {
+            return Ok(false);
+        }
+        let Some(dest) = dest else {
+            return Ok(false);
+        };
+        if args.len() != 1 || dest.ty != IrType::Hash {
+            return Ok(false);
+        }
+        let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: ScriptRef hash destination has no 32-byte storage; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: ScriptRef hash destination has no buffer storage; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+
+        self.emit("# cellscript abi: load SourceView ScriptRef hash field into addressable Hash");
+        self.emit("li t0, 32");
+        self.emit_stack_store("t0", size_offset);
+        self.emit_operand_to_register("a0", &args[0]);
+        self.emit_sp_addi("a1", buffer_offset);
+        self.emit_sp_addi("a2", size_offset);
+        self.emit(format!("call {}", func));
+        let ok_label = self.fresh_label("script_ref_hash_ok");
+        self.emit(format!("beqz a0, {}", ok_label));
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
+        self.emit_sp_addi("t0", buffer_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(true)
+    }
+
     fn emit_runtime_witness_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
         if !matches!(func, "__ckb_witness_raw" | "__ckb_witness_lock" | "__ckb_witness_input_type" | "__ckb_witness_output_type") {
             return Ok(false);
@@ -9245,6 +9333,10 @@ impl CodeGenerator {
                 | "__ckb_require_cell_type_hash"
                 | "__ckb_require_cell_lock_args_hash"
                 | "__ckb_require_cell_type_args_hash"
+                | "__ckb_require_cell_lock_args_prefix_hash"
+                | "__ckb_require_cell_type_args_prefix_hash"
+                | "__ckb_require_cell_lock_args_suffix_hash"
+                | "__ckb_require_cell_type_args_suffix_hash"
                 | "__ckb_require_input_out_point_tx_hash"
                 | "__xudt_require_owner_mode_input_type"
         ) {
@@ -10609,6 +10701,14 @@ impl CodeGenerator {
             ),
             ("__ckb_cell_lock_hash_low", "SourceView lock hash low word"),
             ("__ckb_cell_type_hash_low", "SourceView type hash low word"),
+            ("__ckb_cell_lock_code_hash", "SourceView lock Script code_hash read"),
+            ("__ckb_cell_type_code_hash", "SourceView type Script code_hash read"),
+            ("__ckb_cell_lock_hash_type", "SourceView lock Script hash_type read"),
+            ("__ckb_cell_type_hash_type", "SourceView type Script hash_type read"),
+            ("__ckb_cell_lock_args_empty", "SourceView lock Script args_empty read"),
+            ("__ckb_cell_type_args_empty", "SourceView type Script args_empty read"),
+            ("__ckb_cell_lock_args_hash", "SourceView lock Script 32-byte args read"),
+            ("__ckb_cell_type_args_hash", "SourceView type Script 32-byte args read"),
             ("__ckb_require_cell_lock_hash", "SourceView lock hash full 32-byte binding check"),
             ("__ckb_require_cell_type_hash", "SourceView type hash full 32-byte binding check"),
             ("__ckb_require_current_script_args_empty", "current Script empty args requirement"),
@@ -10616,6 +10716,10 @@ impl CodeGenerator {
             ("__ckb_require_cell_type_args_empty", "SourceView type Script empty args requirement"),
             ("__ckb_require_cell_lock_args_hash", "SourceView lock Script 32-byte args binding check"),
             ("__ckb_require_cell_type_args_hash", "SourceView type Script 32-byte args binding check"),
+            ("__ckb_require_cell_lock_args_prefix_hash", "SourceView lock Script 32-byte args prefix binding check"),
+            ("__ckb_require_cell_type_args_prefix_hash", "SourceView type Script 32-byte args prefix binding check"),
+            ("__ckb_require_cell_lock_args_suffix_hash", "SourceView lock Script 32-byte args suffix binding check"),
+            ("__ckb_require_cell_type_args_suffix_hash", "SourceView type Script 32-byte args suffix binding check"),
             ("__ckb_require_cell_lock_script_hash_type", "SourceView lock Script code_hash/hash_type binding check"),
             ("__ckb_require_cell_type_script_hash_type", "SourceView type Script code_hash/hash_type binding check"),
             ("__c256_require_u128_product_lte", "C256 u128 product <= requirement"),
@@ -10703,6 +10807,30 @@ impl CodeGenerator {
                 "__ckb_cell_type_hash_low" => {
                     self.emit_runtime_cell_field_low_word_helper(name, detail, CKB_CELL_FIELD_TYPE_HASH, enabled);
                 }
+                "__ckb_cell_lock_code_hash" => {
+                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptHashFieldRead::CodeHash, enabled);
+                }
+                "__ckb_cell_type_code_hash" => {
+                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptHashFieldRead::CodeHash, enabled);
+                }
+                "__ckb_cell_lock_args_hash" => {
+                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptHashFieldRead::Args32, enabled);
+                }
+                "__ckb_cell_type_args_hash" => {
+                    self.emit_runtime_cell_script_hash_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptHashFieldRead::Args32, enabled);
+                }
+                "__ckb_cell_lock_hash_type" => {
+                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptScalarFieldRead::HashType, enabled);
+                }
+                "__ckb_cell_type_hash_type" => {
+                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptScalarFieldRead::HashType, enabled);
+                }
+                "__ckb_cell_lock_args_empty" => {
+                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_LOCK, ScriptScalarFieldRead::ArgsEmpty, enabled);
+                }
+                "__ckb_cell_type_args_empty" => {
+                    self.emit_runtime_cell_script_scalar_field_helper(name, detail, CKB_CELL_FIELD_TYPE, ScriptScalarFieldRead::ArgsEmpty, enabled);
+                }
                 "__ckb_require_cell_lock_hash" => self.emit_runtime_cell_hash_requirement_helper(
                     name,
                     detail,
@@ -10725,10 +10853,58 @@ impl CodeGenerator {
                     self.emit_runtime_cell_script_args_empty_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
                 }
                 "__ckb_require_cell_lock_args_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptArgsHashRequirementMode::Exact32,
+                        enabled,
+                    )
                 }
                 "__ckb_require_cell_type_args_hash" => {
-                    self.emit_runtime_cell_script_args_hash_requirement_helper(name, detail, CKB_CELL_FIELD_TYPE, enabled)
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptArgsHashRequirementMode::Exact32,
+                        enabled,
+                    )
+                }
+                "__ckb_require_cell_lock_args_prefix_hash" => {
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptArgsHashRequirementMode::Prefix32,
+                        enabled,
+                    )
+                }
+                "__ckb_require_cell_type_args_prefix_hash" => {
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptArgsHashRequirementMode::Prefix32,
+                        enabled,
+                    )
+                }
+                "__ckb_require_cell_lock_args_suffix_hash" => {
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_LOCK,
+                        ScriptArgsHashRequirementMode::Suffix32,
+                        enabled,
+                    )
+                }
+                "__ckb_require_cell_type_args_suffix_hash" => {
+                    self.emit_runtime_cell_script_args_hash_requirement_helper(
+                        name,
+                        detail,
+                        CKB_CELL_FIELD_TYPE,
+                        ScriptArgsHashRequirementMode::Suffix32,
+                        enabled,
+                    )
                 }
                 "__ckb_require_cell_lock_script_hash_type" => {
                     self.emit_runtime_cell_script_hash_type_requirement_helper(name, detail, CKB_CELL_FIELD_LOCK, enabled)
@@ -13097,6 +13273,240 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_cell_script_hash_field_helper(
+        &mut self,
+        symbol: &str,
+        detail: &str,
+        field_id: u64,
+        read: ScriptHashFieldRead,
+        enabled: bool,
+    ) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: CKB SourceView read-only ScriptRef Hash field ({})", detail));
+        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status");
+        if !enabled {
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit("ret");
+            return;
+        }
+
+        const SCRIPT_SIZE_OFFSET: usize = 8;
+        const SCRIPT_BUFFER_OFFSET: usize = 16;
+        const OUT_PTR_OFFSET: usize = 152;
+        const SIZE_PTR_OFFSET: usize = 160;
+        const RA_OFFSET: usize = 184;
+        const FRAME_SIZE: usize = 192;
+
+        let requested_size = match read {
+            ScriptHashFieldRead::CodeHash => 53u64,
+            ScriptHashFieldRead::Args32 => 128u64,
+        };
+        let payload_offset = match read {
+            ScriptHashFieldRead::CodeHash => SCRIPT_BUFFER_OFFSET + 16,
+            ScriptHashFieldRead::Args32 => SCRIPT_BUFFER_OFFSET + 53,
+        };
+        let invalid = self.fresh_label("script_ref_hash_source_invalid");
+        let failed = self.fresh_label("script_ref_hash_load_failed");
+        let loaded = self.fresh_label("script_ref_hash_loaded");
+        let malformed = self.fresh_label("script_ref_hash_malformed");
+        let args_mismatch = self.fresh_label("script_ref_hash_args_mismatch");
+        let copy_loop = self.fresh_label("script_ref_hash_copy");
+        let copy_done = self.fresh_label("script_ref_hash_copy_done");
+        let done = self.fresh_label("script_ref_hash_done");
+        let abi = self.runtime_abi();
+
+        self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", OUT_PTR_OFFSET));
+        self.emit(format!("sd a2, {}(sp)", SIZE_PTR_OFFSET));
+        self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit(format!("li t0, {}", requested_size));
+        self.emit(format!("sd t0, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
+        self.emit(format!("addi a1, sp, {}", SCRIPT_SIZE_OFFSET));
+        self.emit("li a2, 0");
+        self.emit("addi a3, t1, 0");
+        self.emit("addi a4, t2, 0");
+        self.emit(format!("li a5, {}", field_id));
+        self.emit(format!("li a7, {}", abi.load_cell_by_field));
+        self.emit("ecall");
+        self.emit(format!("beqz a0, {}", loaded));
+        if matches!(read, ScriptHashFieldRead::CodeHash) {
+            self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+            self.emit("sub t1, a0, t0");
+            self.emit(format!("beqz t1, {}", loaded));
+        }
+        self.emit(format!("j {}", failed));
+
+        self.emit_label(&loaded);
+        self.emit(format!("ld t3, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit("li t1, 49");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("bnez t2, {}", malformed));
+        self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET);
+        self.emit("sub t2, t0, t3");
+        self.emit(format!("bnez t2, {}", malformed));
+        for (offset, expected) in [(4usize, 16u64), (8, 48), (12, 49)] {
+            self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + offset);
+            self.emit(format!("li t1, {}", expected));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", malformed));
+        }
+        if matches!(read, ScriptHashFieldRead::Args32) {
+            self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + 49);
+            self.emit("li t1, 32");
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", args_mismatch));
+            self.emit("li t1, 85");
+            self.emit("sub t2, t3, t1");
+            self.emit(format!("bnez t2, {}", malformed));
+        }
+
+        self.emit("li t1, 0");
+        self.emit_label(&copy_loop);
+        self.emit("li t2, 32");
+        self.emit("sltu t3, t1, t2");
+        self.emit(format!("beqz t3, {}", copy_done));
+        self.emit(format!("addi t6, sp, {}", payload_offset));
+        self.emit("add t6, t6, t1");
+        self.emit("lbu t5, 0(t6)");
+        self.emit(format!("ld t6, {}(sp)", OUT_PTR_OFFSET));
+        self.emit("add t6, t6, t1");
+        self.emit("sb t5, 0(t6)");
+        self.emit("addi t1, t1, 1");
+        self.emit(format!("j {}", copy_loop));
+        self.emit_label(&copy_done);
+        self.emit(format!("ld t6, {}(sp)", SIZE_PTR_OFFSET));
+        self.emit("li t0, 32");
+        self.emit("sd t0, 0(t6)");
+        self.emit("li a0, 0");
+        self.emit(format!("j {}", done));
+
+        self.emit_label(&invalid);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&args_mismatch);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptArgsMismatch.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&malformed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit_label(&done);
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
+        self.emit("ret");
+    }
+
+    fn emit_runtime_cell_script_scalar_field_helper(
+        &mut self,
+        symbol: &str,
+        detail: &str,
+        field_id: u64,
+        read: ScriptScalarFieldRead,
+        enabled: bool,
+    ) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: CKB SourceView read-only ScriptRef scalar field ({})", detail));
+        self.emit("# cellscript abi: args a0=SourceView; returns a0=value, a1=status");
+        if !enabled {
+            self.emit("li a0, 0");
+            self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit("ret");
+            return;
+        }
+
+        const SCRIPT_SIZE_OFFSET: usize = 8;
+        const SCRIPT_BUFFER_OFFSET: usize = 16;
+        const RA_OFFSET: usize = 152;
+        const FRAME_SIZE: usize = 160;
+        let requested_size = match read {
+            ScriptScalarFieldRead::HashType => 53u64,
+            ScriptScalarFieldRead::ArgsEmpty => 128u64,
+        };
+        let invalid = self.fresh_label("script_ref_scalar_source_invalid");
+        let failed = self.fresh_label("script_ref_scalar_load_failed");
+        let loaded = self.fresh_label("script_ref_scalar_loaded");
+        let malformed = self.fresh_label("script_ref_scalar_malformed");
+        let nonempty = self.fresh_label("script_ref_scalar_nonempty");
+        let done = self.fresh_label("script_ref_scalar_done");
+        let abi = self.runtime_abi();
+
+        self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit(format!("li t0, {}", requested_size));
+        self.emit(format!("sd t0, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
+        self.emit(format!("addi a1, sp, {}", SCRIPT_SIZE_OFFSET));
+        self.emit("li a2, 0");
+        self.emit("addi a3, t1, 0");
+        self.emit("addi a4, t2, 0");
+        self.emit(format!("li a5, {}", field_id));
+        self.emit(format!("li a7, {}", abi.load_cell_by_field));
+        self.emit("ecall");
+        self.emit(format!("beqz a0, {}", loaded));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", loaded));
+        self.emit(format!("j {}", failed));
+
+        self.emit_label(&loaded);
+        self.emit(format!("ld t3, {}(sp)", SCRIPT_SIZE_OFFSET));
+        self.emit("li t1, 49");
+        self.emit("sltu t2, t3, t1");
+        self.emit(format!("bnez t2, {}", malformed));
+        self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET);
+        self.emit("sub t2, t0, t3");
+        self.emit(format!("bnez t2, {}", malformed));
+        for (offset, expected) in [(4usize, 16u64), (8, 48), (12, 49)] {
+            self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + offset);
+            self.emit(format!("li t1, {}", expected));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", malformed));
+        }
+        match read {
+            ScriptScalarFieldRead::HashType => {
+                self.emit(format!("lbu a0, {}(sp)", SCRIPT_BUFFER_OFFSET + 48));
+                self.emit("li a1, 0");
+                self.emit(format!("j {}", done));
+            }
+            ScriptScalarFieldRead::ArgsEmpty => {
+                self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + 49);
+                self.emit(format!("bnez t0, {}", nonempty));
+                self.emit("li t1, 53");
+                self.emit("sub t2, t3, t1");
+                self.emit(format!("bnez t2, {}", malformed));
+                self.emit("li a0, 1");
+                self.emit("li a1, 0");
+                self.emit(format!("j {}", done));
+                self.emit_label(&nonempty);
+                self.emit("li a0, 0");
+                self.emit("li a1, 0");
+                self.emit(format!("j {}", done));
+            }
+        }
+
+        self.emit_label(&invalid);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&failed);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&malformed);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+        self.emit_label(&done);
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
+        self.emit("ret");
+    }
+
     fn emit_runtime_cell_script_args_empty_requirement_helper(&mut self, symbol: &str, detail: &str, field_id: u64, enabled: bool) {
         self.emit_global(symbol);
         self.emit_label(symbol);
@@ -13321,12 +13731,29 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
-    fn emit_runtime_cell_script_args_hash_requirement_helper(&mut self, symbol: &str, detail: &str, field_id: u64, enabled: bool) {
+    fn emit_runtime_cell_script_args_hash_requirement_helper(
+        &mut self,
+        symbol: &str,
+        detail: &str,
+        field_id: u64,
+        mode: ScriptArgsHashRequirementMode,
+        enabled: bool,
+    ) {
         self.emit_global(symbol);
         self.emit_label(symbol);
         self.emit(format!("# cellscript abi: CKB SourceView Script 32-byte args requirement ({})", detail));
         self.emit("# cellscript abi: args a0=SourceView, a1=expected_args_hash_ptr, a2=expected_args_hash_len");
-        self.emit("# cellscript abi: expects Molecule Script args Bytes length == 32 and payload == expected hash");
+        match mode {
+            ScriptArgsHashRequirementMode::Exact32 => {
+                self.emit("# cellscript abi: expects Molecule Script args Bytes length == 32 and payload == expected hash");
+            }
+            ScriptArgsHashRequirementMode::Prefix32 => {
+                self.emit("# cellscript abi: expects Molecule Script args Bytes length >= 32 and first 32 bytes == expected hash");
+            }
+            ScriptArgsHashRequirementMode::Suffix32 => {
+                self.emit("# cellscript abi: expects Molecule Script args Bytes length >= 32 and last 32 bytes == expected hash");
+            }
+        }
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("ret");
@@ -13336,20 +13763,29 @@ impl CodeGenerator {
         const SCRIPT_SIZE_OFFSET: usize = 8;
         const SCRIPT_BUFFER_OFFSET: usize = 16;
         const ARGS_PAYLOAD_OFFSET: usize = SCRIPT_BUFFER_OFFSET + 53;
+        const SOURCE_INDEX_OFFSET: usize = 152;
+        const SOURCE_KIND_OFFSET: usize = 160;
+        const EXPECTED_HASH_LEN_OFFSET: usize = 168;
+        const EXPECTED_HASH_PTR_OFFSET: usize = 176;
+        const RA_OFFSET: usize = 184;
+        const FRAME_SIZE: usize = 192;
+        const SCRIPT_PREFIX_SIZE: u64 = 53;
         const HASH_ARGS_SCRIPT_SIZE: u64 = 85;
 
         let invalid = self.fresh_label("script_args_hash_source_invalid");
         let bad_expected = self.fresh_label("script_args_hash_expected_invalid");
+        let loaded = self.fresh_label("script_args_hash_loaded");
+        let suffix_loaded = self.fresh_label("script_args_hash_suffix_loaded");
         let failed = self.fresh_label("script_args_hash_load_failed");
         let mismatch = self.fresh_label("script_args_hash_mismatch");
         let malformed = self.fresh_label("script_args_hash_malformed");
         let done = self.fresh_label("script_args_hash_done");
         let abi = self.runtime_abi();
 
-        self.emit("addi sp, sp, -192");
-        self.emit("sd ra, 184(sp)");
-        self.emit("sd a1, 176(sp)");
-        self.emit("sd a2, 168(sp)");
+        self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", EXPECTED_HASH_PTR_OFFSET));
+        self.emit(format!("sd a2, {}(sp)", EXPECTED_HASH_LEN_OFFSET));
 
         self.emit(format!("beqz a1, {}", bad_expected));
         self.emit("li t0, 32");
@@ -13357,7 +13793,13 @@ impl CodeGenerator {
         self.emit(format!("bnez t1, {}", bad_expected));
 
         self.emit_decode_source_view_to_t1_t2(&invalid);
-        self.emit("li t0, 128");
+        self.emit(format!("sd t1, {}(sp)", SOURCE_INDEX_OFFSET));
+        self.emit(format!("sd t2, {}(sp)", SOURCE_KIND_OFFSET));
+        let requested_size = match mode {
+            ScriptArgsHashRequirementMode::Exact32 | ScriptArgsHashRequirementMode::Prefix32 => 128u64,
+            ScriptArgsHashRequirementMode::Suffix32 => SCRIPT_PREFIX_SIZE,
+        };
+        self.emit(format!("li t0, {}", requested_size));
         self.emit(format!("sd t0, {}(sp)", SCRIPT_SIZE_OFFSET));
         self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
         self.emit(format!("addi a1, sp, {}", SCRIPT_SIZE_OFFSET));
@@ -13367,8 +13809,13 @@ impl CodeGenerator {
         self.emit(format!("li a5, {}", field_id));
         self.emit(format!("li a7, {}", abi.load_cell_by_field));
         self.emit("ecall");
-        self.emit(format!("bnez a0, {}", failed));
+        self.emit(format!("beqz a0, {}", loaded));
+        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
+        self.emit("sub t1, a0, t0");
+        self.emit(format!("beqz t1, {}", loaded));
+        self.emit(format!("j {}", failed));
 
+        self.emit_label(&loaded);
         self.emit(format!("ld t3, {}(sp)", SCRIPT_SIZE_OFFSET));
         self.emit("li t1, 53");
         self.emit("sltu t2, t3, t1");
@@ -13385,15 +13832,56 @@ impl CodeGenerator {
         }
 
         self.emit_stack_u32_le_to("t0", SCRIPT_BUFFER_OFFSET + 49);
-        self.emit("li t1, 32");
-        self.emit("sub t2, t0, t1");
-        self.emit(format!("bnez t2, {}", mismatch));
-        self.emit(format!("li t1, {}", HASH_ARGS_SCRIPT_SIZE));
-        self.emit("sub t2, t3, t1");
-        self.emit(format!("bnez t2, {}", malformed));
-
-        self.emit(format!("addi a0, sp, {}", ARGS_PAYLOAD_OFFSET));
-        self.emit("ld a1, 176(sp)");
+        match mode {
+            ScriptArgsHashRequirementMode::Exact32 => {
+                self.emit("li t1, 32");
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("bnez t2, {}", mismatch));
+                self.emit(format!("li t1, {}", HASH_ARGS_SCRIPT_SIZE));
+                self.emit("sub t2, t3, t1");
+                self.emit(format!("bnez t2, {}", malformed));
+                self.emit(format!("addi a0, sp, {}", ARGS_PAYLOAD_OFFSET));
+            }
+            ScriptArgsHashRequirementMode::Prefix32 => {
+                self.emit("li t1, 32");
+                self.emit("sltu t2, t0, t1");
+                self.emit(format!("bnez t2, {}", mismatch));
+                self.emit(format!("li t1, {}", SCRIPT_PREFIX_SIZE));
+                self.emit("add t1, t1, t0");
+                self.emit("sub t2, t3, t1");
+                self.emit(format!("bnez t2, {}", malformed));
+                self.emit(format!("addi a0, sp, {}", ARGS_PAYLOAD_OFFSET));
+            }
+            ScriptArgsHashRequirementMode::Suffix32 => {
+                self.emit("li t1, 32");
+                self.emit("sltu t2, t0, t1");
+                self.emit(format!("bnez t2, {}", mismatch));
+                self.emit(format!("li t1, {}", SCRIPT_PREFIX_SIZE));
+                self.emit("add t1, t1, t0");
+                self.emit("sub t2, t3, t1");
+                self.emit(format!("bnez t2, {}", malformed));
+                self.emit("addi t1, t1, -32");
+                self.emit("li t0, 32");
+                self.emit(format!("sd t0, {}(sp)", SCRIPT_SIZE_OFFSET));
+                self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
+                self.emit(format!("addi a1, sp, {}", SCRIPT_SIZE_OFFSET));
+                self.emit("addi a2, t1, 0");
+                self.emit(format!("ld a3, {}(sp)", SOURCE_INDEX_OFFSET));
+                self.emit(format!("ld a4, {}(sp)", SOURCE_KIND_OFFSET));
+                self.emit(format!("li a5, {}", field_id));
+                self.emit(format!("li a7, {}", abi.load_cell_by_field));
+                self.emit("ecall");
+                self.emit(format!("beqz a0, {}", suffix_loaded));
+                self.emit(format!("j {}", failed));
+                self.emit_label(&suffix_loaded);
+                self.emit(format!("ld t0, {}(sp)", SCRIPT_SIZE_OFFSET));
+                self.emit("li t1, 32");
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("bnez t2, {}", malformed));
+                self.emit(format!("addi a0, sp, {}", SCRIPT_BUFFER_OFFSET));
+            }
+        }
+        self.emit(format!("ld a1, {}(sp)", EXPECTED_HASH_PTR_OFFSET));
         self.emit("li a2, 32");
         self.emit("call __cellscript_memcmp_fixed");
         self.emit(format!("bnez a0, {}", mismatch));
@@ -13415,8 +13903,8 @@ impl CodeGenerator {
         self.emit_label(&malformed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
         self.emit_label(&done);
-        self.emit("ld ra, 184(sp)");
-        self.emit("addi sp, sp, 192");
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
         self.emit("ret");
     }
 
@@ -17210,6 +17698,10 @@ fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__ckb_require_cell_type_args_empty"
             | "__ckb_require_cell_lock_args_hash"
             | "__ckb_require_cell_type_args_hash"
+            | "__ckb_require_cell_lock_args_prefix_hash"
+            | "__ckb_require_cell_type_args_prefix_hash"
+            | "__ckb_require_cell_lock_args_suffix_hash"
+            | "__ckb_require_cell_type_args_suffix_hash"
             | "__ckb_require_cell_lock_script_hash_type"
             | "__ckb_require_cell_type_script_hash_type"
             | "__ckb_require_input_out_point_tx_hash"
@@ -17256,6 +17748,10 @@ fn is_runtime_scalar_failclosed_call(func: &str) -> bool {
             | "__ckb_cell_unoccupied_capacity"
             | "__ckb_cell_output_index"
             | "__ckb_cell_data_size"
+            | "__ckb_cell_lock_hash_type"
+            | "__ckb_cell_type_hash_type"
+            | "__ckb_cell_lock_args_empty"
+            | "__ckb_cell_type_args_empty"
             | "__dao_accumulated_rate"
             | "__dao_input_accumulated_rate"
             | "__dao_has_dao_type"

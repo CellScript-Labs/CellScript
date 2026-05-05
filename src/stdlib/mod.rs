@@ -201,6 +201,46 @@ impl StdLib {
                 return_type: Some(IrType::U64),
             },
             StdFunction {
+                name: "ckb_cell_lock_code_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_code_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_hash_type".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_type_hash_type".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "ckb_cell_type_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
                 name: "ckb_input_out_point_index".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
@@ -238,6 +278,26 @@ impl StdLib {
             },
             StdFunction {
                 name: "ckb_require_cell_type_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_prefix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_prefix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_suffix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_suffix_hash".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
                 return_type: None,
             },

@@ -57,13 +57,14 @@ pub struct CompileOptions {
     /// - `Some("0.15")`: require v0.15 syntax, reject legacy forms
     /// - `Some("0.16")`: require v0.15 syntax plus v0.16 ProofPlan soundness
     /// - `Some("0.17")`: require v0.15 syntax plus v0.17 CKB source/ProofPlan gates
+    /// - `Some("0.18")`: require v0.17 CKB source gates plus v0.18 ScriptRef/ScriptArgs surface
     pub primitive_compat: Option<String>,
 }
 
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
     pub fn is_primitive_strict_015(&self) -> bool {
-        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17"))
+        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17" | "0.18"))
     }
 
     /// Returns true when running in v0.16 strict assurance mode.
@@ -73,13 +74,13 @@ impl CompileOptions {
 
     /// Returns true when running in v0.17 strict CKB source mode.
     pub fn is_ckb_source_strict_017(&self) -> bool {
-        self.primitive_compat.as_deref() == Some("0.17")
+        matches!(self.primitive_compat.as_deref(), Some("0.17" | "0.18"))
     }
 
     /// Returns true when running in v0.14 compat mode (the default when
     /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
     pub fn is_primitive_compat_014(&self) -> bool {
-        !matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17"))
+        !matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17" | "0.18"))
     }
 }
 
@@ -89,10 +90,10 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     }
     if let Some(mode) = options.primitive_compat.as_deref() {
         match mode {
-            "0.14" | "0.15" | "0.16" | "0.17" => {}
+            "0.14" | "0.15" | "0.16" | "0.17" | "0.18" => {}
             other => {
                 return Err(CompileError::without_span(format!(
-                    "unsupported primitive compatibility mode '{}'; expected 0.14, 0.15, 0.16, or 0.17",
+                    "unsupported primitive compatibility mode '{}'; expected 0.14, 0.15, 0.16, 0.17, or 0.18",
                     other
                 )));
             }
@@ -11645,12 +11646,24 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                             | "__ckb_cell_lock_hash_low"
                             | "__ckb_cell_type_hash_low"
+                            | "__ckb_cell_lock_code_hash"
+                            | "__ckb_cell_type_code_hash"
+                            | "__ckb_cell_lock_hash_type"
+                            | "__ckb_cell_type_hash_type"
+                            | "__ckb_cell_lock_args_empty"
+                            | "__ckb_cell_type_args_empty"
+                            | "__ckb_cell_lock_args_hash"
+                            | "__ckb_cell_type_args_hash"
                             | "__ckb_require_cell_lock_hash"
                             | "__ckb_require_cell_type_hash"
                             | "__ckb_require_cell_lock_args_empty"
                             | "__ckb_require_cell_type_args_empty"
                             | "__ckb_require_cell_lock_args_hash"
                             | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args_prefix_hash"
+                            | "__ckb_require_cell_type_args_prefix_hash"
+                            | "__ckb_require_cell_lock_args_suffix_hash"
+                            | "__ckb_require_cell_type_args_suffix_hash"
                             | "__ckb_require_cell_lock_script_hash_type"
                             | "__ckb_require_cell_type_script_hash_type"
                             | "__ckb_cell_data_size"
@@ -11659,12 +11672,34 @@ fn body_ckb_runtime_features(
                     features.insert("ckb-source-cell-fields".to_string());
                     if matches!(
                         func.as_str(),
+                        "__ckb_cell_lock_args_empty"
+                            | "__ckb_cell_type_args_empty"
+                            | "__ckb_cell_lock_args_hash"
+                            | "__ckb_cell_type_args_hash"
+                    ) {
+                        features.insert("ckb-script-args-read".to_string());
+                    }
+                    if matches!(
+                        func.as_str(),
                         "__ckb_require_cell_lock_args_empty"
                             | "__ckb_require_cell_type_args_empty"
                             | "__ckb_require_cell_lock_args_hash"
                             | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args_prefix_hash"
+                            | "__ckb_require_cell_type_args_prefix_hash"
+                            | "__ckb_require_cell_lock_args_suffix_hash"
+                            | "__ckb_require_cell_type_args_suffix_hash"
                     ) {
                         features.insert("ckb-script-args-requirements".to_string());
+                    }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_cell_lock_code_hash"
+                            | "__ckb_cell_type_code_hash"
+                            | "__ckb_cell_lock_hash_type"
+                            | "__ckb_cell_type_hash_type"
+                    ) {
+                        features.insert("ckb-script-ref-read".to_string());
                     }
                     if matches!(func.as_str(), "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type")
                     {
@@ -12147,6 +12182,30 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_cell_lock_hash_low" => Some(("cell-lock-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_hash_low")),
         "__ckb_cell_type_hash_low" => Some(("cell-type-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_hash_low")),
+        "__ckb_cell_lock_code_hash" => {
+            Some(("cell-lock-script-code-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_code_hash"))
+        }
+        "__ckb_cell_type_code_hash" => {
+            Some(("cell-type-script-code-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_code_hash"))
+        }
+        "__ckb_cell_lock_hash_type" => {
+            Some(("cell-lock-script-hash-type-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_hash_type"))
+        }
+        "__ckb_cell_type_hash_type" => {
+            Some(("cell-type-script-hash-type-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_hash_type"))
+        }
+        "__ckb_cell_lock_args_empty" => {
+            Some(("cell-lock-script-args-empty-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_args_empty"))
+        }
+        "__ckb_cell_type_args_empty" => {
+            Some(("cell-type-script-args-empty-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_args_empty"))
+        }
+        "__ckb_cell_lock_args_hash" => {
+            Some(("cell-lock-script-args-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_args_hash"))
+        }
+        "__ckb_cell_type_args_hash" => {
+            Some(("cell-type-script-args-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_args_hash"))
+        }
         "__ckb_require_cell_lock_hash" => {
             Some(("cell-lock-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_hash"))
         }
@@ -12165,6 +12224,30 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_require_cell_type_args_hash" => {
             Some(("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_hash"))
         }
+        "__ckb_require_cell_lock_args_prefix_hash" => Some((
+            "cell-lock-script-prefix-hash-args-require",
+            "LOAD_CELL_BY_FIELD",
+            "SourceView",
+            "ckb::require_cell_lock_args_prefix_hash",
+        )),
+        "__ckb_require_cell_type_args_prefix_hash" => Some((
+            "cell-type-script-prefix-hash-args-require",
+            "LOAD_CELL_BY_FIELD",
+            "SourceView",
+            "ckb::require_cell_type_args_prefix_hash",
+        )),
+        "__ckb_require_cell_lock_args_suffix_hash" => Some((
+            "cell-lock-script-suffix-hash-args-require",
+            "LOAD_CELL_BY_FIELD",
+            "SourceView",
+            "ckb::require_cell_lock_args_suffix_hash",
+        )),
+        "__ckb_require_cell_type_args_suffix_hash" => Some((
+            "cell-type-script-suffix-hash-args-require",
+            "LOAD_CELL_BY_FIELD",
+            "SourceView",
+            "ckb::require_cell_type_args_suffix_hash",
+        )),
         "__ckb_require_cell_lock_script_hash_type" => {
             Some(("cell-lock-script-identity-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_script_hash_type"))
         }

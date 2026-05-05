@@ -4060,6 +4060,78 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::cell_lock_code_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_code_hash",
+                    "ckb_cell_lock_code_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_code_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_code_hash",
+                    "ckb_cell_type_code_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_hash_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_hash_type",
+                    "ckb_cell_lock_hash_type",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_hash_type" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_hash_type",
+                    "ckb_cell_type_hash_type",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_args_empty" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_args_empty",
+                    "ckb_cell_lock_args_empty",
+                    IrType::Bool,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_args_empty" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_args_empty",
+                    "ckb_cell_type_args_empty",
+                    IrType::Bool,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_args_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_args_hash",
+                    "ckb_cell_lock_args_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_args_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_args_hash",
+                    "ckb_cell_type_args_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "ckb::require_cell_lock_hash" if call.args.len() == 2 => {
                     self.lower_void_runtime_call("__ckb_require_cell_lock_hash", &call.args, current, blocks, vars)
                 }
@@ -4080,6 +4152,18 @@ impl IrGenerator {
                 }
                 "ckb::require_cell_type_args_hash" if call.args.len() == 2 => {
                     self.lower_void_runtime_call("__ckb_require_cell_type_args_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_lock_args_prefix_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_prefix_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_args_prefix_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_prefix_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_lock_args_suffix_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_lock_args_suffix_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_type_args_suffix_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_type_args_suffix_hash", &call.args, current, blocks, vars)
                 }
                 "ckb::require_cell_lock_script_hash_type" if call.args.len() == 3 => {
                     self.lower_void_runtime_call("__ckb_require_cell_lock_script_hash_type", &call.args, current, blocks, vars)

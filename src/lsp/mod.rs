@@ -550,6 +550,14 @@ impl LspServer {
                     ("input_out_point_tx_hash_low", "ckb::input_out_point_tx_hash_low(${1:source::group_input(0)})"),
                     ("cell_lock_hash_low", "ckb::cell_lock_hash_low(${1:source::group_input(0)})"),
                     ("cell_type_hash_low", "ckb::cell_type_hash_low(${1:source::group_input(0)})"),
+                    ("cell_lock_code_hash", "ckb::cell_lock_code_hash(${1:source::group_input(0)})"),
+                    ("cell_type_code_hash", "ckb::cell_type_code_hash(${1:source::group_input(0)})"),
+                    ("cell_lock_hash_type", "ckb::cell_lock_hash_type(${1:source::group_input(0)})"),
+                    ("cell_type_hash_type", "ckb::cell_type_hash_type(${1:source::group_input(0)})"),
+                    ("cell_lock_args_empty", "ckb::cell_lock_args_empty(${1:source::group_input(0)})"),
+                    ("cell_type_args_empty", "ckb::cell_type_args_empty(${1:source::group_input(0)})"),
+                    ("cell_lock_args_hash", "ckb::cell_lock_args_hash(${1:source::group_input(0)})"),
+                    ("cell_type_args_hash", "ckb::cell_type_args_hash(${1:source::group_input(0)})"),
                     ("require_cell_lock_hash", "ckb::require_cell_lock_hash(${1:source::group_input(0)}, ${2:expected_lock_hash})"),
                     ("require_cell_type_hash", "ckb::require_cell_type_hash(${1:source::group_input(0)}, ${2:expected_type_hash})"),
                     ("require_current_script_args_empty", "ckb::require_current_script_args_empty()"),
@@ -562,6 +570,22 @@ impl LspServer {
                     (
                         "require_cell_type_args_hash",
                         "ckb::require_cell_type_args_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_cell_lock_args_prefix_hash",
+                        "ckb::require_cell_lock_args_prefix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_cell_type_args_prefix_hash",
+                        "ckb::require_cell_type_args_prefix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_cell_lock_args_suffix_hash",
+                        "ckb::require_cell_lock_args_suffix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
+                    ),
+                    (
+                        "require_cell_type_args_suffix_hash",
+                        "ckb::require_cell_type_args_suffix_hash(${1:source::group_input(0)}, ${2:expected_args_hash})",
                     ),
                     (
                         "require_cell_lock_script_hash_type",
@@ -2470,6 +2494,10 @@ mod tests {
         let ckb = server.member_completions("file:///test.cell", "ckb");
         assert!(ckb.iter().any(|item| item.label == "input_since"));
         assert!(ckb.iter().any(|item| item.label == "since_epoch_relative"));
+        assert!(ckb.iter().any(|item| item.label == "cell_lock_code_hash"));
+        assert!(ckb.iter().any(|item| item.label == "cell_type_args_hash"));
+        assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_prefix_hash"));
+        assert!(ckb.iter().any(|item| item.label == "require_cell_type_args_suffix_hash"));
         assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_empty"));
 
         let dao = server.member_completions("file:///test.cell", "dao");
