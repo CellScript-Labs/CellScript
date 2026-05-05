@@ -113,6 +113,20 @@ release-local replay before expensive CKB-node execution.
 Each mode has a contract in `tests/syntax_combo/matrix.toml`: minimum generated,
 accepted, and rejected case counts plus required origin families. A mode fails
 closed if a budget/configuration change drops coverage below that contract.
+The report also emits:
+
+- `governance_release_matrix`: the grammar-governance tracks covered by this
+  run;
+- `governance_oracles`: the enabled parser, formatter, type/effect,
+  metadata, codegen, and compact-report oracles;
+- `known_bug_classes`: high-risk historical bug classes and the concrete cases
+  or origins that keep each class covered.
+
+`quick`, `ci`, and `deep` have escalating required bug classes. Losing a
+required case such as stdlib locked-output lowering, preserve type equivalence,
+require-block purity, legacy transfer rejection, stdlib argument validation, or
+deep hidden-lifecycle rejection fails the audit before release wording can be
+updated.
 
 ## Acceptance Integration
 
@@ -124,13 +138,13 @@ Keep this layering strict:
 - `scripts/cellscript_syntax_combo_audit.sh quick` is the local smoke gate;
 - `scripts/cellscript_syntax_combo_audit.sh ci` is the merge/release syntax
   gate;
-- `scripts/cellscript_syntax_combo_audit.sh deep` is for release-local or
-  feature-risk replay;
+- `scripts/cellscript_syntax_combo_audit.sh deep` is the production-release
+  replay for higher-risk mutations;
 - `scripts/ckb_cellscript_acceptance.sh --production` remains the chain-evidence
   component;
 - `scripts/cellscript_ckb_release_gate.sh full` is the acceptance-standard
-  wrapper that requires both syntax-combination CI and builder-backed CKB
-  evidence.
+  wrapper that requires syntax-combination CI, syntax-combination deep replay,
+  and builder-backed CKB evidence.
 
 Do not treat a passing CKB acceptance run as a substitute for a failed
 syntax-combination audit. CKB evidence proves selected concrete transactions;
@@ -392,6 +406,7 @@ Before a stable release:
 
 ```bash
 scripts/cellscript_syntax_combo_audit.sh ci
+scripts/cellscript_syntax_combo_audit.sh deep
 ./scripts/cellscript_ckb_release_gate.sh full
 ```
 
@@ -417,6 +432,21 @@ The final JSON report should be small enough for review tools:
   "generated": 1000,
   "accepted": 612,
   "rejected": 388,
+  "failures_count": 0,
+  "governance_release_matrix": [
+    {
+      "track": "stdlib_lifecycle_patterns",
+      "status": "covered_by_gate",
+      "gate": "syntax-combo stdlib lifecycle metadata oracles"
+    }
+  ],
+  "known_bug_classes": [
+    {
+      "id": "SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT",
+      "status": "covered",
+      "required": true
+    }
+  ],
   "coverage": {
     "pairwise": 1.0,
     "triplewise_sampled": 0.42

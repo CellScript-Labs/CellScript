@@ -68,7 +68,7 @@ evidence.
 
 - [`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
   defines which CKB-facing responsibilities must stay in `ckb-std`,
-  `ckb-sdk-rust`, or the future adapter instead of compiler core.
+  `ckb-sdk-rust`, or `cellscript-ckb-adapter` instead of compiler core.
 - [`CELLSCRIPT_CKB_STD_COMPAT.md`](CELLSCRIPT_CKB_STD_COMPAT.md) defines the
   contract-side compatibility boundary for generated verifier code, parity
   tests, and future Rust-shim/native-simulation workflows.
@@ -96,7 +96,7 @@ reopen the v0.13 action model casually, and it must not promote sugar that
 hides `consume`, `create`, `destroy`, `transition`, `preserve`, witness
 placement, CellDeps, or signer authority.
 
-Completed ecosystem-reuse implementation slice:
+Completed 0.19 implementation slices:
 
 - `src/ckb_abi.rs` centralizes the inline CKB ABI constants used by CellScript.
 - `tests/ckb_std_compat.rs` adds parity tests against `ckb-std` and
@@ -126,6 +126,11 @@ Completed ecosystem-reuse implementation slice:
 - `scripts/cellscript_ckb_adapter_acceptance.sh` starts a local CKB devnet and
   records focused `estimate_cycles` plus `test_tx_pool_accept` evidence for the
   adapter boundary.
+- `scripts/cellscript_syntax_combo_audit.py` emits a machine-readable
+  grammar-governance release matrix, oracle summary, and required bug-class
+  coverage for high-risk syntax regressions.
+- `tests/syntax_combo/matrix.toml` records the mode floors, required origins,
+  and required grammar-governance bug classes used by the reusable audit gate.
 
 Current 0.19 status:
 
@@ -137,7 +142,7 @@ Current 0.19 status:
 | Rust adapter crate | Done for this slice | `crates/cellscript-ckb-adapter` materializes packed CKB transaction shape and adapter evidence with `ckb-sdk-rust`; `examples/ckb-sdk-builder` is a cookbook wrapper. |
 | Focused local-node adapter acceptance | Done for this slice | `scripts/cellscript_ckb_adapter_acceptance.sh` records local CKB `estimate_cycles` and `test_tx_pool_accept` evidence. |
 | Focused ecosystem reuse gate | Done for this slice | `./scripts/cellscript_ckb_ecosystem_reuse_gate.sh quick` / `full` cover compatibility, adapter crate, cookbook, and focused node acceptance. |
-| Grammar and syntax governance | Partial | Governance documents and syntax-combination infrastructure exist; the 0.19 release status matrix, expanded high-risk gates, and editor/docs sync remain open. |
+| Grammar and syntax governance | Done for this slice | Governance docs now include a 0.19 release status matrix; syntax-combo quick/ci/deep emit machine-readable governance and known-bug-class coverage; VS Code grammar/snippets are aligned with `verification`. |
 | Package manifest and lockfile | Still open | No completed package lockfile verification gate is claimed by this slice. |
 | Source package registry | Still open | Registry publish/resolve/hash-rejection fixtures remain planned. |
 | Deployment registry | Still open | Network-specific deployment verification, CellDep solving, and stale-deployment rejection fixtures remain planned. |

@@ -5,6 +5,8 @@
 - Updated grammar, snippets, and README examples for the canonical
   `verification` action/lock surface and removed the legacy authoring model
   from current guidance.
+- Aligned the extension release boundary with the 0.19 grammar-governance
+  matrix and syntax-combo known-bug-class gate.
 - Updated lock snippets for the 0.14 lock-boundary surface:
   `protected`, `lock_args`, `witness`, and `require`.
 - Added LSP completions for `lock_args`, CKB source views, witness fields,

@@ -83,3 +83,31 @@ type_effect = true
 ir_metadata = true
 codegen_assembly = true
 compact_report = true
+
+[governance]
+release_matrix_report_key = "governance_release_matrix"
+bug_class_report_key = "known_bug_classes"
+description = "The runner must emit machine-readable grammar-governance release evidence and fail closed when required high-risk bug classes lose coverage."
+
+required_bug_classes.quick = [
+    "SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT",
+    "SCA-BUG-PRESERVE-TYPE-EQUIVALENCE",
+    "SCA-BUG-REQUIRE-BLOCK-PURITY",
+    "SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED",
+    "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
+    "SCA-BUG-LEGACY-TRANSFER-REJECTED",
+    "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
+    "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
+]
+
+required_bug_classes.ci = [
+    "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
+    "SCA-BUG-METADATA-HELPER-VALIDATION",
+    "SCA-BUG-RECEIPT-LIFECYCLE-OUTPUT",
+]
+
+required_bug_classes.deep = [
+    "SCA-BUG-DEEP-HIDDEN-LIFECYCLE",
+    "SCA-BUG-DEEP-READ-STDLIB-LIFECYCLE",
+    "SCA-BUG-DEEP-UNKNOWN-STDLIB",
+]

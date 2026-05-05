@@ -65,6 +65,22 @@ merge can have no state continuation.
 | Global protocol law | `invariant`, aggregate primitives, ProofPlan records | Must state trigger, scope, reads, and executable/metadata coverage. |
 | Deferred / rejected syntax | Non-canonical action-body sugar or protocol-name semantics | Must not be accepted as partial syntax. |
 
+## 0.19 Release Status Matrix
+
+| Track | Status | Implementation / evidence | Release gate |
+|---|---|---|---|
+| Canonical action / lock surface | Done for this slice | Parser, formatter, examples, wiki, VS Code grammar/snippets, and syntax-combo accepted cases use `verification` and action-level `transition`. | `scripts/cellscript_syntax_combo_audit.sh quick/ci/deep`; VS Code validate and dry-run in the release gate. |
+| `verification` section boundary | Done for this slice | `verification` replaces `where` in public examples and editor snippets; lifecycle statements remain proof obligations, not runtime execution. | Syntax-combo parser, formatter, type/effect, metadata, and codegen oracles. |
+| Local sugar expansion | Done for this slice | `preserve` and anonymous `require { ... }` are checked against canonical field equality and pure-boolean grouping rules. | Required bug classes `SCA-BUG-PRESERVE-TYPE-EQUIVALENCE` and `SCA-BUG-REQUIRE-BLOCK-PURITY`. |
+| Stdlib lifecycle helper boundary | Done for this slice | `std::lifecycle::*` and `std::receipt::*` helpers must validate arity/cell kind and lower to consume/create/locked-output obligations. | Required bug classes `SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT`, `SCA-BUG-STDLIB-ARGUMENT-VALIDATION`, and `SCA-BUG-RECEIPT-LIFECYCLE-OUTPUT`. |
+| Source qualifier linearity | Done for this slice | `read`, `protected`, `witness`, and `lock_args` bindings cannot be consumed, destroyed, or hidden behind stdlib lifecycle calls. | Required bug classes `SCA-BUG-SOURCE-QUALIFIER-LINEARITY` and `SCA-BUG-DEEP-READ-STDLIB-LIFECYCLE`. |
+| Deferred / rejected surfaces | Done for this slice | Legacy `transfer`, unknown `std::*`, named protocol magic, action-body sugar, reusable proof blocks, and transition blocks are not public 0.19 syntax. | Required bug classes `SCA-BUG-LEGACY-TRANSFER-REJECTED`, `SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED`, `SCA-BUG-DEEP-HIDDEN-LIFECYCLE`, and `SCA-BUG-DEEP-UNKNOWN-STDLIB`. |
+| Machine-readable governance evidence | Done for this slice | The syntax-combo report emits `governance_release_matrix`, `governance_oracles`, and `known_bug_classes`. | The runner fails closed when the mode's required origins or bug classes are missing. |
+
+This matrix is compiler-governance evidence. It is not a replacement for
+builder-backed CKB transaction acceptance, external audit, or exhaustive
+adversarial state-space verification.
+
 ## `verification`
 
 `verification` is a section header, not an execution body. It can contain local

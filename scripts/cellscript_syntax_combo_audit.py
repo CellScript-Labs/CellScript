@@ -27,6 +27,173 @@ ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "tests" / "syntax_combo" / "matrix.toml"
 SEEDS = ROOT / "tests" / "syntax_combo" / "seeds"
 
+MODE_RANK = {"quick": 0, "ci": 1, "deep": 2, "repro": 3}
+
+GOVERNANCE_RELEASE_MATRIX: tuple[dict[str, str], ...] = (
+    {
+        "track": "canonical_action_lock_surface",
+        "layer": "parser_formatter_lsp_docs",
+        "status": "covered_by_gate",
+        "evidence": "action and lock cases parse, format, and use the verification section",
+        "gate": "syntax-combo accepted action/lock cases plus VS Code validate/dry-run in release gate",
+    },
+    {
+        "track": "local_explicit_sugar",
+        "layer": "type_lowering_metadata",
+        "status": "covered_by_gate",
+        "evidence": "preserve and anonymous require-block cases are type/effect checked and metadata-checked",
+        "gate": "syntax-combo preserve/require-block positive and negative cases",
+    },
+    {
+        "track": "stdlib_lifecycle_patterns",
+        "layer": "type_lowering_metadata_codegen",
+        "status": "covered_by_gate",
+        "evidence": "transfer/claim/settle emit consume, create, locked output, and field obligations",
+        "gate": "syntax-combo stdlib lifecycle metadata oracles",
+    },
+    {
+        "track": "source_qualifier_boundary",
+        "layer": "type_effect",
+        "status": "covered_by_gate",
+        "evidence": "read/protected/witness/lock_args boundaries reject linear lifecycle misuse",
+        "gate": "syntax-combo lock source qualifier and read-param reject cases",
+    },
+    {
+        "track": "deferred_rejected_surfaces",
+        "layer": "parser_type_policy",
+        "status": "covered_by_gate",
+        "evidence": "legacy transfer capability, unknown stdlib patterns, and hidden lifecycle proof forms fail closed",
+        "gate": "syntax-combo reject seeds and required bug classes",
+    },
+    {
+        "track": "metadata_fidelity",
+        "layer": "ir_metadata_codegen",
+        "status": "covered_by_gate",
+        "evidence": "accepted cases compile to non-empty assembly and metadata matches consume/create/lock obligations",
+        "gate": "syntax-combo metadata/codegen oracles",
+    },
+)
+
+BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT",
+        "name": "stdlib lifecycle pattern must create and lock the declared output",
+        "min_mode": "quick",
+        "required_cases": ("stdlib-transfer",),
+        "required_origins": ("generated",),
+        "release_boundary": "std::lifecycle::transfer(input, output, to) cannot drop to or omit create output with_lock(to)",
+    },
+    {
+        "id": "SCA-BUG-PRESERVE-TYPE-EQUIVALENCE",
+        "name": "preserve sugar must be type-equivalent to canonical require equality",
+        "min_mode": "quick",
+        "required_cases": ("reject-preserve-type-mismatch",),
+        "required_origins": ("generated",),
+        "release_boundary": "preserve output from input { field } must reject field type mismatches",
+    },
+    {
+        "id": "SCA-BUG-REQUIRE-BLOCK-PURITY",
+        "name": "anonymous require block cannot hide lifecycle or verifier-boundary operations",
+        "min_mode": "quick",
+        "required_cases": ("reject-require-block-lifecycle", "seed-require-block-lifecycle"),
+        "required_origins": ("generated", "tests/syntax_combo/seeds/require-block-lifecycle.cell"),
+        "release_boundary": "require { ... } remains pure boolean grouping sugar",
+    },
+    {
+        "id": "SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED",
+        "name": "unknown stdlib namespaces and helper names fail closed",
+        "min_mode": "quick",
+        "required_cases": ("reject-unknown-stdlib",),
+        "required_origins": ("generated",),
+        "release_boundary": "unsupported std::* calls cannot compile as inert boolean expressions",
+    },
+    {
+        "id": "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
+        "name": "source-qualified values cannot be consumed by lifecycle operations",
+        "min_mode": "quick",
+        "required_cases": ("reject-consume-read-param",),
+        "required_origins": ("generated",),
+        "release_boundary": "read/protected/witness/lock_args values do not escape into consume/destroy/stdlib lifecycle",
+    },
+    {
+        "id": "SCA-BUG-LEGACY-TRANSFER-REJECTED",
+        "name": "removed legacy transfer capability and expression syntax stay rejected",
+        "min_mode": "quick",
+        "required_cases": ("reject-legacy-transfer-capability-strict", "seed-legacy-transfer-capability"),
+        "required_origins": ("generated", "tests/syntax_combo/seeds/legacy-transfer-capability.cell"),
+        "release_boundary": "old protocol-name surface cannot re-enter the canonical grammar",
+    },
+    {
+        "id": "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
+        "name": "receipt claim helpers require receipt inputs and declared claim output type",
+        "min_mode": "quick",
+        "required_cases": ("reject-claim-without-output-arrow",),
+        "required_origins": ("generated",),
+        "release_boundary": "claim semantics come from stdlib helper validation, not action names",
+    },
+    {
+        "id": "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
+        "name": "lock protected, witness, and lock_args source qualifiers stay parse/type checked",
+        "min_mode": "quick",
+        "required_cases": ("lock-source-qualifiers",),
+        "required_origins": ("generated",),
+        "release_boundary": "lock authorization data sources remain explicit in the surface and metadata path",
+    },
+    {
+        "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
+        "name": "stdlib lifecycle helpers validate arity and cell kind",
+        "min_mode": "ci",
+        "required_cases": (
+            "matrix-reject-claim-non-receipt",
+            "matrix-reject-claim-extra-args",
+            "matrix-reject-transfer-extra-args",
+            "matrix-reject-settle-missing-args",
+        ),
+        "required_origins": ("matrix:reject/stdlib-lifecycle",),
+        "release_boundary": "stdlib lifecycle patterns fail closed before lowering when arguments are invalid",
+    },
+    {
+        "id": "SCA-BUG-METADATA-HELPER-VALIDATION",
+        "name": "cell metadata helpers reject non-cell arguments",
+        "min_mode": "ci",
+        "required_cases": ("matrix-reject-cell-metadata-non-cell",),
+        "required_origins": ("matrix:reject/metadata",),
+        "release_boundary": "std::cell::* metadata helpers cannot be used as generic boolean predicates",
+    },
+    {
+        "id": "SCA-BUG-RECEIPT-LIFECYCLE-OUTPUT",
+        "name": "receipt claim and settle helpers emit locked output obligations",
+        "min_mode": "ci",
+        "required_cases": ("matrix-stdlib-claim-require-block", "matrix-stdlib-settle-preserve-capacity"),
+        "required_origins": ("matrix:receipt/proof", "matrix:receipt/metadata"),
+        "release_boundary": "claim/settle helpers must lower to explicit consume/create/lock obligations",
+    },
+    {
+        "id": "SCA-BUG-DEEP-HIDDEN-LIFECYCLE",
+        "name": "deep reject variants keep stdlib lifecycle out of pure proof positions",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-require-block-transfer",),
+        "required_origins": ("matrix:deep/reject/proof-purity", "seeded:deep/reject"),
+        "release_boundary": "release-local deep replay covers hidden lifecycle mutations beyond the quick corpus",
+    },
+    {
+        "id": "SCA-BUG-DEEP-READ-STDLIB-LIFECYCLE",
+        "name": "deep reject variants cover stdlib lifecycle on read parameters",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-transfer-read-param",),
+        "required_origins": ("matrix:deep/reject/source-qualifier",),
+        "release_boundary": "read-param lifecycle rejection is covered for both explicit consume and stdlib lifecycle syntax",
+    },
+    {
+        "id": "SCA-BUG-DEEP-UNKNOWN-STDLIB",
+        "name": "deep reject variants cover unknown stdlib helper families",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-unknown-accounting",),
+        "required_origins": ("matrix:deep/reject/stdlib-namespace",),
+        "release_boundary": "unsupported helper families stay rejected under release-local deep replay",
+    },
+)
+
 
 @dataclass(frozen=True)
 class Expected:
@@ -1050,6 +1217,51 @@ def contract_failure(code: str, summary: str) -> dict[str, Any]:
     }
 
 
+def required_for_mode(contract: dict[str, Any], mode: str) -> bool:
+    min_mode = str(contract.get("min_mode", "quick"))
+    return MODE_RANK.get(mode, 0) >= MODE_RANK.get(min_mode, 0)
+
+
+def evaluate_bug_class_coverage(mode: str, cases: list[AuditCase]) -> list[dict[str, Any]]:
+    case_names = {case.name for case in cases}
+    origins = {case.origin for case in cases}
+    coverage: list[dict[str, Any]] = []
+    for contract in BUG_CLASS_CONTRACTS:
+        required = required_for_mode(contract, mode)
+        required_cases = tuple(contract.get("required_cases", ()))
+        required_origins = tuple(contract.get("required_origins", ()))
+        missing_cases = [name for name in required_cases if name not in case_names]
+        missing_origins = [origin for origin in required_origins if origin not in origins]
+        status = "covered" if not missing_cases and not missing_origins else "missing"
+        coverage.append(
+            {
+                "id": contract["id"],
+                "name": contract["name"],
+                "status": status if required else "not_required_for_mode",
+                "required": required,
+                "min_mode": contract.get("min_mode", "quick"),
+                "required_cases": list(required_cases),
+                "required_origins": list(required_origins),
+                "missing_cases": missing_cases if required else [],
+                "missing_origins": missing_origins if required else [],
+                "release_boundary": contract["release_boundary"],
+            }
+        )
+    return coverage
+
+
+def governance_oracles() -> dict[str, bool]:
+    configured = read_matrix().get("required_oracles", {})
+    return {
+        "parser": bool(configured.get("parse")),
+        "formatter_roundtrip": bool(configured.get("formatter_roundtrip")),
+        "type_effect": bool(configured.get("type_effect")),
+        "ir_metadata": bool(configured.get("ir_metadata")),
+        "codegen_assembly": bool(configured.get("codegen_assembly")),
+        "compact_report": bool(configured.get("compact_report")),
+    }
+
+
 def validate_mode_contract(mode: str, report: dict[str, Any]) -> list[dict[str, Any]]:
     if mode == "repro":
         return []
@@ -1072,6 +1284,18 @@ def validate_mode_contract(mode: str, report: dict[str, Any]) -> list[dict[str, 
     missing_origins = [origin for origin in config.get("required_origins", []) if origin not in origins]
     if missing_origins:
         failures.append(contract_failure("SCA-CONTRACT-ORIGIN", f"{mode} missing required origins: {', '.join(missing_origins)}"))
+    missing_bug_classes = [
+        item
+        for item in report.get("known_bug_classes", [])
+        if item.get("required") and item.get("status") != "covered"
+    ]
+    for item in missing_bug_classes:
+        details: list[str] = []
+        if item.get("missing_cases"):
+            details.append("missing cases: " + ", ".join(item["missing_cases"]))
+        if item.get("missing_origins"):
+            details.append("missing origins: " + ", ".join(item["missing_origins"]))
+        failures.append(contract_failure(item["id"], f"{mode} bug-class coverage missing for {item['name']}: {'; '.join(details)}"))
     return failures
 
 
@@ -1351,6 +1575,9 @@ def main(argv: list[str]) -> int:
         "accepted": accepted,
         "rejected": rejected,
         "failures_count": len(failures),
+        "governance_release_matrix": list(GOVERNANCE_RELEASE_MATRIX),
+        "governance_oracles": governance_oracles(),
+        "known_bug_classes": evaluate_bug_class_coverage(args.mode, cases),
         "phases": phase_counts,
         "origins": origin_counts,
         "failures": failures[:10],
