@@ -20,7 +20,7 @@ Current manifest status:
 
 Selected equivalence row counts:
 
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 76
 - `MODEL`: 0
 
 Supporting evidence outside the selected equivalence rows:
@@ -203,7 +203,11 @@ exit `37` under `receipt_group_malformed_receipt_data`. The second malformed
 receipt-data row keeps the first receipt valid and shortens the second receipt
 input to 4 bytes; both sides reject again with original exit `4` and CellScript
 exit `37` under `receipt_group_second_malformed_receipt_data`. These rows are
-not duplicate receipt-id proof.
+not duplicate receipt-id proof. The missing-second-input row keeps one valid
+receipt input and mints the two-receipt xUDT amount; original iCKB rejects with
+exit `11`, while the CellScript aggregate probe rejects with exit `46` under
+`receipt_group_missing_second_input`. This is executable group-cardinality
+evidence for missing receipt input coverage.
 The DAO redeem relative-since rows are CellScript-only VM evidence: both inputs
 are withdrawal requests, the immature row carries relative epoch since `359/0/1`
 and exits with DAO maturity violation, while the mature row carries `360/0/1`
@@ -502,7 +506,7 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
 
 ## What Still Blocks Full Differential Equivalence
 
-- Seventy-five normalized fixtures have full original-vs-CellScript CKB VM
+- Seventy-six normalized fixtures have full original-vs-CellScript CKB VM
   differential evidence.
 - DAO hash patching is still a test-environment bridge and must remain
   explicitly recorded; it is not mainnet identity reconstruction.

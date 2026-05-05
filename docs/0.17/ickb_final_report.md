@@ -5,7 +5,7 @@
 CellScript now has a **selected executed iCKB equivalence matrix**.
 
 The benchmark is no longer model-level-only. The current active matrix contains
-75 original-vs-CellScript differential rows and 0 active `MODEL` rows. The
+76 original-vs-CellScript differential rows and 0 active `MODEL` rows. The
 production gate now passes as `EXECUTED_CKB_VM_DIFF` / `PROVEN` for that
 selected matrix because every selected row carries original-side execution,
 CellScript-side execution, matching pass/fail status, hashes, cycles,
@@ -310,7 +310,7 @@ prebuilt Capsule script binaries were missing under `scripts/build/debug`.
 This is recorded as build-harness evidence, not behavioural equivalence.
 
 The differential matrix is explicitly labelled `EXECUTED_CKB_VM_DIFF`,
-`PROVEN`, and `production_equivalence_claim = true`. It contains 75 selected
+`PROVEN`, and `production_equivalence_claim = true`. It contains 76 selected
 original-vs-CellScript differential rows and 0 active `MODEL` rows. Fourteen
 CellScript-only CKB VM rows and eight original-side CKB VM rows are retained as
 `supporting_evidence`, not selected equivalence rows. The active matrix no

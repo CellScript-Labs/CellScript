@@ -5,7 +5,7 @@ production-equivalent behaviour for any selected iCKB scenario.
 
 Current status: `PROVEN` for the selected executed iCKB equivalence matrix.
 
-The current benchmark has advanced to `EXECUTED_CKB_VM_DIFF`: seventy-five
+The current benchmark has advanced to `EXECUTED_CKB_VM_DIFF`: seventy-six
 selected rows run original iCKB ELFs and generated CellScript ELFs side by side
 under real CKB VM/syscall context via `ckb-testtool`, with matching pass/fail
 status, named reject modes, hashes, cycles, transaction sizes, occupied
@@ -109,7 +109,7 @@ The current matrix sets:
 
 Current row counts by evidence level:
 
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 75
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 76
 - `MODEL`: 0
 
 Supporting evidence outside the selected equivalence rows:
@@ -127,7 +127,7 @@ under `retired_model_assumptions`, each pointing at the replacement
 differential row that executes the closest chain-level fixture shape. Retired
 assumptions are audit notes, not active blockers.
 
-The seventy-five differential rows are:
+The seventy-six differential rows are:
 
 1. **Non-empty script args reject**: unpatched original iCKB Logic and a
    generated CellScript ELF both reject the same normalized non-empty type args
@@ -187,294 +187,299 @@ The seventy-five differential rows are:
    has malformed 4-byte receipt data, while the first receipt, DAO header, xUDT
    owner-mode args, and exact two-receipt xUDT output remain valid, with named
    `receipt_group_second_malformed_receipt_data` failure mode.
-14. **Receipt group under-mint reject**: unpatched original iCKB Logic and a
+14. **Receipt group missing second input reject**: unpatched original iCKB
+   Logic and a generated CellScript aggregate probe both reject the same
+   normalized receipt-group fixture when only one receipt input is present but
+   the xUDT output claims the two-receipt mint amount, with named
+   `receipt_group_missing_second_input` failure mode.
+15. **Receipt group under-mint reject**: unpatched original iCKB Logic and a
    generated CellScript aggregate probe both reject the same normalized
    two-receipt input fixture when the xUDT output mints only one receipt worth
    of iCKB, with named `receipt_group_under_mint` failure mode. This is
    multi-receipt aggregate evidence, not duplicate receipt-id proof.
-15. **Valid mint from receipt**: unpatched original iCKB Logic and the generated
+16. **Valid mint from receipt**: unpatched original iCKB Logic and the generated
    CellScript ELF both accept the same normalized receipt-to-xUDT mint fixture.
    The fixture uses the original xUDT binary with `Data1` hash type and
    owner-mode args bound to the script-under-test hash.
-16. **Mint from malformed receipt data reject**: unpatched original iCKB Logic
+17. **Mint from malformed receipt data reject**: unpatched original iCKB Logic
    and a generated CellScript receipt-data-size probe both reject the same
    normalized single-receipt mint fixture when the receipt input has malformed
    4-byte data, while the DAO header, xUDT owner-mode args, and exact xUDT
    output remain valid, with named `mint_malformed_receipt_data` failure mode.
-17. **Amount inflation reject**: unpatched original iCKB Logic and the generated
+18. **Amount inflation reject**: unpatched original iCKB Logic and the generated
    CellScript ELF both reject the same normalized inflated xUDT output amount
    fixture with named `amount_inflation` failure mode. Numeric exit codes are
    recorded separately and differ by implementation.
-18. **Amount deflation reject**: unpatched original iCKB Logic and the generated
+19. **Amount deflation reject**: unpatched original iCKB Logic and the generated
    CellScript ELF both reject the same normalized under-minted xUDT output
    amount fixture with named `amount_deflation` failure mode.
-19. **Wrong xUDT args reject**: unpatched original iCKB Logic and the generated
+20. **Wrong xUDT args reject**: unpatched original iCKB Logic and the generated
    CellScript ELF both reject the same normalized receipt-to-xUDT mint fixture
    with a fixed wrong owner-mode hash and named `wrong_xudt_binding` failure
    mode.
-20. **Wrong accumulated rate reject**: unpatched original iCKB Logic and the
+21. **Wrong accumulated rate reject**: unpatched original iCKB Logic and the
    generated CellScript ELF both reject the same normalized receipt-to-xUDT mint
    fixture when the receipt input header accumulated rate is wrong, with named
    `wrong_accumulated_rate` failure mode.
-21. **Missing header dep reject**: unpatched original iCKB Logic and the
+22. **Missing header dep reject**: unpatched original iCKB Logic and the
    generated CellScript ELF both reject the same normalized receipt-to-xUDT mint
    fixture when the receipt input is linked to a DAO header but that header is
    omitted from transaction header deps, with named `missing_header_dep`
    failure mode.
-22. **DAO mature withdrawal**: unmodified original DAO ELF and a generated
+23. **DAO mature withdrawal**: unmodified original DAO ELF and a generated
    CellScript ELF both accept the same normalized phase-2 withdrawal fixture
    with withdraw/deposit headers, witness `input_type = 1`, and mature since
    `0x2003e8022a0002f3`.
-23. **DAO immature withdrawal reject**: unmodified original DAO ELF and a
+24. **DAO immature withdrawal reject**: unmodified original DAO ELF and a
    generated CellScript ELF both reject the same normalized phase-2 withdrawal
    fixture when since is reduced to `0x2003e802290002f3`, with named
    `dao_incorrect_since` failure mode.
-24. **DAO max withdrawal capacity**: unmodified original DAO ELF and a
+25. **DAO max withdrawal capacity**: unmodified original DAO ELF and a
    generated CellScript capacity upper-bound probe both accept the same
    normalized mature phase-2 withdrawal fixture when output capacity is exactly
    the observed original DAO boundary `123468305678`.
-25. **DAO wrong deposit accumulated rate reject**: unmodified original DAO ELF
+26. **DAO wrong deposit accumulated rate reject**: unmodified original DAO ELF
    and a generated CellScript capacity/rate probe both reject the same
    normalized mature phase-2 withdrawal fixture when the deposit header
    accumulated rate is `10000001` instead of `10000000`, with named
    `dao_wrong_deposit_accumulated_rate` failure mode.
-26. **DAO over-withdraw capacity reject**: unmodified original DAO ELF and a
+27. **DAO over-withdraw capacity reject**: unmodified original DAO ELF and a
    generated CellScript capacity upper-bound probe both reject the same
    normalized mature phase-2 withdrawal fixture when output capacity is one
    shannon above that observed boundary, with named `dao_over_withdraw_capacity` failure
    mode.
-27. **DAO missing withdraw header reject**: unmodified original DAO ELF and a
+28. **DAO missing withdraw header reject**: unmodified original DAO ELF and a
    generated CellScript input-header probe both reject the same normalized
    phase-2 withdrawal fixture when the withdrawing input is linked to a
    withdraw header in the test context but the transaction omits that withdraw
    header dep. The deposit header remains present at header dep index 0, with
    named `dao_missing_withdraw_header` failure mode.
-28. **DAO missing deposit header reject**: unmodified original DAO ELF and a
+29. **DAO missing deposit header reject**: unmodified original DAO ELF and a
    generated CellScript deposit-header probe both reject the same normalized
    phase-2 withdrawal fixture when the withdraw header remains present at
    header dep index 0 but the transaction omits the deposit header while
    witness `input_type` still points to header dep index 1, with named
    `dao_missing_deposit_header` failure mode.
-29. **DAO deposit header index out-of-bounds reject**: unmodified original DAO
+30. **DAO deposit header index out-of-bounds reject**: unmodified original DAO
    ELF and a generated CellScript deposit-header probe both reject the same
    normalized phase-2 withdrawal fixture when withdraw and deposit header deps
    are present but witness `input_type` points past them to header dep index 2,
    with named `dao_deposit_header_index_out_of_bounds` failure mode.
-30. **DAO withdrawal deposit-data input reject**: unmodified original DAO ELF
+31. **DAO withdrawal deposit-data input reject**: unmodified original DAO ELF
    and a generated CellScript withdrawal-data classifier probe both reject the
    same normalized phase-2 withdrawal fixture when the input keeps DAO type,
    mature since, withdraw/deposit headers, and witness `input_type = 1`, but
    carries deposit data `0x0000000000000000` instead of a withdrawal-request
    block number, with named `dao_withdrawal_deposit_data_input` failure mode.
-31. **DAO withdrawal malformed input-data reject**: unmodified original DAO
+32. **DAO withdrawal malformed input-data reject**: unmodified original DAO
    ELF and a generated CellScript malformed withdrawal-data classifier probe
    both reject the same normalized phase-2 withdrawal fixture when the input
    keeps DAO type, mature since, withdraw/deposit headers, and witness
    `input_type = 1`, but carries only four bytes of data `0x12060000`, with
    named `dao_withdrawal_malformed_input_data` failure mode.
-32. **DAO wrong deposit header index reject**: unmodified original DAO ELF and a
+33. **DAO wrong deposit header index reject**: unmodified original DAO ELF and a
    generated CellScript deposit-header witness probe both reject the same
    normalized phase-2 withdrawal fixture when withdraw and deposit header deps
    are both present but witness `input_type` points to header dep index 0
    (withdraw header) instead of index 1 (deposit header), with named
    `dao_wrong_deposit_header_index` failure mode.
-33. **DAO wrong withdraw committed header reject**: unmodified original DAO ELF
+34. **DAO wrong withdraw committed header reject**: unmodified original DAO ELF
    and a generated CellScript input-header probe both reject the same normalized
    phase-2 withdrawal fixture when the withdrawing input is committed to the
    deposit header instead of the withdraw header while both header deps remain
    present and witness `input_type` still points to the deposit header at index
    1, with named `dao_wrong_withdraw_committed_header` failure mode.
-34. **Valid limit order**: original iCKB Limit Order and a generated
+35. **Valid limit order**: original iCKB Limit Order and a generated
    CellScript ELF both accept the same normalized CKB-to-UDT fulfilment fixture
    with value preserved.
-35. **Limit order CKB-to-UDT min-match boundary**: original iCKB Limit Order
+36. **Limit order CKB-to-UDT min-match boundary**: original iCKB Limit Order
    and a generated CellScript ELF both accept the same normalized CKB-to-UDT
    fulfilment fixture when the order pays exactly `64` shannons of CKB and
    receives exactly `64` UDT units, proving the equality boundary of
    `1 << min_match_log`.
-36. **Valid limit order UDT-to-CKB**: original iCKB Limit Order and a generated
+37. **Valid limit order UDT-to-CKB**: original iCKB Limit Order and a generated
    CellScript ELF both accept the same normalized UDT-to-CKB fulfilment fixture
    with value preserved, full UDT fill, matching auxiliary UDT type hash, and
    an explicit funding input for the increased order CKB capacity.
-37. **Limit order UDT-to-CKB min-match boundary**: original iCKB Limit Order
+38. **Limit order UDT-to-CKB min-match boundary**: original iCKB Limit Order
    and a generated CellScript ELF both accept the same normalized UDT-to-CKB
    fulfilment fixture when the order receives exactly `64` shannons of CKB and
    spends exactly `64` UDT units, proving the reverse equality boundary of
    `1 << min_match_log`.
-38. **Limit order UDT-to-CKB no UDT paid reject**: original iCKB Limit Order
+39. **Limit order UDT-to-CKB no UDT paid reject**: original iCKB Limit Order
    and a generated CellScript ELF both reject the same normalized UDT-to-CKB
    fulfilment fixture when the output order keeps the full UDT amount and pays
    no CKB to the order, with named `no_udt_paid_out` failure mode.
-39. **Limit order UDT-to-CKB wrong asset reject**: original iCKB Limit Order
+40. **Limit order UDT-to-CKB wrong asset reject**: original iCKB Limit Order
    and a generated CellScript ELF both reject the same normalized UDT-to-CKB
    fulfilment fixture when the output order uses a different auxiliary UDT type
    script hash, with named `wrong_asset` failure mode.
-40. **Limit order UDT-to-CKB insufficient match reject**: original iCKB Limit
+41. **Limit order UDT-to-CKB insufficient match reject**: original iCKB Limit
    Order and a generated CellScript ELF both reject the same normalized
    UDT-to-CKB fulfilment fixture when value is preserved but the UDT delta is
    50, below `ckb_min_match = 64`, with named `insufficient_match` failure
    mode.
-41. **Limit order UDT-to-CKB underpayment reject**: original iCKB Limit Order
+42. **Limit order UDT-to-CKB underpayment reject**: original iCKB Limit Order
    and a generated CellScript ELF both reject the same normalized UDT-to-CKB
    fulfilment fixture when the output order receives only 5,000,000,000 CKB for
    a full 10,000,000,000 UDT fill, with named `limit_order_underpayment`
    failure mode.
-42. **Limit order underpayment reject**: original iCKB Limit Order and a
+43. **Limit order underpayment reject**: original iCKB Limit Order and a
    generated CellScript ELF both reject the same normalized CKB-to-UDT
    fulfilment fixture when output value is lower than input value, with named
    `limit_order_underpayment` failure mode.
-43. **Limit order CKB-to-UDT wrong asset reject**: original iCKB Limit Order and a
+44. **Limit order CKB-to-UDT wrong asset reject**: original iCKB Limit Order and a
    generated CellScript ELF both reject the same normalized CKB-to-UDT
    fulfilment fixture when the input and output UDT type hashes differ, with
    named `wrong_asset` failure mode.
-44. **Limit order CKB-to-UDT insufficient match reject**: original iCKB Limit Order and a
+45. **Limit order CKB-to-UDT insufficient match reject**: original iCKB Limit Order and a
    generated CellScript ELF both reject the same normalized CKB-to-UDT
    fulfilment fixture when value is preserved but the CKB delta is below
    `ckb_min_match`, with named `insufficient_match` failure mode.
-45. **Limit order no CKB paid reject**: original iCKB Limit Order and a
+46. **Limit order no CKB paid reject**: original iCKB Limit Order and a
    generated CellScript ELF both reject the same normalized CKB-to-UDT
    fulfilment fixture when output CKB is unchanged, with named
    `no_ckb_paid_out` failure mode.
-46. **Limit order UDT decreased reject**: original iCKB Limit Order and a
+47. **Limit order UDT decreased reject**: original iCKB Limit Order and a
    generated CellScript ELF both reject the same normalized CKB-to-UDT
    fulfilment fixture when the output order UDT amount is lower than the input
    order amount, with named `udt_decreased` failure mode.
-47. **Valid Owned-Owner pairing**: patched original iCKB Owned-Owner and a
+48. **Valid Owned-Owner pairing**: patched original iCKB Owned-Owner and a
    generated CellScript ELF both accept the same normalized lock-owned/type-owner
    input fixture when the owner cell's stored i32 relative distance points from
    owner OutPoint index 1 to the owned withdrawal request at index 2.
-48. **Valid Owned-Owner output pairing**: patched original iCKB Owned-Owner and
+49. **Valid Owned-Owner output pairing**: patched original iCKB Owned-Owner and
    a generated CellScript ELF both accept the same normalized output-side
    lock-owned/type-owner fixture when the owner output's stored i32 relative
    distance is `-1` and points from output index 1 to the owned withdrawal
    request at output index 0.
-49. **Owned-Owner output relative mismatch reject**: patched original iCKB
+50. **Owned-Owner output relative mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    output-side lock-owned/type-owner fixture when the owner output's stored i32
    relative distance is `1` and points to missing output index 2 instead of the
    owned withdrawal request at output index 0, with named
    `output_relative_distance_mismatch` failure mode.
-50. **Owned-Owner output duplicate owner reject**: patched original iCKB
+51. **Owned-Owner output duplicate owner reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    output-side fixture where type-owner outputs at indices 1 and 2 store `-1`
    and `-2`, so both point to the lock-owned withdrawal request output at index
    0, with named `output_duplicate_owner_pair` failure mode.
-51. **Owned-Owner output missing owner reject**: patched original iCKB
+52. **Owned-Owner output missing owner reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    output-side fixture where output 2 is a type-owner pointing to output 1, but
    output 0 is another lock-owned withdrawal request with no owner, with named
    `output_missing_owner_pair` failure mode.
-52. **Owned-Owner output missing owned reject**: unpatched original iCKB
+53. **Owned-Owner output missing owned reject**: unpatched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    output-side type-owner fixture when the owner output points to no lock-owned
    cell, with named `output_missing_owned_pair` failure mode.
-53. **Owned-Owner output script misuse reject**: unpatched original iCKB
+54. **Owned-Owner output script misuse reject**: unpatched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    output fixture where the script under test appears as both lock and type on
    output 0, with named `output_script_misuse` failure mode.
-54. **Owned-Owner output non-withdrawal request reject**: unpatched original
+55. **Owned-Owner output non-withdrawal request reject**: unpatched original
    iCKB Owned-Owner and a generated CellScript ELF both reject the same
    normalized output fixture where output 1 triggers type execution and output
    0 is lock-owned but lacks DAO withdrawal request type/data, with named
    `output_not_withdrawal_request` failure mode.
-55. **Owned-Owner output owner data length mismatch reject**: patched original
+56. **Owned-Owner output owner data length mismatch reject**: patched original
    iCKB Owned-Owner and a generated CellScript ELF both reject the same
    normalized output fixture where the owner output data is only three bytes
    and cannot decode the signed i32 relative MetaPoint distance, with named
    `output_owner_data_length_mismatch` failure mode.
-56. **Owned-Owner output related type hash mismatch reject**: patched original
+57. **Owned-Owner output related type hash mismatch reject**: patched original
    iCKB Owned-Owner and a generated CellScript ELF both reject the same
    normalized output fixture where the lock-owned output has nonzero
    withdrawal-request data but its type script hash differs from the expected
    auxiliary withdrawal type hash, with named
    `output_related_type_hash_mismatch` failure mode.
-57. **Owned-Owner output related data rule mismatch reject**: patched original
+58. **Owned-Owner output related data rule mismatch reject**: patched original
    iCKB Owned-Owner and a generated CellScript ELF both reject the same
    normalized output fixture where the lock-owned output has the expected
    auxiliary withdrawal type hash but carries 8-byte zero/deposit-marker data
    instead of nonzero withdrawal-request data, with named
    `output_related_data_rule_mismatch` failure mode.
-58. **Owned-Owner related type hash mismatch reject**: patched original iCKB
+59. **Owned-Owner related type hash mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    input fixture where the lock-owned input has nonzero withdrawal-request data
    but its type script hash differs from the expected auxiliary withdrawal type
    hash, with named `related_type_hash_mismatch` failure mode.
-59. **Owned-Owner related data rule mismatch reject**: patched original iCKB
+60. **Owned-Owner related data rule mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    input fixture where the lock-owned input has the expected auxiliary
    withdrawal type hash but carries 8-byte zero/deposit-marker data instead of
    nonzero withdrawal-request data, with named `related_data_rule_mismatch`
    failure mode.
-60. **Owned-Owner owner data length mismatch reject**: patched original iCKB
+61. **Owned-Owner owner data length mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    lock-owned/type-owner input fixture where the owner cell data is only three
    bytes and cannot decode the signed i32 relative MetaPoint distance, with
    named `owner_data_length_mismatch` failure mode.
-61. **Owned-Owner relative mismatch reject**: patched original iCKB
+62. **Owned-Owner relative mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    lock-owned/type-owner input fixture when the owner cell's stored i32
    relative distance points to index 0 instead of the owned withdrawal request
    at index 2, with named `relative_distance_mismatch` failure mode.
-62. **Owned-Owner script misuse reject**: unpatched original iCKB Owned-Owner
+63. **Owned-Owner script misuse reject**: unpatched original iCKB Owned-Owner
    and a generated CellScript ELF both reject the same normalized single-input
    fixture where the script under test appears as both lock and type on the
    same cell, with named `script_misuse` failure mode.
-63. **Owned-Owner non-withdrawal request reject**: unpatched original iCKB
+64. **Owned-Owner non-withdrawal request reject**: unpatched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    lock-owned input fixture with no DAO withdrawal request type/data, with
    named `not_withdrawal_request` failure mode.
-64. **Owned-Owner missing owner reject**: patched original iCKB Owned-Owner
+65. **Owned-Owner missing owner reject**: patched original iCKB Owned-Owner
    and a generated CellScript ELF both reject the same normalized lock-owned
    withdrawal request input when no matching type-owner cell is present, with
    named `missing_owner_pair` failure mode.
-65. **Owned-Owner missing owned reject**: unpatched original iCKB Owned-Owner
+66. **Owned-Owner missing owned reject**: unpatched original iCKB Owned-Owner
    and a generated CellScript ELF both reject the same normalized type-owner
    input when its relative metapoint points to no lock-owned cell, with named
    `missing_owned_pair` failure mode.
-66. **Owned-Owner duplicate owner reject**: patched original iCKB Owned-Owner
+67. **Owned-Owner duplicate owner reject**: patched original iCKB Owned-Owner
    and a generated CellScript ELF both reject the same normalized fixture where
    two type-owner cells point to the same lock-owned withdrawal request, with
    named `duplicate_owner_pair` failure mode.
-67. **DAO wrong withdraw accumulated rate reject**: unmodified original DAO ELF
+68. **DAO wrong withdraw accumulated rate reject**: unmodified original DAO ELF
    and a generated CellScript runtime capacity-compensation probe both reject
    the same normalized phase-2 withdrawal fixture when the withdraw header
    accumulated rate is `10000999` instead of `10001000`, causing the correct-rate
    output capacity to exceed the fixture-rate maximum by `11526` shannons, with
    named `dao_wrong_withdraw_accumulated_rate` failure mode.
-68. **DAO deposit-rate adjusted max withdrawal capacity**: unmodified original
+69. **DAO deposit-rate adjusted max withdrawal capacity**: unmodified original
    DAO ELF and a generated CellScript runtime capacity-compensation probe both
    accept the same normalized phase-2 withdrawal fixture when the deposit header
    accumulated rate is `10000001` and output capacity is exactly the fixture-rate
    maximum `123468294151`.
-69. **DAO withdraw-rate adjusted max withdrawal capacity**: unmodified original
+70. **DAO withdraw-rate adjusted max withdrawal capacity**: unmodified original
    DAO ELF and a generated CellScript runtime capacity-compensation probe both
    accept the same normalized phase-2 withdrawal fixture when the withdraw header
    accumulated rate is `10000999` and output capacity is exactly the fixture-rate
    maximum `123468294152`.
-70. **DAO deposit-rate adjusted over-withdraw capacity reject**: unmodified
+71. **DAO deposit-rate adjusted over-withdraw capacity reject**: unmodified
    original DAO ELF and a generated CellScript runtime capacity-compensation
    probe both reject the same normalized phase-2 withdrawal fixture when the
    deposit header accumulated rate is `10000001` and output capacity is one
    shannon above the fixture-rate maximum `123468294151`.
-71. **DAO withdraw-rate adjusted over-withdraw capacity reject**: unmodified
+72. **DAO withdraw-rate adjusted over-withdraw capacity reject**: unmodified
    original DAO ELF and a generated CellScript runtime capacity-compensation
    probe both reject the same normalized phase-2 withdrawal fixture when the
    withdraw header accumulated rate is `10000999` and output capacity is one
    shannon above the fixture-rate maximum `123468294152`.
-72. **DAO missing witness input_type reject**: unmodified original DAO ELF and a
+73. **DAO missing witness input_type reject**: unmodified original DAO ELF and a
    generated CellScript WitnessArgs input_type presence probe both reject the
    same normalized phase-2 withdrawal fixture when the witness omits
    `input_type` entirely.
-73. **DAO empty witness input_type reject**: unmodified original DAO ELF and a
+74. **DAO empty witness input_type reject**: unmodified original DAO ELF and a
    generated CellScript WitnessArgs input_type non-empty probe both reject the
    same normalized phase-2 withdrawal fixture when witness `input_type` is
    present but has zero payload bytes.
-74. **DAO short witness input_type reject**: unmodified original DAO ELF and a
+75. **DAO short witness input_type reject**: unmodified original DAO ELF and a
    generated CellScript WitnessArgs input_type width probe both reject the same
    normalized phase-2 withdrawal fixture when witness `input_type` is present
    and non-empty but only one byte long instead of the expected 8-byte
    little-endian header dep index.
-75. **DAO long witness input_type reject**: unmodified original DAO ELF and a
+76. **DAO long witness input_type reject**: unmodified original DAO ELF and a
    generated CellScript WitnessArgs input_type exact-width probe both reject
    the same normalized phase-2 withdrawal fixture when witness `input_type` is
    present but nine bytes long instead of the expected 8-byte little-endian
@@ -500,7 +505,7 @@ execution evidence fails the test suite.
 
 ## What Still Blocks Equivalence
 
-- Seventy-five normalized fixtures have full original-vs-CellScript differential
+- Seventy-six normalized fixtures have full original-vs-CellScript differential
   execution evidence.
 - DAO hash patching is used for original iCKB Logic in the current test
   environment and is recorded in each differential execution object. This is

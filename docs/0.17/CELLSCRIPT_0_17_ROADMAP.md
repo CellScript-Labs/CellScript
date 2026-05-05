@@ -118,7 +118,7 @@ Implemented:
   `tests/benchmarks/ickb_specs/ickb_logic.cell`.
 - executable production-equivalence claim gate in
   `tests/benchmarks/ickb_diff/matrix.json` and `tests/ickb_diff.rs`; the
-  selected matrix now reaches `EXECUTED_CKB_VM_DIFF` / `PROVEN` with 75
+  selected matrix now reaches `EXECUTED_CKB_VM_DIFF` / `PROVEN` with 76
   original-vs-CellScript differential rows and no active `MODEL` rows.
 - hardened 0.16 assurance paths: ProofPlan obligation origin/scope matching,
   duplicate/semantically incomplete ProofPlan record rejection, cell-access

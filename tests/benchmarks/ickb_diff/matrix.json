@@ -42,7 +42,7 @@
     "ckb_vm_or_testtool_version": [
       "ckb-testtool 1.1"
     ],
-    "transaction_fixture_manifest_sha256": "0x9a7307ece3f87a169a4a19b25ba4701d624eb52d12e841e8c1eb79ea4d8914b3",
+    "transaction_fixture_manifest_sha256": "0x77545ed247397b7b574c2a31ba61142d1d9d675084ef7c2dc82e5e85b9a189ee",
     "identical_inputs_outputs_cell_deps_header_deps_witnesses": "per-row normalized_fixture_sha256 and transaction_context_sha256 bind the original and CellScript executions to matched transaction context",
     "original_and_cellscript_exit_codes": "per-row execution.original_ickb_exit_code and execution.cellscript_exit_code",
     "named_failure_mode_for_rejects": "every reject row carries a non-empty failure_mode in the row and execution object",
@@ -1346,6 +1346,107 @@
       "original_ickb_expected": "fail",
       "result": "differential-agree-fail",
       "scenario": "differential: receipt group second malformed receipt data original vs CellScript agree"
+    },
+    {
+      "cellscript_expected": "fail",
+      "ckb_vm_execution": true,
+      "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+      "execution": {
+        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_cycles": 0,
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#46 } }",
+        "cellscript_exit_code": 46,
+        "cellscript_status": "fail",
+        "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
+        "failure_mode": "receipt_group_missing_second_input",
+        "fee_shannons": 0,
+        "fixture_sha256": "0x667724ef63eeaffa9d453aaf6a21d9cac1a6ab228c6589a638b91278b311dfa2",
+        "normalized_fixture": {
+          "cell_deps": [
+            "xudt"
+          ],
+          "expected_status": "fail",
+          "failure_mode": "receipt_group_missing_second_input",
+          "header_deps": [
+            {
+              "dao_accumulated_rate": 10000000000000000,
+              "index": 0,
+              "linked_inputs": [
+                0
+              ]
+            }
+          ],
+          "input_capacity_shannons": 100000000000,
+          "inputs": [
+            {
+              "capacity_shannons": 100000000000,
+              "data": "0x0100000000a0724e18090000",
+              "index": 0,
+              "lock": "always_success",
+              "receipt_deposit_accumulated_rate": 10000000000000000,
+              "receipt_deposit_amount_shannons": 10000000000000,
+              "receipt_quantity": 1,
+              "role": "single_ickb_receipt",
+              "type": "script_under_test"
+            }
+          ],
+          "outputs": [
+            {
+              "capacity_shannons": 100000000000,
+              "data": "0x0040e59c301200000000000000000000",
+              "expected_xudt_amount": 10000000000000,
+              "index": 0,
+              "lock": "always_success",
+              "role": "over_minted_ickb_xudt_missing_second_receipt",
+              "type": "original_xudt",
+              "xudt_amount": 20000000000000,
+              "xudt_binding": "script_under_test_hash+owner_mode_input_type",
+              "xudt_hash_type": "Data1",
+              "xudt_owner_mode_args": {
+                "flags_le_u32": 2147483648,
+                "owner": "script_under_test_hash"
+              }
+            }
+          ],
+          "scenario": "receipt_group_missing_second_input",
+          "schema": "cellscript-ickb-normalized-fixture-v1",
+          "script_under_test_difference": "only the iCKB owner script code cell and owner script hashes differ; both sides use one receipt input while the xUDT output claims the two-receipt mint amount",
+          "script_under_test_roles": [
+            "input_0_type",
+            "output_0_xudt_owner"
+          ],
+          "witnesses": [
+            "0x"
+          ]
+        },
+        "normalized_fixture_sha256": "0x667724ef63eeaffa9d453aaf6a21d9cac1a6ab228c6589a638b91278b311dfa2",
+        "occupied_capacity_shannons": 12600000000,
+        "original_cycles": 0,
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 11 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/a5e7adef0453dcccf471056c7a8cd46aee00e50643ba8c4b69e34a43070dbc89.html#11 } }",
+        "original_ickb_binary_patched": false,
+        "original_ickb_binary_sha256": "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
+        "original_ickb_exit_code": 11,
+        "original_ickb_status": "fail",
+        "original_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
+        "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
+        "statuses_match": true,
+        "transaction_context_sha256": {
+          "cellscript": "0x34da12f111072a970de59706c7354d3339306341ce3581368509143019650e41",
+          "original": "0xa6edcc06c0764086cad08948cf28fd41a88138f35bfc627ffe0fb9cf8b9dfd71"
+        },
+        "tx_size_bytes": 457,
+        "tx_size_bytes_by_side": {
+          "cellscript": 457,
+          "original": 457
+        }
+      },
+      "failure_mode": "receipt_group_missing_second_input",
+      "full_differential": true,
+      "note": "Both original iCKB and CellScript reject the same normalized receipt-group fixture when only one receipt input is present but the xUDT output claims the two-receipt mint amount; this covers missing receipt-group cardinality, not duplicate receipt-id proof.",
+      "original_ickb_executed": true,
+      "original_ickb_expected": "fail",
+      "result": "differential-agree-fail",
+      "scenario": "differential: receipt group missing second input original vs CellScript agree"
     },
     {
       "cellscript_expected": "fail",

@@ -158,6 +158,8 @@ const RECEIPT_GROUP_MALFORMED_RECEIPT_DATA_DIFF_SCENARIO: &str =
     "differential: receipt group malformed receipt data original vs CellScript agree";
 const RECEIPT_GROUP_SECOND_MALFORMED_RECEIPT_DATA_DIFF_SCENARIO: &str =
     "differential: receipt group second malformed receipt data original vs CellScript agree";
+const RECEIPT_GROUP_MISSING_SECOND_INPUT_DIFF_SCENARIO: &str =
+    "differential: receipt group missing second input original vs CellScript agree";
 const NON_EMPTY_ARGS_DIFF_SCENARIO: &str = "differential: non-empty script args original vs CellScript agree";
 const MINT_FROM_RECEIPT_DIFF_SCENARIO: &str = "differential: mint from receipt original vs CellScript agree";
 const MINT_FROM_RECEIPT_MALFORMED_RECEIPT_DATA_DIFF_SCENARIO: &str =
@@ -1046,7 +1048,7 @@ fn ickb_diff_matrix_structure_and_model_rows_valid() {
     assert_supporting_evidence_rows_are_not_claim_rows(&matrix);
 
     let rows = matrix["rows"].as_array().expect("rows");
-    assert!(rows.len() >= 75, "matrix should retain the executed differential iCKB rows");
+    assert!(rows.len() >= 76, "matrix should retain the executed differential iCKB rows");
 
     // Validate each row based on its evidence level.
     let mut seen_scenarios = std::collections::BTreeSet::new();
@@ -3113,6 +3115,64 @@ fn receipt_group_second_malformed_receipt_data_differential_execution() -> Value
         MintXudtBinding::ScriptUnderTest,
         MintReceiptDataMode::MalformedSecondInput,
     )
+}
+
+fn receipt_group_missing_second_input_differential_execution() -> Value {
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_xudt_elf = load_original_ickb_binary("xudt");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let original_xudt_binary_sha256 = sha256_prefixed(&original_xudt_elf);
+    let original = run_original_receipt_group_missing_second_input();
+    let (cellscript, cellscript_elf) = run_cellscript_receipt_group_missing_second_input();
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "receipt group missing-second-input differential mismatch: original={:#?}, cellscript={:#?}",
+        original, cellscript
+    );
+    assert_eq!(original.status, "fail", "original iCKB status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_receipt_group_missing_second_input_fixture();
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "original_xudt_binary_sha256": original_xudt_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "shared_xudt_binary_sha256": original_xudt_binary_sha256,
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": "receipt_group_missing_second_input",
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
 }
 
 fn receipt_group_mint_differential_execution_with_rate_header_and_xudt_binding(
@@ -5554,6 +5614,84 @@ fn run_cellscript_receipt_group_mint(
     (run, cellscript_elf)
 }
 
+fn run_original_receipt_group_missing_second_input() -> DepositPhase1SideRun {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let always_success_lock = deploy_always_success_lock(&mut context);
+    let ickb_logic_elf = load_original_ickb_binary("ickb_logic");
+    let ickb_logic_out_point = context.deploy_cell(Bytes::copy_from_slice(&ickb_logic_elf));
+    let ickb_logic_script = context.build_script(&ickb_logic_out_point, Bytes::default()).expect("iCKB Logic script");
+    let xudt_elf = load_original_ickb_binary("xudt");
+    let xudt_out_point = context.deploy_cell(Bytes::copy_from_slice(&xudt_elf));
+    let xudt_script =
+        build_xudt_owner_mode_script(&mut context, &xudt_out_point, &ickb_logic_script, MintXudtBinding::ScriptUnderTest);
+
+    let receipt_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(MINT_RECEIPT_INPUT_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(ickb_logic_script))
+            .build(),
+        mint_receipt_data(),
+    );
+    let header_hash = insert_and_link_mint_receipt_header(&mut context, &receipt_out_point, MINT_RECEIPT_ACCUMULATED_RATE);
+
+    let (outputs, outputs_data) = mint_from_receipt_outputs(MINT_RECEIPT_OUTPUT_AMOUNT * 2, &xudt_script, &always_success_lock);
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(receipt_out_point).build())
+        .cell_dep(packed::CellDep::new_builder().out_point(xudt_out_point).dep_type(DepType::Code).build())
+        .header_dep(header_hash)
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(MINT_RECEIPT_INPUT_CAPACITY, &outputs);
+    side_run_from_result(context.verify_tx(&tx, MINT_FROM_RECEIPT_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons)
+}
+
+fn run_cellscript_receipt_group_missing_second_input() -> (DepositPhase1SideRun, Vec<u8>) {
+    let cellscript_elf = compile_cellscript_source_to_elf(
+        RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_PROGRAM,
+        RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_ACTION,
+        None,
+    );
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let always_success_lock = deploy_always_success_lock(&mut context);
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript script");
+    let xudt_elf = load_original_ickb_binary("xudt");
+    let xudt_out_point = context.deploy_cell(Bytes::copy_from_slice(&xudt_elf));
+    let xudt_script =
+        build_xudt_owner_mode_script(&mut context, &xudt_out_point, &cellscript_script, MintXudtBinding::ScriptUnderTest);
+
+    let receipt_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(MINT_RECEIPT_INPUT_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(cellscript_script))
+            .build(),
+        mint_receipt_data(),
+    );
+    let header_hash = insert_and_link_mint_receipt_header(&mut context, &receipt_out_point, MINT_RECEIPT_ACCUMULATED_RATE);
+
+    let (outputs, outputs_data) = mint_from_receipt_outputs(MINT_RECEIPT_OUTPUT_AMOUNT * 2, &xudt_script, &always_success_lock);
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(receipt_out_point).build())
+        .cell_dep(packed::CellDep::new_builder().out_point(xudt_out_point).dep_type(DepType::Code).build())
+        .header_dep(header_hash)
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(MINT_RECEIPT_INPUT_CAPACITY, &outputs);
+    let run =
+        side_run_from_result(context.verify_tx(&tx, MINT_FROM_RECEIPT_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, cellscript_elf)
+}
+
 fn run_original_owned_owner(owner_relative_distance: i32) -> (DepositPhase1SideRun, String, String) {
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
     let always_success_lock = deploy_always_success_lock(&mut context);
@@ -7697,6 +7835,60 @@ fn normalized_receipt_group_mint_fixture(
     })
 }
 
+fn normalized_receipt_group_missing_second_input_fixture() -> Value {
+    let receipt_data = mint_receipt_data();
+    let xudt_data = xudt_output_data(MINT_RECEIPT_OUTPUT_AMOUNT * 2);
+    json!({
+        "schema": "cellscript-ickb-normalized-fixture-v1",
+        "scenario": "receipt_group_missing_second_input",
+        "script_under_test_roles": ["input_0_type", "output_0_xudt_owner"],
+        "script_under_test_difference": "only the iCKB owner script code cell and owner script hashes differ; both sides use one receipt input while the xUDT output claims the two-receipt mint amount",
+        "input_capacity_shannons": MINT_RECEIPT_INPUT_CAPACITY,
+        "cell_deps": ["xudt"],
+        "header_deps": [
+            {
+                "index": 0,
+                "linked_inputs": [0],
+                "dao_accumulated_rate": MINT_RECEIPT_ACCUMULATED_RATE
+            }
+        ],
+        "witnesses": ["0x"],
+        "inputs": [
+            {
+                "index": 0,
+                "role": "single_ickb_receipt",
+                "capacity_shannons": MINT_RECEIPT_INPUT_CAPACITY,
+                "lock": "always_success",
+                "type": "script_under_test",
+                "data": hex_prefixed(&receipt_data),
+                "receipt_quantity": MINT_RECEIPT_QUANTITY,
+                "receipt_deposit_amount_shannons": MINT_RECEIPT_DEPOSIT_AMOUNT,
+                "receipt_deposit_accumulated_rate": MINT_RECEIPT_ACCUMULATED_RATE
+            }
+        ],
+        "outputs": [
+            {
+                "index": 0,
+                "role": "over_minted_ickb_xudt_missing_second_receipt",
+                "capacity_shannons": MINT_XUDT_OUTPUT_CAPACITY,
+                "lock": "always_success",
+                "type": "original_xudt",
+                "xudt_hash_type": "Data1",
+                "xudt_owner_mode_args": {
+                    "owner": "script_under_test_hash",
+                    "flags_le_u32": XUDT_OWNER_MODE_TYPE_FLAGS
+                },
+                "xudt_binding": "script_under_test_hash+owner_mode_input_type",
+                "data": hex_prefixed(&xudt_data),
+                "xudt_amount": (MINT_RECEIPT_OUTPUT_AMOUNT * 2) as u64,
+                "expected_xudt_amount": MINT_RECEIPT_OUTPUT_AMOUNT as u64
+            }
+        ],
+        "expected_status": "fail",
+        "failure_mode": "receipt_group_missing_second_input"
+    })
+}
+
 fn normalized_receipt_without_deposit_fixture() -> Value {
     let receipt_data = receipt_without_deposit_data();
     json!({
@@ -9480,6 +9672,17 @@ fn differential_receipt_group_second_malformed_receipt_data_both_reject() {
     assert_eq!(execution["original_ickb_status"], "fail");
     assert_eq!(execution["cellscript_status"], "fail");
     assert_matrix_execution_matches(RECEIPT_GROUP_SECOND_MALFORMED_RECEIPT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_missing_second_input_both_reject() {
+    let execution = receipt_group_missing_second_input_differential_execution();
+    assert_eq!(execution["failure_mode"], "receipt_group_missing_second_input");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let inputs = execution["normalized_fixture"]["inputs"].as_array().expect("receipt group inputs");
+    assert_eq!(inputs.len(), 1, "fixture must exercise a missing second receipt input");
+    assert_matrix_execution_matches(RECEIPT_GROUP_MISSING_SECOND_INPUT_DIFF_SCENARIO, &execution);
 }
 
 #[test]

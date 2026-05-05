@@ -10,7 +10,7 @@
 - iCKB 被用作高难度、真实 CKB 协议样本，用来检验 CellScript 是否能表达、降低并
   执行 CKB 原生约束。
 - 当前 selected matrix 已经升级为 `EXECUTED_CKB_VM_DIFF` / `PROVEN`，包含
-  75 条 original-vs-CellScript CKB VM 双侧差分行，active `MODEL` 行和 active
+  76 条 original-vs-CellScript CKB VM 双侧差分行，active `MODEL` 行和 active
   非可执行假设均为 0。
 - 14 条 CellScript-only VM 行、8 条 original-side VM 行和 3 条 legacy assumption
   已移入 supporting / retired evidence，不参与生产等价 claim。

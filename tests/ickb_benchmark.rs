@@ -115,7 +115,7 @@ fn ickb_negative_fixtures_fail_for_expected_invariant() {
 }
 
 #[test]
-fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
+fn ickb_diff_matrix_is_proven_and_consistent_with_retired_model_fixtures() {
     let matrix = read_fixture("ickb_diff", "matrix.json");
     assert_eq!(matrix["schema"], "cellscript-ickb-diff-matrix-v1");
     assert_eq!(matrix["mode"], "EXECUTED_CKB_VM_DIFF");
