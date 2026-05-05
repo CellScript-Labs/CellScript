@@ -2,373 +2,136 @@
 
 ## Status
 
-Draft governance note for the 0.13 / 0.14 language-surface cleanup track.
+Active 0.19 grammar-governance contract.
 
-This document records a grammar-governance position rather than an immediate
-implementation plan. It should guide future parser, formatter, example, and
-reference-documentation work when CellScript decides how strictly to separate
-transition shape, validity constraints, and global protocol laws.
+This document defines the public syntax boundary that parser, formatter, LSP,
+examples, docs, lowering metadata, and release gates must keep aligned.
 
 ## Thesis
 
-The recent grammar feedback is useful because it does not overpraise the
-language surface and does not misread CellScript's direction. It identifies the
-main governance issue that appears once the language grows beyond early 0.13 /
-0.14 syntax work:
+CellScript should not chase the cleanest general-purpose grammar. It should
+chase the clearest audit grammar for CKB Cell transformations.
 
-> CellScript should not chase the cleanest general-purpose language grammar. It
-> should chase the cleanest possible grammar for describing CKB Cell
-> transitions.
+The governing rule is:
 
-In Chinese shorthand:
-
-> 不是最优雅的通用语言，而是最清楚的 Cell 转移审计格式。
-
-CellScript's strongest identity is not that it resembles Rust, Move, Solidity,
-or Python. Its strongest identity is that it can become:
-
-> A verifier-oriented double-entry accounting DSL over the CKB Cell model.
-
-That framing suggests one governing rule:
-
-> State movement must be visible. Validity constraints must be visible. The
-> grammar should not hide one inside the other.
-
-## Design Principles
-
-- Keep Cell movement first-class and auditable.
-- Keep `resource`, `shared`, `receipt`, `action`, `lock`, `consume`, `create`,
-  `destroy`, and `invariant` as domain words. They are the soul of the
-  language surface.
-- Separate transition shape from validity constraints.
-- Separate action-local validity from resource/global law.
-- Prefer formatter-friendly regularity over permissive optional syntax.
-- Allow familiar expression syntax where it improves engineering legibility, but
-  do not mix semantic roles.
-- Treat accounting sugar such as `conserve` as explicit sugar that lowers to
-  ordinary input/output constraints.
-
-## 1. `where` Should Not Become A Hidden Function Body
-
-The criticism that `where` has become more like a function body than a pure
-constraint block is accurate.
-
-A block like this mixes semantic roles:
-
-```cell
-where
-    assert(...)
-    let x = ...
-    consume token
-    create output = ...
-    return ...
-```
-
-Once `where` contains local computation, Cell consumption, output creation, and
-returns, it no longer reads as a validity-refinement block. It becomes a hidden
-transition body. That makes the language model less honest.
-
-The clearer direction is:
-
-```cell
-action transfer(token: Token, to: Address) -> Token
-    consume token
-    create next = Token { amount: token.amount } with_lock(to)
-where
-    require token.amount > 0
-    require to != ZERO_ADDRESS
-```
-
-The transition shape is declared in the action body. The `where` block refines
-validity. The `where` block does not secretly perform state transition work.
-
-The mental model should be:
-
-```text
-signature = transition interface
-body      = Cell movement and output shape
-where     = validity constraints
-```
-
-Or, in Chinese:
-
-```text
-签名：这是什么动作
-主体：哪些 Cell 被消费/创建/保留
-where：为什么这个动作合法
-```
-
-The compact rule is:
-
-> 状态变化放明处，约束放 where。where 不应该偷偷干活。
-
-## 2. Govern `assert`, `require`, And `invariant`
-
-`assert`, `require`, and `assert_invariant` are currently too close from the
-external user's point of view. If all three can mean "this condition must hold",
-then users will not know which one belongs in normal protocol code:
-
-```cell
-assert(x)
-require(x)
-assert_invariant(x)
-```
-
-A cleaner public semantic split is:
-
-| Syntax | Meaning | Failure meaning |
-|---|---|---|
-| `require` | Action-local precondition or postcondition | This proposed transition is invalid. |
-| `invariant` | Resource/global protocol law | The contract/spec is internally inconsistent if violated. |
-| `assert` | Low-level/internal compiler primitive | Mostly generated, internal, or test-oriented. |
-
-The main user-facing style should be:
-
-```cell
-where
-    require token.amount > 0
-    require output.amount == token.amount
-```
-
-Global or resource-level law should remain top-level:
-
-```cell
-invariant conservation:
-    sum(inputs<Token>.amount) == sum(outputs<Token>.amount)
-```
-
-`assert` should be demoted in public guidance. Possible governance options:
-
-- keep `assert` as a compiler/internal lowering primitive;
-- expose only `debug_assert(...)` to users;
-- allow `assert` only in test-only or explicitly low-level contexts;
-- keep current syntax for compatibility, but make `require` the canonical style
-  in docs, examples, snippets, and formatter output.
-
-The key is not the exact spelling. The key is that public documentation should
-not encourage three near-equivalent ways to express mandatory validity.
-
-## 3. Mixed Surface Style Is Acceptable; Mixed Semantic Roles Are Not
-
-Applied DSLs do not need perfect aesthetic purity. They need domain legibility.
-CellScript benefits from familiar engineering syntax where it keeps examples
-short and obvious:
-
-```cell
-let x = ...
-Token { amount: x }
-Vec<Token>
-group_inputs<Token>
-```
-
-That kind of mixture is acceptable because it borrows expression forms that many
-engineers already understand.
-
-The dangerous mixture is semantic, not visual:
-
-```cell
-where
-    assert(...)
-    consume ...
-    create ...
-    return ...
-```
-
-Here the problem is not that the language looks partly Rust-like or partly
-DSL-like. The problem is that the same block performs transition effects,
-returns local values, and declares validity constraints.
-
-Governance rule:
-
-> Surface syntax may be mixed when it improves familiarity. Semantic roles must
-> not be mixed.
+> Action shape, Cell lifecycle declarations, and verification obligations must
+> stay visible at the action site.
 
 Chinese shorthand:
 
-> 语法长得混一点可以，语义边界不能混。
+> action 讲“这是什么交易形状”；transition 讲“哪个状态延续”；
+> verification 讲“为什么这笔 Cell 变换可以被接受”。
 
-## 4. Prefer Formatter-Friendly Separator Rules
+## Canonical Surface
 
-CellScript should not be too permissive with optional commas and semicolons. A
-DSL that must support auditing, generated examples, LSP tooling, and stable
-reference snippets benefits from regular syntax.
+The 0.19 public action form is:
 
-Recommended separator policy:
+```cellscript
+action NAME(params...) -> outputs {
+    transition old -> new
+    transition old.state: A -> new.state: B
 
-### Statement Blocks
-
-Use newline-separated statements and avoid mandatory semicolons:
-
-```cell
-action transfer(token: Token, to: Address) -> Token
-    consume token
-    create next = Token { amount: token.amount } with_lock(to)
-where
-    require token.amount > 0
-    require to != ZERO_ADDRESS
-```
-
-### Struct Literals, Lists, And Tuples
-
-Require commas inside expression forms:
-
-```cell
-Token {
-    amount: token.amount,
-    owner: to,
+    verification
+        require ...
+        preserve old -> new {
+            field_a
+            field_b
+        }
+        consume ...
+        destroy ...
+        create ...
 }
 ```
 
-### Function Calls
+The 0.19 public lock form is:
 
-Require commas between arguments:
-
-```cell
-require hash(lock_args, nonce) == expected
+```cellscript
+lock NAME(protected cell: T, witness arg: U) -> bool {
+    verification
+        require ...
+}
 ```
 
-The compact rule is:
+`transition` is optional. Resource-accounting actions such as token split and
+merge can have no state continuation.
 
-> Blocks use newlines. Expressions use commas. Do not make both optional.
+## Semantic Layers
 
-Chinese shorthand:
+| Layer | Surface | Governance rule |
+|---|---|---|
+| Core verifier syntax | `action`, `lock`, `verification`, `transition`, `consume`, `create`, `destroy`, `read`, `protected`, `witness`, `lock_args` | Must expose transaction shape and CKB source boundary directly. |
+| Local explicit sugar | `preserve old -> new { fields }`, anonymous `require { ... }` | Must expand to canonical `require` obligations and remain visible in metadata. |
+| Stdlib helper patterns | `std::cell::*`, `std::lifecycle::*`, `std::receipt::*`, `std::accounting::*` | Must validate arguments, fail closed, and lower to explicit obligations. |
+| Global protocol law | `invariant`, aggregate primitives, ProofPlan records | Must state trigger, scope, reads, and executable/metadata coverage. |
+| Deferred / rejected syntax | Non-canonical action-body sugar or protocol-name semantics | Must not be accepted as partial syntax. |
 
-> block 靠换行，expression 内部靠逗号，不要两边都可选。
+## `verification`
 
-This policy helps the parser, formatter, syntax highlighter, snippets, and code
-review diffs. It also makes generated examples more stable.
+`verification` is a section header, not an execution body. It can contain local
+calculation, `require`, `preserve`, lifecycle operations, and output checks, but
+those statements are proof obligations over a proposed CKB transaction.
 
-## 5. Proposed Action Shape
+Rules:
 
-A future grammar-cleanup pass can divide actions into three layers:
+- `require` guards action/lock validity and can carry a static message or
+  error label.
+- anonymous `require { ... }` blocks contain only pure boolean expressions.
+- lifecycle operations are forbidden inside `require { ... }`.
+- `consume`, `create`, and `destroy` validate transaction shape; they are not
+  VM-side allocation or storage mutation.
+- public action/lock conditions use `require`.
 
-```cell
-action transfer(token: Token, to: Address) -> Token
-    consume token
-    create next = Token {
-        amount: token.amount,
-    } with_lock(to)
-where
-    require token.amount > 0
-    require next.amount == token.amount
+## `transition`
+
+`transition old -> new` declares a same-type Cell continuation. It does not
+prove the field delta. The delta must be expressed with `require` and
+`preserve`.
+
+`transition old.state: A -> new.state: B` binds a declared `flow` edge for an
+explicit state field.
+
+Multiple transitions are written as repeated action-level lines:
+
+```cellscript
+transition wallet_before -> wallet_after
+transition proposal_before -> proposal_after
 ```
 
-Layer meaning:
+Multiple continuations stay as repeated `transition` declarations so each edge
+remains visible at the action site.
 
-| Layer | Role |
-|---|---|
-| Signature | Names the action and declares the transition interface. |
-| Body | Declares Cell movement, output construction, preservation, and accounting shape. |
-| `where` | Declares why the proposed transition is valid. |
+## Rejected Surfaces
 
-This keeps Cell movement in the open. It also makes the `where` block easier to
-read as proof obligations rather than an imperative body.
+The current parser and docs must present only the canonical forms above.
+Protocol-name magic is especially forbidden: action names must not trigger
+compiler behavior based on words such as claim, transfer, swap, or settle.
 
-## 6. Integrating `preserve`, `conserve`, And Accounting Sugar
+If a future version reconsiders a non-canonical surface, it needs parser,
+typechecker, lowering, metadata, formatter, LSP, example, and regression
+coverage in the same change.
 
-CellScript can make higher-level Cell accounting readable without hiding what it
-lowers to.
+## Acceptance Rules
 
-Example:
+Every grammar change must be checked across:
 
-```cell
-action transfer(token: Token, to: Address) -> Token
-    consume token
-    create next = Token {
-        amount: token.amount,
-    } with_lock(to)
-    preserve_capacity token -> next
-where
-    require to != ZERO_ADDRESS
-    require next.amount == token.amount
-```
+- parser accepted/rejected forms;
+- typechecker semantic boundary;
+- IR lowering and metadata expansion;
+- codegen or explicit non-codegen blocker;
+- formatter round trip;
+- LSP completion/highlighting/snippets;
+- examples and wiki docs;
+- syntax-combination audit seeds.
 
-A richer split example:
-
-```cell
-action split(token: Token, amounts: Vec<u64>) -> Vec<Token>
-    consume token
-    create outputs = amounts.map(|amount| Token { amount })
-    preserve_lock token -> outputs
-    conserve Token.amount
-where
-    require sum(amounts) == token.amount
-    require all(amounts, |x| x > 0)
-```
-
-`conserve Token.amount` is powerful accounting sugar, but it must be documented
-as sugar. It should lower to explicit input/output relations, for example:
-
-```cell
-require sum(inputs<Token>.amount) == sum(outputs<Token>.amount)
-```
-
-The governance principle is:
-
-> Accounting sugar is welcome when it makes the audit shape clearer, but it must
-> lower to explicit CellScript obligations that metadata and proof tooling can
-> expose.
-
-## 7. Preserve The Double-Entry Accounting Feel
-
-The most valuable aesthetic direction for CellScript is not "small Rust" or
-"Solidity for CKB". It is a verifier-oriented accounting language over proposed
-Cell transitions.
-
-The core verbs should stabilize around:
-
-```cell
-consume
-create
-preserve
-require
-```
-
-And the higher-level governance words should be:
-
-```cell
-invariant
-conserve
-```
-
-This vocabulary makes CellScript feel like it writes state-transition receipts,
-not merely contract functions.
-
-Chinese summary:
-
-> 它不是写合约逻辑，而是在写“状态转移凭证”。
-
-## Compatibility And Migration Guidance
-
-This RFC does not require immediate breaking changes. A staged path is safer:
-
-1. Document the intended semantic split first.
-2. Update examples and tutorials to prefer `require` for action-local validity.
-3. Keep existing `where` forms working while warning on transition effects inside
-   `where` only when a future compatibility mode enables that lint.
-4. Teach the formatter to canonicalize commas in expression forms before the
-   parser rejects old examples.
-5. Reserve `assert` for internal, generated, debug, or legacy-compatible use.
-6. Introduce `preserve` / `conserve` only when their lowering is explicit in
-   metadata and proof-plan output.
-
-The migration goal is not to punish existing syntax. The goal is to make the
-canonical style honest enough that users can audit Cell transitions directly
-from the source.
+Compile-only success is not enough for a CKB-facing grammar claim.
 
 ## Conclusion
 
-The feedback is correct on four main points:
+CellScript's language moat is not generic elegance. It is a stable, readable
+audit transcript for Cell transformations:
 
-1. The domain words are strong. `resource`, `receipt`, `action`, `lock`,
-   `consume`, and `create` are CellScript's identity.
-2. `where` is drifting into a mixed transition/function body and should be
-   governed back toward constraints.
-3. `assert`, `require`, and `invariant` need public semantic separation.
-4. Overly free punctuation is less valuable than formatter-friendly regularity.
-
-However, CellScript should not respond by chasing the most elegant generic
-language grammar. It should respond by becoming the clearest audit format for
-CKB Cell transitions.
-
-That is the language moat.
+```text
+action = verifier case
+transition = lifecycle continuation declaration
+verification = proof obligations
+```

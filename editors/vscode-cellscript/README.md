@@ -43,10 +43,11 @@ outside the LSP scope.
 ### Editor basics
 
 - `.cell` file association
-- TextMate syntax highlighting for the current 0.13 action model (`where`
-  proof blocks, `transition input.state: A -> output.state: B`, `flow`, named
-  output `create out = T { ... }`, and source qualifiers such as `read`,
-  `protected`, `witness`, and `lock_args`)
+- TextMate syntax highlighting for the current canonical action model
+  (`verification` sections, action-level `transition input -> output` /
+  `transition input.state: A -> output.state: B`, `flow`, named output
+  `create out = T { ... }`, and source qualifiers such as `read`, `protected`,
+  `witness`, and `lock_args`)
 - comment, bracket, auto-close, and folding configuration
 - snippets for resources, shared state, receipts, flows, action proof blocks,
   field-to-field state transitions, locks, source-qualified parameters, effects,
@@ -56,32 +57,35 @@ outside the LSP scope.
   `witness`, `require`, `source::*`, `witness::*`, and `env::sighash_all`
 - status bar state indicator
 
-## 0.13 Authoring Surface
+## Canonical Authoring Surface
 
 The extension snippets and grammar follow the signature-direction action
 surface:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer
+action fill_offer(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require output.price == input.price
-    require output.seller == input.seller
+
+    verification
+        require output.price == input.price
+        require output.seller == input.seller
+}
 ```
 
-Use where proof blocks for action proof logic; do not use the old brace-body
-action form.
+Use `verification` sections for action and lock proof logic.
 
 At action and lock boundaries, source qualifiers are written before the
 parameter name:
 
 ```cellscript
-action grant(read config: Config, tokens: Token) -> grant: Grant
-where
-    create grant = Grant { admin: config.admin }
+action grant(read config: Config, tokens: Token) -> grant: Grant {
+    verification
+        create grant = Grant { admin: config.admin }
+}
 
 lock owner_only(protected cell: Wallet, witness owner: Address) -> bool {
-    require owner == cell.owner
+    verification
+        require owner == cell.owner
 }
 ```
 

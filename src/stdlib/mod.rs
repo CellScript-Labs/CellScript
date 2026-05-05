@@ -1,7 +1,7 @@
 pub mod ckb_protocols;
 pub mod collections;
 
-use crate::{ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
+use crate::{ckb_abi, ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
 
 pub struct StdLib;
 
@@ -527,76 +527,70 @@ impl StdLib {
     fn generate_syscalls(target_profile: TargetProfile) -> String {
         let mut asm = String::new();
 
-        // syscall_load_tx_hash (2061)
-        asm.push_str("# Syscall: load_tx_hash (2061)\n");
+        asm.push_str(&format!("# Syscall: load_tx_hash ({})\n", ckb_abi::syscall::LOAD_TX_HASH));
         asm.push_str(".global __syscall_load_tx_hash\n");
         asm.push_str("__syscall_load_tx_hash:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2061\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_TX_HASH));
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_script_hash (2062)
-        asm.push_str("# Syscall: load_script_hash (2062)\n");
+        asm.push_str(&format!("# Syscall: load_script_hash ({})\n", ckb_abi::syscall::LOAD_SCRIPT_HASH));
         asm.push_str(".global __syscall_load_script_hash\n");
         asm.push_str("__syscall_load_script_hash:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2062\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_SCRIPT_HASH));
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_cell (2071)
-        asm.push_str("# Syscall: load_cell (2071)\n");
+        asm.push_str(&format!("# Syscall: load_cell ({})\n", ckb_abi::syscall::LOAD_CELL));
         asm.push_str(".global __syscall_load_cell\n");
         asm.push_str("__syscall_load_cell:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2071\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL));
         asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_header (2072)
-        asm.push_str("# Syscall: load_header (2072)\n");
+        asm.push_str(&format!("# Syscall: load_header ({})\n", ckb_abi::syscall::LOAD_HEADER));
         asm.push_str(".global __syscall_load_header\n");
         asm.push_str("__syscall_load_header:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2072\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_HEADER));
         asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_input (2073)
-        asm.push_str("# Syscall: load_input (2073)\n");
+        asm.push_str(&format!("# Syscall: load_input ({})\n", ckb_abi::syscall::LOAD_INPUT));
         asm.push_str(".global __syscall_load_input\n");
         asm.push_str("__syscall_load_input:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2073\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_INPUT));
         asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_witness (2074)
-        asm.push_str("# Syscall: load_witness (2074)\n");
+        asm.push_str(&format!("# Syscall: load_witness ({})\n", ckb_abi::syscall::LOAD_WITNESS));
         asm.push_str(".global __syscall_load_witness\n");
         asm.push_str("__syscall_load_witness:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2074\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_WITNESS));
         asm.push_str("    # a0 = index, a1 = source\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
@@ -604,7 +598,7 @@ impl StdLib {
         asm.push_str("    ret\n\n");
 
         let load_script_syscall = match target_profile {
-            TargetProfile::Ckb => 2052,
+            TargetProfile::Ckb => ckb_abi::syscall::LOAD_SCRIPT,
         };
         asm.push_str(&format!("# Syscall: load_script ({})\n", load_script_syscall));
         asm.push_str(".global __syscall_load_script\n");
@@ -618,51 +612,47 @@ impl StdLib {
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_cell_by_field (2081)
-        asm.push_str("# Syscall: load_cell_by_field (2081)\n");
+        asm.push_str(&format!("# Syscall: load_cell_by_field ({})\n", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
         asm.push_str(".global __syscall_load_cell_by_field\n");
         asm.push_str("__syscall_load_cell_by_field:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2081\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
         asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source, a5 = field\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_load_cell_data (2092)
-        asm.push_str("# Syscall: load_cell_data (2092)\n");
+        asm.push_str(&format!("# Syscall: load_cell_data ({})\n", ckb_abi::syscall::LOAD_CELL_DATA));
         asm.push_str(".global __syscall_load_cell_data\n");
         asm.push_str("__syscall_load_cell_data:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2092\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL_DATA));
         asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_current_cycles (2042)
-        asm.push_str("# Syscall: current_cycles (2042)\n");
+        asm.push_str(&format!("# Syscall: current_cycles ({})\n", ckb_abi::syscall::CURRENT_CYCLES));
         asm.push_str(".global __syscall_current_cycles\n");
         asm.push_str("__syscall_current_cycles:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2042\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::CURRENT_CYCLES));
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
         asm.push_str("    ret\n\n");
 
-        // syscall_debug_print (2177)
-        asm.push_str("# Syscall: debug_print (2177)\n");
+        asm.push_str(&format!("# Syscall: debug_print ({})\n", ckb_abi::syscall::DEBUG));
         asm.push_str(".global __syscall_debug_print\n");
         asm.push_str("__syscall_debug_print:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2177\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::DEBUG));
         asm.push_str("    # a0 = msg pointer, a1 = msg length\n");
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
@@ -747,9 +737,9 @@ impl StdLib {
         asm.push_str("    sd ra, 8(sp)\n");
         // All profiles use CKB epoch number.
         asm.push_str("    # Load CKB epoch number from header dep\n");
-        asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
+        asm.push_str(&format!("    li a7, {}  # LOAD_HEADER_BY_FIELD\n", ckb_abi::syscall::LOAD_HEADER_BY_FIELD));
         asm.push_str("    li a0, 0     # header index\n");
-        asm.push_str("    li a1, 0     # field = epoch number\n");
+        asm.push_str(&format!("    li a1, {}     # field = epoch number\n", ckb_abi::header_field::EPOCH_NUMBER));
         asm.push_str("    ecall\n");
         asm.push_str("    ld ra, 8(sp)\n");
         asm.push_str("    addi sp, sp, 16\n");
@@ -759,21 +749,21 @@ impl StdLib {
             &mut asm,
             "__ckb_header_epoch_number",
             "ckb_epoch_number",
-            0,
+            ckb_abi::header_field::EPOCH_NUMBER,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_header_epoch_helper(
             &mut asm,
             "__ckb_header_epoch_start_block_number",
             "ckb_epoch_start_block_number",
-            1,
+            ckb_abi::header_field::EPOCH_START_BLOCK_NUMBER,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_header_epoch_helper(
             &mut asm,
             "__ckb_header_epoch_length",
             "ckb_epoch_length",
-            2,
+            ckb_abi::header_field::EPOCH_LENGTH,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_input_since_helper(&mut asm, target_profile == TargetProfile::Ckb);
@@ -784,7 +774,7 @@ impl StdLib {
         asm.push_str("__env_remaining_cycles:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2042  # CURRENT_CYCLES\n");
+        asm.push_str(&format!("    li a7, {}  # CURRENT_CYCLES\n", ckb_abi::syscall::CURRENT_CYCLES));
         asm.push_str("    ecall\n");
         asm.push_str("    # a0 = current cycles\n");
         asm.push_str("    li t0, 10000000  # max cycles\n");
@@ -820,9 +810,9 @@ impl StdLib {
         asm.push_str("    addi a1, sp, 8\n");
         asm.push_str("    li a2, 0     # offset\n");
         asm.push_str("    li a3, 0     # header index\n");
-        asm.push_str("    li a4, 4     # Source::HeaderDep\n");
+        asm.push_str(&format!("    li a4, {}     # Source::HeaderDep\n", ckb_abi::source::HEADER_DEP));
         asm.push_str(&format!("    li a5, {}     # field = {}\n", field_id, field_name));
-        asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
+        asm.push_str(&format!("    li a7, {}  # LOAD_HEADER_BY_FIELD\n", ckb_abi::syscall::LOAD_HEADER_BY_FIELD));
         asm.push_str("    ecall\n");
         asm.push_str("    ld a0, 16(sp)\n");
         asm.push_str("    ld ra, 24(sp)\n");
@@ -854,9 +844,9 @@ impl StdLib {
         asm.push_str("    addi a1, sp, 8\n");
         asm.push_str("    li a2, 0     # offset\n");
         asm.push_str("    li a3, 0     # group input index\n");
-        asm.push_str("    li a4, 72057594037927937  # Source::GroupInput\n");
-        asm.push_str("    li a5, 1     # field = Since\n");
-        asm.push_str("    li a7, 2083  # LOAD_INPUT_BY_FIELD\n");
+        asm.push_str(&format!("    li a4, {}  # Source::GroupInput\n", ckb_abi::source::GROUP_INPUT));
+        asm.push_str(&format!("    li a5, {}     # field = Since\n", ckb_abi::input_field::SINCE));
+        asm.push_str(&format!("    li a7, {}  # LOAD_INPUT_BY_FIELD\n", ckb_abi::syscall::LOAD_INPUT_BY_FIELD));
         asm.push_str("    ecall\n");
         asm.push_str("    ld a0, 16(sp)\n");
         asm.push_str("    ld ra, 24(sp)\n");

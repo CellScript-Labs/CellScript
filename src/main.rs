@@ -89,6 +89,7 @@ fn main() {
                     | "abi"
                     | "scheduler-plan"
                     | "ckb-hash"
+                    | "ckb-std-compat"
                     | "explain"
                     | "explain-profile"
                     | "explain-proof"

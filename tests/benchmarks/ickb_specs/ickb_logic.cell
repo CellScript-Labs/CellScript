@@ -62,20 +62,19 @@ action deposit_phase_1(
     logic_hash: Hash,
     depositor: Address
 ) -> (deposit: DaoDeposit, receipt: IckbReceipt)
-where
+{
+    verification
     ckb::require_current_script_args_empty()
     // TODO(ickb-benchmark): exact iCKB output deposit/receipt pairing must stay
     // in benchmark fixtures until CellScript has generic aggregate lowering.
-    assert_invariant(
+    require
         deposit_amount >= CKB_MINIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT,
         "deposit too small"
-    )
-    assert_invariant(
+    require
         deposit_amount <= CKB_MAXIMUM_UNOCCUPIED_CAPACITY_PER_DEPOSIT,
         "deposit too big"
-    )
-    assert_invariant(deposit_quantity > 0, "empty receipt")
-    assert_invariant(deposit_accumulated_rate > 0, "missing accumulated rate")
+    require deposit_quantity > 0, "empty receipt"
+    require deposit_accumulated_rate > 0, "missing accumulated rate"
 
     create deposit = DaoDeposit {
         unoccupied_capacity: deposit_amount,
@@ -90,6 +89,7 @@ where
         deposit_accumulated_rate,
         logic_hash
     } with_lock(depositor)
+}
 
 action mint_from_receipt(
     receipt: IckbReceipt,
@@ -99,7 +99,8 @@ action mint_from_receipt(
     expected_xudt_hash_type: u64,
     owner: Address
 ) -> token: IckbToken
-where
+{
+    verification
     ckb::require_current_script_args_empty()
     // TODO(ickb-benchmark): output receipt/deposit pairing is intentionally not
     // a core dao::* helper; model it in test fixtures until generic aggregate
@@ -112,22 +113,21 @@ where
     let group_capacity = ckb::cell_capacity(input)
     let role = ckb::current_role()
 
-    assert_invariant(role == 2, "mint must run as type script")
-    assert_invariant(header_rate > 0, "missing header accumulated rate")
-    assert_invariant(input_header_rate > 0, "missing input header accumulated rate")
-    assert_invariant(receipt.deposit_accumulated_rate == header_rate, "receipt/header rate mismatch")
-    assert_invariant(receipt.deposit_accumulated_rate == input_header_rate, "receipt input header mismatch")
-    assert_invariant(group_capacity > 0, "missing group input capacity")
+    require role == 2, "mint must run as type script"
+    require header_rate > 0, "missing header accumulated rate"
+    require input_header_rate > 0, "missing input header accumulated rate"
+    require receipt.deposit_accumulated_rate == header_rate, "receipt/header rate mismatch"
+    require receipt.deposit_accumulated_rate == input_header_rate, "receipt input header mismatch"
+    require group_capacity > 0, "missing group input capacity"
     let current_logic_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_type_script_hash_type(source::group_output(0), expected_xudt_code_hash, expected_xudt_hash_type)
     xudt::require_owner_mode_type_args(source::group_output(0), current_logic_hash, 2147483648)
     xudt::require_owner_mode_type_args(source::group_output(0), receipt.logic_hash, 2147483648)
-    assert_invariant(
+    require
         existing_tokens.xudt_args_hash == expected_xudt_args_hash,
         "wrong xudt binding"
-    )
-    assert_invariant(receipt.deposit_quantity > 0, "empty receipt")
-    assert_invariant(receipt.deposit_accumulated_rate > 0, "missing accumulated rate")
+    require receipt.deposit_quantity > 0, "empty receipt"
+    require receipt.deposit_accumulated_rate > 0, "missing accumulated rate"
 
     let minted = receipt.deposit_quantity *
         discounted_ickb_value(receipt.deposit_amount, receipt.deposit_accumulated_rate)
@@ -144,11 +144,12 @@ where
         amount: existing_tokens.amount + minted,
         xudt_args_hash: expected_xudt_args_hash
     } with_lock(owner)
+}
 
-action transfer_ickb(token: IckbToken, to: Address) -> next_token: IckbToken
-where
+action transfer_ickb(token: IckbToken, to: Address) -> next_token: IckbToken {
+    verification
     ckb::require_current_script_args_empty()
-    assert_invariant(token.amount > 0, "empty transfer")
+    require token.amount > 0, "empty transfer"
     xudt::require_group_amount_conserved()
 
     consume token
@@ -157,6 +158,7 @@ where
         amount: token.amount,
         xudt_args_hash: token.xudt_args_hash
     } with_lock(to)
+}
 
 action request_withdrawal(
     token: IckbToken,
@@ -165,27 +167,28 @@ action request_withdrawal(
     maturity_epoch: u64,
     owner: Address
 ) -> request: WithdrawalRequest
-where
+{
+    verification
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let header = source::header_dep(0)
     dao::require_header_dep_for_input(input, header)
     let header_rate = dao::accumulated_rate(header)
     let input_header_rate = dao::input_accumulated_rate(input)
-    assert_invariant(dao::has_dao_type(input), "not dao type")
-    assert_invariant(dao::is_deposit_data(input), "not dao deposit data")
+    require dao::has_dao_type(input), "not dao type"
+    require dao::is_deposit_data(input), "not dao deposit data"
     ckb::require_cell_lock_args_empty(input)
     ckb::require_cell_type_args_empty(input)
-    assert_invariant(header_rate > 0, "missing withdrawal header rate")
-    assert_invariant(input_header_rate > 0, "missing withdrawal input header rate")
+    require header_rate > 0, "missing withdrawal header rate"
+    require input_header_rate > 0, "missing withdrawal input header rate"
 
     let deposit_ickb = discounted_ickb_value(
         deposit.unoccupied_capacity,
         deposit.deposit_accumulated_rate
     )
 
-    assert_invariant(token.amount == deposit_ickb, "amount mismatch")
-    assert_invariant(maturity_epoch > request_epoch, "invalid maturity")
+    require token.amount == deposit_ickb, "amount mismatch"
+    require maturity_epoch > request_epoch, "invalid maturity"
     xudt::require_group_amount_burned(token.amount)
 
     consume token
@@ -199,22 +202,24 @@ where
         maturity_epoch,
         owner
     } with_lock(owner)
+}
 
-action redeem_mature(request: WithdrawalRequest, current_epoch: u64, owner: Address)
-where
+action redeem_mature(request: WithdrawalRequest, current_epoch: u64, owner: Address) {
+    verification
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
-    assert_invariant(dao::has_dao_type(input), "not dao type")
-    assert_invariant(dao::is_withdrawal_request_data(input), "not dao withdrawal request data")
+    require dao::has_dao_type(input), "not dao type"
+    require dao::is_withdrawal_request_data(input), "not dao withdrawal request data"
     ckb::require_cell_lock_args_empty(input)
     ckb::require_cell_type_args_empty(input)
     let required_since = ckb::since_epoch_relative(request.maturity_epoch, 0, 1)
     dao::require_input_since_at_least(input, required_since)
     dao::require_input_relative_epoch_since_at_least(input, request.maturity_epoch, 0, 1)
-    assert_invariant(current_epoch >= request.maturity_epoch, "immature redeem")
-    assert_invariant(owner == request.owner, "wrong owner")
+    require current_epoch >= request.maturity_epoch, "immature redeem"
+    require owner == request.owner, "wrong owner"
 
     consume request
+}
 
 fn discounted_ickb_value(unoccupied_capacity: u128, accumulated_rate: u128) -> u128 {
     let raw = unoccupied_capacity * GENESIS_ACCUMULATED_RATE / accumulated_rate
@@ -224,16 +229,18 @@ fn discounted_ickb_value(unoccupied_capacity: u128, accumulated_rate: u128) -> u
 }
 
 lock receipt_owner(receipt: protected IckbReceipt, claimed_owner: witness Address) -> bool {
-    ckb::require_current_script_args_empty()
-    require ckb::current_role() == 1
-    require receipt.deposit_quantity > 0
-    require claimed_owner == claimed_owner
+    verification
+        ckb::require_current_script_args_empty()
+        require ckb::current_role() == 1
+        require receipt.deposit_quantity > 0
+        require claimed_owner == claimed_owner
 }
 
 lock withdrawal_owner(request: protected WithdrawalRequest, claimed_owner: witness Address) -> bool {
-    ckb::require_current_script_args_empty()
-    require ckb::current_role() == 1
-    require request.owner == claimed_owner
+    verification
+        ckb::require_current_script_args_empty()
+        require ckb::current_role() == 1
+        require request.owner == claimed_owner
 }
 
 // TODO(ickb-benchmark): CellScript can now verify xUDT owner-mode Type args

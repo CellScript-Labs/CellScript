@@ -13,12 +13,13 @@ resource Badge has store, create, replace
     owner: Address
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge
-where
-    create_unique<Badge>(identity = field(badge_id)) {
-        badge_id,
-        owner
-    } with_lock(owner)
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+    verification
+        create_unique<Badge>(identity = field(badge_id)) {
+            badge_id,
+            owner
+        } with_lock(owner)
+}
 "#;
 
 const METADATA_ONLY_INVARIANT: &str = r#"
@@ -35,9 +36,10 @@ resource Token {
     amount: u64
 }
 
-action noop() -> u64
-where
-    0
+action noop() -> u64 {
+    verification
+        0
+}
 "#;
 
 fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {
@@ -419,6 +421,9 @@ fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     validate.arg("validate-tx").arg("--against").arg(&metadata).arg(&tx).arg("--json");
     let validate_json = run_success_json(validate);
     assert_eq!(validate_json["status"], "ok");
+    assert_eq!(validate_json["validation_level"], "cellscript-metadata-evidence");
+    assert_eq!(validate_json["ckb_vm_execution"], false);
+    assert_eq!(validate_json["tx_pool_acceptance"], false);
 }
 
 #[test]

@@ -39,17 +39,20 @@ through an explicit stdlib lifecycle pattern such as
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
-    require auth_after.token_symbol == auth_before.token_symbol
-    require auth_after.max_supply == auth_before.max_supply
-    require auth_after.minted == auth_before.minted + amount
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    create token = Token {
-        amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
+
+        create token = Token {
+            amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 ```
 
 The field shorthand `amount` means `amount: amount`. The `with_lock(to)` part is
@@ -68,19 +71,21 @@ resource Badge has store, create, replace
     owner: Address
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge
-where
-    create_unique<Badge>(identity = field(badge_id)) {
-        badge_id,
-        owner
-    } with_lock(owner)
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+    verification
+        create_unique<Badge>(identity = field(badge_id)) {
+            badge_id,
+            owner
+        } with_lock(owner)
+}
 
-action move_badge(badge: Badge, new_owner: Address) -> Badge
-where
-    replace_unique<Badge>(identity = field(badge_id)) badge {
-        badge_id: badge.badge_id,
-        owner: new_owner
-    }
+action transfer_badge(badge: Badge, new_owner: Address) -> Badge {
+    verification
+        replace_unique<Badge>(identity = field(badge_id)) badge {
+            badge_id: badge.badge_id,
+            owner: new_owner
+        }
+}
 ```
 
 `replace_unique` consumes the named input before the field initializer block.
@@ -95,10 +100,13 @@ input and output names are ordinary bindings; `require` clauses prove continuity
 and the allowed field changes.
 
 ```cellscript
-action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet
-where
-    require wallet_after.owner == wallet_before.owner
-    require wallet_after.nonce == wallet_before.nonce + 1
+action bump_nonce(wallet_before: Wallet) -> wallet_after: Wallet {
+    transition wallet_before -> wallet_after
+
+    verification
+        require wallet_after.owner == wallet_before.owner
+        require wallet_after.nonce == wallet_before.nonce + 1
+}
 ```
 
 When reviewing this pattern, inspect metadata and builder evidence for the input

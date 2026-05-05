@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-05-04
+**Updated**: 2026-05-05
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -27,7 +27,7 @@ The current project direction is simple:
 | 0.16 release scope | `feat/assurance-tooling` implements the scoped metadata-assurance release: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | 0.17 release scope | `research/protocol-equivalence` closes the scoped iCKB protocol-semantics milestone with partial CKB VM differential evidence and an explicit `NOT_PROVEN` production-equivalence gate. | [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/0.17/ickb_final_report.md) |
 | 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| 0.19 planning scope | Package/deployment registry, lockfile-bound provenance, and CellScript Action Builder architecture. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
+| 0.19 in-progress scope | CKB ecosystem reuse and `ckb-std` compatibility first slice is implemented; package/deployment registry, lockfile-bound provenance, and generated Action Builder remain open. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -169,8 +169,20 @@ Detailed status:
 
 ### 0.19: Package Registry And Action Builder
 
-0.19 should turn compiler artifacts into package, deployment, and
-transaction-building infrastructure:
+0.19 is now in progress. The first implemented slice turns the CKB ecosystem
+reuse boundary into executable compatibility evidence:
+
+- centralized inline CKB ABI constants in `src/ckb_abi.rs`;
+- parity tests against `ckb-std` / `ckb-types` for constants, SourceView,
+  WitnessArgs layout, TYPE_ID, since/epoch, and occupied-capacity field use;
+- `cellc action build --json` adapter contracts and packed-materialization
+  requirements;
+- `cellc ckb-std-compat --json` compatibility reports;
+- an offline `examples/ckb-sdk-builder` adapter-shape crate using
+  `ckb-sdk-rust` packed types and adapter-owned evidence boundaries.
+
+The remaining 0.19 work is still package, deployment, and transaction-building
+infrastructure:
 
 - source/package registry for package identity, source hashes, build recipes,
   ABI metadata, audit artifacts, and dependency resolution;

@@ -156,9 +156,10 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     f"matrix_cell_helper_{short_name}",
                     f"""
-                    action {action}(coin_before: Coin) -> coin_after: Coin
-                    where
+                    action {action}(coin_before: Coin) -> coin_after: Coin {{
+                        verification
                         {helper}(coin_after, coin_before)
+                    }}
                     """,
                 ),
                 expected=Expected("accept"),
@@ -174,8 +175,8 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_explicit_transfer_branch_require",
                     """
-                    action branch_keep(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action branch_keep(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         consume coin
 
                         create next_coin = Coin {
@@ -188,6 +189,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                         } else {
                             require next_coin.nonce == coin.nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -205,8 +207,8 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_explicit_transfer_let_proof",
                     """
-                    action let_keep(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action let_keep(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         consume coin
 
                         create next_coin = Coin {
@@ -217,6 +219,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                         let same_amount = next_coin.amount == coin.amount
                         require same_amount
                         require next_coin.nonce == coin.nonce
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -234,8 +237,8 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_stdlib_transfer_require_block",
                     """
-                    action transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         std::lifecycle::transfer(coin, next_coin, to) {
                             amount
                             nonce
@@ -245,6 +248,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                             next_coin.amount == coin.amount
                             next_coin.nonce == coin.nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -263,14 +267,15 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_stdlib_transfer_lock_capacity",
                     """
-                    action transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         std::lifecycle::transfer(coin, next_coin, to) {
                             amount
                             nonce
                         }
                         std::cell::preserve_lock(next_coin, coin)
                         std::cell::preserve_capacity(next_coin, coin)
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -289,8 +294,8 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_stdlib_claim_require_block",
                     """
-                    action claim_with_block(voucher: Voucher) -> coin: Coin
-                    where
+                    action claim_with_block(voucher: Voucher) -> coin: Coin {
+                        verification
                         std::receipt::claim(voucher, coin, voucher.holder) {
                             amount
                             nonce
@@ -300,6 +305,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                             coin.amount == voucher.amount
                             coin.nonce == voucher.nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -317,13 +323,14 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_stdlib_settle_preserve_capacity",
                     """
-                    action settle_with_capacity(voucher: Voucher) -> coin: Coin
-                    where
+                    action settle_with_capacity(voucher: Voucher) -> coin: Coin {
+                        verification
                         std::lifecycle::settle(voucher, coin, voucher.holder) {
                             amount
                             nonce
                         }
                         std::cell::preserve_capacity(coin, voucher)
+                    }
                     """,
                 ),
                 expected=Expected("accept"),
@@ -343,6 +350,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     "matrix_lock_protected_only",
                     """
                     lock protected_wallet(protected wallet: Wallet) -> bool {
+                        verification
                         require wallet.owner == wallet.owner
                     }
                     """,
@@ -356,6 +364,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     "matrix_lock_witness_only",
                     """
                     lock witness_owner(witness owner: Address) -> bool {
+                        verification
                         require owner == owner
                     }
                     """,
@@ -369,6 +378,7 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     "matrix_lock_args_only",
                     """
                     lock args_owner(lock_args owner: Address) -> bool {
+                        verification
                         require owner == owner
                     }
                     """,
@@ -381,12 +391,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_require_block_assignment",
                     """
-                    action hidden_mutation(flag: bool)
-                    where
+                    action hidden_mutation(flag: bool) {
+                        verification
                         let mut ok = flag
                         require {
                             ok = false
                         }
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("require block", "assignment")),
@@ -397,12 +408,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_claim_non_receipt",
                     """
-                    action bad_claim(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         std::receipt::claim(coin, next_coin, to) {
                             amount
                             nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("claim requires a receipt",)),
@@ -413,12 +425,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_claim_extra_args",
                     """
-                    action bad_claim(voucher: Voucher) -> coin: Coin
-                    where
+                    action bad_claim(voucher: Voucher) -> coin: Coin {
+                        verification
                         std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {
                             amount
                             nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("claim expects 3 arguments",)),
@@ -429,12 +442,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_transfer_extra_args",
                     """
-                    action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
-                    where
+                    action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
                         std::lifecycle::transfer(coin, next_coin, to, to) {
                             amount
                             nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("transfer expects 3 arguments",)),
@@ -445,12 +459,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_settle_missing_args",
                     """
-                    action bad_settle(voucher: Voucher) -> coin: Coin
-                    where
+                    action bad_settle(voucher: Voucher) -> coin: Coin {
+                        verification
                         std::lifecycle::settle(voucher, coin) {
                             amount
                             nonce
                         }
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("settle expects 3 arguments",)),
@@ -461,9 +476,10 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                 source=module_source(
                     "matrix_reject_cell_metadata_non_cell",
                     """
-                    action bad_metadata(amount: u64) -> out: Coin
-                    where
+                    action bad_metadata(amount: u64) -> out: Coin {
+                        verification
                         std::cell::preserve_capacity(out, amount)
+                    }
                     """,
                 ),
                 expected=Expected("reject_compile", ("preserve_capacity input must be a cell-backed value",)),
@@ -480,12 +496,13 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     source=module_source(
                         "matrix_deep_reject_transfer_read_param",
                         """
-                        action bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin
-                        where
+                        action bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin {
+                            verification
                             std::lifecycle::transfer(coin, next_coin, to) {
                                 amount
                                 nonce
                             }
+                        }
                         """,
                     ),
                     expected=Expected("reject_compile", ("cell-backed linear",)),
@@ -496,14 +513,15 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     source=module_source(
                         "matrix_deep_reject_require_block_transfer",
                         """
-                        action hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin
-                        where
+                        action hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+                            verification
                             require {
                                 std::lifecycle::transfer(coin, next_coin, to) {
                                     amount
                                     nonce
                                 }
                             }
+                        }
                         """,
                     ),
                     expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
@@ -514,9 +532,10 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     source=module_source(
                         "matrix_deep_reject_unknown_accounting",
                         """
-                        action bad_accounting(coin_before: Coin) -> coin_after: Coin
-                        where
+                        action bad_accounting(coin_before: Coin) -> coin_after: Coin {
+                            verification
                             std::accounting::minted(coin_after, coin_before)
+                        }
                         """,
                     ),
                     expected=Expected("reject_compile", ("unknown stdlib pattern",)),
@@ -535,14 +554,15 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "explicit_transfer",
                 """
-                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     consume coin
 
                     create next_coin = Coin {
                         amount: coin.amount,
                         nonce: coin.nonce
                     } with_lock(to)
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -560,8 +580,8 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "pure_require_block",
                 """
-                action keep_fields(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action keep_fields(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     consume coin
 
                     create next_coin = Coin {
@@ -573,6 +593,7 @@ def generated_cases() -> list[AuditCase]:
                         next_coin.amount == coin.amount
                         next_coin.nonce == coin.nonce
                     }
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -589,8 +610,8 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "preserve_sugar",
                 """
-                action preserve_fields(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action preserve_fields(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     consume coin
 
                     create next_coin = Coin {
@@ -602,6 +623,7 @@ def generated_cases() -> list[AuditCase]:
                         amount
                         nonce
                     }
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -618,12 +640,13 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "stdlib_transfer",
                 """
-                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     std::lifecycle::transfer(coin, next_coin, to) {
                         amount
                         nonce
                     }
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -641,12 +664,13 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "stdlib_claim",
                 """
-                action claim_voucher(voucher: Voucher) -> coin: Coin
-                where
+                action claim_voucher(voucher: Voucher) -> coin: Coin {
+                    verification
                     std::receipt::claim(voucher, coin, voucher.holder) {
                         amount
                         nonce
                     }
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -663,12 +687,13 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "stdlib_settle",
                 """
-                action settle_voucher(voucher: Voucher) -> coin: Coin
-                where
+                action settle_voucher(voucher: Voucher) -> coin: Coin {
+                    verification
                     std::lifecycle::settle(voucher, coin, voucher.holder) {
                         amount
                         nonce
                     }
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -685,12 +710,13 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "cell_metadata_helpers",
                 """
-                action preserve_boundary(coin_before: Coin) -> coin_after: Coin
-                where
+                action preserve_boundary(coin_before: Coin) -> coin_after: Coin {
+                    verification
                     std::cell::preserve_type(coin_after, coin_before)
                     std::cell::preserve_lock(coin_after, coin_before)
                     std::cell::preserve_capacity(coin_after, coin_before)
                     std::accounting::conserved(coin_after, coin_before)
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -712,6 +738,7 @@ def generated_cases() -> list[AuditCase]:
                     lock_args owner: Address,
                     witness claimed_owner: Address
                 ) -> bool {
+                    verification
                     require wallet.owner == owner
                     require claimed_owner == owner
                 }
@@ -724,14 +751,15 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "reject_require_block_lifecycle",
                 """
-                action bad(voucher: Voucher) -> coin: Coin
-                where
+                action bad(voucher: Voucher) -> coin: Coin {
+                    verification
                     require {
                         std::receipt::claim(voucher, coin, voucher.holder) {
                             amount
                             nonce
                         }
                     }
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
@@ -749,11 +777,12 @@ resource BadCoin has store, create, consume, replace, burn, relock {
     amount: bool,
 }
 
-action bad(coin: Coin) -> bad_coin: BadCoin
-where
+action bad(coin: Coin) -> bad_coin: BadCoin {
+    verification
     preserve bad_coin from coin {
         amount
     }
+}
 """,
             expected=Expected("reject_compile", ("type mismatch",)),
         ),
@@ -762,11 +791,12 @@ where
             source=module_source(
                 "reject_transfer_missing_field",
                 """
-                action bad(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action bad(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     std::lifecycle::transfer(coin, next_coin, to) {
                         amount
                     }
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("missing nonce",)),
@@ -776,9 +806,10 @@ where
             source=module_source(
                 "reject_consume_read_param",
                 """
-                action bad(read coin: Coin)
-                where
+                action bad(read coin: Coin) {
+                    verification
                     consume coin
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("cell-backed linear",)),
@@ -788,9 +819,10 @@ where
             source=module_source(
                 "reject_unknown_stdlib",
                 """
-                action bad(coin_before: Coin) -> coin_after: Coin
-                where
+                action bad(coin_before: Coin) -> coin_after: Coin {
+                    verification
                     std::cell::teleport(coin_after, coin_before)
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("unknown stdlib pattern",)),
@@ -811,12 +843,13 @@ receipt Voucher has create, consume, burn {
     holder: Address,
 }
 
-action bad(voucher: Voucher) -> coin: Coin
-where
+action bad(voucher: Voucher) -> coin: Coin {
+    verification
     std::receipt::claim(voucher, coin, voucher.holder) {
         amount
         nonce
     }
+}
 """,
             expected=Expected("reject_compile", ("declare a claim output type",)),
         ),
@@ -830,9 +863,10 @@ resource Coin has store, transfer {
     nonce: u64,
 }
 
-action bad(coin: Coin, to: Address)
-where
+action bad(coin: Coin, to: Address) {
+    verification
     transfer coin to to
+}
 """,
             expected=Expected("reject_compile", ("CS0150", "legacy capability 'transfer'", "replace + relock")),
         ),
@@ -859,34 +893,37 @@ def seeded_deep_cases(seed: int) -> list[AuditCase]:
             (
                 "require_block_lifecycle",
                 """
-                action seeded_reject_lifecycle_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action seeded_reject_lifecycle_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     require {
                         std::lifecycle::transfer(coin, next_coin, to) {
                             amount
                             nonce
                         }
                     }
+                }
                 """,
                 ("require block", "verifier-boundary syntax"),
             ),
             (
                 "unknown_stdlib",
                 """
-                action seeded_reject_unknown_{suffix}(coin_before: Coin) -> coin_after: Coin
-                where
+                action seeded_reject_unknown_{suffix}(coin_before: Coin) -> coin_after: Coin {
+                    verification
                     std::cell::teleport(coin_after, coin_before)
+                }
                 """,
                 ("unknown stdlib pattern",),
             ),
             (
                 "transfer_missing_field",
                 """
-                action seeded_reject_missing_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action seeded_reject_missing_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
                     std::lifecycle::transfer(coin, next_coin, to) {
                         amount
                     }
+                }
                 """,
                 ("missing nonce",),
             ),
@@ -899,11 +936,12 @@ def seeded_deep_cases(seed: int) -> list[AuditCase]:
             source=module_source(
                 f"seeded_deep_transfer_{suffix}",
                 f"""
-                action seeded_transfer_{suffix}(coin: Coin, to: Address) -> next_coin: Coin
-                where
+                action seeded_transfer_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {{
+                    verification
                     std::lifecycle::transfer(coin, next_coin, to) {{
 {transfer_fields}
                     }}
+                }}
                 """,
             ),
             expected=Expected("accept"),
@@ -922,9 +960,10 @@ def seeded_deep_cases(seed: int) -> list[AuditCase]:
             source=module_source(
                 f"seeded_deep_cell_helper_{suffix}",
                 f"""
-                action seeded_helper_{suffix}(coin_before: Coin) -> coin_after: Coin
-                where
+                action seeded_helper_{suffix}(coin_before: Coin) -> coin_after: Coin {{
+                    verification
                     {helper}(coin_after, coin_before)
+                }}
                 """,
             ),
             expected=Expected("accept"),
@@ -978,7 +1017,7 @@ def load_cases(mode: str, budget: int | None, seed: int) -> list[AuditCase]:
 
     seed_cases: list[AuditCase] = []
     if SEEDS.exists():
-        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell"))]
+        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell")) if path.is_file()]
 
     if mode == "quick":
         default_budget = read_matrix().get("mode", {}).get("quick", {}).get("budget", len(cases))

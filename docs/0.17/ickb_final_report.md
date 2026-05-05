@@ -76,10 +76,10 @@ into typed compiler/runtime surface:
 - `ckb::cell_capacity`, `ckb::cell_output_index`,
   `ckb::cell_occupied_capacity`, `ckb::cell_unoccupied_capacity`,
   `ckb::cell_lock_hash`, `ckb::cell_type_hash`, and cell data-size helpers
-  compile through SourceViews. Occupied capacity now uses the CKB byte
-  formula `8 + lock(33+args) + optional type(33+args) + data_len`, multiplied
-  by `100_000_000` shannons. Low-word hash helpers remain diagnostics only;
-  active 0.18 iCKB rows use full 32-byte hash reads or exact Script matching.
+  compile through SourceViews. Occupied capacity now reads the CKB
+  `CellField::OccupiedCapacity` field through `LOAD_CELL_BY_FIELD`. Low-word
+  hash helpers remain diagnostics only; active 0.18 iCKB rows use full 32-byte
+  hash reads or exact Script matching.
 - `ckb::require_cell_lock_hash` and `ckb::require_cell_type_hash` compile to
   fail-closed full 32-byte SourceView hash equality checks.
 - `ckb::require_cell_lock_script_hash_type` and

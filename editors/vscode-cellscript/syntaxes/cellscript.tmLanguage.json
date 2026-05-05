@@ -159,7 +159,7 @@
       "patterns": [
         {
           "name": "keyword.control.cellscript",
-          "match": "\\b(module|use|if|else|for|in|while|match|return|let|mut|ref|as|where)\\b"
+          "match": "\\b(module|use|if|else|for|in|while|match|return|let|mut|ref|as|verification)\\b"
         },
         {
           "name": "keyword.declaration.cellscript",
@@ -167,7 +167,7 @@
         },
         {
           "name": "keyword.other.cellscript",
-          "match": "\\b(has|store|consume|create|read|read_ref|launch|transition|self|env|with_lock|assert|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|transfer|destroy|std)\\b"
+          "match": "\\b(has|store|consume|create|read|read_ref|launch|transition|self|env|with_lock|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|transfer|destroy|std)\\b"
         },
         {
           "name": "constant.language.boolean.cellscript",

@@ -68,7 +68,7 @@ Each release answers a specific question:
 | v0.16 release scope | Implemented for the scoped `cellscript-0.16` metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | v0.17 release scope | Scoped protocol-equivalence milestone complete: partial CKB VM differential evidence exists, while production equivalence remains deliberately `NOT_PROVEN`. | [v0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [iCKB final report](../docs/0.17/ickb_final_report.md) |
 | v0.18 planning scope | First-class read-only ScriptRef / ScriptArgs API and iCKB equivalence-closure prerequisites. | [v0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| v0.19 planning scope | Package/deployment registry and CellScript Action Builder architecture. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
+| v0.19 in-progress scope | CKB ecosystem reuse and `ckb-std` compatibility first slice is implemented; package/deployment registry and generated Action Builder remain open. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -88,7 +88,7 @@ Each release answers a specific question:
 | v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Implemented for scoped `cellscript-0.16` release |
 | v0.17 | iCKB-Grade Protocol Semantics | "Turn protocol-equivalence gaps into executable evidence gates." | Scoped milestone complete; equivalence not proven |
 | v0.18 | First-Class Script API and Equivalence Closure | "Make ScriptRef/ScriptArgs and remaining iCKB proof prerequisites first-class." | Planning |
-| v0.19 | Package Registry and Action Builder | "Turn one action into one valid transaction through registry-bound metadata." | Planning |
+| v0.19 | Package Registry and Action Builder | "Turn one action into one valid transaction through registry-bound metadata." | In progress; CKB compatibility / adapter-boundary first slice landed |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or

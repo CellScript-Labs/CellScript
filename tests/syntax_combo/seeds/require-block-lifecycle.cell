@@ -14,11 +14,12 @@ receipt Voucher -> Coin has create, consume, burn {
     holder: Address,
 }
 
-action bad(voucher: Voucher) -> coin: Coin
-where
-    require {
-        std::receipt::claim(voucher, coin, voucher.holder) {
-            amount
-            nonce
+action bad(voucher: Voucher) -> coin: Coin {
+    verification
+        require {
+            std::receipt::claim(voucher, coin, voucher.holder) {
+                amount
+                nonce
+            }
         }
-    }
+}

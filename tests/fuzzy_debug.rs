@@ -139,7 +139,7 @@ resource Token has store {
 }
 
 action mint(amount: u64) -> Token {
-    assert_invariant(amount > 0, "positive")
+    require amount > 0, "positive"
     create Token { amount }
 }
 "#,
@@ -151,12 +151,13 @@ resource Wallet has store {
 }
 
 lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    let input = source::group_input(0)
-    let digest = env::sighash_all(input)
-    let witness_lock = witness::lock(input)
-    require owner == wallet.owner
-    require claimed_owner == owner
-    require witness_lock == digest
+    verification
+        let input = source::group_input(0)
+        let digest = env::sighash_all(input)
+        let witness_lock = witness::lock(input)
+        require owner == wallet.owner
+        require claimed_owner == owner
+        require witness_lock == digest
 }
 "#,
         include_str!("../examples/language/canonical_style.cell"),
@@ -237,14 +238,16 @@ resource Token has store {
     amount: u64
 }
 
-action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64
-where
-    assert_invariant(active, "active")
-    return amount
+action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64 {
+    verification
+        require active, "active"
+        return amount
 
+}
 lock owner_lock(token: protected Token, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    require owner == token.owner
-    require claimed_owner == owner
+    verification
+        require owner == token.owner
+        require claimed_owner == owner
 }
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -374,9 +377,10 @@ version = "0.1.0"
         r#"
 module fuzzy_cli_hex::main
 
-action owned(owner: Address) -> u64
-where
-    return 0
+action owned(owner: Address) -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();

@@ -5,6 +5,7 @@
 
 pub mod assumptions;
 pub mod ast;
+pub mod ckb_abi;
 pub mod cli;
 pub mod codegen;
 pub mod debug;
@@ -12239,10 +12240,10 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_cell_capacity" => Some(("cell-capacity", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_capacity")),
         "__ckb_cell_occupied_capacity" => {
-            Some(("cell-occupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView", "ckb::cell_occupied_capacity"))
+            Some(("cell-occupied-capacity", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_occupied_capacity"))
         }
         "__ckb_cell_unoccupied_capacity" => {
-            Some(("cell-unoccupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView", "ckb::cell_unoccupied_capacity"))
+            Some(("cell-unoccupied-capacity", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_unoccupied_capacity"))
         }
         "__ckb_cell_output_index" => Some(("cell-output-index", "SOURCE_VIEW", "SourceView", "ckb::cell_output_index")),
         "__ckb_input_out_point_index" => {
@@ -14069,10 +14070,11 @@ mod tests {
     const SIMPLE_PROGRAM: &str = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    let z = x + y
-    return z
+action add(x: u64, y: u64) -> u64 {
+    verification
+        let z = x + y
+        return z
+}
 "#;
 
     #[derive(Debug)]
@@ -14180,86 +14182,95 @@ where
     const OPTIMIZER_PROGRAM: &str = r#"
 module test
 
-action calc() -> u64
-where
-    return (2 + 3) * 4
+action calc() -> u64 {
+    verification
+        return (2 + 3) * 4
+}
 "#;
 
     const IF_PROGRAM: &str = r#"
 module test
 
-action increment_if(flag: bool, x: u64) -> u64
-where
-    if flag {
-        let tmp = x + 1
-    }
-    return x
+action increment_if(flag: bool, x: u64) -> u64 {
+    verification
+        if flag {
+            let tmp = x + 1
+        }
+        return x
+}
 "#;
 
     const CALL_PROGRAM: &str = r#"
 module test
 
-action double(x: u64) -> u64
-where
-    return x + x
+action double(x: u64) -> u64 {
+    verification
+        return x + x
 
-action run(y: u64) -> u64
-where
-    let z = double(y)
-    return z
+}
+action run(y: u64) -> u64 {
+    verification
+        let z = double(y)
+        return z
+}
 "#;
 
     const IF_EXPR_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool, x: u64) -> u64
-where
-    let y = if flag { x + 1 } else { x + 2 }
-    return y
+action choose(flag: bool, x: u64) -> u64 {
+    verification
+        let y = if flag { x + 1 } else { x + 2 }
+        return y
+}
 "#;
 
     const IF_EXPR_FIXED_BYTE_CONST_PROGRAM: &str = r#"
 module test
 
-action choose_zero(flag: bool, target: Address) -> bool
-where
-    let selected = if flag { Address::zero() } else { Address::zero() }
-    return target == selected
+action choose_zero(flag: bool, target: Address) -> bool {
+    verification
+        let selected = if flag { Address::zero() } else { Address::zero() }
+        return target == selected
+}
 "#;
 
     const WHILE_PROGRAM: &str = r#"
 module test
 
-action spin(flag: bool, x: u64) -> u64
-where
-    while flag {
-        let tmp = x + 1
-    }
-    return x
+action spin(flag: bool, x: u64) -> u64 {
+    verification
+        while flag {
+            let tmp = x + 1
+        }
+        return x
+}
 "#;
 
     const FOR_RANGE_PROGRAM: &str = r#"
 module test
 
-action visit(n: u64) -> u64
-where
-    for i in 0..n {
-        let tmp = i + 1
-    }
-    return n
+action visit(n: u64) -> u64 {
+    verification
+        for i in 0..n {
+            let tmp = i + 1
+        }
+        return n
+}
 "#;
 
     const ASSIGN_PROGRAM: &str = r#"
 module test
 
-action countdown(n: u64) -> u64
-where
-    let mut x: u64 = n
-    while x > 0 {
-        x = x - 1
-    }
-    x += 1
-    return x
+action countdown(n: u64) -> u64 {
+    verification
+        let mut x: u64 = n
+        while x > 0 {
+            x = x - 1
+        }
+        x += 1
+        return x
+}
 "#;
 
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
@@ -14269,14 +14280,15 @@ resource Token has destroy {
     amount: u64,
 }
 
-action ok(n: u64)
-where
-    for i in 0..n {
-        let out = create Token {
-            amount: i
+action ok(n: u64) {
+    verification
+        for i in 0..n {
+            let out = create Token {
+                amount: i
+            }
+            destroy out
         }
-        destroy out
-    }
+}
 "#;
 
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
@@ -14286,13 +14298,14 @@ resource Token {
     amount: u64,
 }
 
-action bad(n: u64)
-where
-    for i in 0..n {
-        let out = create Token {
-            amount: i
+action bad(n: u64) {
+    verification
+        for i in 0..n {
+            let out = create Token {
+                amount: i
+            }
         }
-    }
+}
 "#;
 
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -14302,12 +14315,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, n: u64)
-where
-    for i in 0..n {
+action bad(token: Token, n: u64) {
+    verification
+        for i in 0..n {
+            destroy token
+        }
         destroy token
-    }
-    destroy token
+}
 "#;
 
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
@@ -14317,12 +14331,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool)
-where
-    while flag {
+action bad(token: Token, flag: bool) {
+    verification
+        while flag {
+            destroy token
+        }
         destroy token
-    }
-    destroy token
+}
 "#;
 
     const STRUCT_FIELD_PROGRAM: &str = r#"
@@ -14333,13 +14348,14 @@ struct Point {
     y: u64,
 }
 
-action tweak() -> u64
-where
-    let mut p = Point { x: 1, y: 2 }
-    let a = p.x
-    p.x = a + 4
-    p.x += 1
-    return p.x
+action tweak() -> u64 {
+    verification
+        let mut p = Point { x: 1, y: 2 }
+        let a = p.x
+        p.x = a + 4
+        p.x += 1
+        return p.x
+}
 "#;
 
     const TEMPORARY_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -14354,10 +14370,11 @@ fn point() -> Point {
     return Point { x: 1, y: 2 }
 }
 
-action bad() -> u64
-where
-    point().x = 3
-    return 0
+action bad() -> u64 {
+    verification
+        point().x = 3
+        return 0
+}
 "#;
 
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -14367,10 +14384,11 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64
-where
-    read_ref<Config>().threshold = 2
-    return 0
+action bad() -> u64 {
+    verification
+        read_ref<Config>().threshold = 2
+        return 0
+}
 "#;
 
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -14380,11 +14398,12 @@ shared Config {
     threshold: u64,
 }
 
-action bad() -> u64
-where
-    let mut cfg = read_ref<Config>()
-    cfg.threshold = 2
-    return cfg.threshold
+action bad() -> u64 {
+    verification
+        let mut cfg = read_ref<Config>()
+        cfg.threshold = 2
+        return cfg.threshold
+}
 "#;
 
     const READ_ONLY_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -14394,12 +14413,13 @@ struct Point {
     x: u64,
 }
 
-action bad() -> u64
-where
-    let mut point = Point { x: 1 }
-    let mut view = &point
-    view.x = 2
-    return point.x
+action bad() -> u64 {
+    verification
+        let mut point = Point { x: 1 }
+        let mut view = &point
+        view.x = 2
+        return point.x
+}
 "#;
 
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
@@ -14409,9 +14429,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(mut token: Token)
-where
-    consume token
+action bad(mut token: Token) {
+    verification
+        consume token
+}
 "#;
 
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
@@ -14421,9 +14442,10 @@ shared Config {
     threshold: u64,
 }
 
-action bad(mut read cfg: Config) -> u64
-where
-    return cfg.threshold
+action bad(mut read cfg: Config) -> u64 {
+    verification
+        return cfg.threshold
+}
 "#;
 
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -14433,9 +14455,10 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(mut pool: &mut Pool)
-where
-    pool.reserve = pool.reserve + 1
+action bad(mut pool: &mut Pool) {
+    verification
+        pool.reserve = pool.reserve + 1
+}
 "#;
 
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
@@ -14459,8 +14482,9 @@ shared Pool {
 }
 
 lock bad(pool: &mut Pool) -> bool {
-    pool.reserve = pool.reserve + 1
-    return true
+    verification
+        pool.reserve = pool.reserve + 1
+        return true
 }
 "#;
 
@@ -14471,11 +14495,12 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64
-where
-    let alias = pool
-    alias.reserve = alias.reserve + 1
-    return alias.reserve
+action bad(pool: &mut Pool) -> u64 {
+    verification
+        let alias = pool
+        alias.reserve = alias.reserve + 1
+        return alias.reserve
+}
 "#;
 
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
@@ -14485,11 +14510,12 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64
-where
-    let pair = (pool, 0)
-    pair.0.reserve = pair.0.reserve + 1
-    return pair.0.reserve
+action bad(pool: &mut Pool) -> u64 {
+    verification
+        let pair = (pool, 0)
+        pair.0.reserve = pair.0.reserve + 1
+        return pair.0.reserve
+}
 "#;
 
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
@@ -14499,11 +14525,12 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool, flag: bool) -> u64
-where
-    let alias = if flag { pool } else { pool }
-    alias.reserve = alias.reserve + 1
-    return alias.reserve
+action bad(pool: &mut Pool, flag: bool) -> u64 {
+    verification
+        let alias = if flag { pool } else { pool }
+        alias.reserve = alias.reserve + 1
+        return alias.reserve
+}
 "#;
 
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
@@ -14513,11 +14540,12 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut Pool) -> u64
-where
-    let mut alias = read_ref<Pool>()
-    alias = pool
-    return alias.reserve
+action bad(pool: &mut Pool) -> u64 {
+    verification
+        let mut alias = read_ref<Pool>()
+        alias = pool
+        return alias.reserve
+}
 "#;
 
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
@@ -14527,11 +14555,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad()
-where
-    let mut token = create Token { amount: 1 }
-    token.amount = 2
-    destroy token
+action bad() {
+    verification
+        let mut token = create Token { amount: 1 }
+        token.amount = 2
+        destroy token
+}
 "#;
 
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -14541,11 +14570,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let view = &token
-    destroy token
-    return view.amount
+action bad(token: Token) -> u64 {
+    verification
+        let view = &token
+        destroy token
+        return view.amount
+}
 "#;
 
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
@@ -14555,11 +14585,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let amount = &token.amount
-    destroy token
-    return 0
+action bad(token: Token) -> u64 {
+    verification
+        let amount = &token.amount
+        destroy token
+        return 0
+}
 "#;
 
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -14569,11 +14600,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let pair = (&token, 0)
-    destroy token
-    return pair.0.amount
+action bad(token: Token) -> u64 {
+    verification
+        let pair = (&token, 0)
+        destroy token
+        return pair.0.amount
+}
 "#;
 
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
@@ -14583,11 +14615,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let refs = [&token]
-    destroy token
-    return refs[0].amount
+action bad(token: Token) -> u64 {
+    verification
+        let refs = [&token]
+        destroy token
+        return refs[0].amount
+}
 "#;
 
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
@@ -14597,11 +14630,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64
-where
-    let view = if flag { &token } else { &token }
-    destroy token
-    return view.amount
+action bad(token: Token, flag: bool) -> u64 {
+    verification
+        let view = if flag { &token } else { &token }
+        destroy token
+        return view.amount
+}
 "#;
 
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
@@ -14611,12 +14645,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let mut view = read_ref<Token>()
-    view = &token
-    destroy token
-    return view.amount
+action bad(token: Token) -> u64 {
+    verification
+        let mut view = read_ref<Token>()
+        view = &token
+        destroy token
+        return view.amount
+}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
@@ -14626,12 +14661,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let mut pair = (read_ref<Token>(), 0)
-    pair = (&token, 0)
-    destroy token
-    return pair.0.amount
+action bad(token: Token) -> u64 {
+    verification
+        let mut pair = (read_ref<Token>(), 0)
+        pair = (&token, 0)
+        destroy token
+        return pair.0.amount
+}
 "#;
 
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
@@ -14641,12 +14677,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    let mut pair = (read_ref<Token>(), 0)
-    pair.0 = &token
-    destroy token
-    return pair.0.amount
+action bad(token: Token) -> u64 {
+    verification
+        let mut pair = (read_ref<Token>(), 0)
+        pair.0 = &token
+        destroy token
+        return pair.0.amount
+}
 "#;
 
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
@@ -14656,9 +14693,10 @@ resource Token {
     amount: u64,
 }
 
-action leak(token: Token) -> &Token
-where
-    return &token
+action leak(token: Token) -> &Token {
+    verification
+        return &token
+}
 "#;
 
     const FUNCTION_RETURN_REF_PROGRAM: &str = r#"
@@ -14705,7 +14743,8 @@ resource Token {
 }
 
     lock bad(token: Token) -> bool {
-        return true
+        verification
+            return true
     }
 "#;
 
@@ -14717,7 +14756,8 @@ resource Token {
 }
 
 lock bad(token: &Token) -> bool {
-    return token.amount > 0
+    verification
+        return token.amount > 0
 }
 "#;
 
@@ -14740,9 +14780,10 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pool: &mut (Pool, u64)) -> u64
-where
-    return 0
+action bad(pool: &mut (Pool, u64)) -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
@@ -14776,11 +14817,12 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64
-where
-    let points = Vec::new()
-    points.push(&point)
-    return 0
+action bad(point: Point) -> u64 {
+    verification
+        let points = Vec::new()
+        points.push(&point)
+        return 0
+}
 "#;
 
     const CALLABLE_TUPLE_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -14802,8 +14844,9 @@ shared Pool {
     reserve: u64,
 }
 
-action bad(pools: [&mut Pool; 1])
-where
+action bad(pools: [&mut Pool; 1]) {
+    verification
+}
 "#;
 
     const CALLABLE_NESTED_REFERENCE_PARAM_PROGRAM: &str = r#"
@@ -14825,9 +14868,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(ref token: Token)
-where
-    consume token
+action bad(ref token: Token) {
+    verification
+        consume token
+}
 "#;
 
     const FUNCTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
@@ -14846,7 +14890,8 @@ fn bad(ref point: Point) -> u64 {
 module test
 
 lock bad(ref owner: Address) -> bool {
-    return true
+    verification
+        return true
 }
 "#;
 
@@ -14878,10 +14923,11 @@ enum MaybeToken {
     const IF_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64
-where
-    let y = if flag { 1 } else { false }
-    return 1
+action choose(flag: bool) -> u64 {
+    verification
+        let y = if flag { 1 } else { false }
+        return 1
+}
 "#;
 
     const UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -14891,9 +14937,10 @@ struct Point {
     x: u64,
 }
 
-action read(p: Point) -> u64
-where
-    return p.y
+action read(p: Point) -> u64 {
+    verification
+        return p.y
+}
 "#;
 
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
@@ -14934,9 +14981,10 @@ struct Point {
     const UNKNOWN_FUNCTION_PROGRAM: &str = r#"
 module test
 
-action run(x: u64) -> u64
-where
-    return missing(x)
+action run(x: u64) -> u64 {
+    verification
+        return missing(x)
+}
 "#;
 
     const CONSTANT_PROGRAM: &str = r#"
@@ -14944,26 +14992,29 @@ module test
 
 const STEP: u64 = 3;
 
-action bump(x: u64) -> u64
-where
-    return x + STEP
+action bump(x: u64) -> u64 {
+    verification
+        return x + STEP
+}
 "#;
 
     const CAST_PROGRAM: &str = r#"
 module test
 
-action widen(x: u16) -> u64
-where
-    return x as u64
+action widen(x: u16) -> u64 {
+    verification
+        return x as u64
+}
 "#;
 
     const ASSERT_PROGRAM: &str = r#"
 module test
 
-action checked(x: u64) -> u64
-where
-    assert_invariant(x > 0, "x must be positive")
-    return x
+action checked(x: u64) -> u64 {
+    verification
+        require x > 0, "x must be positive"
+        return x
+}
 "#;
 
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
@@ -14974,8 +15025,9 @@ resource Token {
 }
 
 lock owner_guard(token: protected Token, script_owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    require script_owner == token.owner
-    require claimed_owner == token.owner
+    verification
+        require script_owner == token.owner
+        require claimed_owner == token.owner
 }
 "#;
 
@@ -14986,9 +15038,10 @@ resource Token {
     owner: Address,
 }
 
-action bad(protected token: Token) -> u64
-where
-    return 0
+action bad(protected token: Token) -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
@@ -14999,7 +15052,8 @@ resource Token {
 }
 
 lock bad(protected token: Token, lock_args owner: Address) -> bool {
-    require owner == token.owner
+    verification
+        require owner == token.owner
 }
 "#;
 
@@ -15015,32 +15069,36 @@ struct Owner {
 }
 
 lock bad(token: protected Token, owner: lock_args Owner) -> bool {
-    require owner.address == token.owner
+    verification
+        require owner.address == token.owner
 }
 "#;
 
     const ACTION_REQUIRE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool
-where
-    require x > 0
+action bad(x: u64) -> bool {
+    verification
+        require x > 0
+}
 "#;
 
     const ACTION_REQUIRE_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action checked(x: u64) -> bool
-where
-    require x > 0, "x must be positive"
+action checked(x: u64) -> bool {
+    verification
+        require x > 0, "x must be positive"
+}
 "#;
 
     const REQUIRE_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64, msg: String) -> bool
-where
-    require x > 0, msg
+action bad(x: u64, msg: String) -> bool {
+    verification
+        require x > 0, msg
+}
 "#;
 
     const FUNCTION_REQUIRE_PROGRAM: &str = r#"
@@ -15054,44 +15112,49 @@ fn bad(x: u64) -> bool {
     const ASSERT_NON_BOOL_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64
-where
-    assert_invariant(x, "x must be boolean")
-    return x
+action bad(x: u64) -> u64 {
+    verification
+        require x, "x must be boolean"
+        return x
+}
 "#;
 
     const ASSERT_DYNAMIC_MESSAGE_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64
-where
-    assert_invariant(x > 0, x)
-    return x
+action bad(x: u64) -> u64 {
+    verification
+        assert_invariant(x > 0, x)
+        return x
+}
 "#;
 
     const ASSERT_BINDING_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> u64
-where
-    let ok = assert_invariant(x > 0, "x must be positive")
-    return x
+action bad(x: u64) -> u64 {
+    verification
+        let ok = assert_invariant(x > 0, "x must be positive")
+        return x
+}
 "#;
 
     const ASSERT_TAIL_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64) -> bool
-where
-    assert_invariant(x > 0, "x must be positive")
+action bad(x: u64) -> bool {
+    verification
+        assert_invariant(x > 0, "x must be positive")
+}
 "#;
 
     const STRING_VALUE_PROGRAM: &str = r#"
 module test
 
-action bad() -> String
-where
-    return "not a lowered runtime value"
+action bad() -> String {
+    verification
+        return "not a lowered runtime value"
+}
 "#;
 
     const CREATE_PROGRAM: &str = r#"
@@ -15101,12 +15164,13 @@ resource Token {
     amount: u64,
 }
 
-action mint(owner: Address) -> Token
-where
-    let token = create Token {
-        amount: 42
-    } with_lock(owner)
-    return token
+action mint(owner: Address) -> Token {
+    verification
+        let token = create Token {
+            amount: 42
+        } with_lock(owner)
+        return token
+}
 "#;
 
     const CREATE_VERIFY_PROGRAM: &str = r#"
@@ -15116,12 +15180,13 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token
-where
-    let token = create Token {
-        amount: 42
-    }
-    return token
+action issue() -> Token {
+    verification
+        let token = create Token {
+            amount: 42
+        }
+        return token
+}
 "#;
 
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
@@ -15131,12 +15196,13 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token
-where
-    let token = create Token {
-        amount: amount * 2
-    }
-    return token
+action issue(amount: u64) -> Token {
+    verification
+        let token = create Token {
+            amount: amount * 2
+        }
+        return token
+}
 "#;
 
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
@@ -15146,12 +15212,13 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token
-where
-    return create Token {
-        amount: 1,
-        amount: 2,
-    }
+action issue() -> Token {
+    verification
+        return create Token {
+            amount: 1,
+            amount: 2,
+        }
+}
 "#;
 
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
@@ -15162,11 +15229,12 @@ resource Token {
     owner: Address,
 }
 
-action issue(owner: Address) -> Token
-where
-    return create Token {
-        amount: 1,
-    }
+action issue(owner: Address) -> Token {
+    verification
+        return create Token {
+            amount: 1,
+        }
+}
 "#;
 
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
@@ -15176,12 +15244,13 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token
-where
-    return create Token {
-        amount: 1,
-        owner: Address::zero(),
-    }
+action issue() -> Token {
+    verification
+        return create Token {
+            amount: 1,
+            owner: Address::zero(),
+        }
+}
 "#;
 
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -15191,11 +15260,12 @@ resource Token {
     amount: u64,
 }
 
-action issue() -> Token
-where
-    return create Token {
-        amount: false,
-    }
+action issue() -> Token {
+    verification
+        return create Token {
+            amount: false,
+        }
+}
 "#;
 
     const CREATE_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -15205,11 +15275,12 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> Snapshot
-where
-    return create Snapshot {
-        amount: 1,
-    }
+action bad() -> Snapshot {
+    verification
+        return create Snapshot {
+            amount: 1,
+        }
+}
 "#;
 
     const CONSUME_NON_CELL_PROGRAM: &str = r#"
@@ -15219,10 +15290,11 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad(snapshot: Snapshot) -> u64
-where
-    consume snapshot
-    return 0
+action bad(snapshot: Snapshot) -> u64 {
+    verification
+        consume snapshot
+        return 0
+}
 "#;
 
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
@@ -15232,10 +15304,11 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token) -> u64
-where
-    consume if true { token } else { token }
-    return 0
+action bad(token: Token) -> u64 {
+    verification
+        consume if true { token } else { token }
+        return 0
+}
 "#;
 
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
@@ -15245,13 +15318,14 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool)
-where
-    if flag {
-        consume token
-    } else {
-        consume token
-    }
+action burn(token: Token, flag: bool) {
+    verification
+        if flag {
+            consume token
+        } else {
+            consume token
+        }
+}
 "#;
 
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -15261,12 +15335,13 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool)
-where
-    if flag {
+action burn(token: Token, flag: bool) {
+    verification
+        if flag {
+            consume token
+        }
         consume token
-    }
-    consume token
+}
 "#;
 
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
@@ -15276,14 +15351,15 @@ resource Token {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool)
-where
-    if flag {
+action burn(token: Token, flag: bool) {
+    verification
+        if flag {
+            consume token
+        } else {
+            let amount = token.amount
+        }
         consume token
-    } else {
-        let amount = token.amount
-    }
-    consume token
+}
 "#;
 
     const CONSUME_DESTROY_PROGRAM: &str = r#"
@@ -15293,10 +15369,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(a: Token, b: Token)
-where
-    consume a
-    destroy b
+action burn(a: Token, b: Token) {
+    verification
+        consume a
+        destroy b
+}
 "#;
 
     const PARAM_FIELD_PROGRAM: &str = r#"
@@ -15306,9 +15383,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action inspect(snapshot: Snapshot) -> u64
-where
-    return snapshot.amount
+action inspect(snapshot: Snapshot) -> u64 {
+    verification
+        return snapshot.amount
+}
 "#;
 
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
@@ -15318,12 +15396,13 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action same_symbol(left: Token, right: Token) -> bool
-where
-    let same = left.symbol == right.symbol
-    consume left
-    consume right
-    return same
+action same_symbol(left: Token, right: Token) -> bool {
+    verification
+        let same = left.symbol == right.symbol
+        consume left
+        consume right
+        return same
+}
 "#;
 
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
@@ -15334,11 +15413,12 @@ shared Flags {
     nonce: u32,
 }
 
-action inspect() -> u32
-where
-    let flags = read_ref<Flags>()
-    let enabled = flags.enabled
-    return flags.nonce
+action inspect() -> u32 {
+    verification
+        let flags = read_ref<Flags>()
+        let enabled = flags.enabled
+        return flags.nonce
+}
 "#;
 
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
@@ -15349,14 +15429,15 @@ resource Flags {
     nonce: u32,
 }
 
-action issue(nonce: u32) -> Flags
-where
-    let enabled = true
-    let out = create Flags {
-        enabled: enabled,
-        nonce: nonce
-    }
-    return out
+action issue(nonce: u32) -> Flags {
+    verification
+        let enabled = true
+        let out = create Flags {
+            enabled: enabled,
+            nonce: nonce
+        }
+        return out
+}
 "#;
 
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
@@ -15367,16 +15448,17 @@ resource Flags {
     nonce: u32,
 }
 
-action pass(flags: Flags) -> Flags
-where
-    let enabled = flags.enabled
-    let nonce = flags.nonce
-    consume flags
-    let out = create Flags {
-        enabled: enabled,
-        nonce: nonce
-    }
-    return out
+action pass(flags: Flags) -> Flags {
+    verification
+        let enabled = flags.enabled
+        let nonce = flags.nonce
+        consume flags
+        let out = create Flags {
+            enabled: enabled,
+            nonce: nonce
+        }
+        return out
+}
 "#;
 
     const READ_REF_FIELD_PROGRAM: &str = r#"
@@ -15386,10 +15468,11 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64
-where
-    let cfg = read_ref<Config>()
-    return cfg.threshold
+action inspect() -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        return cfg.threshold
+}
 "#;
 
     const READ_REF_STRUCT_TARGET_PROGRAM: &str = r#"
@@ -15399,10 +15482,11 @@ struct Snapshot {
     amount: u64,
 }
 
-action bad() -> u64
-where
-    let snapshot = read_ref<Snapshot>()
-    return snapshot.amount
+action bad() -> u64 {
+    verification
+        let snapshot = read_ref<Snapshot>()
+        return snapshot.amount
+}
 "#;
 
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
@@ -15413,10 +15497,11 @@ shared Config {
 }
 
 #[effect(ReadOnly)]
-action inspect() -> u64
-where
-    let cfg = read_ref<Config>()
-    return cfg.threshold
+action inspect() -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        return cfg.threshold
+}
 "#;
 
     const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -15427,12 +15512,13 @@ resource Token {
 }
 
 #[effect(ReadOnly)]
-action issue(amount: u64) -> Token
-where
-    let out = create Token {
-        amount: amount
-    }
-    return out
+action issue(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
 "#;
 
     const IMPURE_FN_PROGRAM: &str = r#"
@@ -15455,14 +15541,15 @@ resource Token has destroy {
     amount: u64,
 }
 
-action issue(amount: u64) -> u64
-where
-    let out = create Token {
-        amount: amount
-    }
-    destroy out
-    return amount
+action issue(amount: u64) -> u64 {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        destroy out
+        return amount
 
+}
 fn helper(amount: u64) -> u64 {
     return issue(amount)
 }
@@ -15503,9 +15590,10 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64
-where
-    return add_one(x)
+action run(x: u64) -> u64 {
+    verification
+        return add_one(x)
+}
 "#;
 
     const CALL_MISSING_ARGUMENT_PROGRAM: &str = r#"
@@ -15515,9 +15603,10 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64
-where
-    return add(x)
+action run(x: u64) -> u64 {
+    verification
+        return add(x)
+}
 "#;
 
     const CALL_TYPE_MISMATCH_PROGRAM: &str = r#"
@@ -15527,9 +15616,10 @@ fn add(a: u64, b: u64) -> u64 {
     return a + b
 }
 
-action run(x: u64) -> u64
-where
-    return add(x, false)
+action run(x: u64) -> u64 {
+    verification
+        return add(x, false)
+}
 "#;
 
     const QUALIFIED_ACTION_CALLS_FN_PROGRAM: &str = r#"
@@ -15539,9 +15629,10 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64
-where
-    return test::add_one(x)
+action run(x: u64) -> u64 {
+    verification
+        return test::add_one(x)
+}
 "#;
 
     const QUALIFIED_CALL_EXTRA_ARGUMENT_PROGRAM: &str = r#"
@@ -15551,9 +15642,10 @@ fn add_one(x: u64) -> u64 {
     return x + 1
 }
 
-action run(x: u64) -> u64
-where
-    return test::add_one(x, 2)
+action run(x: u64) -> u64 {
+    verification
+        return test::add_one(x, 2)
+}
 "#;
 
     const BOOL_FN_CALL_PROGRAM: &str = r#"
@@ -15563,25 +15655,28 @@ fn ready() -> bool {
     return true
 }
 
-action run() -> bool
-where
-    return test::ready()
+action run() -> bool {
+    verification
+        return test::ready()
+}
 "#;
 
     const DUPLICATE_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(x: u64, x: u64) -> u64
-where
-    return x
+action bad(x: u64, x: u64) -> u64 {
+    verification
+        return x
+}
 "#;
 
     const WILDCARD_ACTION_PARAM_PROGRAM: &str = r#"
 module test
 
-action bad(_: u64) -> u64
-where
-    return 1
+action bad(_: u64) -> u64 {
+    verification
+        return 1
+}
 "#;
 
     const DUPLICATE_FN_PARAM_PROGRAM: &str = r#"
@@ -15591,49 +15686,54 @@ fn bad(x: u64, x: u64) -> u64 {
     return x
 }
 
-action run() -> u64
-where
-    return 1
+action run() -> u64 {
+    verification
+        return 1
+}
 "#;
 
     const WILDCARD_LOCK_PARAM_PROGRAM: &str = r#"
 module test
 
 lock owned(_: Address) -> bool {
-    return true
+    verification
+        return true
 }
 "#;
 
     const LOCAL_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let x = 1
-    let x = 2
-    return x
+action bad() -> u64 {
+    verification
+        let x = 1
+        let x = 2
+        return x
+}
 "#;
 
     const TUPLE_BINDING_REUSE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let (x, x) = (1, 2)
-    return x
+action bad() -> u64 {
+    verification
+        let (x, x) = (1, 2)
+        return x
+}
 "#;
 
     const BLOCK_BINDING_SHADOW_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let x = 1
-    let y = {
-        let x = 2
-        x
-    }
-    return x + y
+action bad() -> u64 {
+    verification
+        let x = 1
+        let y = {
+            let x = 2
+            x
+        }
+        return x + y
+}
 "#;
 
     const UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15643,10 +15743,11 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action run(x: u64) -> u64
-where
-    note(x)
-    return x
+action run(x: u64) -> u64 {
+    verification
+        note(x)
+        return x
+}
 "#;
 
     const BIND_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15656,10 +15757,11 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64
-where
-    let y = note(x)
-    return x
+action bad(x: u64) -> u64 {
+    verification
+        let y = note(x)
+        return x
+}
 "#;
 
     const RETURN_UNIT_FN_CALL_PROGRAM: &str = r#"
@@ -15669,33 +15771,37 @@ fn note(x: u64) {
     let y = x + 1
 }
 
-action bad(x: u64) -> u64
-where
-    return note(x)
+action bad(x: u64) -> u64 {
+    verification
+        return note(x)
+}
 "#;
 
     const RETURN_VALUE_FROM_UNIT_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad()
-where
-    return 1
+action bad() {
+    verification
+        return 1
+}
 "#;
 
     const BARE_RETURN_FROM_VALUE_ACTION_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    return
+action bad() -> u64 {
+    verification
+        return
+}
 "#;
 
     const MISSING_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let x = 1
+action bad() -> u64 {
+    verification
+        let x = 1
+}
 "#;
 
     const MISSING_FUNCTION_RETURN_PROGRAM: &str = r#"
@@ -15705,29 +15811,32 @@ fn bad() -> u64 {
     let x = 1
 }
 
-action run() -> u64
-where
-    return 1
+action run() -> u64 {
+    verification
+        return 1
+}
 "#;
 
     const TAIL_EXPR_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    1
+action bad() -> u64 {
+    verification
+        1
+}
 "#;
 
     const BRANCH_COMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64
-where
-    if flag {
-        return 1
-    } else {
-        return 2
-    }
+action choose(flag: bool) -> u64 {
+    verification
+        if flag {
+            return 1
+        } else {
+            return 2
+        }
+}
 "#;
 
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
@@ -15737,13 +15846,14 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token
-where
-    if flag {
-        return token
-    } else {
-        return token
-    }
+action choose(token: Token, flag: bool) -> Token {
+    verification
+        if flag {
+            return token
+        } else {
+            return token
+        }
+}
 "#;
 
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -15753,14 +15863,15 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token, flag: bool) -> u64
-where
-    if flag {
-        return 1
-    } else {
-        consume token
-        return 2
-    }
+action bad(token: Token, flag: bool) -> u64 {
+    verification
+        if flag {
+            return 1
+        } else {
+            consume token
+            return 2
+        }
+}
 "#;
 
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
@@ -15770,9 +15881,10 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token
-where
-    if flag { token } else { token }
+action choose(token: Token, flag: bool) -> Token {
+    verification
+        if flag { token } else { token }
+}
 "#;
 
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
@@ -15782,9 +15894,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token
-where
-    if flag { left } else { right }
+action bad(left: Token, right: Token, flag: bool) -> Token {
+    verification
+        if flag { left } else { right }
+}
 "#;
 
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -15794,10 +15907,11 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token
-where
-    let moved = if flag { token } else { token }
-    return moved
+action choose(token: Token, flag: bool) -> Token {
+    verification
+        let moved = if flag { token } else { token }
+        return moved
+}
 "#;
 
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -15807,10 +15921,11 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token
-where
-    let moved = if flag { left } else { right }
-    return moved
+action bad(left: Token, right: Token, flag: bool) -> Token {
+    verification
+        let moved = if flag { left } else { right }
+        return moved
+}
 "#;
 
     const LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM: &str = r#"
@@ -15820,9 +15935,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: bool) -> u64
-where
-    if flag { destroy token } else { destroy token }
+action burn(token: Token, flag: bool) -> u64 {
+    verification
+        if flag { destroy token } else { destroy token }
+}
 "#;
 
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -15832,9 +15948,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token)
-where
-    let pair = (left, right)
+action bad(left: Token, right: Token) {
+    verification
+        let pair = (left, right)
+}
 "#;
 
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
@@ -15844,9 +15961,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token)
-where
-    let items = [left, right]
+action bad(left: Token, right: Token) {
+    verification
+        let items = [left, right]
+}
 "#;
 
     const LINEAR_TUPLE_DESTRUCTURE_HANDLES_ITEMS_PROGRAM: &str = r#"
@@ -15856,11 +15974,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action choose(left: Token, right: Token) -> Token
-where
-    let (kept, burned) = (left, right)
-    destroy burned
-    return kept
+action choose(left: Token, right: Token) -> Token {
+    verification
+        let (kept, burned) = (left, right)
+        destroy burned
+        return kept
+}
 "#;
 
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -15870,9 +15989,10 @@ resource Token {
     amount: u64,
 }
 
-action bad(token: Token)
-where
-    let _ = token
+action bad(token: Token) {
+    verification
+        let _ = token
+}
 "#;
 
     const LINEAR_TUPLE_WILDCARD_DISCARD_PROGRAM: &str = r#"
@@ -15882,10 +16002,11 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token)
-where
-    let (_, kept) = (left, right)
-    destroy kept
+action bad(left: Token, right: Token) {
+    verification
+        let (_, kept) = (left, right)
+        destroy kept
+}
 "#;
 
     const LINEAR_TUPLE_FIELD_PROJECTION_PROGRAM: &str = r#"
@@ -15895,12 +16016,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token) -> (Token, Token)
-where
-    let pair = (left, right)
-    let first = pair.0
-    destroy first
-    pair
+action bad(left: Token, right: Token) -> (Token, Token) {
+    verification
+        let pair = (left, right)
+        let first = pair.0
+        destroy first
+        pair
+}
 "#;
 
     const LINEAR_ARRAY_INDEX_PROJECTION_PROGRAM: &str = r#"
@@ -15910,11 +16032,12 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(left: Token, right: Token)
-where
-    let items = [left, right]
-    let first = items[0]
-    destroy first
+action bad(left: Token, right: Token) {
+    verification
+        let items = [left, right]
+        let first = items[0]
+        destroy first
+}
 "#;
 
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -15924,10 +16047,11 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token
-where
-    let moved = { token }
-    return moved
+action choose(token: Token) -> Token {
+    verification
+        let moved = { token }
+        return moved
+}
 "#;
 
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
@@ -15937,13 +16061,14 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token) -> Token
-where
-    let moved = {
-        let inner = token
-        inner
-    }
-    return moved
+action choose(token: Token) -> Token {
+    verification
+        let moved = {
+            let inner = token
+            inner
+        }
+        return moved
+}
 "#;
 
     const LINEAR_BLOCK_EXPR_STATEFUL_PROGRAM: &str = r#"
@@ -15953,9 +16078,10 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token) -> u64
-where
-    { destroy token }
+action burn(token: Token) -> u64 {
+    verification
+        { destroy token }
+}
 "#;
 
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
@@ -15965,29 +16091,31 @@ resource Token {
     amount: u64,
 }
 
-action bad() -> u64
-where
-    {
-        let out = create Token {
-            amount: 1
+action bad() -> u64 {
+    verification
+        {
+            let out = create Token {
+                amount: 1
+            }
+            1
         }
-        1
-    }
+}
 "#;
 
     const BLOCK_TAIL_IF_VALUE_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64
-where
-    let value = {
-        if flag {
-            1
-        } else {
-            2
+action choose(flag: bool) -> u64 {
+    verification
+        let value = {
+            if flag {
+                1
+            } else {
+                2
+            }
         }
-    }
-    return value
+        return value
+}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
@@ -15997,13 +16125,14 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: bool) -> Token
-where
-    let moved = {
-        let inner = token
-        if flag { inner } else { inner }
-    }
-    return moved
+action choose(token: Token, flag: bool) -> Token {
+    verification
+        let moved = {
+            let inner = token
+            if flag { inner } else { inner }
+        }
+        return moved
+}
 "#;
 
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
@@ -16013,98 +16142,108 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: bool) -> Token
-where
-    let moved = {
-        if flag { left } else { right }
-    }
-    return moved
+action bad(left: Token, right: Token, flag: bool) -> Token {
+    verification
+        let moved = {
+            if flag { left } else { right }
+        }
+        return moved
+}
 "#;
 
     const TAIL_IF_ACTION_RETURN_PROGRAM: &str = r#"
 module test
 
-action choose(flag: bool) -> u64
-where
-    if flag { 1 } else { 2 }
+action choose(flag: bool) -> u64 {
+    verification
+        if flag { 1 } else { 2 }
+}
 "#;
 
     const BRANCH_INCOMPLETE_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64
-where
-    if flag {
-        return 1
-    }
-    let x = 2
+action bad(flag: bool) -> u64 {
+    verification
+        if flag {
+            return 1
+        }
+        let x = 2
+}
 "#;
 
     const UNREACHABLE_AFTER_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    return 1
-    let x = 2
+action bad() -> u64 {
+    verification
+        return 1
+        let x = 2
+}
 "#;
 
     const UNREACHABLE_AFTER_BRANCH_RETURN_PROGRAM: &str = r#"
 module test
 
-action bad(flag: bool) -> u64
-where
-    if flag {
-        return 1
-    } else {
-        return 2
-    }
-    let x = 3
+action bad(flag: bool) -> u64 {
+    verification
+        if flag {
+            return 1
+        } else {
+            return 2
+        }
+        let x = 3
+}
 "#;
 
     const CKB_HEADER_EPOCH_PROGRAM: &str = r#"
 module test
 
-action epoch() -> u64
-where
-    let number = ckb::header_epoch_number()
-    let start = ckb::header_epoch_start_block_number()
-    let length = ckb::header_epoch_length()
-    let since = ckb::input_since()
-    return number + start + length + since
+action epoch() -> u64 {
+    verification
+        let number = ckb::header_epoch_number()
+        let start = ckb::header_epoch_start_block_number()
+        let length = ckb::header_epoch_length()
+        let since = ckb::input_since()
+        return number + start + length + since
+}
 "#;
 
     const BUILTIN_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action now(x: u64) -> u64
-where
-    return env::current_timepoint(x)
+action now(x: u64) -> u64 {
+    verification
+        return env::current_timepoint(x)
+}
 "#;
 
     const NUMERIC_BUILTIN_TYPE_MISMATCH_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    return min(1, false)
+action bad() -> u64 {
+    verification
+        return min(1, false)
+}
 "#;
 
     const UNKNOWN_NAMESPACED_CONSTRUCTOR_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let value = Missing::new()
-    return 0
+action bad() -> u64 {
+    verification
+        let value = Missing::new()
+        return 0
+}
 "#;
 
     const METHOD_WRONG_ARITY_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64
-where
-    return items.len(1)
+action count(items: [u64; 3]) -> u64 {
+    verification
+        return items.len(1)
+}
 "#;
 
     const LOCK_CALLS_FN_PROGRAM: &str = r#"
@@ -16115,7 +16254,8 @@ fn yes() -> bool {
 }
 
 lock guard() -> bool {
-    return yes()
+    verification
+        return yes()
 }
 "#;
 
@@ -16123,7 +16263,8 @@ lock guard() -> bool {
 module test
 
 lock guard() -> bool {
-    return true
+    verification
+        return true
 }
 
 fn bad() -> bool {
@@ -16138,17 +16279,19 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token
-where
-    let out = create Token {
-        amount: amount
-    }
-    return out
+action issue(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
 
+}
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token
-where
-    return issue(amount)
+action wrapper(amount: u64) -> Token {
+    verification
+        return issue(amount)
+}
 "#;
 
     const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
@@ -16158,17 +16301,19 @@ resource Token {
     amount: u64,
 }
 
-action issue(amount: u64) -> Token
-where
-    let out = create Token {
-        amount: amount
-    }
-    return out
+action issue(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
 
+}
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token
-where
-    return test::issue(amount)
+action wrapper(amount: u64) -> Token {
+    verification
+        return test::issue(amount)
+}
 "#;
 
     const CONSUME_FIELD_PROGRAM: &str = r#"
@@ -16178,11 +16323,12 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64
-where
-    let amount = token.amount
-    consume token
-    return amount
+action inspect(token: Token) -> u64 {
+    verification
+        let amount = token.amount
+        consume token
+        return amount
+}
 "#;
 
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
@@ -16192,14 +16338,15 @@ resource Token {
     amount: u64,
 }
 
-action pass(token: Token) -> Token
-where
-    let amount = token.amount
-    consume token
-    let out = create Token {
-        amount: amount
-    }
-    return out
+action pass(token: Token) -> Token {
+    verification
+        let amount = token.amount
+        consume token
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
 "#;
 
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -16209,17 +16356,18 @@ resource Token {
     amount: u64,
 }
 
-action merge(left: Token, right: Token) -> Token
-where
-    let left_amount = left.amount
-    let right_amount = right.amount
-    let total = left_amount + right_amount
-    consume left
-    consume right
-    let out = create Token {
-        amount: total
-    }
-    return out
+action merge(left: Token, right: Token) -> Token {
+    verification
+        let left_amount = left.amount
+        let right_amount = right.amount
+        let total = left_amount + right_amount
+        consume left
+        consume right
+        let out = create Token {
+            amount: total
+        }
+        return out
+}
 "#;
 
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
@@ -16229,18 +16377,19 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token)
-where
-    let amount = token.amount
-    let remaining = amount - fee
-    consume token
-    let change = create Token {
-        amount: remaining
-    }
-    let paid_fee = create Token {
-        amount: fee
-    }
-    return (change, paid_fee)
+action split(token: Token, fee: u64) -> (Token, Token) {
+    verification
+        let amount = token.amount
+        let remaining = amount - fee
+        consume token
+        let change = create Token {
+            amount: remaining
+        }
+        let paid_fee = create Token {
+            amount: fee
+        }
+        return (change, paid_fee)
+}
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -16251,20 +16400,21 @@ resource Token {
     symbol: [u8; 8],
 }
 
-action merge(left: Token, right: Token) -> Token
-where
-    assert_invariant(left.symbol == right.symbol, "symbol mismatch")
-    let left_amount = left.amount
-    let right_amount = right.amount
-    let total = left_amount + right_amount
-    let symbol = left.symbol
-    consume left
-    consume right
-    let out = create Token {
-        amount: total,
-        symbol: symbol
-    }
-    return out
+action merge(left: Token, right: Token) -> Token {
+    verification
+        require left.symbol == right.symbol, "symbol mismatch"
+        let left_amount = left.amount
+        let right_amount = right.amount
+        let total = left_amount + right_amount
+        let symbol = left.symbol
+        consume left
+        consume right
+        let out = create Token {
+            amount: total,
+            symbol: symbol
+        }
+        return out
+}
 "#;
 
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
@@ -16274,125 +16424,138 @@ shared Config {
     threshold: u64,
 }
 
-action inspect() -> u64
-where
-    let left = read_ref<Config>()
-    let right = read_ref<Config>()
-    return left.threshold + right.threshold
+action inspect() -> u64 {
+    verification
+        let left = read_ref<Config>()
+        let right = read_ref<Config>()
+        return left.threshold + right.threshold
+}
 "#;
 
     const INDEXED_TUPLE_PROGRAM: &str = r#"
 module test
 
-action second(entries: [(Address, u64); 2]) -> u64
-where
-    return entries[0].1
+action second(entries: [(Address, u64); 2]) -> u64 {
+    verification
+        return entries[0].1
+}
 "#;
 
     const FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum(items: [u64; 3]) -> u64
-where
-    let mut total: u64 = 0
-    for item in items {
-        total += item
-    }
-    return total
+action sum(items: [u64; 3]) -> u64 {
+    verification
+        let mut total: u64 = 0
+        for item in items {
+            total += item
+        }
+        return total
+}
 "#;
 
     const LOCAL_FOREACH_ARRAY_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64
-where
-    let items = [1, 2, 3]
-    let mut total: u64 = 0
-    for item in items {
-        total += item
-    }
-    return total
+action sum() -> u64 {
+    verification
+        let items = [1, 2, 3]
+        let mut total: u64 = 0
+        for item in items {
+            total += item
+        }
+        return total
+}
 "#;
 
     const LOCAL_FOREACH_ARRAY_OF_TUPLES_PROGRAM: &str = r#"
 module test
 
-action sum() -> u64
-where
-    let entries = [(Address::zero, 2), (Address::zero, 5)]
-    let mut total: u64 = 0
-    for (_, amount) in entries {
-        total += amount
-    }
-    return total
+action sum() -> u64 {
+    verification
+        let entries = [(Address::zero, 2), (Address::zero, 5)]
+        let mut total: u64 = 0
+        for (_, amount) in entries {
+            total += amount
+        }
+        return total
+}
 "#;
 
     const LEN_METHOD_PROGRAM: &str = r#"
 module test
 
-action count(items: [u64; 3]) -> u64
-where
-    return items.len()
+action count(items: [u64; 3]) -> u64 {
+    verification
+        return items.len()
+}
 "#;
 
     const FORBIDDEN_UNWRAP_CALL_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64
-where
-    return unwrap(value)
+action bad(value: u64) -> u64 {
+    verification
+        return unwrap(value)
+}
 "#;
 
     const FORBIDDEN_EXPECT_METHOD_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64
-where
-    return value.expect("checked")
+action bad(value: u64) -> u64 {
+    verification
+        return value.expect("checked")
+}
 "#;
 
     const FORBIDDEN_NAMESPACED_UNWRAP_OR_PROGRAM: &str = r#"
 module test
 
-action bad(value: u64) -> u64
-where
-    return Option::unwrap_or(value, 0)
+action bad(value: u64) -> u64 {
+    verification
+        return Option::unwrap_or(value, 0)
+}
 "#;
 
     const LOCAL_ARRAY_LEN_PROGRAM: &str = r#"
 module test
 
-action count() -> u64
-where
-    let items = [1, 2, 3]
-    return items.len()
+action count() -> u64 {
+    verification
+        let items = [1, 2, 3]
+        return items.len()
+}
 "#;
 
     const TYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action count() -> u64
-where
-    let items: [u8; 0] = []
-    return items.len()
+action count() -> u64 {
+    verification
+        let items: [u8; 0] = []
+        return items.len()
+}
 "#;
 
     const UNTYPED_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let items = []
-    return 0
+action bad() -> u64 {
+    verification
+        let items = []
+        return 0
+}
 "#;
 
     const WRONG_LENGTH_EMPTY_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let items: [u8; 1] = []
-    return 0
+action bad() -> u64 {
+    verification
+        let items: [u8; 1] = []
+        return 0
+}
 "#;
 
     const EMPTY_LITERAL_NON_VEC_CONTEXT_PROGRAM: &str = r#"
@@ -16402,101 +16565,111 @@ struct Snapshot {
     values: [u8; 1],
 }
 
-action bad() -> u64
-where
-    let snapshot = Snapshot {
-        values: [],
-    }
-    return 0
+action bad() -> u64 {
+    verification
+        let snapshot = Snapshot {
+            values: [],
+        }
+        return 0
+}
 "#;
 
     const LOCAL_ARRAY_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64
-where
-    let mut items = [1, 2, 3]
-    items[1] += 5
-    items[0] = 7
-    return items[0] + items[1] + items[2]
+action tweak() -> u64 {
+    verification
+        let mut items = [1, 2, 3]
+        items[1] += 5
+        items[0] = 7
+        return items[0] + items[1] + items[2]
+}
 "#;
 
     const IMMUTABLE_ARRAY_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let items = [1, 2]
-    items[0] = 3
-    return items[0]
+action bad() -> u64 {
+    verification
+        let items = [1, 2]
+        items[0] = 3
+        return items[0]
+}
 "#;
 
     const HETEROGENEOUS_ARRAY_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let items = [1, false]
-    return 1
+action bad() -> u64 {
+    verification
+        let items = [1, false]
+        return 1
+}
 "#;
 
     const LOCAL_ARRAY_OOB_READ_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let items = [1, 2]
-    return items[2]
+action bad() -> u64 {
+    verification
+        let items = [1, 2]
+        return items[2]
+}
 "#;
 
     const LOCAL_ARRAY_OOB_WRITE_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let mut items = [1, 2]
-    items[2] = 3
-    return items[0]
+action bad() -> u64 {
+    verification
+        let mut items = [1, 2]
+        items[2] = 3
+        return items[0]
+}
 "#;
 
     const LOCAL_TUPLE_STATIC_FIELD_PROGRAM: &str = r#"
 module test
 
-action tweak() -> u64
-where
-    let mut pair = (1, 2)
-    pair.1 += 5
-    pair.0 = 7
-    return pair.0 + pair.1
+action tweak() -> u64 {
+    verification
+        let mut pair = (1, 2)
+        pair.1 += 5
+        pair.0 = 7
+        return pair.0 + pair.1
+}
 "#;
 
     const ARRAY_OF_TUPLES_STATIC_INDEX_PROGRAM: &str = r#"
 module test
 
-action pick() -> u64
-where
-    let entries = [(Address::zero, 2), (Address::zero, 5)]
-    return entries[1].1
+action pick() -> u64 {
+    verification
+        let entries = [(Address::zero, 2), (Address::zero, 5)]
+        return entries[1].1
+}
 "#;
 
     const IMMUTABLE_TUPLE_ASSIGN_PROGRAM: &str = r#"
 module test
 
-action bad() -> u64
-where
-    let pair = (1, 2)
-    pair.1 = 3
-    return pair.1
+action bad() -> u64 {
+    verification
+        let pair = (1, 2)
+        pair.1 = 3
+        return pair.1
+}
 "#;
 
     const LOCAL_TUPLE_DESTRUCTURE_PROGRAM: &str = r#"
 module test
 
-action split() -> u64
-where
-    let pair = (1, 2)
-    let (a, b) = pair
-    return a + b
+action split() -> u64 {
+    verification
+        let pair = (1, 2)
+        let (a, b) = pair
+        return a + b
+}
 "#;
 
     const MATCH_PROGRAM: &str = r#"
@@ -16507,12 +16680,13 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64
-where
-    return match flag {
-        Flag::On => { 1 }
-        _ => { 2 }
-    }
+action select(flag: Flag) -> u64 {
+    verification
+        return match flag {
+            Flag::On => { 1 }
+            _ => { 2 }
+        }
+}
 "#;
 
     const EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -16523,12 +16697,13 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64
-where
-    return match flag {
-        Flag::On => { 1 }
-        Flag::Off => { 2 }
-    }
+action select(flag: Flag) -> u64 {
+    verification
+        return match flag {
+            Flag::On => { 1 }
+            Flag::Off => { 2 }
+        }
+}
 "#;
 
     const LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM: &str = r#"
@@ -16543,13 +16718,14 @@ resource Token {
     amount: u64,
 }
 
-action choose(token: Token, flag: Flag) -> Token
-where
-    let moved = match flag {
-        Flag::On => { token }
-        Flag::Off => { token }
-    }
-    return moved
+action choose(token: Token, flag: Flag) -> Token {
+    verification
+        let moved = match flag {
+            Flag::On => { token }
+            Flag::Off => { token }
+        }
+        return moved
+}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
@@ -16564,13 +16740,14 @@ resource Token {
     amount: u64,
 }
 
-action bad(left: Token, right: Token, flag: Flag) -> Token
-where
-    let moved = match flag {
-        Flag::On => { left }
-        Flag::Off => { right }
-    }
-    return moved
+action bad(left: Token, right: Token, flag: Flag) -> Token {
+    verification
+        let moved = match flag {
+            Flag::On => { left }
+            Flag::Off => { right }
+        }
+        return moved
+}
 "#;
 
     const LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -16585,12 +16762,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token, flag: Flag)
-where
-    match flag {
-        Flag::On => { destroy token }
-        Flag::Off => { destroy token }
-    }
+action burn(token: Token, flag: Flag) {
+    verification
+        match flag {
+            Flag::On => { destroy token }
+            Flag::Off => { destroy token }
+        }
+}
 "#;
 
     const LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM: &str = r#"
@@ -16605,12 +16783,13 @@ resource Token has destroy {
     amount: u64,
 }
 
-action bad(token: Token, flag: Flag)
-where
-    match flag {
-        Flag::On => { destroy token }
-        Flag::Off => { 0 }
-    }
+action bad(token: Token, flag: Flag) {
+    verification
+        match flag {
+            Flag::On => { destroy token }
+            Flag::Off => { 0 }
+        }
+}
 "#;
 
     const UNKNOWN_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -16621,12 +16800,13 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64
-where
-    return match flag {
-        Flag::Maybe => { 1 }
-        _ => { 2 }
-    }
+action select(flag: Flag) -> u64 {
+    verification
+        return match flag {
+            Flag::Maybe => { 1 }
+            _ => { 2 }
+        }
+}
 "#;
 
     const DUPLICATE_MATCH_VARIANT_PROGRAM: &str = r#"
@@ -16637,13 +16817,14 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64
-where
-    return match flag {
-        Flag::On => { 1 }
-        On => { 2 }
-        _ => { 3 }
-    }
+action select(flag: Flag) -> u64 {
+    verification
+        return match flag {
+            Flag::On => { 1 }
+            On => { 2 }
+            _ => { 3 }
+        }
+}
 "#;
 
     const NON_EXHAUSTIVE_MATCH_PROGRAM: &str = r#"
@@ -16654,11 +16835,12 @@ enum Flag {
     Off,
 }
 
-action select(flag: Flag) -> u64
-where
-    return match flag {
-        Flag::On => { 1 }
-    }
+action select(flag: Flag) -> u64 {
+    verification
+        return match flag {
+            Flag::On => { 1 }
+        }
+}
 "#;
 
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
@@ -16669,12 +16851,13 @@ enum MaybeAmount {
     None,
 }
 
-action select(value: MaybeAmount) -> u64
-where
-    return match value {
-        MaybeAmount::Some => { 1 }
-        _ => { 0 }
-    }
+action select(value: MaybeAmount) -> u64 {
+    verification
+        return match value {
+            MaybeAmount::Some => { 1 }
+            _ => { 0 }
+        }
+}
 "#;
 
     const ENUM_PAYLOAD_VALUE_PROGRAM: &str = r#"
@@ -16685,9 +16868,10 @@ enum AssetType {
     Token(Hash),
 }
 
-action bad() -> AssetType
-where
-    return AssetType::Token
+action bad() -> AssetType {
+    verification
+        return AssetType::Token
+}
 "#;
 
     const UNKNOWN_ENUM_VALUE_PROGRAM: &str = r#"
@@ -16698,9 +16882,10 @@ enum Flag {
     Off,
 }
 
-action bad() -> Flag
-where
-    return Flag::Maybe
+action bad() -> Flag {
+    verification
+        return Flag::Maybe
+}
 "#;
 
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
@@ -16710,18 +16895,20 @@ resource Bad {
     missing: MissingType,
 }
 
-action run(value: Bad) -> u64
-where
-    destroy value
-    return 0
+action run(value: Bad) -> u64 {
+    verification
+        destroy value
+        return 0
+}
 "#;
 
     const RESERVED_OPTION_TYPE_PROGRAM: &str = r#"
 module test
 
-action bad(value: Option<u64>) -> u64
-where
-    return 0
+action bad(value: Option<u64>) -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
@@ -16735,9 +16922,10 @@ resource Vault has store {
     amount: u64,
 }
 
-action bad(input: Vault<Token>) -> u64
-where
-    return 0
+action bad(input: Vault<Token>) -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
@@ -16747,20 +16935,22 @@ resource Token {
     amount: u64,
 }
 
-action Token() -> u64
-where
-    return 0
+action Token() -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const VEC_BUILTIN_PROGRAM: &str = r#"
 module test
 
-action pack(bytes: [u8; 3]) -> u64
-where
-    let mut data = Vec::new()
-    data.push(bytes[0])
-    data.extend_from_slice(bytes)
-    return data.len()
+action pack(bytes: [u8; 3]) -> u64 {
+    verification
+        let mut data = Vec::new()
+        data.push(bytes[0])
+        data.extend_from_slice(bytes)
+        return data.len()
+}
 "#;
 
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
@@ -16771,56 +16961,61 @@ resource Group {
     anchors: Vec<Hash>,
 }
 
-action create_group(owner: Address, seed: Hash) -> Group
-where
-    let mut members = Vec::new()
-    members.push(owner)
-    let mut anchors = Vec::new()
-    anchors.push(seed)
-    return create Group {
-        members: members,
-        anchors: anchors,
-    }
+action create_group(owner: Address, seed: Hash) -> Group {
+    verification
+        let mut members = Vec::new()
+        members.push(owner)
+        let mut anchors = Vec::new()
+        anchors.push(seed)
+        return create Group {
+            members: members,
+            anchors: anchors,
+        }
+}
 "#;
 
     const STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_sum() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    return values.len() + values[1]
+action stack_vec_sum() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        return values.len() + values[1]
+}
 "#;
 
     const STACK_VEC_WITH_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_with_capacity_sum() -> u64
-where
-    let mut values = Vec::with_capacity(2)
-    values.push(7)
-    values.push(9)
-    return values.len() + values[1]
+action stack_vec_with_capacity_sum() -> u64 {
+    verification
+        let mut values = Vec::with_capacity(2)
+        values.push(7)
+        values.push(9)
+        return values.len() + values[1]
+}
 "#;
 
     const BOUNDED_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action bounded_vec_literal_sum() -> u64
-where
-    let mut values: Vec<u64> = [7, 9]
-    return values.len() + values[1]
+action bounded_vec_literal_sum() -> u64 {
+    verification
+        let mut values: Vec<u64> = [7, 9]
+        return values.len() + values[1]
+}
 "#;
 
     const EMPTY_VEC_LITERAL_PROGRAM: &str = r#"
 module test
 
-action empty_vec_literal_capacity() -> u64
-where
-    let values: Vec<Address> = []
-    return values.capacity()
+action empty_vec_literal_capacity() -> u64 {
+    verification
+        let values: Vec<Address> = []
+        return values.capacity()
+}
 "#;
 
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
@@ -16831,304 +17026,328 @@ resource Group has store {
     labels: Vec<u8>,
 }
 
-action create_group(owner: Address) -> Group
-where
-    return create Group {
-        members: [owner],
-        labels: [],
-    }
+action create_group(owner: Address) -> Group {
+    verification
+        return create Group {
+            members: [owner],
+            labels: [],
+        }
+}
 "#;
 
     const STACK_VEC_CAPACITY_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_capacity_value() -> u64
-where
-    let mut values = Vec::with_capacity(2)
-    values.push(7)
-    return values.capacity()
+action stack_vec_capacity_value() -> u64 {
+    verification
+        let mut values = Vec::with_capacity(2)
+        values.push(7)
+        return values.capacity()
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CAPACITY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_capacity(owner: Address) -> u64
-where
-    let mut owners = Vec::with_capacity(2)
-    owners.push(owner)
-    return owners.capacity()
+action stack_vec_address_capacity(owner: Address) -> u64 {
+    verification
+        let mut owners = Vec::with_capacity(2)
+        owners.push(owner)
+        return owners.capacity()
+}
 "#;
 
     const STACK_VEC_REMOVE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_remove_middle() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    values.push(11)
-    let removed = values.remove(1)
-    return removed + values.len() + values[1]
+action stack_vec_remove_middle() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        values.push(11)
+        let removed = values.remove(1)
+        return removed + values.len() + values[1]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REMOVE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_remove(first: Address, second: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(first)
-    owners.push(second)
-    let removed = owners.remove(0)
-    if removed == first {
-        return owners[0] == second
-    }
-    return false
+action stack_vec_address_remove(first: Address, second: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(first)
+        owners.push(second)
+        let removed = owners.remove(0)
+        if removed == first {
+            return owners[0] == second
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_POP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_pop_last() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(11)
-    let popped = values.pop()
-    return popped + values.len() + values[0]
+action stack_vec_pop_last() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(11)
+        let popped = values.pop()
+        return popped + values.len() + values[0]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_POP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_pop(owner: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(owner)
-    let popped = owners.pop()
-    return popped == owner
+action stack_vec_address_pop(owner: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(owner)
+        let popped = owners.pop()
+        return popped == owner
+}
 "#;
 
     const STACK_VEC_INSERT_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_insert_middle() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(11)
-    values.insert(1, 9)
-    return values.len() + values[1] + values[2]
+action stack_vec_insert_middle() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(11)
+        values.insert(1, 9)
+        return values.len() + values[1] + values[2]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_INSERT_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_insert(owner: Address, candidate: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(owner)
-    owners.insert(0, candidate)
-    if owners[0] == candidate {
-        return owners[1] == owner
-    }
-    return false
+action stack_vec_address_insert(owner: Address, candidate: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(owner)
+        owners.insert(0, candidate)
+        if owners[0] == candidate {
+            return owners[1] == owner
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_SET_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_set_middle() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(11)
-    values.set(1, 9)
-    return values.len() + values[0] + values[1]
+action stack_vec_set_middle() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(11)
+        values.set(1, 9)
+        return values.len() + values[0] + values[1]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SET_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_set(owner: Address, candidate: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(owner)
-    owners.push(owner)
-    owners.set(1, candidate)
-    if owners[0] == owner {
-        return owners[1] == candidate
-    }
-    return false
+action stack_vec_address_set(owner: Address, candidate: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(owner)
+        owners.push(owner)
+        owners.set(1, candidate)
+        if owners[0] == owner {
+            return owners[1] == candidate
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_REVERSE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_reverse_sum() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    values.push(11)
-    values.reverse()
-    return values[0] + values[2]
+action stack_vec_reverse_sum() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        values.push(11)
+        values.reverse()
+        return values[0] + values[2]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_REVERSE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_reverse(first: Address, second: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(first)
-    owners.push(second)
-    owners.reverse()
-    if owners[0] == second {
-        return owners[1] == first
-    }
-    return false
+action stack_vec_address_reverse(first: Address, second: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(first)
+        owners.push(second)
+        owners.reverse()
+        if owners[0] == second {
+            return owners[1] == first
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_SWAP_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_swap_sum() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    values.push(11)
-    values.swap(0, 2)
-    return values[0] + values[2]
+action stack_vec_swap_sum() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        values.push(11)
+        values.swap(0, 2)
+        return values[0] + values[2]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_SWAP_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_swap(first: Address, second: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(first)
-    owners.push(second)
-    owners.swap(0, 1)
-    if owners[0] == second {
-        return owners[1] == first
-    }
-    return false
+action stack_vec_address_swap(first: Address, second: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(first)
+        owners.push(second)
+        owners.swap(0, 1)
+        if owners[0] == second {
+            return owners[1] == first
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_FIRST_LAST_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_first_last_sum() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    values.push(11)
-    return values.first() + values.last()
+action stack_vec_first_last_sum() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        values.push(11)
+        return values.first() + values.last()
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_FIRST_LAST_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_first_last(first: Address, second: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(first)
-    owners.push(second)
-    if owners.first() == first {
-        return owners.last() == second
-    }
-    return false
+action stack_vec_address_first_last(first: Address, second: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(first)
+        owners.push(second)
+        if owners.first() == first {
+            return owners.last() == second
+        }
+        return false
+}
 "#;
 
     const STACK_VEC_TRUNCATE_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_truncate_len() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    values.push(11)
-    values.truncate(2)
-    return values.len() + values[1]
+action stack_vec_truncate_len() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        values.push(11)
+        values.truncate(2)
+        return values.len() + values[1]
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_TRUNCATE_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_truncate(first: Address, second: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(first)
-    owners.push(second)
-    owners.truncate(1)
-    if owners.len() == 1 {
-        return owners[0] == first
-    }
-    return false
+action stack_vec_address_truncate(first: Address, second: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(first)
+        owners.push(second)
+        owners.truncate(1)
+        if owners.len() == 1 {
+            return owners[0] == first
+        }
+        return false
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_roundtrip(owner: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(owner)
-    return owners[0] == owner
+action stack_vec_address_roundtrip(owner: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(owner)
+        return owners[0] == owner
+}
 "#;
 
     const STACK_VEC_EXTEND_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_extend_len(seed: [u8; 3]) -> u64
-where
-    let mut bytes = Vec::new()
-    bytes.extend_from_slice(seed)
-    return bytes.len()
+action stack_vec_extend_len(seed: [u8; 3]) -> u64 {
+    verification
+        let mut bytes = Vec::new()
+        bytes.extend_from_slice(seed)
+        return bytes.len()
+}
 "#;
 
     const STACK_VEC_CLEAR_IS_EMPTY_PROGRAM: &str = r#"
 module test
 
-action stack_vec_clear_len() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.clear()
-    if values.is_empty() {
-        return values.len()
-    }
-    return 99
+action stack_vec_clear_len() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.clear()
+        if values.is_empty() {
+            return values.len()
+        }
+        return 99
+}
 "#;
 
     const STACK_VEC_CONTAINS_RUNTIME_PROGRAM: &str = r#"
 module test
 
-action stack_vec_contains_hit() -> u64
-where
-    let mut values = Vec::new()
-    values.push(7)
-    values.push(9)
-    if values.contains(9) {
-        return 1
-    }
-    return 0
+action stack_vec_contains_hit() -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(7)
+        values.push(9)
+        if values.contains(9) {
+            return 1
+        }
+        return 0
+}
 "#;
 
     const FIXED_BYTE_STACK_VEC_CONTAINS_PROGRAM: &str = r#"
 module test
 
-action stack_vec_address_contains(owner: Address, candidate: Address) -> bool
-where
-    let mut owners = Vec::new()
-    owners.push(owner)
-    return owners.contains(candidate)
+action stack_vec_address_contains(owner: Address, candidate: Address) -> bool {
+    verification
+        let mut owners = Vec::new()
+        owners.push(owner)
+        return owners.contains(candidate)
+}
 "#;
 
     const FIXED_SCHEMA_STACK_VEC_PROGRAM: &str = r#"
@@ -17139,66 +17358,70 @@ struct Snapshot {
     amount: u64,
 }
 
-action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool
-where
-    let mut snapshots = Vec::with_capacity(3)
-    snapshots.push(first)
-    snapshots.insert(0, second)
-    snapshots.swap(0, 1)
-    snapshots.set(1, third)
-    snapshots.reverse()
-    let removed = snapshots.remove(0)
-    snapshots.push(removed)
-    snapshots.truncate(2)
+action stack_vec_snapshot_roundtrip(first: Snapshot, second: Snapshot, third: Snapshot) -> bool {
+    verification
+        let mut snapshots = Vec::with_capacity(3)
+        snapshots.push(first)
+        snapshots.insert(0, second)
+        snapshots.swap(0, 1)
+        snapshots.set(1, third)
+        snapshots.reverse()
+        let removed = snapshots.remove(0)
+        snapshots.push(removed)
+        snapshots.truncate(2)
 
-    if snapshots.capacity() == 6 {
-        if snapshots.contains(third) {
-            let loaded = snapshots.pop()
-            if loaded.owner == third.owner {
-                return loaded.amount == third.amount
+        if snapshots.capacity() == 6 {
+            if snapshots.contains(third) {
+                let loaded = snapshots.pop()
+                if loaded.owner == third.owner {
+                    return loaded.amount == third.amount
+                }
             }
         }
-    }
 
-    return false
+        return false
 
-action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool
-where
-    let mut snapshots = Vec::new()
-    snapshots.push(first)
-    snapshots.push(second)
+}
+action stack_vec_snapshot_first_last(first: Snapshot, second: Snapshot) -> bool {
+    verification
+        let mut snapshots = Vec::new()
+        snapshots.push(first)
+        snapshots.push(second)
 
-    if snapshots.first().owner == first.owner {
-        return snapshots.last().amount == second.amount
-    }
-
-    return false
-
-action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64
-where
-    let mut snapshots = Vec::new()
-    snapshots.push(snapshot)
-    snapshots.clear()
-
-    if snapshots.is_empty() {
-        return snapshots.len()
-    }
-
-    return 99
-
-action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool
-where
-    let mut snapshots = Vec::new()
-    snapshots.push(snapshot)
-
-    if snapshots.contains(snapshot) {
-        let loaded = snapshots.pop()
-        if loaded.owner == snapshot.owner {
-            return loaded.amount == snapshot.amount
+        if snapshots.first().owner == first.owner {
+            return snapshots.last().amount == second.amount
         }
-    }
 
-    return false
+        return false
+
+}
+action stack_vec_snapshot_clear(snapshot: Snapshot) -> u64 {
+    verification
+        let mut snapshots = Vec::new()
+        snapshots.push(snapshot)
+        snapshots.clear()
+
+        if snapshots.is_empty() {
+            return snapshots.len()
+        }
+
+        return 99
+
+}
+action stack_vec_snapshot_pop(snapshot: Snapshot) -> bool {
+    verification
+        let mut snapshots = Vec::new()
+        snapshots.push(snapshot)
+
+        if snapshots.contains(snapshot) {
+            let loaded = snapshots.pop()
+            if loaded.owner == snapshot.owner {
+                return loaded.amount == snapshot.amount
+            }
+        }
+
+        return false
+}
 "#;
 
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
@@ -17209,15 +17432,16 @@ resource NFT {
     owner: Address,
 }
 
-action batch_mint(owner: Address) -> Vec<NFT>
-where
-    let mut nfts = Vec::new()
-    let nft = create NFT {
-        token_id: 1,
-        owner: owner,
-    }
-    nfts.push(nft)
-    return nfts
+action batch_mint(owner: Address) -> Vec<NFT> {
+    verification
+        let mut nfts = Vec::new()
+        let nft = create NFT {
+            token_id: 1,
+            owner: owner,
+        }
+        nfts.push(nft)
+        return nfts
+}
 "#;
 
     const TYPE_HASH_PROGRAM: &str = r#"
@@ -17227,34 +17451,38 @@ struct Pool {
     amount: u64,
 }
 
-action pool_id(pool: Pool) -> Hash
-where
-    return pool.type_hash()
+action pool_id(pool: Pool) -> Hash {
+    verification
+        return pool.type_hash()
+}
 "#;
 
     const ZERO_PROGRAM: &str = r#"
 module test
 
-action is_zero(target: Address) -> bool
-where
-    return target == Address::zero()
+action is_zero(target: Address) -> bool {
+    verification
+        return target == Address::zero()
+}
 "#;
 
     const LOCAL_ZERO_PROGRAM: &str = r#"
 module test
 
-action is_zero(target: Address) -> bool
-where
-    let zero = Address::zero()
-    return target == zero
+action is_zero(target: Address) -> bool {
+    verification
+        let zero = Address::zero()
+        return target == zero
+}
 "#;
 
     const U128_EQ_PROGRAM: &str = r#"
 module test
 
-action eq128(left: u128, right: u128) -> bool
-where
-    return left == right
+action eq128(left: u128, right: u128) -> bool {
+    verification
+        return left == right
+}
 "#;
 
     const U128_MUTATE_PROGRAM: &str = r#"
@@ -17265,10 +17493,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.owner == ledger_before.owner
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.owner == ledger_before.owner
+        require ledger_after.balance == ledger_before.balance + delta
+}
 "#;
 
     const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
@@ -17279,10 +17508,11 @@ shared BigState has store {
     pad: [u8; 600],
 }
 
-action update(state_before: BigState, delta: u64) -> state_after: BigState
-where
-    require state_after.balance == state_before.balance + delta
-    require state_after.pad == state_before.pad
+action update(state_before: BigState, delta: u64) -> state_after: BigState {
+    verification
+        require state_after.balance == state_before.balance + delta
+        require state_after.pad == state_before.pad
+}
 "#;
 
     const SUMMARY_PROGRAM: &str = r#"
@@ -17296,19 +17526,21 @@ resource Token has store, transfer, destroy {
     amount: u64,
 }
 
-action update(amount: u64) -> u64
-where
-    let cfg = read_ref<Config>()
-    let token = create Token { amount: amount }
-    consume token
-    return cfg.threshold
+action update(amount: u64) -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        let token = create Token { amount: amount }
+        consume token
+        return cfg.threshold
+}
 "#;
 
     const BAD_LOCK_PROGRAM: &str = r#"
 module test
 
 lock invalid(owner: Address) -> u64 {
-    return 1
+    verification
+        return 1
 }
 "#;
 
@@ -17320,8 +17552,9 @@ resource Token {
 }
 
 lock bad() -> bool {
-    let token = create Token { amount: 1 }
-    return true
+    verification
+        let token = create Token { amount: 1 }
+        return true
 }
 "#;
 
@@ -17329,8 +17562,9 @@ lock bad() -> bool {
 module test
 
 lock bad() -> bool {
-    destroy token
-    return true
+    verification
+        destroy token
+        return true
 }
 "#;
 
@@ -17342,8 +17576,9 @@ shared Config {
 }
 
 lock guard() -> bool {
-    let cfg = read_ref<Config>()
-    return cfg.threshold > 0
+    verification
+        let cfg = read_ref<Config>()
+        return cfg.threshold > 0
 }
 "#;
 
@@ -17358,17 +17593,19 @@ resource Fingerprint has store {
     digest: Hash,
 }
 
-action make_config(symbol: [u8; 8]) -> Config
-where
-    create Config {
-        symbol: symbol
-    }
+action make_config(symbol: [u8; 8]) -> Config {
+    verification
+        create Config {
+            symbol: symbol
+        }
 
-action make_fingerprint() -> Fingerprint
-where
-    create Fingerprint {
-        digest: Hash::zero()
-    }
+}
+action make_fingerprint() -> Fingerprint {
+    verification
+        create Fingerprint {
+            digest: Hash::zero()
+        }
+}
 "#;
 
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
@@ -17378,11 +17615,12 @@ resource Token has store {
     amount: u64,
 }
 
-action mint() -> Token
-where
-    create Token {
-        amount: 42
-    } with_lock(Address::zero())
+action mint() -> Token {
+    verification
+        create Token {
+            amount: 42
+        } with_lock(Address::zero())
+}
 "#;
 
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
@@ -17392,9 +17630,10 @@ resource Token has store {
     amount: u64,
 }
 
-action burn(token: Token)
-where
-    destroy token
+action burn(token: Token) {
+    verification
+        destroy token
+}
 "#;
 
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
@@ -17409,9 +17648,10 @@ flow Ticket.state {
     Created -> Created;
 }
 
-action noop() -> u64
-where
-    return 0
+action noop() -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
@@ -17426,11 +17666,12 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket
-where
-    return create Ticket {
-        id: 1,
-    }
+action make() -> Ticket {
+    verification
+        return create Ticket {
+            id: 1,
+        }
+}
 "#;
 
     const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
@@ -17444,9 +17685,10 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action noop() -> u64
-where
-    return 0
+action noop() -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
@@ -17461,9 +17703,10 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action noop() -> u64
-where
-    return 0
+action noop() -> u64 {
+    verification
+        return 0
+}
 "#;
 
     const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
@@ -17478,12 +17721,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket
-where
-    return create Ticket {
-        state: 2,
-        id: 1,
-    }
+action make() -> Ticket {
+    verification
+        return create Ticket {
+            state: 2,
+            id: 1,
+        }
+}
 "#;
 
     const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
@@ -17498,12 +17742,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket
-where
-    return create Ticket {
-        state: 1,
-        id: 1,
-    }
+action make() -> Ticket {
+    verification
+        return create Ticket {
+            state: 1,
+            id: 1,
+        }
+}
 "#;
 
     const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
@@ -17518,12 +17763,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make(state: u8) -> Ticket
-where
-    return create Ticket {
-        state: state,
-        id: 1,
-    }
+action make(state: u8) -> Ticket {
+    verification
+        return create Ticket {
+            state: state,
+            id: 1,
+        }
+}
 "#;
 
     const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
@@ -17538,13 +17784,14 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action reset(ticket: Ticket) -> Ticket
-where
-    consume ticket
-    return create Ticket {
-        state: 0,
-        id: ticket.id,
-    }
+action reset(ticket: Ticket) -> Ticket {
+    verification
+        consume ticket
+        return create Ticket {
+            state: 0,
+            id: ticket.id,
+        }
+}
 "#;
 
     const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
@@ -17559,13 +17806,14 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> output: Ticket
+action activate(ticket: Ticket) -> output: Ticket {
     transition ticket.state: Created -> output.state: Active
-where
-    create output = Ticket {
-        state: Active,
-        id: ticket.id,
-    }
+    verification
+        create output = Ticket {
+            state: Active,
+            id: ticket.id,
+        }
+}
 "#;
 
     const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
@@ -17580,12 +17828,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action make() -> Ticket
-where
-    return create Ticket {
-        state: Created,
-        id: 1,
-    }
+action make() -> Ticket {
+    verification
+        return create Ticket {
+            state: Created,
+            id: 1,
+        }
+}
 "#;
 
     const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
@@ -17600,14 +17849,15 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> output: Ticket
+action activate(ticket: Ticket) -> output: Ticket {
     transition ticket.state: Created -> output.state: Active
-where
-    assert_invariant(ticket.state < Ticket::Active, "already active")
-    create output = Ticket {
-        state: Ticket::Active,
-        id: ticket.id,
-    }
+    verification
+        require ticket.state < Ticket::Active, "already active"
+        create output = Ticket {
+            state: Ticket::Active,
+            id: ticket.id,
+        }
+}
 "#;
 
     const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
@@ -17631,13 +17881,14 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> Ticket
-where
-    consume ticket
-    return create Ticket {
-        state: OtherTicket::Live,
-        id: ticket.id,
-    }
+action activate(ticket: Ticket) -> Ticket {
+    verification
+        consume ticket
+        return create Ticket {
+            state: OtherTicket::Live,
+            id: ticket.id,
+        }
+}
 "#;
 
     #[test]
@@ -18200,32 +18451,27 @@ where
     #[test]
     fn compile_rejects_non_bool_assert_condition() {
         let err = compile(ASSERT_NON_BOOL_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("assert condition must be boolean"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("require condition must be boolean"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_dynamic_assert_invariant_messages() {
         let err = compile(ASSERT_DYNAMIC_MESSAGE_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("assert message must be a string literal"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("unknown function 'assert'"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_binding_assert_invariant_results() {
         let err = compile(ASSERT_BINDING_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(
-            err.message.contains("cannot bind the result of a function without a return value"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert!(err.message.contains("unknown function 'assert'"), "unexpected error: {}", err.message);
     }
 
     #[test]
     fn compile_rejects_assert_invariant_as_tail_return_value() {
         let err = compile(ASSERT_TAIL_RETURN_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("tail expression type mismatch"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("Unit"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("unknown function 'assert'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -18243,9 +18489,10 @@ resource Coin has store {
     amount: u64
 }
 
-action bad(amount: u64) -> out: Coin
-where
-    std::cell::preserve_capacity(out, amount)
+action bad(amount: u64) -> out: Coin {
+    verification
+        std::cell::preserve_capacity(out, amount)
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(
@@ -18662,13 +18909,14 @@ receipt Listing has destroy {
     price: u64,
 }
 
-action create_listing(read nft: NFT, price: u64) -> listing: Listing
-where
-    create listing = Listing {
-        token_id: nft.token_id,
-        seller: nft.owner,
-        price: price,
-    }
+action create_listing(read nft: NFT, price: u64) -> listing: Listing {
+    verification
+        create listing = Listing {
+            token_id: nft.token_id,
+            seller: nft.owner,
+            price: price,
+        }
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -18724,13 +18972,14 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> Grant
-where
-    consume token
-    create Grant {
-        admin: config.admin,
-        amount: token.amount,
-    } with_lock(config.admin)
+action grant(read config: Config, token: Token) -> Grant {
+    verification
+        consume token
+        create Grant {
+            admin: config.admin,
+            amount: token.amount,
+        } with_lock(config.admin)
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -19584,10 +19833,11 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let value = 7
-    return value.len()
+action bad() -> u64 {
+    verification
+        let value = 7
+        return value.len()
+}
 "#,
                 "len is only supported on array or Vec values",
             ),
@@ -19595,10 +19845,11 @@ where
                 r#"
 module test
 
-action bad() -> bool
-where
-    let value = 7
-    return value.is_empty()
+action bad() -> bool {
+    verification
+        let value = 7
+        return value.is_empty()
+}
 "#,
                 "is_empty is only supported on array or Vec values",
             ),
@@ -19606,11 +19857,12 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let value = 7
-    value.extend_from_slice([1, 2])
-    return value
+action bad() -> u64 {
+    verification
+        let value = 7
+        value.extend_from_slice([1, 2])
+        return value
+}
 "#,
                 "extend_from_slice is only supported on Vec values",
             ),
@@ -19618,11 +19870,12 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let mut values: Vec<u64> = []
-    values.extend_from_slice([true])
-    return values.len()
+action bad() -> u64 {
+    verification
+        let mut values: Vec<u64> = []
+        values.extend_from_slice([true])
+        return values.len()
+}
 "#,
                 "Vec.extend_from_slice type mismatch",
             ),
@@ -19634,11 +19887,12 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64
-where
-    let mut points = Vec::new()
-    points.extend_from_slice([&point])
-    return 0
+action bad(point: Point) -> u64 {
+    verification
+        let mut points = Vec::new()
+        points.extend_from_slice([&point])
+        return 0
+}
 "#,
                 "Vec.extend_from_slice cannot store reference type &Point",
             ),
@@ -19646,10 +19900,11 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let values = Vec::new()
-    return values.capacity()
+action bad() -> u64 {
+    verification
+        let values = Vec::new()
+        return values.capacity()
+}
 "#,
                 "Vec.capacity requires a typed Vec<T>",
             ),
@@ -19657,10 +19912,11 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let values = Vec::new()
-    return values.remove(0)
+action bad() -> u64 {
+    verification
+        let values = Vec::new()
+        return values.remove(0)
+}
 "#,
                 "Vec.remove requires a typed Vec<T>",
             ),
@@ -19668,10 +19924,11 @@ where
                 r#"
 module test
 
-action bad() -> u64
-where
-    let values = Vec::new()
-    return values.first()
+action bad() -> u64 {
+    verification
+        let values = Vec::new()
+        return values.first()
+}
 "#,
                 "Vec.first requires a typed Vec<T>",
             ),
@@ -19679,11 +19936,12 @@ where
                 r#"
 module test
 
-action bad(owner: Address) -> bool
-where
-    let mut values = Vec::new()
-    values.push(1)
-    return values.contains(owner)
+action bad(owner: Address) -> bool {
+    verification
+        let mut values = Vec::new()
+        values.push(1)
+        return values.contains(owner)
+}
 "#,
                 "Vec.contains type mismatch",
             ),
@@ -19691,12 +19949,13 @@ where
                 r#"
 module test
 
-action bad(owner: Address) -> u64
-where
-    let mut values = Vec::new()
-    values.push(1)
-    values.insert(0, owner)
-    return 0
+action bad(owner: Address) -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(1)
+        values.insert(0, owner)
+        return 0
+}
 "#,
                 "Vec.insert type mismatch",
             ),
@@ -19704,12 +19963,13 @@ where
                 r#"
 module test
 
-action bad(owner: Address) -> u64
-where
-    let mut values = Vec::new()
-    values.push(1)
-    values.set(0, owner)
-    return 0
+action bad(owner: Address) -> u64 {
+    verification
+        let mut values = Vec::new()
+        values.push(1)
+        values.set(0, owner)
+        return 0
+}
 "#,
                 "Vec.set type mismatch",
             ),
@@ -19721,11 +19981,12 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64
-where
-    let mut points = Vec::new()
-    points.insert(0, &point)
-    return 0
+action bad(point: Point) -> u64 {
+    verification
+        let mut points = Vec::new()
+        points.insert(0, &point)
+        return 0
+}
 "#,
                 "Vec.insert cannot store reference type &Point",
             ),
@@ -19737,11 +19998,12 @@ struct Point {
     x: u64,
 }
 
-action bad(point: Point) -> u64
-where
-    let mut points = Vec::new()
-    points.set(0, &point)
-    return 0
+action bad(point: Point) -> u64 {
+    verification
+        let mut points = Vec::new()
+        points.set(0, &point)
+        return 0
+}
 "#,
                 "Vec.set cannot store reference type &Point",
             ),
@@ -19954,10 +20216,11 @@ where
             r#"
 module test
 
-action bad() -> u64
-where
-    let values: Vec<Address> = [1]
-    return values.len()
+action bad() -> u64 {
+    verification
+        let values: Vec<Address> = [1]
+        return values.len()
+}
 "#,
             CompileOptions::default(),
         )
@@ -20948,10 +21211,11 @@ resource Collection {
     name: Vec<u8>,
 }
 
-action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection
-where
-    require collection_after.name == collection_before.name
-    require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
+action batch(collection_before: Collection, recipients: Vec<Address>) -> collection_after: Collection {
+    verification
+        require collection_after.name == collection_before.name
+        require collection_after.total_supply == collection_before.total_supply + recipients.len() as u64
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "batch").expect("batch metadata");
@@ -21123,13 +21387,15 @@ where
         let program = r#"
 module vm::u64_literals
 
-action high_bit() -> u64
-where
-    return 9223372036854775808
+action high_bit() -> u64 {
+    verification
+        return 9223372036854775808
 
-action max_value() -> u64
-where
-    return 18446744073709551615
+}
+action max_value() -> u64 {
+    verification
+        return 18446744073709551615
+}
 "#;
 
         let result =
@@ -21141,11 +21407,11 @@ where
 
     #[test]
     fn compile_riscv_elf_accepts_large_stack_offsets() {
-        let mut program = String::from("module vm::large_stack\n\naction main() -> u64\nwhere\n");
+        let mut program = String::from("module vm::large_stack\n\naction main() -> u64 {\n    verification\n");
         for index in 0..260 {
-            program.push_str(&format!("    let x{} = {}\n", index, index));
+            program.push_str(&format!("        let x{} = {}\n", index, index));
         }
-        program.push_str("    return x259\n");
+        program.push_str("        return x259\n}\n");
 
         let asm = compile(&program, CompileOptions { target: Some("riscv64-asm".to_string()), ..CompileOptions::default() }).unwrap();
         let asm = String::from_utf8(asm.artifact_bytes).unwrap();
@@ -21166,9 +21432,10 @@ struct Big {
     amount: u64,
 }
 
-action inspect(snapshot: Big) -> u64
-where
-    return snapshot.amount
+action inspect(snapshot: Big) -> u64 {
+    verification
+        return snapshot.amount
+}
 "#;
 
         let scalar_asm =
@@ -21192,9 +21459,10 @@ struct Big {
     marker: [u8; 1],
 }
 
-action get_marker(snapshot: Big) -> [u8; 1]
-where
-    return snapshot.marker
+action get_marker(snapshot: Big) -> [u8; 1] {
+    verification
+        return snapshot.marker
+}
 "#;
 
         let bytes_asm =
@@ -21299,12 +21567,13 @@ shared Config has store {
     enabled: bool,
 }
 
-action create_config(admin: Address, enabled: bool) -> Config
-where
-    create Config {
-        admin: admin,
-        enabled: enabled,
-    } with_lock(admin)
+action create_config(admin: Address, enabled: bool) -> Config {
+    verification
+        create Config {
+            admin: admin,
+            enabled: enabled,
+        } with_lock(admin)
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -21332,9 +21601,10 @@ where
             r#"
 module test::timepoint
 
-action now() -> u64
-where
-    return env::current_timepoint()
+action now() -> u64 {
+    verification
+        return env::current_timepoint()
+}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -21352,9 +21622,10 @@ where
             r#"
 module test::timepoint
 
-action now() -> u64
-where
-    return env::current_timepoint()
+action now() -> u64 {
+    verification
+        return env::current_timepoint()
+}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -21434,12 +21705,13 @@ resource Receipt {
     amount: u64,
 }
 
-action mint(amount: u64) -> Receipt
-where
-    let receipt = create Receipt {
-        amount: amount,
-    };
-    receipt
+action mint(amount: u64) -> Receipt {
+    verification
+        let receipt = create Receipt {
+            amount: amount,
+        };
+        receipt
+}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints metadata");
@@ -21494,9 +21766,10 @@ hash_type = "type"
             r#"
 module deploy_manifest
 
-action add(a: u64, b: u64) -> u64
-where
-    a + b
+action add(a: u64, b: u64) -> u64 {
+    verification
+        a + b
+}
 "#,
         )
         .unwrap();
@@ -21537,9 +21810,10 @@ with_default_hash_type(Data1)
     amount: u64,
 }
 
-action mint(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -21580,9 +21854,10 @@ dep_type = "dep_group"
             r#"
 module conflicting_cell_dep_location
 
-action add(a: u64, b: u64) -> u64
-where
-    a + b
+action add(a: u64, b: u64) -> u64 {
+    verification
+        a + b
+}
 "#,
         )
         .unwrap();
@@ -21623,9 +21898,10 @@ dep_type = "dep_group"
             r#"
 module incomplete_cell_dep_location
 
-action add(a: u64, b: u64) -> u64
-where
-    a + b
+action add(a: u64, b: u64) -> u64 {
+    verification
+        a + b
+}
 "#,
         )
         .unwrap();
@@ -21664,9 +21940,10 @@ dep_type = "unknown"
             r#"
 module bad_deploy_manifest
 
-action add(a: u64, b: u64) -> u64
-where
-    a + b
+action add(a: u64, b: u64) -> u64 {
+    verification
+        a + b
+}
 "#,
         )
         .unwrap();
@@ -21701,9 +21978,10 @@ hash_type = "unsupported"
             r#"
 module bad_hash_type_manifest
 
-action add(a: u64, b: u64) -> u64
-where
-    a + b
+action add(a: u64, b: u64) -> u64 {
+    verification
+        a + b
+}
 "#,
         )
         .unwrap();
@@ -21736,9 +22014,10 @@ where
             r#"
 module test
 
-action main() -> u64
-where
-    return env::current_timepoint()
+action main() -> u64 {
+    verification
+        return env::current_timepoint()
+}
 "#,
             CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
         )
@@ -21754,13 +22033,15 @@ where
             r#"
 module test
 
-action needs_arg(value: u64) -> u64
-where
-    value
+action needs_arg(value: u64) -> u64 {
+    verification
+        value
 
-action main() -> u64
-where
-    0
+}
+action main() -> u64 {
+    verification
+        0
+}
 "#,
             CompileOptions::default(),
         )
@@ -22299,12 +22580,13 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token
-where
-    create Token {
-        amount,
-        symbol,
-    }
+action mint(amount: u64, symbol: [u8; 8]) -> Token {
+    verification
+        create Token {
+            amount,
+            symbol,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         assert_eq!(result.metadata.actions.len(), 1);
@@ -22639,14 +22921,15 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    let amount = input.amount
-    create output = Offer {
-        state: OfferState::Filled,
-        amount,
-    }
+    verification
+        let amount = input.amount
+        create output = Offer {
+            state: OfferState::Filled,
+            amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -22689,14 +22972,15 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input input: Offer) -> output: Offer
+action accept(input input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require input.amount == output.amount
-    create output = Offer {
-        state: OfferState::Filled,
-        amount: input.amount,
-    }
+    verification
+        require input.amount == output.amount
+        create output = Offer {
+            state: OfferState::Filled,
+            amount: input.amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -22743,14 +23027,15 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> output: Offer
+action fill(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    if input.price > 0 {
-        require output.price == input.price
-    } else {
-        require output.note == input.note
-    }
+    verification
+        if input.price > 0 {
+            require output.price == input.price
+        } else {
+            require output.note == input.note
+        }
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("incomplete branch constraints"), "unexpected error: {}", err.message);
@@ -22777,16 +23062,17 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> output: Offer
+action fill(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    if input.price > 0 {
-        require output.price == input.price
-    } else {
-        require output.price == input.price + 1
-    }
+    verification
+        if input.price > 0 {
+            require output.price == input.price
+        } else {
+            require output.price == input.price + 1
+        }
 
-    require output.note == input.note
+        require output.note == input.note
+}
 "#;
         compile(source, CompileOptions::default()).unwrap();
     }
@@ -22810,9 +23096,10 @@ fn helper(input token: Token) -> u64 {
         let scalar_source = r#"
 module test
 
-action main(input amount: u64) -> u64
-where
-    amount
+action main(input amount: u64) -> u64 {
+    verification
+        amount
+}
 "#;
         let scalar_err = compile(scalar_source, CompileOptions::default()).unwrap_err();
         assert!(
@@ -22842,10 +23129,11 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action cancel(input: Offer) -> output: Offer
+action cancel(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Cancelled
-where
-    require input.amount == output.amount
+    verification
+        require input.amount == output.amount
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
@@ -22898,19 +23186,21 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept_sugar(input: Offer) -> output: Offer
+action accept_sugar(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    let amount = input.amount
-    create output = Offer {
-        state: OfferState::Filled,
-        amount,
-    }
+    verification
+        let amount = input.amount
+        create output = Offer {
+            state: OfferState::Filled,
+            amount,
+        }
 
-action accept_core(input: Offer) -> output: Offer
+}
+action accept_core(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require input.amount == output.amount
+    verification
+        require input.amount == output.amount
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let sugar = result.metadata.actions.iter().find(|action| action.name == "accept_sugar").expect("sugar metadata");
@@ -22951,13 +23241,14 @@ flow Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(old: Offer) -> new: Offer
+action accept(old: Offer) -> new: Offer {
     transition old.state: Live -> new.state: Filled
-where
-    create new = Offer {
-        state: OfferState::Filled,
-        amount: old.amount,
-    }
+    verification
+        create new = Offer {
+            state: OfferState::Filled,
+            amount: old.amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "accept").expect("accept metadata");
@@ -22984,13 +23275,14 @@ resource Token has store {
     amount: u64
 }
 
-action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token)
-where
-    require next_auth.minted == auth.minted + amount
+action mint(auth: Authority, amount: u64) -> (next_auth: Authority, token: Token) {
+    verification
+        require next_auth.minted == auth.minted + amount
 
-    create token = Token {
-        amount,
-    }
+        create token = Token {
+            amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let assembly = String::from_utf8(result.artifact_bytes).expect("assembly is utf8");
@@ -23025,10 +23317,11 @@ flow Offer.state {
     Live -> Cancelled;
 }
 
-action accept(old: Offer) -> new: Offer
+action accept(old: Offer) -> new: Offer {
     transition old.state: Live -> new.state: Cancelled
-where
-        require old.amount == new.amount
+    verification
+            require old.amount == new.amount
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
@@ -23052,13 +23345,14 @@ receipt Grant has store {
     amount: u64,
 }
 
-action grant(read config: Config, token: Token) -> grant: Grant
-where
-    consume token
-    create grant = Grant {
-        admin: config.admin,
-        amount: token.amount,
-    } with_lock(config.admin)
+action grant(read config: Config, token: Token) -> grant: Grant {
+    verification
+        consume token
+        create grant = Grant {
+            admin: config.admin,
+            amount: token.amount,
+        } with_lock(config.admin)
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -23082,11 +23376,12 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(witness amount: u64) -> token: Token
-where
-    create token = Token {
-        amount,
-    }
+action mint(witness amount: u64) -> token: Token {
+    verification
+        create token = Token {
+            amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let action = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
@@ -23117,14 +23412,15 @@ flow OfferFlow for Offer.status {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.status: Live -> output.status: Filled
-where
-    let amount = input.amount
-    create output = Offer {
-        status: OfferState::Filled,
-        amount,
-    }
+    verification
+        let amount = input.amount
+        create output = Offer {
+            status: OfferState::Filled,
+            amount,
+        }
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -23163,12 +23459,13 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action seed_live() -> Offer
-where
-    create Offer {
-        state: OfferState::Live,
-        amount: 1,
-    }
+action seed_live() -> Offer {
+    verification
+        create Offer {
+            state: OfferState::Live,
+            amount: 1,
+        }
+}
 "#;
         compile(source, CompileOptions::default()).unwrap();
     }
@@ -23192,14 +23489,15 @@ flow Offer.state {
     Live -> Created;
 }
 
-action reset(input: Offer) -> output: Offer
+action reset(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Created
-where
-    let amount = input.amount
-    create output = Offer {
-        state: OfferState::Created,
-        amount,
-    }
+    verification
+        let amount = input.amount
+        create output = Offer {
+            state: OfferState::Created,
+            amount,
+        }
+}
 "#;
         compile(source, CompileOptions::default()).unwrap();
     }
@@ -23224,13 +23522,14 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action accept(input: &Offer) -> output: Offer
+action accept(input: &Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    create output = Offer {
-        state: OfferState::Filled,
-        amount: input.amount,
-    }
+    verification
+        create output = Offer {
+            state: OfferState::Filled,
+            amount: input.amount,
+        }
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("cannot use bare `&T` at the verifier boundary"), "unexpected error: {}", err.message);
@@ -23257,14 +23556,15 @@ flow OfferFlow for Offer.state {
     Live -> Cancelled;
 }
 
-action accept(input: Offer)
-where
-    let amount = input.amount
-    consume input
-    create Offer {
-        state: OfferState::Filled,
-        amount,
-    }
+action accept(input: Offer) {
+    verification
+        let amount = input.amount
+        consume input
+        create Offer {
+            state: OfferState::Filled,
+            amount,
+        }
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("must declare the exact field-to-field transition"), "unexpected error: {}", err.message);
@@ -23290,13 +23590,14 @@ flow Offer.state {
     Created -> Live;
 }
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    create output = Offer {
-        state: OfferState::Filled,
-        amount: 1,
-    }
+    verification
+        create output = Offer {
+            state: OfferState::Filled,
+            amount: 1,
+        }
+}
 "#;
         let err = compile(source, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("is not declared"), "unexpected error: {}", err.message);
@@ -23380,7 +23681,8 @@ source_roots = ["src", "shared"]
 "#,
         )
         .unwrap();
-        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64\nwhere\n    1\n").unwrap();
+        std::fs::write(root.join("src/main.cell"), "module demo::main\naction ping() -> u64 {\n    verification\n        1\n}\n")
+            .unwrap();
         std::fs::write(root.join("shared/types.cell"), "module demo::types\nstruct Pair { left: u64, right: u64 }\n").unwrap();
 
         let modules = load_modules_for_input(root).unwrap();
@@ -23436,9 +23738,10 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
+action transfer_token(token: Token, to: Address) -> Token {
+    verification
+        return transfer token to to
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -23485,8 +23788,9 @@ resource Config {
 }
 
 lock config_guard() -> bool {
-    let config = read_ref<Config>()
-    require config.digest == Hash::zero()
+    verification
+        let config = read_ref<Config>()
+        require config.digest == Hash::zero()
 }
 "#;
 
@@ -23557,9 +23861,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -23598,9 +23903,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -23684,9 +23990,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -23730,9 +24037,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
@@ -23801,9 +24109,10 @@ resource Flag {
     enabled: bool,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -23825,9 +24134,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -23851,9 +24161,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -23877,9 +24188,10 @@ resource Config {
     digest: Hash,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let err = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap_err();
@@ -23966,9 +24278,10 @@ resource Token has store, consume, burn {
     amount: u64,
 }
 
-action burn(token: Token)
-where
-    destroy token
+action burn(token: Token) {
+    verification
+        destroy token
+}
 "#;
 
         compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
@@ -23983,9 +24296,10 @@ resource Token has store, replace, relock {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
+action transfer_token(token: Token, to: Address) -> Token {
+    verification
+        return transfer token to to
+}
 "#;
 
         compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
@@ -24099,10 +24413,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.owner == ledger_before.owner
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.owner == ledger_before.owner
+        require ledger_after.balance == ledger_before.balance + delta
+}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24140,10 +24455,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.owner == ledger_before.owner
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.owner == ledger_before.owner
+        require ledger_after.balance == ledger_before.balance + delta
+}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24169,14 +24485,15 @@ resource NFT has store, destroy {
     royalty_bps: u16
 }
 
-action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
-where
-    assert(nft_before.owner != to, "cannot transfer to self")
-    require nft_after.token_id == nft_before.token_id
-    require nft_after.owner == to
-    require nft_after.metadata_hash == nft_before.metadata_hash
-    require nft_after.royalty_recipient == nft_before.royalty_recipient
-    require nft_after.royalty_bps == nft_before.royalty_bps
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
+    verification
+        require nft_before.owner != to, "cannot transfer to self"
+        require nft_after.token_id == nft_before.token_id
+        require nft_after.owner == to
+        require nft_after.metadata_hash == nft_before.metadata_hash
+        require nft_after.royalty_recipient == nft_before.royalty_recipient
+        require nft_after.royalty_bps == nft_before.royalty_bps
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24218,12 +24535,13 @@ resource Collection has store {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection) -> collection_after: Collection
-where
-    require collection_after.name == collection_before.name
-    require collection_after.creator == collection_before.creator
-    require collection_after.total_supply == collection_before.total_supply + 1
-    require collection_after.max_supply == collection_before.max_supply
+action mint(collection_before: Collection) -> collection_after: Collection {
+    verification
+        require collection_after.name == collection_before.name
+        require collection_after.creator == collection_before.creator
+        require collection_after.total_supply == collection_before.total_supply + 1
+        require collection_after.max_supply == collection_before.max_supply
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24270,19 +24588,20 @@ resource Collection has store {
     max_supply: u64,
 }
 
-action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT)
-where
-    let first_token_id = collection_before.total_supply + 1
-    require collection_after.creator == collection_before.creator
-    require collection_after.total_supply == first_token_id
-    require collection_after.max_supply == collection_before.max_supply
-    create nft0 = NFT {
-        token_id: first_token_id,
-        owner: recipients[0],
-        metadata_hash: metadata_hashes[0],
-        royalty_recipient: collection_before.creator,
-        royalty_bps: 250,
-    }
+action batch(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT) {
+    verification
+        let first_token_id = collection_before.total_supply + 1
+        require collection_after.creator == collection_before.creator
+        require collection_after.total_supply == first_token_id
+        require collection_after.max_supply == collection_before.max_supply
+        create nft0 = NFT {
+            token_id: first_token_id,
+            owner: recipients[0],
+            metadata_hash: metadata_hashes[0],
+            royalty_recipient: collection_before.creator,
+            royalty_bps: 250,
+        }
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24336,18 +24655,19 @@ receipt Receipt has store {
     amount: u64,
 }
 
-action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt)
-where
-    create auth = Authority { symbol, minted: seed.amount }
-    if recipients[0].1 > 0 {
-        create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
-    }
-    if recipients[1].1 > 0 {
-        create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
-    }
-    consume seed
-    create pool = Pool { symbol, reserve: seed.amount }
-    create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
+action launch(symbol: [u8; 8], seed: Token, creator: Address, recipients: [(Address, u64); 2]) -> (auth: Authority, pool: Pool, receipt: Receipt) {
+    verification
+        create auth = Authority { symbol, minted: seed.amount }
+        if recipients[0].1 > 0 {
+            create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
+        }
+        if recipients[1].1 > 0 {
+            create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
+        }
+        consume seed
+        create pool = Pool { symbol, reserve: seed.amount }
+        create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
+}
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24407,13 +24727,15 @@ resource Token has destroy {
     amount: u64,
 }
 
-action burn(token: Token)
-where
-    destroy token
+action burn(token: Token) {
+    verification
+        destroy token
 
-action unsupported_timepoint() -> u64
-where
-    return env::current_timepoint()
+}
+action unsupported_timepoint() -> u64 {
+    verification
+        return env::current_timepoint()
+}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped.cell");
@@ -24454,15 +24776,17 @@ resource DynamicCell {
 }
 
 lock owner_lock(owner: Address) -> bool {
-    true
+    verification
+        true
 }
 
-action unsupported(name: String) -> DynamicCell
-where
-    let cell = create DynamicCell {
-        name: name,
-    };
-    cell
+action unsupported(name: String) -> DynamicCell {
+    verification
+        let cell = create DynamicCell {
+            name: name,
+        };
+        cell
+}
 "#;
         let temp = tempdir().unwrap();
         let entry = Utf8Path::from_path(temp.path()).unwrap().join("scoped_lock.cell");
@@ -24491,7 +24815,8 @@ where
 module scoped_lock
 
 lock owner_lock(owner: Address, claimed: Address) -> bool {
-    owner == claimed
+    verification
+        owner == claimed
 }
 "#;
         let temp = tempdir().unwrap();
@@ -24532,7 +24857,8 @@ receipt Proposal {
 }
 
 lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
-    now < proposal.expires_at
+    verification
+        now < proposal.expires_at
 }
 "#;
         let temp = tempdir().unwrap();
@@ -24571,14 +24897,15 @@ resource TimeLock {
     unlock_height: u64,
 }
 
-action create_lock(owner: Address) -> TimeLock
-where
-    let lock = create TimeLock {
-        owner: owner,
-        lock_type: LockType::Absolute,
-        unlock_height: 42,
-    };
-    lock
+action create_lock(owner: Address) -> TimeLock {
+    verification
+        let lock = create TimeLock {
+            owner: owner,
+            lock_type: LockType::Absolute,
+            unlock_height: 42,
+        };
+        lock
+}
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         let time_lock = result.metadata.types.iter().find(|ty| ty.name == "TimeLock").expect("TimeLock metadata");
@@ -24608,17 +24935,19 @@ resource LockedAsset {
     lock_hash: Hash,
 }
 
-action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset
-where
-    let locked = create LockedAsset {
-        asset_type: asset_type,
-        amount: amount,
-        lock_hash: Hash::zero(),
-    };
-    locked
+action lock_asset(asset_type: AssetType, amount: u64) -> LockedAsset {
+    verification
+        let locked = create LockedAsset {
+            asset_type: asset_type,
+            amount: amount,
+            lock_hash: Hash::zero(),
+        };
+        locked
 
+}
 lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) -> bool {
-    locked_asset.lock_hash == expected
+    verification
+        locked_asset.lock_hash == expected
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24668,7 +24997,8 @@ resource Collection {
 }
 
 lock collection_creator(protected collection: Collection, witness claimed_creator: Address) -> bool {
-    collection.creator == claimed_creator
+    verification
+        collection.creator == claimed_creator
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24709,7 +25039,8 @@ receipt Emergency {
 }
 
 lock enough(protected emergency: Emergency, witness required: u8) -> bool {
-    emergency.approvers.len() >= required as usize
+    verification
+        emergency.approvers.len() >= required as usize
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24758,7 +25089,8 @@ fn is_signer(wallet: &Wallet, addr: Address) -> bool {
 }
 
 lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
-    is_signer(wallet, addr)
+    verification
+        is_signer(wallet, addr)
 }
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24799,12 +25131,13 @@ resource Collection {
     max_supply: u64,
 }
 
-action mint(collection_before: Collection) -> collection_after: Collection
-where
-    assert(collection_before.total_supply < collection_before.max_supply, "max supply reached");
-    require collection_after.name == collection_before.name
-    require collection_after.max_supply == collection_before.max_supply
-    require collection_after.total_supply == collection_before.total_supply + 1
+action mint(collection_before: Collection) -> collection_after: Collection {
+    verification
+        require collection_before.total_supply < collection_before.max_supply, "max supply reached"
+        require collection_after.name == collection_before.name
+        require collection_after.max_supply == collection_before.max_supply
+        require collection_after.total_supply == collection_before.total_supply + 1
+}
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let collection = result.metadata.types.iter().find(|ty| ty.name == "Collection").expect("Collection metadata");
@@ -24844,9 +25177,10 @@ resource Token has store {
     amount: u64,
 }
 
-action value() -> u64
-where
-    return 1
+action value() -> u64 {
+    verification
+        return 1
+}
 "#;
 
         let result = compile(source, CompileOptions::default()).unwrap();
@@ -24891,9 +25225,10 @@ resource Token has store {
     amount: u64
 }
 
-action value() -> u64
-where
-    return 1
+action value() -> u64 {
+    verification
+        return 1
+}
 "#;
 
         let result =
@@ -24926,13 +25261,15 @@ resource PlainToken has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    return create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
 
-action mint_plain(amount: u64) -> PlainToken
-where
-    return create PlainToken { amount: amount }
+}
+action mint_plain(amount: u64) -> PlainToken {
+    verification
+        return create PlainToken { amount: amount }
+}
 "#;
 
         let ckb_metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -24966,9 +25303,10 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    return create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
+}
 "#;
 
         let mut metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -24991,9 +25329,10 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    return create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
+}
 "#;
 
         let mut metadata = compile_metadata_for_profile_without_artifact_policy(program, crate::TargetProfile::Ckb);
@@ -25017,9 +25356,10 @@ struct TokenSnapshot {
     amount: u64
 }
 
-action value() -> u64
-where
-    return 1
+action value() -> u64 {
+    verification
+        return 1
+}
 "#;
 
         let result =
@@ -25073,9 +25413,10 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#;
 
         let result =
@@ -25094,9 +25435,10 @@ resource Token has store {
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#;
 
         let result =
@@ -25118,9 +25460,10 @@ resource NFT has store
     owner: Address
 }
 
-action mint(token_id: u64, owner: Address) -> NFT
-where
-    create NFT { token_id: token_id, owner: owner }
+action mint(token_id: u64, owner: Address) -> NFT {
+    verification
+        create NFT { token_id: token_id, owner: owner }
+}
 "#;
 
         let result =
@@ -25141,9 +25484,10 @@ resource Config has store
     value: u64
 }
 
-action init(value: u64) -> Config
-where
-    create Config { value: value }
+action init(value: u64) -> Config {
+    verification
+        create Config { value: value }
+}
 "#;
 
         let result =
@@ -25164,9 +25508,10 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#;
 
         let result =
@@ -25188,9 +25533,10 @@ resource NFT has store
     owner: Address
 }
 
-action mint(token_id: u64, owner: Address) -> NFT
-where
-    create_unique<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
+action mint(token_id: u64, owner: Address) -> NFT {
+    verification
+        create_unique<NFT>(identity = field(token_id)) { token_id: token_id, owner: owner }
+}
 "#;
 
         let result =
@@ -25227,9 +25573,10 @@ resource NFT has store
     owner: Address
 }
 
-action rotate(old: NFT, owner: Address) -> NFT
-where
-    replace_unique<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
+action rotate(old: NFT, owner: Address) -> NFT {
+    verification
+        replace_unique<NFT>(identity = field(token_id)) old { token_id: old.token_id, owner: owner }
+}
 "#;
 
         let result =
@@ -25269,9 +25616,10 @@ resource Token has store
     amount: u64
 }
 
-action mint(amount: u64) -> Token
-where
-    create_unique<Token>(identity = script_args) { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create_unique<Token>(identity = script_args) { amount: amount }
+}
 "#;
         let create_script_args = compile(
             create_script_args_program,
@@ -25303,9 +25651,10 @@ resource Token has store
     amount: u64
 }
 
-action replace(old: Token, amount: u64) -> Token
-where
-    replace_unique<Token>(identity = script_args) old { amount: amount }
+action replace(old: Token, amount: u64) -> Token {
+    verification
+        replace_unique<Token>(identity = script_args) old { amount: amount }
+}
 "#;
         let script_args =
             compile(script_args_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -25335,9 +25684,10 @@ resource Config has store
     value: u64
 }
 
-action replace(old: Config, value: u64) -> Config
-where
-    replace_unique<Config>(identity = singleton_type) old { value: value }
+action replace(old: Config, value: u64) -> Config {
+    verification
+        replace_unique<Config>(identity = singleton_type) old { value: value }
+}
 "#;
         let singleton =
             compile(singleton_program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -25370,9 +25720,10 @@ resource Note has store
     memo: Vec<u8>
 }
 
-action mint(memo: Vec<u8>) -> Note
-where
-    create_unique<Note>(identity = field(memo)) { memo: memo }
+action mint(memo: Vec<u8>) -> Note {
+    verification
+        create_unique<Note>(identity = field(memo)) { memo: memo }
+}
 "#;
 
         let err =
@@ -25385,9 +25736,10 @@ where
         let program = r#"
 module vm::minimal
 
-action main() -> u64
-where
-    return 0
+action main() -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result =
@@ -25406,9 +25758,10 @@ where
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64
-where
-    return amount
+action spend(amount: u64) -> u64 {
+    verification
+        return amount
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -25451,9 +25804,10 @@ where
         let program = r#"
 module vm::entry_abi
 
-action spend(amount: u64) -> u64
-where
-    return amount
+action spend(amount: u64) -> u64 {
+    verification
+        return amount
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -25471,9 +25825,10 @@ where
         let program = r#"
 module vm::entry_abi
 
-action owned(owner: Address) -> u64
-where
-    return 0
+action owned(owner: Address) -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -25506,12 +25861,13 @@ resource C has store, destroy {
     value: u64,
 }
 
-action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64
-where
-    destroy a
-    destroy b
-    destroy c
-    return required
+action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
+    verification
+        destroy a
+        destroy b
+        destroy c
+        return required
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -25544,21 +25900,25 @@ where
         let program = r#"
 module vm::entry_abi
 
-action bad(items: Vec<Address>) -> u64
-where
-    return 0
+action bad(items: Vec<Address>) -> u64 {
+    verification
+        return 0
 
-action hashes(items: Vec<Hash>) -> u64
-where
-    return 0
+}
+action hashes(items: Vec<Hash>) -> u64 {
+    verification
+        return 0
 
-action nested(items: Vec<Vec<u8>>) -> u64
-where
-    return 0
+}
+action nested(items: Vec<Vec<u8>>) -> u64 {
+    verification
+        return 0
 
-action raw(data: Vec<u8>) -> u64
-where
-    return 0
+}
+action raw(data: Vec<u8>) -> u64 {
+    verification
+        return 0
+}
 "#;
 
         let result = compile(program, CompileOptions::default()).unwrap();
@@ -25651,9 +26011,10 @@ module app::main
 
 use dep::token::Token
 
-action pass_through(token: Token) -> Token
-where
-    token
+action pass_through(token: Token) -> Token {
+    verification
+        token
+}
 "#,
         )
         .unwrap();
@@ -25689,9 +26050,10 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25721,9 +26083,10 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25754,9 +26117,10 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25793,9 +26157,10 @@ out_dir = "artifacts"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25829,9 +26194,10 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25865,9 +26231,10 @@ target_profile = "ckb"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25902,9 +26269,10 @@ target = "riscv64-elf"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25938,9 +26306,10 @@ token_std = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -25973,9 +26342,10 @@ token_std = { path = "../missing_dep" }
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -26006,9 +26376,10 @@ version = "0.1.0"
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -26053,9 +26424,10 @@ module demo::main
 
 use demo::helper::Token
 
-action pass(token: Token) -> Token
-where
-    token
+action pass(token: Token) -> Token {
+    verification
+        token
+}
 "#,
         )
         .unwrap();
@@ -26092,9 +26464,10 @@ app_pkg = { path = "../app_pkg" }
             r#"
 module dep::main
 
-action dep_ping() -> u64
-where
-    1
+action dep_ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -26116,9 +26489,10 @@ dep_pkg = { path = "../dep_pkg" }
             r#"
 module app::main
 
-action app_ping() -> u64
-where
-    1
+action app_ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -26163,9 +26537,10 @@ module demo::main
 
 use demo::token::Token
 
-action pass(token: Token) -> Token
-where
-    token
+action pass(token: Token) -> Token {
+    verification
+        token
+}
 "#,
         )
         .unwrap();
@@ -26197,9 +26572,10 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();
@@ -26232,9 +26608,10 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
         )
         .unwrap();

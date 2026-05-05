@@ -16,8 +16,9 @@ learn what each layer proves, and what it does not prove yet.
 
 If CellScript is new to you, read the tutorials in order. The first four
 language chapters explain how a `.cell` file is shaped, how resources move, why
-effects such as `consume` and `create` are explicit, and how the 0.13 action
-model expresses input-to-output verification.
+effects such as `consume` and `create` are explicit, and how the canonical
+action model expresses input-to-output verification with `transition` and
+`verification`.
 The v0.15 material then extends that model with identity policies, scoped
 invariants, ProofPlan metadata, and primitive capability boundaries.
 
@@ -35,7 +36,7 @@ If you already know what you need, jump directly:
 
 - writing source: start with [Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics);
 - understanding Cell movement: read [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects);
-- understanding 0.13 actions: read [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax);
+- understanding actions: read [Action Model and Canonical Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax);
 - using stdlib patterns: read [Standard Library](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-10-Standard-Library);
 - copying a known pattern: use [Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes);
 - checking CKB terms: keep [CKB Glossary](https://github.com/tsukifune-kosei/CellScript/wiki/CKB-Glossary) nearby;
@@ -53,9 +54,9 @@ If you already know what you need, jump directly:
    `.cell` file.
 3. [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects):
    understand how values move through a Cell transaction.
-4. [Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax):
-   learn the signature-direction action model, `where`, `transition`, named outputs,
-   and source qualifiers.
+4. [Action Model and Canonical Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax):
+   learn the signature-direction action model, `verification`, `transition`,
+   named outputs, and source qualifiers.
 5. [Standard Library](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-10-Standard-Library):
    use stdlib lifecycle, Cell metadata, accounting, runtime, and collection
    helpers without hiding verifier obligations.

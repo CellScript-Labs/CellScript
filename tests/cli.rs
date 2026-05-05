@@ -8,10 +8,11 @@ fn cellc_writes_requested_output_file() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    let z = x + y
-    return z
+action add(x: u64, y: u64) -> u64 {
+    verification
+        let z = x + y
+        return z
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -146,9 +147,10 @@ resource Token has store, consume, burn {
     amount: u64,
 }
 
-action burn(token: Token)
-where
-    destroy token
+action burn(token: Token) {
+    verification
+        destroy token
+}
 "#,
     )
     .unwrap();
@@ -179,9 +181,10 @@ resource Token has store, destroy {
     amount: u64,
 }
 
-action burn(token: Token)
-where
-    destroy token
+action burn(token: Token) {
+    verification
+        destroy token
+}
 "#,
     )
     .unwrap();
@@ -203,9 +206,10 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action send(token: Token, to: Address)
-where
-    transfer token to to
+action send(token: Token, to: Address) {
+    verification
+        transfer token to to
+}
 "#,
     )
     .unwrap();
@@ -247,9 +251,10 @@ hash_type = "type"
         r#"
 module demo::main
 
-action main(value: u64) -> u64
-where
-    return value
+action main(value: u64) -> u64 {
+    verification
+        return value
+}
 "#,
     )
     .unwrap();
@@ -296,9 +301,10 @@ fn cellc_verify_artifact_accepts_matching_sidecar() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -329,9 +335,10 @@ fn cellc_verify_artifact_rejects_tampered_artifact() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -354,9 +361,10 @@ fn cellc_verify_artifact_rejects_tampered_source_when_requested() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -367,9 +375,10 @@ where
         r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y + 1
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y + 1
+}
 "#,
     )
     .unwrap();
@@ -391,9 +400,10 @@ fn cellc_verify_artifact_rejects_metadata_schema_downgrade() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -428,9 +438,10 @@ fn cellc_verify_artifact_rejects_noncanonical_source_unit_hash() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -472,13 +483,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -502,9 +514,10 @@ fn cellc_verify_artifact_enforces_expected_hashes() {
     let source = r#"
 module test
 
-action add(x: u64, y: u64) -> u64
-where
-    x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        x + y
+}
 "#;
     std::fs::write(&input, source).unwrap();
 
@@ -644,9 +657,10 @@ module app::main
 
 use dep::token::Token
 
-action pass_through(token: Token) -> Token
-where
-    token
+action pass_through(token: Token) -> Token {
+    verification
+        token
+}
 "#,
     )
     .unwrap();
@@ -685,9 +699,10 @@ remote = "1.2.3"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -730,12 +745,13 @@ resource Token {
     amount: u64
 }
 
-action issue(amount: u64) -> Token
-where
-    let out = create Token {
-        amount: amount
-    }
-    return out
+action issue(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
 "#,
     )
     .unwrap();
@@ -761,9 +777,10 @@ use dep::token::Token
 use dep::token::issue
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token
-where
-    return issue(amount)
+action wrapper(amount: u64) -> Token {
+    verification
+        return issue(amount)
+}
 "#,
     )
     .unwrap();
@@ -782,9 +799,10 @@ module app::main
 use dep::token::Token
 
 #[effect(ReadOnly)]
-action wrapper(amount: u64) -> Token
-where
-    return dep::token::issue(amount)
+action wrapper(amount: u64) -> Token {
+    verification
+        return dep::token::issue(amount)
+}
 "#,
     )
     .unwrap();
@@ -844,9 +862,10 @@ dep_pkg = { path = "../dep_pkg" }
         r#"
 module app::main
 
-action run(x: u64) -> u64
-where
-    return dep::math::add_one(x)
+action run(x: u64) -> u64 {
+    verification
+        return dep::math::add_one(x)
+}
 "#,
     )
     .unwrap();
@@ -880,9 +899,10 @@ out_dir = "artifacts"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -921,9 +941,10 @@ out_dir = "artifacts"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -962,9 +983,10 @@ out_dir = "artifacts"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -999,9 +1021,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -1063,9 +1086,10 @@ target = "riscv64-elf"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -1119,9 +1143,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -1189,9 +1214,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action add(x: u64, y: u64) -> u64
-where
-    return x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        return x + y
+}
 "#,
     )
     .unwrap();
@@ -1235,9 +1261,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action now() -> u64
-where
-    return env::current_timepoint()
+action now() -> u64 {
+    verification
+        return env::current_timepoint()
+}
 "#,
     )
     .unwrap();
@@ -1276,13 +1303,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -1316,11 +1344,12 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action append_schema_vec(items: Vec<Address>, owner: Address) -> u64
-where
-    let mut values = items
-    values.push(owner)
-    return values.len()
+action append_schema_vec(items: Vec<Address>, owner: Address) -> u64 {
+    verification
+        let mut values = items
+        values.push(owner)
+        return values.len()
+}
 "#,
     )
     .unwrap();
@@ -1362,13 +1391,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -1410,13 +1440,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -1492,35 +1523,36 @@ flow VestingGrant.state {
     Claimable -> FullyClaimed;
 }
 
-action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant)
+action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant) {
     transition grant.state: Claimable -> updated_grant.state: FullyClaimed
-where
-    let now = env::current_timepoint()
+    verification
+        let now = env::current_timepoint()
 
-    assert_invariant(now >= grant.cliff_timepoint, "cliff not reached")
-    assert_invariant(grant.state < VestingGrant::FullyClaimed, "already fully claimed")
+        require now >= grant.cliff_timepoint, "cliff not reached"
+        require grant.state < VestingGrant::FullyClaimed, "already fully claimed"
 
-    let vested_total = grant.total_amount
-    let claimable = vested_total - grant.claimed_amount
-    assert_invariant(claimable > 0, "nothing to claim")
+        let vested_total = grant.total_amount
+        let claimable = vested_total - grant.claimed_amount
+        require claimable > 0, "nothing to claim"
 
-    consume grant
+        consume grant
 
-    let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
+        let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
 
-    create tokens = Token {
-        amount: claimable,
-        owner: grant.beneficiary
-    } with_lock(grant.beneficiary)
+        create tokens = Token {
+            amount: claimable,
+            owner: grant.beneficiary
+        } with_lock(grant.beneficiary)
 
-    create updated_grant = VestingGrant {
-        state: new_state,
-        beneficiary: grant.beneficiary,
-        total_amount: grant.total_amount,
-        claimed_amount: grant.claimed_amount + claimable,
-        cliff_timepoint: grant.cliff_timepoint,
-        end_timepoint: grant.end_timepoint
-    } with_lock(grant.beneficiary)
+        create updated_grant = VestingGrant {
+            state: new_state,
+            beneficiary: grant.beneficiary,
+            total_amount: grant.total_amount,
+            claimed_amount: grant.claimed_amount + claimable,
+            cliff_timepoint: grant.cliff_timepoint,
+            end_timepoint: grant.end_timepoint
+        } with_lock(grant.beneficiary)
+}
 "#,
     )
     .unwrap();
@@ -1632,15 +1664,16 @@ resource Token has store {
     amount: u64
 }
 
-action withdraw(token: Token, fee: u64) -> Token
-where
-    let amount = token.amount
-    let remaining = amount - fee
-    consume token
-    let out = create Token {
-        amount: remaining
-    }
-    return out
+action withdraw(token: Token, fee: u64) -> Token {
+    verification
+        let amount = token.amount
+        let remaining = amount - fee
+        consume token
+        let out = create Token {
+            amount: remaining
+        }
+        return out
+}
 "#,
     )
     .unwrap();
@@ -1702,10 +1735,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger
-where
-    require ledger_after.owner == ledger_before.owner
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger {
+    verification
+        require ledger_after.owner == ledger_before.owner
+        require ledger_after.balance == ledger_before.balance + delta
+}
 "#,
     )
     .unwrap();
@@ -1760,13 +1794,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -1827,15 +1862,16 @@ resource NFT {
     owner: Address
 }
 
-action batch_mint(owner: Address) -> Vec<NFT>
-where
-    let mut nfts = Vec::new()
-    let nft = create NFT {
-        token_id: 1,
-        owner: owner
-    }
-    nfts.push(nft)
-    return nfts
+action batch_mint(owner: Address) -> Vec<NFT> {
+    verification
+        let mut nfts = Vec::new()
+        let nft = create NFT {
+            token_id: 1,
+            owner: owner
+        }
+        nfts.push(nft)
+        return nfts
+}
 "#,
     )
     .unwrap();
@@ -1904,10 +1940,11 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.owner == ledger_before.owner
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.owner == ledger_before.owner
+        require ledger_after.balance == ledger_before.balance + delta
+}
 "#,
     )
     .unwrap();
@@ -1960,16 +1997,17 @@ resource VestingReceipt has store {
     cliff_timepoint: u64
 }
 
-action redeem_after_cliff(receipt: VestingReceipt) -> Token
-where
-    let now = env::current_timepoint()
-    assert_invariant(now >= receipt.cliff_timepoint, "cliff not reached")
+action redeem_after_cliff(receipt: VestingReceipt) -> Token {
+    verification
+        let now = env::current_timepoint()
+        require now >= receipt.cliff_timepoint, "cliff not reached"
 
-    consume receipt
+        consume receipt
 
-    create Token {
-        amount: receipt.amount
-    } with_lock(receipt.beneficiary)
+        create Token {
+            amount: receipt.amount
+        } with_lock(receipt.beneficiary)
+}
 "#,
     )
     .unwrap();
@@ -2048,33 +2086,34 @@ shared Pool has store {
     fee_rate_bps: u16
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt)
-where
-    assert_invariant(token_a.symbol != token_b.symbol, "same token")
-    assert_invariant(token_a.amount > 0 && token_b.amount > 0, "zero liquidity")
-    assert_invariant(fee_rate_bps <= 10000, "fee too high")
-    assert_invariant(token_a.type_hash() != token_b.type_hash(), "same token type")
+action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (Pool, LPReceipt) {
+    verification
+        require token_a.symbol != token_b.symbol, "same token"
+        require token_a.amount > 0 && token_b.amount > 0, "zero liquidity"
+        require fee_rate_bps <= 10000, "fee too high"
+        require token_a.type_hash() != token_b.type_hash(), "same token type"
 
-    let initial_lp: u64 = token_a.amount
-    consume token_a
-    consume token_b
+        let initial_lp: u64 = token_a.amount
+        consume token_a
+        consume token_b
 
-    let pool = create Pool {
-        token_a_symbol: token_a.symbol,
-        token_b_symbol: token_b.symbol,
-        reserve_a: token_a.amount,
-        reserve_b: token_b.amount,
-        total_lp: initial_lp,
-        fee_rate_bps: fee_rate_bps
-    }
+        let pool = create Pool {
+            token_a_symbol: token_a.symbol,
+            token_b_symbol: token_b.symbol,
+            reserve_a: token_a.amount,
+            reserve_b: token_b.amount,
+            total_lp: initial_lp,
+            fee_rate_bps: fee_rate_bps
+        }
 
-    let receipt = create LPReceipt {
-        pool_id: pool.type_hash(),
-        lp_amount: initial_lp,
-        provider: provider
-    } with_lock(provider)
+        let receipt = create LPReceipt {
+            pool_id: pool.type_hash(),
+            lp_amount: initial_lp,
+            provider: provider
+        } with_lock(provider)
 
-    (pool, receipt)
+        (pool, receipt)
+}
 "#,
     )
     .unwrap();
@@ -2188,13 +2227,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -2238,13 +2278,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -2281,9 +2322,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2292,9 +2334,10 @@ where
         r#"
 module demo::tests::math
 
-action adds() -> u64
-where
-    1 + 2
+action adds() -> u64 {
+    verification
+        1 + 2
+}
 "#,
     )
     .unwrap();
@@ -2343,9 +2386,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2355,10 +2399,11 @@ where
 // cellscript-test: expect-error: pure function cannot call action
 module demo::tests::negative
 
-action impure() -> u64
-where
-    1
+action impure() -> u64 {
+    verification
+        1
 
+}
 fn helper() -> u64 {
     impure()
 }
@@ -2395,9 +2440,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2407,10 +2453,11 @@ where
 // cellscript-test: expect-error: this text is intentionally absent
 module demo::tests::negative
 
-action impure() -> u64
-where
-    1
+action impure() -> u64 {
+    verification
+        1
 
+}
 fn helper() -> u64 {
     impure()
 }
@@ -2446,9 +2493,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2458,9 +2506,10 @@ where
 // cellscript-test: target: riscv64-elf
 module demo::tests::elf
 
-action main() -> u64
-where
-    0
+action main() -> u64 {
+    verification
+        0
+}
 "#,
     )
     .unwrap();
@@ -2493,9 +2542,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2514,13 +2564,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -2553,9 +2604,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2578,13 +2630,14 @@ fn pass_digest(digest: Hash) -> Hash {
     return digest
 }
 
-action issue(digest: Hash) -> Fingerprint
-where
-    let dynamic_digest = pass_digest(digest)
-    let token = create Fingerprint {
-        digest: dynamic_digest
-    }
-    return token
+action issue(digest: Hash) -> Fingerprint {
+    verification
+        let dynamic_digest = pass_digest(digest)
+        let token = create Fingerprint {
+            digest: dynamic_digest
+        }
+        return token
+}
 "#,
     )
     .unwrap();
@@ -2617,9 +2670,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2629,9 +2683,10 @@ where
 // cellscript-test: expect-runtime-feature: not-present
 module demo::tests::metadata
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2664,9 +2719,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2684,9 +2740,10 @@ fn helper(x: u64) -> u64 {
     x + 1
 }
 
-action run(x: u64) -> u64
-where
-    helper(x)
+action run(x: u64) -> u64 {
+    verification
+        helper(x)
+}
 "#,
     )
     .unwrap();
@@ -2719,9 +2776,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2731,9 +2789,10 @@ where
 // cellscript-test: expect-function: missing_helper
 module demo::tests::entries
 
-action run(x: u64) -> u64
-where
-    x
+action run(x: u64) -> u64 {
+    verification
+        x
+}
 "#,
     )
     .unwrap();
@@ -2766,9 +2825,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2778,9 +2838,10 @@ where
 // cellscript-test: expect-eror: typo should not be ignored
 module demo::tests::typo
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2814,9 +2875,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2827,9 +2889,10 @@ where
 // cellscript-test: expect-fail
 module demo::tests::conflict
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -2861,9 +2924,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action ping() -> u64
-where
-    1
+action ping() -> u64 {
+    verification
+        1
+}
 "#,
     )
     .unwrap();
@@ -3034,9 +3098,10 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
+action transfer_token(token: Token, to: Address) -> Token {
+    verification
+        return transfer token to to
+}
 "#,
     )
     .unwrap();
@@ -3081,9 +3146,10 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token
-where
-    return transfer token to to
+action transfer_token(token: Token, to: Address) -> Token {
+    verification
+        return transfer token to to
+}
 "#,
     )
     .unwrap();
@@ -3119,9 +3185,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();
@@ -3170,9 +3237,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();
@@ -3243,9 +3311,10 @@ resource Token {
     amount: u64,
 }
 
-action run() -> u64
-where
-    return 0
+action run() -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();
@@ -3491,12 +3560,13 @@ resource Token has store, transfer, destroy {
     amount: u64
 }
 
-action update(amount: u64) -> u64
-where
-    let cfg = read_ref<Config>()
-    let token = create Token { amount: amount }
-    consume token
-    return cfg.threshold
+action update(amount: u64) -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        let token = create Token { amount: amount }
+        consume token
+        return cfg.threshold
+}
 "#,
     )
     .unwrap();
@@ -3539,38 +3609,40 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action address_helpers(owner: Address, candidate: Address) -> bool
-where
-    let mut owners = Vec::with_capacity(2)
-    owners.push(owner)
-    owners.insert(0, candidate)
-    owners.swap(0, 1)
-    let removed = owners.remove(1)
-    owners.push(removed)
-    owners.truncate(1)
-    owners.set(0, owner)
+action address_helpers(owner: Address, candidate: Address) -> bool {
+    verification
+        let mut owners = Vec::with_capacity(2)
+        owners.push(owner)
+        owners.insert(0, candidate)
+        owners.swap(0, 1)
+        let removed = owners.remove(1)
+        owners.push(removed)
+        owners.truncate(1)
+        owners.set(0, owner)
 
-    if owners.contains(owner) {
-        return owners.first() == owner
-    }
+        if owners.contains(owner) {
+            return owners.first() == owner
+        }
 
-    false
+        false
 
-action hash_helpers(first: Hash, second: Hash) -> bool
-where
-    let mut keys = Vec::new()
-    keys.push(first)
-    keys.push(second)
-    let popped = keys.pop()
-    keys.push(popped)
-    keys.swap(0, 1)
-    keys.reverse()
+}
+action hash_helpers(first: Hash, second: Hash) -> bool {
+    verification
+        let mut keys = Vec::new()
+        keys.push(first)
+        keys.push(second)
+        let popped = keys.pop()
+        keys.push(popped)
+        keys.swap(0, 1)
+        keys.reverse()
 
-    if keys.first() == first {
-        return keys.last() == second
-    }
+        if keys.first() == first {
+            return keys.last() == second
+        }
 
-    false
+        false
+}
 "#,
     )
     .unwrap();
@@ -3658,9 +3730,10 @@ resource Token has store, transfer {
     amount: u64,
 }
 
-action mint(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#,
     )
     .unwrap();
@@ -3686,8 +3759,39 @@ where
     assert_eq!(plan["builder_requirements"]["created_outputs"].as_array().unwrap().len(), 1);
     assert!(plan["ckb"]["capacity_evidence_contract"]["required"].as_bool().unwrap());
     assert_eq!(plan["transaction_draft"]["format"], "cellscript-ccc-transaction-draft-v1");
+    assert_eq!(plan["transaction_draft"]["state"], "ActionPlan");
     assert_eq!(plan["transaction_draft"]["ccc_compatible"], true);
+    assert_eq!(plan["transaction_draft"]["can_submit"], false);
+    assert_eq!(plan["transaction_draft"]["ckb_vm_execution"], false);
+    assert_eq!(plan["transaction_draft"]["tx_pool_acceptance"], false);
     assert_eq!(plan["transaction_draft"]["requires_live_cell_resolution"], true);
+    assert_eq!(plan["transaction_draft"]["requires_packed_materialization"], true);
+    assert_eq!(plan["transaction_draft"]["packed_materialization"]["transaction"], "ckb_types::packed::Transaction");
+    assert_eq!(plan["transaction_draft"]["packed_materialization"]["script"], "ckb_types::packed::Script");
+    assert_eq!(plan["transaction_draft"]["packed_materialization"]["out_point"], "ckb_types::packed::OutPoint");
+    assert_eq!(plan["transaction_draft"]["packed_materialization"]["realizer"], "cellscript-ckb-adapter via ckb-sdk-rust or CCC");
+    assert!(plan["transaction_draft"]["required_evidence"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "tx_pool_acceptance")));
+    assert_eq!(plan["adapter_contract"]["schema"], "cellscript-ckb-adapter-contract-v0.19");
+    assert_eq!(plan["adapter_contract"]["compiler_core_dependency"], "no-ckb-sdk-rust");
+    assert_eq!(plan["adapter_contract"]["compiler_output_state"], "ActionPlan");
+    assert_eq!(plan["adapter_contract"]["adapter_output_state"], "ResolvedActionTx");
+    assert_eq!(plan["adapter_contract"]["accepted_output_state"], "AcceptedActionTx");
+    assert_eq!(plan["adapter_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["entry_payload_abi"], "cellscript-entry-witness-v1");
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["default_action_payload_field"], "input_type");
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["lock_signature_policy"], "explicit-adapter-owned-do-not-overwrite");
+    assert!(plan["adapter_contract"]["resolved_tx_required_fields"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "outputs_data") && items.iter().any(|item| item == "lineage")));
+    assert_eq!(plan["adapter_contract"]["acceptance_report_template"]["schema"], "cellscript-ckb-action-acceptance-report-v0.19");
+    assert_eq!(plan["adapter_contract"]["acceptance_report_template"]["state"], "AcceptedActionTx");
+    assert_eq!(plan["adapter_contract"]["acceptance_report_template"]["action_selector"], "mint");
+    assert!(plan["adapter_contract"]["acceptance_report_template"]["metadata_hash"].as_str().is_some_and(|hash| hash.len() == 64));
+    assert!(plan["adapter_contract"]["acceptance_report_template"]["known_limitations"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item.as_str().is_some_and(|text| text.contains("Template only")))));
     assert_eq!(plan["preview"]["format"], "cellscript-action-preview-v1");
     assert_eq!(plan["preview"]["action"], "mint");
     assert!(plan["preview"]["warnings"].as_array().is_some_and(|warnings| !warnings.is_empty()));
@@ -3713,9 +3817,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action main(amount: u64) -> u64
-where
-    return amount
+action main(amount: u64) -> u64 {
+    verification
+        return amount
+}
 "#,
     )
     .unwrap();
@@ -3774,9 +3879,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot, amount: u64) -> u64
-where
-    return amount
+action main(snapshot: Snapshot, amount: u64) -> u64 {
+    verification
+        return amount
+}
 "#,
     )
     .unwrap();
@@ -3827,17 +3933,20 @@ shared Ledger has store {
     balance: u64,
 }
 
-action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.balance == ledger_before.balance + delta
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.balance == ledger_before.balance + delta
 
-action debit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
-where
-    require ledger_after.balance == ledger_before.balance - delta
+}
+action debit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
+    verification
+        require ledger_after.balance == ledger_before.balance - delta
 
-action read_only(value: u64) -> u64
-where
-    return value
+}
+action read_only(value: u64) -> u64 {
+    verification
+        return value
+}
 "#,
     )
     .unwrap();
@@ -3884,6 +3993,37 @@ fn cellc_ckb_hash_emits_default_blake2b_vector() {
 }
 
 #[test]
+fn cellc_ckb_std_compat_reports_runtime_boundary() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("ckb-std-compat").arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["schema"], "cellscript-ckb-std-compat-report-v0.19");
+    assert_eq!(report["runtime_policy"], "inline");
+    assert_eq!(report["compiler_core_dependency"], "no-ckb-std");
+    assert_eq!(report["test_evidence"]["compat_tests"], "tests/ckb_std_compat.rs");
+    assert_eq!(report["test_evidence"]["packed_transaction_materialization"], true);
+    assert_eq!(report["test_evidence"]["script_construction_api"], true);
+    assert_eq!(report["ckb_std_refs"]["type_id"], "ckb_std::type_id");
+    assert_eq!(report["inline_abi"]["fields"]["cell_occupied_capacity"], 6);
+    assert_eq!(report["witness_args_policy"]["entry_payload_abi"], "cellscript-entry-witness-v1");
+    assert_eq!(report["witness_args_policy"]["final_witness_args_owner"], "adapter");
+    assert_eq!(report["witness_args_policy"]["lock_signature_policy"], "explicit-adapter-owned-do-not-overwrite");
+    assert_eq!(report["adapter_boundary"]["transaction_realizer"], "ckb-sdk-rust-or-CCC-adapter");
+    assert_eq!(report["adapter_boundary"]["compiler_core_uses_ckb_sdk_rust"], false);
+    assert_eq!(report["adapter_boundary"]["script_construction"]["packed_type"], "ckb_types::packed::Script");
+    assert_eq!(report["adapter_boundary"]["script_construction"]["evidence_schema"], "cellscript-ckb-script-evidence-v0.19");
+    assert!(report["adapter_boundary"]["script_construction"]["supports"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "script_ref_readback")));
+    assert!(report["adapter_boundary"]["script_construction"]["supports"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "explicit_cell_dep_binding")));
+    assert!(report["non_goals"].as_array().is_some_and(|items| items.iter().any(|item| item == "does-not-execute-ckb-vm")));
+}
+
+#[test]
 fn cellc_opt_report_compares_all_optimization_levels() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -3893,10 +4033,11 @@ fn cellc_opt_report_compares_all_optimization_levels() {
         r#"
 module demo::main
 
-action main(value: u64) -> u64
-where
-    let doubled = value + value
-    return doubled
+action main(value: u64) -> u64 {
+    verification
+        let doubled = value + value
+        return doubled
+}
 "#,
     )
     .unwrap();
@@ -3944,9 +4085,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot, amount: u64) -> u64
-where
-    return amount
+action main(snapshot: Snapshot, amount: u64) -> u64 {
+    verification
+        return amount
+}
 "#,
     )
     .unwrap();
@@ -3991,9 +4133,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action owned(owner: Address) -> u64
-where
-    return 0
+action owned(owner: Address) -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();
@@ -4029,7 +4172,7 @@ version = "0.1.0"
     )
     .unwrap();
     let source_path = root.join("src").join("main.cell");
-    std::fs::write(&source_path, "module demo::main\naction ping(x:u64)->u64\nwhere\nx\n").unwrap();
+    std::fs::write(&source_path, "module demo::main\naction ping(x:u64)->u64{\nverification\nx\n}\n").unwrap();
 
     let dirty_check =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
@@ -4044,7 +4187,7 @@ version = "0.1.0"
     assert!(status.success());
 
     let formatted = std::fs::read_to_string(&source_path).unwrap();
-    assert!(formatted.contains("action ping(x: u64) -> u64\nwhere"));
+    assert!(formatted.contains("action ping(x: u64) -> u64 {\n    verification"));
 
     let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
     assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
@@ -4086,9 +4229,10 @@ version = "0.1.0"
         r#"
 module demo::main
 
-action main() -> u64
-where
-    0
+action main() -> u64 {
+    verification
+        0
+}
 "#,
     )
     .unwrap();
@@ -4127,9 +4271,10 @@ struct Snapshot {
     amount: u64,
 }
 
-action main(snapshot: Snapshot) -> u64
-where
-    snapshot.amount
+action main(snapshot: Snapshot) -> u64 {
+    verification
+        snapshot.amount
+}
 "#,
     )
     .unwrap();
@@ -4167,10 +4312,11 @@ shared Config {
     threshold: u64,
 }
 
-action main() -> u64
-where
-    let cfg = read_ref<Config>()
-    cfg.threshold
+action main() -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        cfg.threshold
+}
 "#,
     )
     .unwrap();

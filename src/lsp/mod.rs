@@ -327,10 +327,10 @@ impl LspServer {
                 "invariant",
                 "invariant ${1:name} {\n    trigger: ${2:type_group}\n    scope: ${3:group}\n    reads: ${4:group_inputs<Token>.amount}, ${5:group_outputs<Token>.amount}\n    assert_conserved(${6:Token.amount}, scope = ${7:group})\n}",
             ),
-            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    verification\n        $0\n}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    require ${6} == ${2}.owner\n    require ${4} == ${6}\n    $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    verification\n        require ${6} == ${2}.owner\n        require ${4} == ${6}\n        $0\n}",
             ),
             ("const", "const ${1:NAME}: ${2:u64} = $0;"),
             ("enum", "enum ${1:Name} {\n    $0\n}"),
@@ -885,13 +885,13 @@ impl LspServer {
             ("shared", "shared ${1:Name} {\n    $0\n}"),
             ("receipt", "receipt ${1:Name} {\n    $0\n}"),
             ("struct", "struct ${1:Name} {\n    $0\n}"),
-            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType}\nwhere\n    $0"),
+            ("action", "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType} {\n    verification\n        $0\n}"),
             ("flow", "flow ${1:Name} for ${2:Type}.${3:state} {\n    ${4:Created} -> ${5:Live};\n}"),
             ("input", "input ${1:name}: ${2:CellType}"),
-            ("transition", "transition ${1:input}.${2:state}: ${3:Created} -> ${4:output}.${2:state}: ${5:Live}"),
+            ("transition", "transition ${1:input} -> ${2:output}"),
             (
                 "lock",
-                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    require ${6} == ${2}.owner\n    require ${4} == ${6}\n    $0\n}",
+                "lock ${1:name}(protected ${2:cell}: ${3:CellType}, witness ${4:arg}: ${5:Address}, lock_args ${6:owner}: ${7:Address}) -> bool {\n    verification\n        require ${6} == ${2}.owner\n        require ${4} == ${6}\n        $0\n}",
             ),
             ("let", "let ${1:name} = $0"),
             ("if", "if ${1:condition} {\n    $0\n}"),
@@ -900,8 +900,8 @@ impl LspServer {
             ("return", "return $0"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
             ("destroy", "destroy ${1:expr}"),
-            ("assert", "assert ${1:condition}"),
             ("require", "require ${1:condition}"),
+            ("verification", "verification\n    $0"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
             ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
@@ -2485,7 +2485,7 @@ mod tests {
         let mut server = LspServer::new();
 
         let uri = "file:///test.cell".to_string();
-        let content = "module test;\n\naction answer() -> u64\nwhere\n    42\n".to_string();
+        let content = "module test;\n\naction answer() -> u64 {\n    verification\n        42\n}\n".to_string();
 
         server.open_document(uri.clone(), content);
         assert!(server.get_diagnostics(&uri).is_empty());
@@ -2614,12 +2614,13 @@ flow OtherTicket.state {
     Draft -> Live;
 }
 
-action activate(ticket: Ticket) -> active_ticket: Ticket
+action activate(ticket: Ticket) -> active_ticket: Ticket {
     transition ticket.state: Created -> active_ticket.state: Active
-where
-    assert_invariant(ticket.state < Ticket::Closed, "closed")
-    require active_ticket.state == Ticket::Active
-    require active_ticket.id == ticket.id
+    verification
+        require ticket.state < Ticket::Closed, "closed"
+        require active_ticket.state == Ticket::Active
+        require active_ticket.id == ticket.id
+}
 "#
         .to_string();
 
@@ -2664,11 +2665,12 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require output.state == Offer::Filled
-    require output.amount == input.amount
+    verification
+        require output.state == Offer::Filled
+        require output.amount == input.amount
+}
 "#
         .to_string();
 
@@ -2704,13 +2706,13 @@ where
         let mut server = LspServer::new();
         let uri = "file:///defs.cell".to_string();
         let source =
-            "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64\nwhere\n    let token = Token { amount: 1 };\n    token.amount\n";
+            "module defs;\n\nresource Token {\n    amount: u64,\n}\n\naction make() -> u64 {\n    verification\n        let token = Token { amount: 1 };\n        token.amount\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
-        let definition = server.goto_definition(&uri, Position { line: 8, character: 16 }).expect("definition");
+        let definition = server.goto_definition(&uri, Position { line: 8, character: 20 }).expect("definition");
         assert_eq!(definition.range.start.line, 2);
 
-        let refs = server.find_references(&uri, Position { line: 8, character: 16 });
+        let refs = server.find_references(&uri, Position { line: 8, character: 20 });
         assert!(refs.len() >= 2);
     }
 
@@ -2718,7 +2720,7 @@ where
     fn test_hover() {
         let mut server = LspServer::new();
         let uri = "file:///hover.cell".to_string();
-        let source = "module hover;\n\naction demo(x: u64)->u64\nwhere\n    x\n";
+        let source = "module hover;\n\naction demo(x: u64)->u64 {\n    verification\n        x\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
         let hover = server.hover(&uri, Position { line: 2, character: 7 }).expect("hover");
@@ -2740,12 +2742,13 @@ resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
-action update(amount: u64) -> u64
-where
-    let cfg = read_ref<Config>()
-    let token = create Token { amount: amount }
-    consume token
-    return cfg.threshold
+action update(amount: u64) -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        let token = create Token { amount: amount }
+        consume token
+        return cfg.threshold
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2780,12 +2783,13 @@ flow Ticket.state {
     Created -> Active;
 }
 
-action activate(ticket: Ticket) -> active_ticket: Ticket
+action activate(ticket: Ticket) -> active_ticket: Ticket {
     transition ticket.state: Created -> active_ticket.state: Active
-where
-    let active = Ticket::Active
-    require active_ticket.state == active
-    require active_ticket.id == ticket.id
+    verification
+        let active = Ticket::Active
+        require active_ticket.state == active
+        require active_ticket.id == ticket.id
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2812,12 +2816,13 @@ resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
 }
 
-action update(amount: u64) -> u64
-where
-    let cfg = read_ref<Config>()
-    let token = create Token { amount: amount }
-    consume token
-    return cfg.threshold
+action update(amount: u64) -> u64 {
+    verification
+        let cfg = read_ref<Config>()
+        let token = create Token { amount: amount }
+        consume token
+        return cfg.threshold
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2839,14 +2844,15 @@ resource NFT {
     token_id: u64,
 }
 
-action use_collection() -> Vec<NFT>
-where
-    let mut items = Vec::new()
-    let nft = create NFT {
-        token_id: 1,
-    }
-    items.push(nft)
-    return items
+action use_collection() -> Vec<NFT> {
+    verification
+        let mut items = Vec::new()
+        let nft = create NFT {
+            token_id: 1,
+        }
+        items.push(nft)
+        return items
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -2861,12 +2867,12 @@ where
     fn test_format_document() {
         let mut server = LspServer::new();
         let uri = "file:///fmt.cell".to_string();
-        let source = "module fmt\naction demo(x:u64)->u64\nwhere\nx\n";
+        let source = "module fmt\naction demo(x:u64)->u64 {\nverification\nx\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
         let edits = server.format_document(&uri);
         assert_eq!(edits.len(), 1);
-        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64\nwhere"));
+        assert!(edits[0].new_text.contains("action demo(x: u64) -> u64 {\n    verification"));
     }
 
     #[test]
@@ -2877,7 +2883,7 @@ where
         std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -2900,7 +2906,7 @@ where
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
         std::fs::write(root.join("src/main.cell"), main_source).unwrap();
 
         let mut server = LspServer::new();
@@ -2923,7 +2929,7 @@ where
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
         let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
+            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
         let main_path = root.join("src/main.cell");
         std::fs::write(&main_path, main_source).unwrap();
 
@@ -2975,9 +2981,10 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64
-where
-    token.amount
+action inspect(token: Token) -> u64 {
+    verification
+        token.amount
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 
@@ -3000,10 +3007,11 @@ resource Token {
     amount: u64,
 }
 
-action inspect(token: Token) -> u64
-where
-    let label = "Token"
-    token.amount
+action inspect(token: Token) -> u64 {
+    verification
+        let label = "Token"
+        token.amount
+}
 "#;
         server.open_document(uri.clone(), source.to_string());
 

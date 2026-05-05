@@ -40,11 +40,12 @@ High-value active references include:
   governance summary
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` for the active grammar-governance
-  direction around transition shape, `where`, `require`, and accounting syntax
+  direction around transition shape, `verification`, `require`, and accounting
+  syntax
+- `CELLSCRIPT_SURFACE_ELEGANCE_RFC.md` for deferred syntax candidates that
+  require full parser/typechecker/lowering/metadata/formatter/LSP coverage
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`
 - `CELLSCRIPT_CKB_ADAPTER.md`
-- `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`
-- `CELLSCRIPT_CKB_STD_COMPAT.md`
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
 - `CELLSCRIPT_RUNTIME_ERROR_CODES.md`
 
@@ -65,6 +66,11 @@ to branch-specific evidence or forward design:
 - `0.17/CELLSCRIPT_0_17_ROADMAP.md`
 - `CELLSCRIPT_0_18_ROADMAP.md`
 - `CELLSCRIPT_0_19_ROADMAP.md`
+- `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
+- `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
+- `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
+  `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md` for 0.19 grammar/syntax
+  governance scope
 
 ## Archive
 

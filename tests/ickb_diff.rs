@@ -53,23 +53,24 @@ const RETIRED_MODEL_ASSUMPTIONS: [(&str, &str, &str); 3] = [
 const VM_HARNESS_WITNESS_ARGS_PROGRAM: &str = r#"
 module vm_harness_witness_args
 
-action test_witness_args() -> u64
-where
-    let view = source::input(0)
-    let size = witness::size(view)
-    ckb::require_witness_size_at_least(view, 16)
-    let raw = witness::raw(view)
-    if size != 16 {
-        return 1
-    }
-    if raw == Hash::zero() {
-        return 2
-    }
-    let lock_field = witness::lock(view)
-    if lock_field != Hash::zero() {
-        return 3
-    }
-    return 0
+action test_witness_args() -> u64 {
+    verification
+        let view = source::input(0)
+        let size = witness::size(view)
+        ckb::require_witness_size_at_least(view, 16)
+        let raw = witness::raw(view)
+        if size != 16 {
+            return 1
+        }
+        if raw == Hash::zero() {
+            return 2
+        }
+        let lock_field = witness::lock(view)
+        if lock_field != Hash::zero() {
+            return 3
+        }
+        return 0
+}
 "#;
 
 const VM_HARNESS_WITNESS_ARGS_ACTION: &str = "test_witness_args";
@@ -77,11 +78,12 @@ const VM_HARNESS_WITNESS_ARGS_ACTION: &str = "test_witness_args";
 const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_PROGRAM: &str = r#"
 module vm_harness_witness_size_too_small
 
-action test_witness_size_too_small() -> u64
-where
-    let view = source::input(0)
-    ckb::require_witness_size_at_least(view, 17)
-    return 0
+action test_witness_size_too_small() -> u64 {
+    verification
+        let view = source::input(0)
+        ckb::require_witness_size_at_least(view, 17)
+        return 0
+}
 "#;
 
 const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_small";
@@ -89,14 +91,15 @@ const VM_HARNESS_WITNESS_SIZE_TOO_SMALL_ACTION: &str = "test_witness_size_too_sm
 const VM_HARNESS_WITNESS_SHORT_LOCK_PROGRAM: &str = r#"
 module vm_harness_witness_short_lock
 
-action test_witness_short_lock_zero_padded() -> u64
-where
-    let view = source::input(0)
-    let lock_field = witness::lock(view)
-    if lock_field != Hash::zero() {
-        return 1
-    }
-    return 0
+action test_witness_short_lock_zero_padded() -> u64 {
+    verification
+        let view = source::input(0)
+        let lock_field = witness::lock(view)
+        if lock_field != Hash::zero() {
+            return 1
+        }
+        return 0
+}
 "#;
 
 const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero_padded";
@@ -104,31 +107,32 @@ const VM_HARNESS_WITNESS_SHORT_LOCK_ACTION: &str = "test_witness_short_lock_zero
 const VM_HARNESS_WITNESS_TYPED_FIELDS_PROGRAM: &str = r#"
 module vm_harness_witness_typed_fields
 
-action test_witness_typed_fields() -> u64
-where
-    let view = source::input(0)
-    let lock_field = witness::lock(view)
-    let input_type = witness::input_type(view)
-    let output_type = witness::output_type(view)
-    if lock_field == Hash::zero() {
-        return 1
-    }
-    if input_type == Hash::zero() {
-        return 2
-    }
-    if output_type == Hash::zero() {
-        return 3
-    }
-    if lock_field == input_type {
-        return 4
-    }
-    if input_type == output_type {
-        return 5
-    }
-    if lock_field == output_type {
-        return 6
-    }
-    return 0
+action test_witness_typed_fields() -> u64 {
+    verification
+        let view = source::input(0)
+        let lock_field = witness::lock(view)
+        let input_type = witness::input_type(view)
+        let output_type = witness::output_type(view)
+        if lock_field == Hash::zero() {
+            return 1
+        }
+        if input_type == Hash::zero() {
+            return 2
+        }
+        if output_type == Hash::zero() {
+            return 3
+        }
+        if lock_field == input_type {
+            return 4
+        }
+        if input_type == output_type {
+            return 5
+        }
+        if lock_field == output_type {
+            return 6
+        }
+        return 0
+}
 "#;
 
 const VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION: &str = "test_witness_typed_fields";
@@ -136,14 +140,15 @@ const VM_HARNESS_WITNESS_TYPED_FIELDS_ACTION: &str = "test_witness_typed_fields"
 const VM_HARNESS_WITNESS_MALFORMED_PROGRAM: &str = r#"
 module vm_harness_witness_malformed
 
-action test_witness_malformed() -> u64
-where
-    let view = source::input(0)
-    let lock_field = witness::lock(view)
-    if lock_field == Hash::zero() {
-        return 1
-    }
-    return 0
+action test_witness_malformed() -> u64 {
+    verification
+        let view = source::input(0)
+        let lock_field = witness::lock(view)
+        if lock_field == Hash::zero() {
+            return 1
+        }
+        return 0
+}
 "#;
 
 const VM_HARNESS_WITNESS_MALFORMED_ACTION: &str = "test_witness_malformed";
@@ -552,221 +557,228 @@ const DEPOSIT_PHASE1_CELLSCRIPT_ACTION: &str = "test_deposit_phase1";
 const DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_deposit_phase1
 
-action test_deposit_phase1() -> u64
-where
-    let deposit = source::output(0)
-    let receipt = source::group_output(0)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(deposit, current_script_hash)
-    let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
-    script::require_cell_type_matches(deposit, expected_dao_type)
-    let is_deposit = dao::is_deposit_data(deposit)
-    if !is_deposit {
-        return 11
-    }
-    let capacity = ckb::cell_capacity(deposit)
-    if capacity < 100000000000 {
-        return 6
-    }
-    let receipt_size = ckb::cell_data_size(receipt)
-    if receipt_size < 12 {
-        return 9
-    }
-    let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
-    if receipt_quantity != 1 {
-        return 12
-    }
-    let expected_unoccupied_capacity = capacity - 8200000000
-    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
-    if receipt_deposit_amount != expected_unoccupied_capacity {
-        return 13
-    }
-    return 0
+action test_deposit_phase1() -> u64 {
+    verification
+        let deposit = source::output(0)
+        let receipt = source::group_output(0)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(deposit, current_script_hash)
+        let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
+        script::require_cell_type_matches(deposit, expected_dao_type)
+        let is_deposit = dao::is_deposit_data(deposit)
+        if !is_deposit {
+            return 11
+        }
+        let capacity = ckb::cell_capacity(deposit)
+        if capacity < 100000000000 {
+            return 6
+        }
+        let receipt_size = ckb::cell_data_size(receipt)
+        if receipt_size < 12 {
+            return 9
+        }
+        let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
+        if receipt_quantity != 1 {
+            return 12
+        }
+        let expected_unoccupied_capacity = capacity - 8200000000
+        let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
+        if receipt_deposit_amount != expected_unoccupied_capacity {
+            return 13
+        }
+        return 0
+}
 "#;
 const DEPOSIT_PHASE1_UPPER_BOUND_CELLSCRIPT_ACTION: &str = "test_deposit_phase1_upper_bound";
 const DEPOSIT_PHASE1_UPPER_BOUND_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_deposit_phase1_upper_bound
 
-action test_deposit_phase1_upper_bound() -> u64
-where
-    let deposit = source::output(0)
-    let receipt = source::group_output(0)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(deposit, current_script_hash)
-    let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
-    script::require_cell_type_matches(deposit, expected_dao_type)
-    let is_deposit = dao::is_deposit_data(deposit)
-    if !is_deposit {
-        return 11
-    }
-    let capacity = ckb::cell_capacity(deposit)
-    if capacity < 100000000000 {
-        return 6
-    }
-    if capacity > 100000000000000 {
-        return 7
-    }
-    let receipt_size = ckb::cell_data_size(receipt)
-    if receipt_size < 12 {
-        return 9
-    }
-    let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
-    if receipt_quantity != 1 {
-        return 12
-    }
-    let expected_unoccupied_capacity = capacity - 8200000000
-    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
-    if receipt_deposit_amount != expected_unoccupied_capacity {
-        return 13
-    }
-    return 0
+action test_deposit_phase1_upper_bound() -> u64 {
+    verification
+        let deposit = source::output(0)
+        let receipt = source::group_output(0)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(deposit, current_script_hash)
+        let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
+        script::require_cell_type_matches(deposit, expected_dao_type)
+        let is_deposit = dao::is_deposit_data(deposit)
+        if !is_deposit {
+            return 11
+        }
+        let capacity = ckb::cell_capacity(deposit)
+        if capacity < 100000000000 {
+            return 6
+        }
+        if capacity > 100000000000000 {
+            return 7
+        }
+        let receipt_size = ckb::cell_data_size(receipt)
+        if receipt_size < 12 {
+            return 9
+        }
+        let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
+        if receipt_quantity != 1 {
+            return 12
+        }
+        let expected_unoccupied_capacity = capacity - 8200000000
+        let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
+        if receipt_deposit_amount != expected_unoccupied_capacity {
+            return 13
+        }
+        return 0
+}
 "#;
 const NON_EMPTY_ARGS_CELLSCRIPT_ACTION: &str = "test_non_empty_args";
 const NON_EMPTY_ARGS_CELLSCRIPT_PROGRAM: &str = r#"
 module diff_non_empty_args
 
-action test_non_empty_args() -> u64
-where
-    ckb::require_cell_type_args_empty(source::output(0))
-    return 0
+action test_non_empty_args() -> u64 {
+    verification
+        ckb::require_cell_type_args_empty(source::output(0))
+        return 0
+}
 "#;
 const MINT_FROM_RECEIPT_CELLSCRIPT_ACTION: &str = "test_mint_from_receipt";
 const MINT_FROM_RECEIPT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_mint_from_receipt
 
-action test_mint_from_receipt() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let receipt_input = source::group_input(0)
-    let input_rate = dao::input_accumulated_rate(receipt_input)
-    if input_rate != 10000000000000000 {
-        return 31
-    }
-    let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
-    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
-    let expected_minted = receipt_quantity * receipt_deposit_amount
-    let xudt_output = source::output(0)
-    xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
-    let minted_low = xudt::amount_low(xudt_output)
-    let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != expected_minted {
-        return 32
-    }
-    if minted_high != 0 {
-        return 33
-    }
-    return 0
+action test_mint_from_receipt() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let receipt_input = source::group_input(0)
+        let input_rate = dao::input_accumulated_rate(receipt_input)
+        if input_rate != 10000000000000000 {
+            return 31
+        }
+        let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
+        let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
+        let expected_minted = receipt_quantity * receipt_deposit_amount
+        let xudt_output = source::output(0)
+        xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
+        let minted_low = xudt::amount_low(xudt_output)
+        let minted_high = xudt::amount_high(xudt_output)
+        if minted_low != expected_minted {
+            return 32
+        }
+        if minted_high != 0 {
+            return 33
+        }
+        return 0
+}
 "#;
 const MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION: &str = "test_mint_from_receipt_receipt_data_size";
 const MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_mint_from_receipt_receipt_data_size
 
-action test_mint_from_receipt_receipt_data_size() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let receipt_input = source::group_input(0)
-    let receipt_size = ckb::cell_data_size(receipt_input)
-    if receipt_size < 12 {
-        return 37
-    }
-    let input_rate = dao::input_accumulated_rate(receipt_input)
-    if input_rate != 10000000000000000 {
-        return 31
-    }
-    let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
-    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
-    let expected_minted = receipt_quantity * receipt_deposit_amount
-    let xudt_output = source::output(0)
-    xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
-    let minted_low = xudt::amount_low(xudt_output)
-    let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != expected_minted {
-        return 32
-    }
-    if minted_high != 0 {
-        return 33
-    }
-    return 0
+action test_mint_from_receipt_receipt_data_size() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let receipt_input = source::group_input(0)
+        let receipt_size = ckb::cell_data_size(receipt_input)
+        if receipt_size < 12 {
+            return 37
+        }
+        let input_rate = dao::input_accumulated_rate(receipt_input)
+        if input_rate != 10000000000000000 {
+            return 31
+        }
+        let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
+        let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
+        let expected_minted = receipt_quantity * receipt_deposit_amount
+        let xudt_output = source::output(0)
+        xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
+        let minted_low = xudt::amount_low(xudt_output)
+        let minted_high = xudt::amount_high(xudt_output)
+        if minted_low != expected_minted {
+            return 32
+        }
+        if minted_high != 0 {
+            return 33
+        }
+        return 0
+}
 "#;
 const RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_ACTION: &str = "test_receipt_group_under_mint";
 const RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_group_under_mint
 
-action test_receipt_group_under_mint() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let first_receipt_input = source::group_input(0)
-    let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
-    if first_input_rate != 10000000000000000 {
-        return 31
-    }
-    let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
-    let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
-    let second_receipt_input = source::group_input(1)
-    let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
-    if second_input_rate != 10000000000000000 {
-        return 31
-    }
-    let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
-    let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
-    let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
-    let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
-    let expected_minted = first_expected_minted + second_expected_minted
-    let xudt_output = source::output(0)
-    xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
-    let minted_low = xudt::amount_low(xudt_output)
-    let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != expected_minted {
-        return 36
-    }
-    if minted_high != 0 {
-        return 33
-    }
-    return 0
+action test_receipt_group_under_mint() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let first_receipt_input = source::group_input(0)
+        let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
+        if first_input_rate != 10000000000000000 {
+            return 31
+        }
+        let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
+        let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
+        let second_receipt_input = source::group_input(1)
+        let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
+        if second_input_rate != 10000000000000000 {
+            return 31
+        }
+        let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
+        let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
+        let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
+        let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
+        let expected_minted = first_expected_minted + second_expected_minted
+        let xudt_output = source::output(0)
+        xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
+        let minted_low = xudt::amount_low(xudt_output)
+        let minted_high = xudt::amount_high(xudt_output)
+        if minted_low != expected_minted {
+            return 36
+        }
+        if minted_high != 0 {
+            return 33
+        }
+        return 0
+}
 "#;
 const RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION: &str = "test_receipt_group_receipt_data_size";
 const RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_group_receipt_data_size
 
-action test_receipt_group_receipt_data_size() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let first_receipt_input = source::group_input(0)
-    let first_receipt_size = ckb::cell_data_size(first_receipt_input)
-    if first_receipt_size < 12 {
-        return 37
-    }
-    let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
-    if first_input_rate != 10000000000000000 {
-        return 31
-    }
-    let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
-    let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
-    let second_receipt_input = source::group_input(1)
-    let second_receipt_size = ckb::cell_data_size(second_receipt_input)
-    if second_receipt_size < 12 {
-        return 38
-    }
-    let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
-    if second_input_rate != 10000000000000000 {
-        return 31
-    }
-    let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
-    let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
-    let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
-    let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
-    let expected_minted = first_expected_minted + second_expected_minted
-    let xudt_output = source::output(0)
-    xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
-    let minted_low = xudt::amount_low(xudt_output)
-    let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != expected_minted {
-        return 36
-    }
-    if minted_high != 0 {
-        return 33
-    }
-    return 0
+action test_receipt_group_receipt_data_size() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let first_receipt_input = source::group_input(0)
+        let first_receipt_size = ckb::cell_data_size(first_receipt_input)
+        if first_receipt_size < 12 {
+            return 37
+        }
+        let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
+        if first_input_rate != 10000000000000000 {
+            return 31
+        }
+        let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
+        let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
+        let second_receipt_input = source::group_input(1)
+        let second_receipt_size = ckb::cell_data_size(second_receipt_input)
+        if second_receipt_size < 12 {
+            return 38
+        }
+        let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
+        if second_input_rate != 10000000000000000 {
+            return 31
+        }
+        let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
+        let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
+        let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
+        let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
+        let expected_minted = first_expected_minted + second_expected_minted
+        let xudt_output = source::output(0)
+        xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
+        let minted_low = xudt::amount_low(xudt_output)
+        let minted_high = xudt::amount_high(xudt_output)
+        if minted_low != expected_minted {
+            return 36
+        }
+        if minted_high != 0 {
+            return 33
+        }
+        return 0
+}
 "#;
 const RECEIPT_WITHOUT_DEPOSIT_DIFF_SCENARIO: &str = "differential: receipt without deposit original vs CellScript agree";
 const RECEIPT_WITHOUT_DEPOSIT_INPUT_CAPACITY: u64 = 200_000_000_000;
@@ -776,38 +788,40 @@ const RECEIPT_WITHOUT_DEPOSIT_CELLSCRIPT_ACTION: &str = "test_receipt_needs_depo
 const RECEIPT_WITHOUT_DEPOSIT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_receipt_without_deposit
 
-action test_receipt_needs_deposit() -> u64
-where
-    let receipt = source::group_output(0)
-    let receipt_size = ckb::cell_data_size(receipt)
-    if receipt_size == 0 {
-        return 9
-    }
-    return 10
+action test_receipt_needs_deposit() -> u64 {
+    verification
+        let receipt = source::group_output(0)
+        let receipt_size = ckb::cell_data_size(receipt)
+        if receipt_size == 0 {
+            return 9
+        }
+        return 10
+}
 "#;
 const DUPLICATE_RECEIPT_OUTPUT_CELLSCRIPT_ACTION: &str = "test_duplicate_receipt_output";
 const DUPLICATE_RECEIPT_OUTPUT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_duplicate_receipt_output
 
-action test_duplicate_receipt_output() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let deposit = source::output(0)
-    let is_deposit = dao::is_deposit_data(deposit)
-    if !is_deposit {
-        return 11
-    }
-    let first_receipt = source::group_output(0)
-    let first_receipt_size = ckb::cell_data_size(first_receipt)
-    if first_receipt_size == 0 {
-        return 9
-    }
-    let second_receipt = source::group_output(1)
-    let second_receipt_size = ckb::cell_data_size(second_receipt)
-    if second_receipt_size == 0 {
-        return 9
-    }
-    return 10
+action test_duplicate_receipt_output() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let deposit = source::output(0)
+        let is_deposit = dao::is_deposit_data(deposit)
+        if !is_deposit {
+            return 11
+        }
+        let first_receipt = source::group_output(0)
+        let first_receipt_size = ckb::cell_data_size(first_receipt)
+        if first_receipt_size == 0 {
+            return 9
+        }
+        let second_receipt = source::group_output(1)
+        let second_receipt_size = ckb::cell_data_size(second_receipt)
+        if second_receipt_size == 0 {
+            return 9
+        }
+        return 10
+}
 "#;
 const IMMATURE_REDEEM_CELLSCRIPT_ACTION: &str = "test_immature_redeem_since";
 const IMMATURE_REDEEM_REQUIRED_EPOCH: u64 = 360;
@@ -881,1429 +895,1463 @@ const DAO_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_since";
 const DAO_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal
 
-action test_dao_withdrawal_since() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    return 0
+action test_dao_withdrawal_since() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_capacity";
 const DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_capacity
 
-action test_dao_withdrawal_capacity() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let input_capacity = ckb::cell_capacity(input)
-    let occupied_capacity = ckb::cell_occupied_capacity(input)
-    let withdraw_rate = dao::input_accumulated_rate(input)
-    if withdraw_rate == 0 {
-        return 40
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
-    let withdrawable_capacity = input_capacity - occupied_capacity
-    let compensated_capacity = (withdrawable_capacity * withdraw_rate) / deposit_header_rate
-    let max_output_capacity = occupied_capacity + compensated_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+action test_dao_withdrawal_capacity() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let input_capacity = ckb::cell_capacity(input)
+        let occupied_capacity = ckb::cell_occupied_capacity(input)
+        let withdraw_rate = dao::input_accumulated_rate(input)
+        if withdraw_rate == 0 {
+            return 40
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
+        let withdrawable_capacity = input_capacity - occupied_capacity
+        let compensated_capacity = (withdrawable_capacity * withdraw_rate) / deposit_header_rate
+        let max_output_capacity = occupied_capacity + compensated_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_two_input_withdrawal_capacity";
 const DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_withdrawal_capacity
 
-action test_dao_two_input_withdrawal_capacity() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
+action test_dao_two_input_withdrawal_capacity() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_three_input_withdrawal_capacity";
 const DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_withdrawal_capacity
 
-action test_dao_three_input_withdrawal_capacity() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
+action test_dao_three_input_withdrawal_capacity() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_deposit_rate";
 const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_mixed_deposit_rate
 
-action test_dao_three_input_mixed_deposit_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit01_header_rate == 0 {
-        return 41
-    }
-    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit2_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_mixed_deposit_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit01_header_rate == 0 {
+            return 41
+        }
+        let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit2_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_withdraw_rate";
 const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_mixed_withdraw_rate
 
-action test_dao_three_input_mixed_withdraw_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(2))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
+action test_dao_three_input_mixed_withdraw_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(2))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_both_rate";
 const DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_mixed_both_rate
 
-action test_dao_three_input_mixed_both_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(3))
-    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit01_header_rate == 0 {
-        return 41
-    }
-    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit2_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_mixed_both_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(3))
+        let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit01_header_rate == 0 {
+            return 41
+        }
+        let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit2_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_deposit_rate";
 const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_second_mixed_deposit_rate
 
-action test_dao_three_input_second_mixed_deposit_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit02_header_rate == 0 {
-        return 41
-    }
-    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit1_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_second_mixed_deposit_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit02_header_rate == 0 {
+            return 41
+        }
+        let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit1_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_withdraw_rate";
 const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_second_mixed_withdraw_rate
 
-action test_dao_three_input_second_mixed_withdraw_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(2))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
+action test_dao_three_input_second_mixed_withdraw_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(2))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_both_rate";
 const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_second_mixed_both_rate
 
-action test_dao_three_input_second_mixed_both_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(3))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit02_header_rate == 0 {
-        return 41
-    }
-    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit1_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_second_mixed_both_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(3))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit02_header_rate == 0 {
+            return 41
+        }
+        let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit1_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str =
     "test_dao_three_input_second_deposit_third_withdraw_rate";
 const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_second_deposit_third_withdraw_rate
 
-action test_dao_three_input_second_deposit_third_withdraw_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(3))
-    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit02_header_rate == 0 {
-        return 41
-    }
-    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit1_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_second_deposit_third_withdraw_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(3))
+        let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit02_header_rate == 0 {
+            return 41
+        }
+        let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit1_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str =
     "test_dao_three_input_second_withdraw_third_deposit_rate";
 const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_second_withdraw_third_deposit_rate
 
-action test_dao_three_input_second_withdraw_third_deposit_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(3))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit01_header_rate == 0 {
-        return 41
-    }
-    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit2_header_rate == 0 {
-        return 44
-    }
+action test_dao_three_input_second_withdraw_third_deposit_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(3))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit01_header_rate == 0 {
+            return 41
+        }
+        let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit2_header_rate == 0 {
+            return 44
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let input2_capacity = ckb::cell_capacity(input2)
-    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
-    let withdraw2_rate = dao::input_accumulated_rate(input2)
-    if withdraw2_rate == 0 {
-        return 43
-    }
-    let withdrawable2_capacity = input2_capacity - occupied2_capacity
-    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
-    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+        let input2_capacity = ckb::cell_capacity(input2)
+        let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+        let withdraw2_rate = dao::input_accumulated_rate(input2)
+        if withdraw2_rate == 0 {
+            return 43
+        }
+        let withdrawable2_capacity = input2_capacity - occupied2_capacity
+        let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+        let max2_output_capacity = occupied2_capacity + compensated2_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_witness_shape";
 const DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_witness_shape
 
-action test_dao_three_input_witness_shape() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let witness0_bytes = witness::size(input0)
-    if witness0_bytes != 28 {
-        return 43
-    }
-    let witness1_bytes = witness::size(input1)
-    if witness1_bytes != 28 {
-        return 44
-    }
-    let witness2_bytes = witness::size(input2)
-    if witness2_bytes != 28 {
-        return 45
-    }
-    let witness0_input_type = witness::input_type(input0)
-    if witness0_input_type == Hash::zero() {
-        return 46
-    }
-    let witness1_input_type = witness::input_type(input1)
-    if witness1_input_type == Hash::zero() {
-        return 47
-    }
-    let witness2_input_type = witness::input_type(input2)
-    if witness2_input_type == Hash::zero() {
-        return 49
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_three_input_witness_shape() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let witness0_bytes = witness::size(input0)
+        if witness0_bytes != 28 {
+            return 43
+        }
+        let witness1_bytes = witness::size(input1)
+        if witness1_bytes != 28 {
+            return 44
+        }
+        let witness2_bytes = witness::size(input2)
+        if witness2_bytes != 28 {
+            return 45
+        }
+        let witness0_input_type = witness::input_type(input0)
+        if witness0_input_type == Hash::zero() {
+            return 46
+        }
+        let witness1_input_type = witness::input_type(input1)
+        if witness1_input_type == Hash::zero() {
+            return 47
+        }
+        let witness2_input_type = witness::input_type(input2)
+        if witness2_input_type == Hash::zero() {
+            return 49
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION: &str = "test_dao_three_input_witness_index";
 const DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_three_input_witness_index
 
-action test_dao_three_input_witness_index() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let input2 = source::group_input(2)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
-    if !is_withdrawal2 {
-        return 36
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_input_since_at_least(input2, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    dao::require_header_dep_for_input(input2, source::header_dep(0))
-    let witness0_bytes = witness::size(input0)
-    if witness0_bytes != 28 {
-        return 43
-    }
-    let witness1_bytes = witness::size(input1)
-    if witness1_bytes != 28 {
-        return 44
-    }
-    let witness2_bytes = witness::size(input2)
-    if witness2_bytes != 28 {
-        return 45
-    }
-	    let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
-	    let witness1_input_type = witness::input_type(input1)
-	    if witness1_input_type != expected_deposit_header_index {
-	        return 48
-	    }
-	    let witness2_input_type = witness::input_type(input2)
-	    if witness2_input_type != expected_deposit_header_index {
-	        return 46
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_three_input_witness_index() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let input2 = source::group_input(2)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+        if !is_withdrawal2 {
+            return 36
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_input_since_at_least(input2, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        dao::require_header_dep_for_input(input2, source::header_dep(0))
+        let witness0_bytes = witness::size(input0)
+        if witness0_bytes != 28 {
+            return 43
+        }
+        let witness1_bytes = witness::size(input1)
+        if witness1_bytes != 28 {
+            return 44
+        }
+        let witness2_bytes = witness::size(input2)
+        if witness2_bytes != 28 {
+            return 45
+        }
+        let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        let witness1_input_type = witness::input_type(input1)
+        if witness1_input_type != expected_deposit_header_index {
+            return 48
+        }
+        let witness2_input_type = witness::input_type(input2)
+        if witness2_input_type != expected_deposit_header_index {
+            return 46
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_witness_shape";
 const DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_witness_shape
 
-action test_dao_two_input_witness_shape() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    let witness0_bytes = witness::size(input0)
-    if witness0_bytes != 28 {
-        return 43
-    }
-    let witness1_bytes = witness::size(input1)
-    if witness1_bytes != 28 {
-        return 44
-    }
-    let witness0_input_type = witness::input_type(input0)
-    if witness0_input_type == Hash::zero() {
-        return 42
-    }
-    let witness1_input_type = witness::input_type(input1)
-    if witness1_input_type == Hash::zero() {
-        return 45
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_two_input_witness_shape() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        let witness0_bytes = witness::size(input0)
+        if witness0_bytes != 28 {
+            return 43
+        }
+        let witness1_bytes = witness::size(input1)
+        if witness1_bytes != 28 {
+            return 44
+        }
+        let witness0_input_type = witness::input_type(input0)
+        if witness0_input_type == Hash::zero() {
+            return 42
+        }
+        let witness1_input_type = witness::input_type(input1)
+        if witness1_input_type == Hash::zero() {
+            return 45
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION: &str = "test_dao_two_input_witness_index";
 const DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_witness_index
 
-action test_dao_two_input_witness_index() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
-    let witness0_bytes = witness::size(input0)
-    if witness0_bytes != 28 {
-        return 43
-    }
-    let witness1_bytes = witness::size(input1)
-    if witness1_bytes != 28 {
-        return 44
-    }
-    let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
-    let witness1_input_type = witness::input_type(input1)
-    if witness1_input_type != expected_deposit_header_index {
-        return 46
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_two_input_witness_index() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
+        let witness0_bytes = witness::size(input0)
+        if witness0_bytes != 28 {
+            return 43
+        }
+        let witness1_bytes = witness::size(input1)
+        if witness1_bytes != 28 {
+            return 44
+        }
+        let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+        let witness1_input_type = witness::input_type(input1)
+        if witness1_input_type != expected_deposit_header_index {
+            return 46
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_deposit_rate";
 const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_mixed_deposit_rate
 
-action test_dao_two_input_mixed_deposit_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(0))
+action test_dao_two_input_mixed_deposit_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(0))
 
-    let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit0_header_rate == 0 {
-        return 41
-    }
-    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit1_header_rate == 0 {
-        return 43
-    }
+        let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit0_header_rate == 0 {
+            return 41
+        }
+        let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit1_header_rate == 0 {
+            return 43
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_withdraw_rate";
 const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_mixed_withdraw_rate
 
-action test_dao_two_input_mixed_withdraw_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(2))
+action test_dao_two_input_mixed_withdraw_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(2))
 
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate == 0 {
-        return 41
-    }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate == 0 {
+            return 41
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_both_rate";
 const DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_two_input_mixed_both_rate
 
-action test_dao_two_input_mixed_both_rate() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input0 = source::group_input(0)
-    let input1 = source::group_input(1)
-    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
-    if !is_withdrawal0 {
-        return 34
-    }
-    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
-    if !is_withdrawal1 {
-        return 35
-    }
-    dao::require_input_since_at_least(input0, 2306942530136048371)
-    dao::require_input_since_at_least(input1, 2306942530136048371)
-    dao::require_header_dep_for_input(input0, source::header_dep(0))
-    dao::require_header_dep_for_input(input1, source::header_dep(3))
+action test_dao_two_input_mixed_both_rate() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input0 = source::group_input(0)
+        let input1 = source::group_input(1)
+        let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+        if !is_withdrawal0 {
+            return 34
+        }
+        let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+        if !is_withdrawal1 {
+            return 35
+        }
+        dao::require_input_since_at_least(input0, 2306942530136048371)
+        dao::require_input_since_at_least(input1, 2306942530136048371)
+        dao::require_header_dep_for_input(input0, source::header_dep(0))
+        dao::require_header_dep_for_input(input1, source::header_dep(3))
 
-    let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit0_header_rate == 0 {
-        return 41
-    }
-    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit1_header_rate == 0 {
-        return 43
-    }
+        let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit0_header_rate == 0 {
+            return 41
+        }
+        let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit1_header_rate == 0 {
+            return 43
+        }
 
-    let input0_capacity = ckb::cell_capacity(input0)
-    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
-    let withdraw0_rate = dao::input_accumulated_rate(input0)
-    if withdraw0_rate == 0 {
-        return 40
-    }
-    let withdrawable0_capacity = input0_capacity - occupied0_capacity
-    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
-    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+        let input0_capacity = ckb::cell_capacity(input0)
+        let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+        let withdraw0_rate = dao::input_accumulated_rate(input0)
+        if withdraw0_rate == 0 {
+            return 40
+        }
+        let withdrawable0_capacity = input0_capacity - occupied0_capacity
+        let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
+        let max0_output_capacity = occupied0_capacity + compensated0_capacity
 
-    let input1_capacity = ckb::cell_capacity(input1)
-    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
-    let withdraw1_rate = dao::input_accumulated_rate(input1)
-    if withdraw1_rate == 0 {
-        return 42
-    }
-    let withdrawable1_capacity = input1_capacity - occupied1_capacity
-    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
-    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+        let input1_capacity = ckb::cell_capacity(input1)
+        let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+        let withdraw1_rate = dao::input_accumulated_rate(input1)
+        if withdraw1_rate == 0 {
+            return 42
+        }
+        let withdrawable1_capacity = input1_capacity - occupied1_capacity
+        let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+        let max1_output_capacity = occupied1_capacity + compensated1_capacity
 
-    let max_output_capacity = max0_output_capacity + max1_output_capacity
-    let output_capacity = ckb::cell_capacity(source::output(0))
-    if output_capacity > max_output_capacity {
-        return 48
-    }
-    return 0
+        let max_output_capacity = max0_output_capacity + max1_output_capacity
+        let output_capacity = ckb::cell_capacity(source::output(0))
+        if output_capacity > max_output_capacity {
+            return 48
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_HEADER_LINEAGE_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_header_lineage";
 const DAO_WITHDRAWAL_HEADER_LINEAGE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_header_lineage
 
-action test_dao_withdrawal_header_lineage() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    let withdraw_rate = dao::input_accumulated_rate(input)
-    if withdraw_rate != 10001000 {
-        return 40
-    }
-    return 0
+action test_dao_withdrawal_header_lineage() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        let withdraw_rate = dao::input_accumulated_rate(input)
+        if withdraw_rate != 10001000 {
+            return 40
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_WITNESS_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header_witness";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_WITNESS_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header_witness
 
-action test_dao_withdrawal_deposit_header_witness() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(0))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_withdrawal_deposit_header_witness() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(0))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type";
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_witness_input_type
 
-action test_dao_withdrawal_witness_input_type() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let deposit_header_index = witness::input_type(input)
-    if deposit_header_index == Hash::zero() {
-        return 42
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_withdrawal_witness_input_type() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let deposit_header_index = witness::input_type(input)
+        if deposit_header_index == Hash::zero() {
+            return 42
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_witness_input_type_width";
 const DAO_WITHDRAWAL_WITNESS_INPUT_TYPE_WIDTH_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_witness_input_type_width
 
-action test_dao_withdrawal_witness_input_type_width() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let witness_bytes = witness::size(input)
-    if witness_bytes != 28 {
-        return 43
-    }
-    let deposit_header_index = witness::input_type(input)
-    if deposit_header_index == Hash::zero() {
-        return 42
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_withdrawal_witness_input_type_width() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let witness_bytes = witness::size(input)
+        if witness_bytes != 28 {
+            return 43
+        }
+        let deposit_header_index = witness::input_type(input)
+        if deposit_header_index == Hash::zero() {
+            return 42
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header
 
-action test_dao_withdrawal_deposit_header() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let withdraw_rate = dao::input_accumulated_rate(input)
-    if withdraw_rate != 10001000 {
-        return 40
-    }
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_withdrawal_deposit_header() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let withdraw_rate = dao::input_accumulated_rate(input)
+        if withdraw_rate != 10001000 {
+            return 40
+        }
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_OOB_CELLSCRIPT_ACTION: &str = "test_dao_withdrawal_deposit_header_oob";
 const DAO_WITHDRAWAL_DEPOSIT_HEADER_OOB_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_dao_withdrawal_deposit_header_oob
 
-action test_dao_withdrawal_deposit_header_oob() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    dao::require_input_since_at_least(input, 2306942530136048371)
-    dao::require_header_dep_for_input(input, source::header_dep(0))
-    let deposit_header_rate = dao::accumulated_rate(source::header_dep(2))
-    if deposit_header_rate != 10000000 {
-        return 41
-    }
-    return 0
+action test_dao_withdrawal_deposit_header_oob() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        dao::require_input_since_at_least(input, 2306942530136048371)
+        dao::require_header_dep_for_input(input, source::header_dep(0))
+        let deposit_header_rate = dao::accumulated_rate(source::header_dep(2))
+        if deposit_header_rate != 10000000 {
+            return 41
+        }
+        return 0
+}
 "#;
 const IMMATURE_REDEEM_CELLSCRIPT_PROGRAM: &str = r#"
 module ckb_vm_immature_redeem
 
-action test_immature_redeem_since() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 34
-    }
-    let required_since = ckb::since_epoch_relative(360, 0, 1)
-    dao::require_input_since_at_least(input, required_since)
-    dao::require_input_relative_epoch_since_at_least(input, 360, 0, 1)
-    return 0
+action test_immature_redeem_since() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 34
+        }
+        let required_since = ckb::since_epoch_relative(360, 0, 1)
+        dao::require_input_since_at_least(input, required_since)
+        dao::require_input_relative_epoch_since_at_least(input, 360, 0, 1)
+        return 0
+}
 "#;
 const LIMIT_ORDER_CELLSCRIPT_ACTION: &str = "test_limit_order_value";
 const LIMIT_ORDER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_limit_order
 
-action test_limit_order_value() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let output = source::output(0)
-    ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
-    let input_ckb = ckb::cell_capacity(input)
-    let output_ckb = ckb::cell_capacity(output)
-    let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
-    let input_type_hash_type = ckb::cell_type_hash_type(input)
-    let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
-    script::require_cell_type_matches(input, expected_type)
-    script::require_cell_type_matches(output, expected_type)
-    let input_udt = xudt::amount_low(input)
-    let output_udt = xudt::amount_low(output)
-    if output_ckb >= input_ckb {
-        return 44
-    }
-    if output_udt < input_udt {
-        return 45
-    }
-    if output_ckb + output_udt < input_ckb + input_udt {
-        return 41
-    }
-    if output_ckb > 0 {
-        if input_ckb < output_ckb + 64 {
-            return 43
+action test_limit_order_value() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let output = source::output(0)
+        ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
+        let input_ckb = ckb::cell_capacity(input)
+        let output_ckb = ckb::cell_capacity(output)
+        let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
+        let input_type_hash_type = ckb::cell_type_hash_type(input)
+        let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
+        script::require_cell_type_matches(input, expected_type)
+        script::require_cell_type_matches(output, expected_type)
+        let input_udt = xudt::amount_low(input)
+        let output_udt = xudt::amount_low(output)
+        if output_ckb >= input_ckb {
+            return 44
         }
-    }
-    return 0
+        if output_udt < input_udt {
+            return 45
+        }
+        if output_ckb + output_udt < input_ckb + input_udt {
+            return 41
+        }
+        if output_ckb > 0 {
+            if input_ckb < output_ckb + 64 {
+                return 43
+            }
+        }
+        return 0
+}
 "#;
 const LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_ACTION: &str = "test_limit_order_udt_to_ckb_value";
 const LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_limit_order_udt_to_ckb
 
-action test_limit_order_udt_to_ckb_value() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::group_input(0)
-    let output = source::output(0)
-    ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
-    let input_ckb = ckb::cell_capacity(input)
-    let output_ckb = ckb::cell_capacity(output)
-    let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
-    let input_type_hash_type = ckb::cell_type_hash_type(input)
-    let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
-    script::require_cell_type_matches(input, expected_type)
-    script::require_cell_type_matches(output, expected_type)
-    let input_udt = xudt::amount_low(input)
-    let output_udt = xudt::amount_low(output)
-    if output_udt >= input_udt {
-        return 54
-    }
-    if output_ckb < input_ckb {
-        return 55
-    }
-    if output_ckb + output_udt < input_ckb + input_udt {
-        return 51
-    }
-    if output_udt > 0 {
-        if input_udt < output_udt + 64 {
-            return 53
+action test_limit_order_udt_to_ckb_value() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::group_input(0)
+        let output = source::output(0)
+        ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
+        let input_ckb = ckb::cell_capacity(input)
+        let output_ckb = ckb::cell_capacity(output)
+        let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
+        let input_type_hash_type = ckb::cell_type_hash_type(input)
+        let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
+        script::require_cell_type_matches(input, expected_type)
+        script::require_cell_type_matches(output, expected_type)
+        let input_udt = xudt::amount_low(input)
+        let output_udt = xudt::amount_low(output)
+        if output_udt >= input_udt {
+            return 54
         }
-    }
-    return 0
+        if output_ckb < input_ckb {
+            return 55
+        }
+        if output_ckb + output_udt < input_ckb + input_udt {
+            return 51
+        }
+        if output_udt > 0 {
+            if input_udt < output_udt + 64 {
+                return 53
+            }
+        }
+        return 0
+}
 "#;
 const OWNED_OWNER_CELLSCRIPT_ACTION: &str = "test_owned_owner_pairing";
 const OWNED_OWNER_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner
 
-action test_owned_owner_pairing() -> u64
-where
-    ckb::require_current_script_args_empty()
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
-    return 0
+action test_owned_owner_pairing() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+        return 0
+}
 "#;
 const OWNED_OWNER_OUTPUT_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_pairing";
 const OWNED_OWNER_OUTPUT_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output
 
-action test_owned_owner_output_pairing() -> u64
-where
-    ckb::require_current_script_args_empty()
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
-    return 0
+action test_owned_owner_output_pairing() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
+        return 0
+}
 "#;
 const OWNED_OWNER_SCRIPT_MISUSE_CELLSCRIPT_ACTION: &str = "test_owned_owner_script_misuse";
 const OWNED_OWNER_SCRIPT_MISUSE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_script_misuse
 
-action test_owned_owner_script_misuse() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::input(0)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(input, current_script_hash)
-    ckb::require_cell_type_hash(input, current_script_hash)
-    return 7
+action test_owned_owner_script_misuse() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::input(0)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(input, current_script_hash)
+        ckb::require_cell_type_hash(input, current_script_hash)
+        return 7
+}
 "#;
 const OWNED_OWNER_OUTPUT_SCRIPT_MISUSE_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_script_misuse";
 const OWNED_OWNER_OUTPUT_SCRIPT_MISUSE_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output_script_misuse
 
-action test_owned_owner_output_script_misuse() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let output = source::output(0)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(output, current_script_hash)
-    ckb::require_cell_type_hash(output, current_script_hash)
-    return 7
+action test_owned_owner_output_script_misuse() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let output = source::output(0)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(output, current_script_hash)
+        ckb::require_cell_type_hash(output, current_script_hash)
+        return 7
+}
 "#;
 const OWNED_OWNER_OUTPUT_NOT_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_not_withdrawal";
 const OWNED_OWNER_OUTPUT_NOT_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_output_not_withdrawal
 
-action test_owned_owner_output_not_withdrawal() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let output = source::output(0)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(output, current_script_hash)
-    let has_dao = dao::has_dao_type(output)
-    if !has_dao {
-        return 6
-    }
-    let is_withdrawal = dao::is_withdrawal_request_data(output)
-    if !is_withdrawal {
-        return 6
-    }
-    return 0
+action test_owned_owner_output_not_withdrawal() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let output = source::output(0)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(output, current_script_hash)
+        let has_dao = dao::has_dao_type(output)
+        if !has_dao {
+            return 6
+        }
+        let is_withdrawal = dao::is_withdrawal_request_data(output)
+        if !is_withdrawal {
+            return 6
+        }
+        return 0
+}
 "#;
 const OWNED_OWNER_NOT_WITHDRAWAL_CELLSCRIPT_ACTION: &str = "test_owned_owner_not_withdrawal";
 const OWNED_OWNER_NOT_WITHDRAWAL_CELLSCRIPT_PROGRAM: &str = r#"
 module differential_owned_owner_not_withdrawal
 
-action test_owned_owner_not_withdrawal() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let input = source::input(0)
-    let has_dao = dao::has_dao_type(input)
-    if !has_dao {
-        return 6
-    }
-    let is_withdrawal = dao::is_withdrawal_request_data(input)
-    if !is_withdrawal {
-        return 6
-    }
-    return 0
+action test_owned_owner_not_withdrawal() -> u64 {
+    verification
+        ckb::require_current_script_args_empty()
+        let input = source::input(0)
+        let has_dao = dao::has_dao_type(input)
+        if !has_dao {
+            return 6
+        }
+        let is_withdrawal = dao::is_withdrawal_request_data(input)
+        if !is_withdrawal {
+            return 6
+        }
+        return 0
+}
 "#;
 
 const OWNED_OWNER_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_related_type_hash_mismatch";
@@ -2314,18 +2362,19 @@ fn owned_owner_related_type_hash_mismatch_cellscript_program(expected_related_ty
         r#"
 module differential_owned_owner_related_type_hash_mismatch
 
-action test_owned_owner_related_type_hash_mismatch() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let owned = source::input(0)
-    let owner = source::input(1)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(owned, current_script_hash)
-    ckb::require_cell_type_hash(owner, current_script_hash)
-    let expected_related_type = {expected_related_type_script}
-    script::require_cell_type_matches(owned, expected_related_type)
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
-    return 0
+action test_owned_owner_related_type_hash_mismatch() -> u64 {{
+    verification
+        ckb::require_current_script_args_empty()
+        let owned = source::input(0)
+        let owner = source::input(1)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(owned, current_script_hash)
+        ckb::require_cell_type_hash(owner, current_script_hash)
+        let expected_related_type = {expected_related_type_script}
+        script::require_cell_type_matches(owned, expected_related_type)
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+        return 0
+}}
 "#
     )
 }
@@ -2338,18 +2387,19 @@ fn owned_owner_output_related_type_hash_mismatch_cellscript_program(expected_rel
         r#"
 module differential_owned_owner_output_related_type_hash_mismatch
 
-action test_owned_owner_output_related_type_hash_mismatch() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let owned = source::output(0)
-    let owner = source::output(1)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(owned, current_script_hash)
-    ckb::require_cell_type_hash(owner, current_script_hash)
-    let expected_related_type = {expected_related_type_script}
-    script::require_cell_type_matches(owned, expected_related_type)
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
-    return 0
+action test_owned_owner_output_related_type_hash_mismatch() -> u64 {{
+    verification
+        ckb::require_current_script_args_empty()
+        let owned = source::output(0)
+        let owner = source::output(1)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(owned, current_script_hash)
+        ckb::require_cell_type_hash(owner, current_script_hash)
+        let expected_related_type = {expected_related_type_script}
+        script::require_cell_type_matches(owned, expected_related_type)
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
+        return 0
+}}
 "#
     )
 }
@@ -2362,22 +2412,23 @@ fn owned_owner_output_related_data_rule_mismatch_cellscript_program(expected_rel
         r#"
 module differential_owned_owner_output_related_data_rule_mismatch
 
-action test_owned_owner_output_related_data_rule_mismatch() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let owned = source::output(0)
-    let owner = source::output(1)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(owned, current_script_hash)
-    ckb::require_cell_type_hash(owner, current_script_hash)
-    let expected_related_type = {expected_related_type_script}
-    script::require_cell_type_matches(owned, expected_related_type)
-    let is_withdrawal = dao::is_withdrawal_request_data(owned)
-    if !is_withdrawal {{
-        return 47
-    }}
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
-    return 0
+action test_owned_owner_output_related_data_rule_mismatch() -> u64 {{
+    verification
+        ckb::require_current_script_args_empty()
+        let owned = source::output(0)
+        let owner = source::output(1)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(owned, current_script_hash)
+        ckb::require_cell_type_hash(owner, current_script_hash)
+        let expected_related_type = {expected_related_type_script}
+        script::require_cell_type_matches(owned, expected_related_type)
+        let is_withdrawal = dao::is_withdrawal_request_data(owned)
+        if !is_withdrawal {{
+            return 47
+        }}
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
+        return 0
+}}
 "#
     )
 }
@@ -2390,22 +2441,23 @@ fn owned_owner_related_data_rule_mismatch_cellscript_program(expected_related_ty
         r#"
 module differential_owned_owner_related_data_rule_mismatch
 
-action test_owned_owner_related_data_rule_mismatch() -> u64
-where
-    ckb::require_current_script_args_empty()
-    let owned = source::input(0)
-    let owner = source::input(1)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_lock_hash(owned, current_script_hash)
-    ckb::require_cell_type_hash(owner, current_script_hash)
-    let expected_related_type = {expected_related_type_script}
-    script::require_cell_type_matches(owned, expected_related_type)
-    let is_withdrawal = dao::is_withdrawal_request_data(owned)
-    if !is_withdrawal {{
-        return 47
-    }}
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
-    return 0
+action test_owned_owner_related_data_rule_mismatch() -> u64 {{
+    verification
+        ckb::require_current_script_args_empty()
+        let owned = source::input(0)
+        let owner = source::input(1)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_lock_hash(owned, current_script_hash)
+        ckb::require_cell_type_hash(owner, current_script_hash)
+        let expected_related_type = {expected_related_type_script}
+        script::require_cell_type_matches(owned, expected_related_type)
+        let is_withdrawal = dao::is_withdrawal_request_data(owned)
+        if !is_withdrawal {{
+            return 47
+        }}
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+        return 0
+}}
 "#
     )
 }
@@ -3239,14 +3291,14 @@ fn cellscript_dao_has_dao_type_returns_false_for_non_dao_cell() {
 // These tests prove that CellScript-generated cell metadata scripts work under
 // real CKB VM/syscall environment:
 //
-// - cell_occupied_capacity: LOAD_CELL_BY_FIELD(Lock, Type) + LOAD_CELL_DATA
+// - cell_occupied_capacity: LOAD_CELL_BY_FIELD(OccupiedCapacity)
 // - cell_data_size: LOAD_CELL_DATA size probe
 
 #[test]
 fn cellscript_cell_occupied_capacity_passes_with_lock_script() {
     // Compile a CellScript program that calls ckb::cell_occupied_capacity(source::input(0))
-    // which uses LOAD_CELL_BY_FIELD(Lock), LOAD_CELL_BY_FIELD(Type), and LOAD_CELL_DATA
-    // to compute the cell's occupied capacity in shannons.
+    // which uses LOAD_CELL_BY_FIELD(OccupiedCapacity) to read the cell's
+    // occupied capacity in shannons.
     let elf = compile_cellscript_source_to_elf(VM_HARNESS_OCCUPIED_CAPACITY_PROGRAM, VM_HARNESS_OCCUPIED_CAPACITY_ACTION, None);
 
     // Build a fixture with an input cell having a lock script and no type script.

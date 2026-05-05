@@ -1,7 +1,9 @@
 # CellScript ckb-std Compatibility
 
-**Status**: design contract for CellScript's CKB contract-side compatibility
-boundary.
+**Status**: 0.19 scope compatibility contract with implementation landed for
+ckb-std constant parity, SourceView decoding, WitnessArgs layout fixtures,
+occupied-capacity field lowering, the formal headless CKB adapter crate, and
+focused local-node adapter acceptance.
 
 See also
 [`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
@@ -10,6 +12,11 @@ for the audit of overlap with `ckb-std` and `ckb-sdk-rust`.
 `ckb-std` is the canonical Rust-side contract standard library for CKB.
 CellScript should treat it as the contract-side ABI and runtime oracle, not as a
 transaction builder and not as a compiler-core dependency.
+
+This document belongs to the 0.19 registry/deployment/adapter scope. It defines
+the compatibility contract that the 0.19 Action Builder and
+`cellscript-ckb-adapter` must respect; it is not counted as 0.18
+protocol-equivalence evidence.
 
 In practical terms:
 
@@ -93,6 +100,42 @@ Inlining runtime access code is an implementation strategy for self-contained
 verifier output, not an independent semantic standard. Any inline helper that
 overlaps with `ckb-std` must have parity or differential tests.
 
+Current implementation evidence:
+
+- `src/ckb_abi.rs` is the CellScript-owned inline ABI mirror.
+- `tests/ckb_std_compat.rs` compares that mirror against `ckb-std` syscall,
+  source, field, and since APIs.
+- `StdLib::generate_syscalls` and main codegen consume the same ABI mirror.
+- `ckb::cell_occupied_capacity` now lowers to
+  `LOAD_CELL_BY_FIELD(CellField::OccupiedCapacity)`.
+- `WitnessArgs` layout tests compare against
+  `ckb-types::packed::WitnessArgs`, including malformed table cases.
+- TYPE_ID lifecycle classification and args-hash generation are tested against
+  the `ckb-std::type_id` API contract.
+- since/epoch tests cover both valid encodings and malformed cases accepted or
+  rejected by `ckb-std::since`.
+- `cellc validate-tx --json` reports `validation_level =
+  cellscript-metadata-evidence`, `ckb_vm_execution = false`, and
+  `tx_pool_acceptance = false`.
+- `cellc ckb-std-compat --json` emits the runtime policy, ABI mirror source,
+  tested compatibility areas, script-construction evidence, and adapter
+  boundary in a stable report.
+- `crates/cellscript-ckb-adapter` is the formal headless off-chain bridge to
+  `ckb-sdk-rust` while keeping compiler core free of SDK dependencies,
+  including arbitrary `ckb_types::packed::Script` construction, script hash /
+  args evidence, lock/type script readback from packed `CellOutput` values,
+  explicit CellDep binding for script code hashes, and TYPE_ID output args
+  checks.
+- `examples/ckb-sdk-builder` is a cookbook wrapper around the formal adapter
+  crate, not a second implementation.
+- `cellc action build --json` and `cellc ckb-std-compat --json` expose the
+  adapter-owned final `WitnessArgs` placement policy for CellScript entry
+  payloads and lock signatures.
+- `scripts/cellscript_ckb_ecosystem_reuse_gate.sh` runs the focused compatibility
+  gate for this slice.
+- `scripts/cellscript_ckb_adapter_acceptance.sh` records local CKB
+  `estimate_cycles` and `test_tx_pool_accept` evidence for the adapter boundary.
+
 ## Compatibility Contract
 
 CellScript's CKB backend should align with `ckb-std` at the ABI boundary:
@@ -157,8 +200,8 @@ Recommended test cuts:
   `ckb-std` semantics;
 - since/epoch fixtures for absolute, relative, malformed, immature, and mature
   cases;
-- occupied-capacity fixtures that compare runtime helper output, packed CKB
-  capacity measurement, and under-capacity builder rejection;
+- occupied-capacity fixtures that compare runtime helper lowering with
+  `CellField::OccupiedCapacity`, and packed CKB capacity measurement;
 - spawn/exec fixtures that prove required CellDeps are surfaced in metadata and
   resolved by the adapter.
 
@@ -166,6 +209,11 @@ Compile-only evidence is not enough for production claims. The useful claim is
 that a CellScript artifact behaves like the corresponding CKB contract-side
 ABI, and that a concrete transaction carrying that artifact is accepted or
 rejected by the node for the expected reason.
+
+The current 0.19 evidence now covers ABI compatibility, headless adapter
+materialization, and focused local-node adapter acceptance. It is still not a
+wallet UI, CellFabric, package registry production gate, external audit, or
+exhaustive adversarial state-space proof.
 
 ## Cookbook Topics
 

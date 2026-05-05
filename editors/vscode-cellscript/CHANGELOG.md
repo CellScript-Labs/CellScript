@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Updated grammar, snippets, and README examples for the canonical
+  `verification` action/lock surface and removed the legacy authoring model
+  from current guidance.
 - Updated lock snippets for the 0.14 lock-boundary surface:
   `protected`, `lock_args`, `witness`, and `require`.
 - Added LSP completions for `lock_args`, CKB source views, witness fields,

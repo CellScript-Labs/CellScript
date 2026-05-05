@@ -5,11 +5,12 @@ struct Proof {
     signature: Hash,
 }
 
-action verify_with_delegate(proof: Proof) -> u64
-where
-    // Spawn is bounded verifier reuse. It does not add a second type script to
-    // any existing Cell; the child verifier must still be present as a CellDep.
-    let pid = spawn("secp256k1_verifier")
-    let status = wait()
-    assert_invariant(status == 0, "delegate verification failed")
-    return pid
+action verify_with_delegate(proof: Proof) -> u64 {
+    verification
+        // Spawn is bounded verifier reuse. It does not add a second type script to
+        // any existing Cell; the child verifier must still be present as a CellDep.
+        let pid = spawn("secp256k1_verifier")
+        let status = wait()
+        require status == 0, "delegate verification failed"
+        return pid
+}

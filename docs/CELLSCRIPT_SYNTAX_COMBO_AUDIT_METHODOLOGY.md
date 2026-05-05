@@ -225,8 +225,9 @@ parse(source) == parse(fmt(source))
 fmt(fmt(source)) == fmt(source)
 ```
 
-Reject any formatting pass that changes source qualifiers, `where` structure,
-`require` block boundaries, `preserve` fields, or stdlib field whitelists.
+Reject any formatting pass that changes source qualifiers, `verification`
+section boundaries, `require` block boundaries, `preserve` fields, or stdlib
+field whitelists.
 
 ### Type/Effect Oracle
 

@@ -17,32 +17,33 @@ action inspect(
     expected_type_code_hash: Hash,
     expected_lock_args_hash: Hash,
     expected_type_args_hash: Hash
-) -> u64
-where
-    let input = source::input(0)
-    let lock_hash: Hash = ckb::cell_lock_hash(input)
-    let type_hash: Hash = ckb::cell_type_hash(input)
-    let lock_code_hash: Hash = ckb::cell_lock_code_hash(input)
-    let type_code_hash: Hash = ckb::cell_type_code_hash(input)
-    let lock_hash_type = ckb::cell_lock_hash_type(input)
-    let type_hash_type = ckb::cell_type_hash_type(input)
-    let lock_args_empty = ckb::cell_lock_args_empty(input)
-    let type_args_empty = ckb::cell_type_args_empty(input)
-    let lock_args_hash: Hash = ckb::cell_lock_args_hash(input)
-    let type_args_hash: Hash = ckb::cell_type_args_hash(input)
-    require lock_hash == expected_lock_hash
-    require type_hash == expected_type_hash
-    require lock_code_hash == expected_lock_code_hash
-    require type_code_hash == expected_type_code_hash
-    require lock_args_hash == expected_lock_args_hash
-    require type_args_hash == expected_type_args_hash
-    ckb::require_cell_lock_args_prefix_hash(input, expected_lock_args_hash)
-    ckb::require_cell_type_args_prefix_hash(input, expected_type_args_hash)
-    ckb::require_cell_lock_args_suffix_hash(input, expected_lock_args_hash)
-    ckb::require_cell_type_args_suffix_hash(input, expected_type_args_hash)
-    let lock_empty_flag = if lock_args_empty { 1 } else { 0 }
-    let type_empty_flag = if type_args_empty { 1 } else { 0 }
-    return lock_hash_type + type_hash_type + lock_empty_flag + type_empty_flag
+) -> u64 {
+    verification
+        let input = source::input(0)
+        let lock_hash: Hash = ckb::cell_lock_hash(input)
+        let type_hash: Hash = ckb::cell_type_hash(input)
+        let lock_code_hash: Hash = ckb::cell_lock_code_hash(input)
+        let type_code_hash: Hash = ckb::cell_type_code_hash(input)
+        let lock_hash_type = ckb::cell_lock_hash_type(input)
+        let type_hash_type = ckb::cell_type_hash_type(input)
+        let lock_args_empty = ckb::cell_lock_args_empty(input)
+        let type_args_empty = ckb::cell_type_args_empty(input)
+        let lock_args_hash: Hash = ckb::cell_lock_args_hash(input)
+        let type_args_hash: Hash = ckb::cell_type_args_hash(input)
+        require lock_hash == expected_lock_hash
+        require type_hash == expected_type_hash
+        require lock_code_hash == expected_lock_code_hash
+        require type_code_hash == expected_type_code_hash
+        require lock_args_hash == expected_lock_args_hash
+        require type_args_hash == expected_type_args_hash
+        ckb::require_cell_lock_args_prefix_hash(input, expected_lock_args_hash)
+        ckb::require_cell_type_args_prefix_hash(input, expected_type_args_hash)
+        ckb::require_cell_lock_args_suffix_hash(input, expected_lock_args_hash)
+        ckb::require_cell_type_args_suffix_hash(input, expected_type_args_hash)
+        let lock_empty_flag = if lock_args_empty { 1 } else { 0 }
+        let type_empty_flag = if type_args_empty { 1 } else { 0 }
+        return lock_hash_type + type_hash_type + lock_empty_flag + type_empty_flag
+}
 "#;
 
 const SCRIPT_REF_PROPERTY_PROGRAM: &str = r#"
@@ -53,104 +54,111 @@ action inspect(
     expected_type_code_hash: Hash,
     expected_lock_args_hash: Hash,
     expected_type_args_hash: Hash
-) -> u64
-where
-    let input = source::input(0)
-    let lock = input.lock
-    let type_script = input.type
-    let lock_code_hash: Hash = lock.code_hash
-    let type_code_hash: Hash = type_script.code_hash
-    let lock_args_hash: Hash = input.lock.args_hash
-    let type_args_hash: Hash = input.type.args_hash
-    let lock_args_empty = input.lock.args_empty
-    let type_args_empty = input.type.args_empty
-    require lock_code_hash == expected_lock_code_hash
-    require type_code_hash == expected_type_code_hash
-    require lock_args_hash == expected_lock_args_hash
-    require type_args_hash == expected_type_args_hash
-    let lock_empty_flag = if lock_args_empty { 1 } else { 0 }
-    let type_empty_flag = if type_args_empty { 1 } else { 0 }
-    return lock.hash_type + type_script.hash_type + lock_empty_flag + type_empty_flag
+) -> u64 {
+    verification
+        let input = source::input(0)
+        let lock = input.lock
+        let type_script = input.type
+        let lock_code_hash: Hash = lock.code_hash
+        let type_code_hash: Hash = type_script.code_hash
+        let lock_args_hash: Hash = input.lock.args_hash
+        let type_args_hash: Hash = input.type.args_hash
+        let lock_args_empty = input.lock.args_empty
+        let type_args_empty = input.type.args_empty
+        require lock_code_hash == expected_lock_code_hash
+        require type_code_hash == expected_type_code_hash
+        require lock_args_hash == expected_lock_args_hash
+        require type_args_hash == expected_type_args_hash
+        let lock_empty_flag = if lock_args_empty { 1 } else { 0 }
+        let type_empty_flag = if type_args_empty { 1 } else { 0 }
+        return lock.hash_type + type_script.hash_type + lock_empty_flag + type_empty_flag
+}
 "#;
 
 const SCRIPT_CONSTRUCTION_PROGRAM: &str = r#"
 module v018::script_construction
 
-action inspect() -> u64
-where
-    let input = source::group_input(0)
-    let code_hash: Hash = ckb::cell_lock_code_hash(input)
-    let hash_type = ckb::cell_lock_hash_type(input)
-    let args = script::args(b"owner")
-    let expected = script::new(code_hash, hash_type, args)
-    let same_code_hash: Hash = expected.code_hash
-    require same_code_hash == code_hash
-    require expected.hash_type == hash_type
-    require expected.args.len == 5
-    script::require_cell_lock_matches(input, expected)
-    return 0
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let code_hash: Hash = ckb::cell_lock_code_hash(input)
+        let hash_type = ckb::cell_lock_hash_type(input)
+        let args = script::args(b"owner")
+        let expected = script::new(code_hash, hash_type, args)
+        let same_code_hash: Hash = expected.code_hash
+        require same_code_hash == code_hash
+        require expected.hash_type == hash_type
+        require expected.args.len == 5
+        script::require_cell_lock_matches(input, expected)
+        return 0
+}
 "#;
 
 const SCRIPT_LITERAL_CONSTRUCTION_PROGRAM: &str = r#"
 module v018::script_literal_construction
 
-action inspect() -> u64
-where
-    let code_hash: Hash = Hash::from_bytes(b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20")
-    let expected = script::new(code_hash, script::hash_type_data2(), script::args_empty())
-    let same_code_hash: Hash = expected.code_hash
-    require same_code_hash == code_hash
-    require expected.args.is_empty == true
-    return expected.hash_type + expected.args.len
+action inspect() -> u64 {
+    verification
+        let code_hash: Hash = Hash::from_bytes(b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20")
+        let expected = script::new(code_hash, script::hash_type_data2(), script::args_empty())
+        let same_code_hash: Hash = expected.code_hash
+        require same_code_hash == code_hash
+        require expected.args.is_empty == true
+        return expected.hash_type + expected.args.len
+}
 "#;
 
 const CELL_DATA_DECODE_PROGRAM: &str = r#"
 module v018::cell_data_decode
 
-action inspect() -> u64
-where
-    let input = source::group_input(0)
-    let quantity = ckb::cell_data_u32_le(input, 0)
-    let amount = ckb::cell_data_u64_le(input, 4)
-    if quantity != 7 {
-        return 90
-    }
-    if amount != 123456789 {
-        return 91
-    }
-    return 0
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let quantity = ckb::cell_data_u32_le(input, 0)
+        let amount = ckb::cell_data_u64_le(input, 4)
+        if quantity != 7 {
+            return 90
+        }
+        if amount != 123456789 {
+            return 91
+        }
+        return 0
+}
 "#;
 
 const OUT_POINT_API_PROGRAM: &str = r#"
 module v018::out_point_api
 
-action inspect() -> u64
-where
-    let input = source::group_input(0)
-    let tx_hash: Hash = ckb::input_out_point_tx_hash(input)
-    let index = ckb::input_out_point_index(input)
-    ckb::require_input_out_point_tx_hash(input, tx_hash)
-    ckb::require_input_out_point(input, tx_hash, index)
-    return 0
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let tx_hash: Hash = ckb::input_out_point_tx_hash(input)
+        let index = ckb::input_out_point_index(input)
+        ckb::require_input_out_point_tx_hash(input, tx_hash)
+        ckb::require_input_out_point(input, tx_hash, index)
+        return 0
+}
 "#;
 
 const OUT_POINT_OUTPUT_REJECT_PROGRAM: &str = r#"
 module v018::out_point_output_reject
 
-action inspect() -> u64
-where
-    let output = source::output(0)
-    let tx_hash: Hash = ckb::input_out_point_tx_hash(output)
-    ckb::require_input_out_point_tx_hash(output, tx_hash)
-    return 0
+action inspect() -> u64 {
+    verification
+        let output = source::output(0)
+        let tx_hash: Hash = ckb::input_out_point_tx_hash(output)
+        ckb::require_input_out_point_tx_hash(output, tx_hash)
+        return 0
+}
 "#;
 
 const ALWAYS_SUCCESS_LOCK_PROGRAM: &str = r#"
 module v018::always_success_lock
 
-action always_success() -> u64
-where
-    return 0
+action always_success() -> u64 {
+    verification
+        return 0
+}
 "#;
 
 fn compile_source_to_elf(source: &str, entry_action: &str) -> Vec<u8> {
@@ -627,9 +635,10 @@ fn v0_18_script_ref_reads_reject_non_source_view_arguments() {
         r#"
 module v018::bad_script_ref_read
 
-action inspect(flag: bool) -> Hash
-where
-    return ckb::cell_lock_code_hash(flag)
+action inspect(flag: bool) -> Hash {
+    verification
+        return ckb::cell_lock_code_hash(flag)
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),
@@ -653,10 +662,11 @@ fn v0_18_script_ref_property_rejects_unknown_script_field() {
         r#"
 module v018::bad_script_ref_property
 
-action inspect() -> Hash
-where
-    let input = source::group_input(0)
-    return input.lock.owner_hash
+action inspect() -> Hash {
+    verification
+        let input = source::group_input(0)
+        return input.lock.owner_hash
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),
@@ -680,11 +690,12 @@ fn v0_18_script_args_prefix_suffix_require_hash_operands() {
         r#"
 module v018::bad_script_args_hash
 
-action inspect() -> u64
-where
-    let input = source::group_input(0)
-    ckb::require_cell_lock_args_prefix_hash(input, 1)
-    return 0
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        ckb::require_cell_lock_args_prefix_hash(input, 1)
+        return 0
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),
@@ -728,10 +739,11 @@ fn v0_18_script_construction_rejects_bad_operands() {
         r#"
 module v018::bad_script_hash_type
 
-action inspect(code_hash: Hash) -> u64
-where
-    let expected = script::new(code_hash, 3, script::args_empty())
-    return expected.hash_type
+action inspect(code_hash: Hash) -> u64 {
+    verification
+        let expected = script::new(code_hash, 3, script::args_empty())
+        return expected.hash_type
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),
@@ -747,10 +759,11 @@ where
         r#"
 module v018::bad_script_args
 
-action inspect(code_hash: Hash) -> u64
-where
-    let expected = script::new(code_hash, script::hash_type_data1(), script::args(1))
-    return expected.hash_type
+action inspect(code_hash: Hash) -> u64 {
+    verification
+        let expected = script::new(code_hash, script::hash_type_data1(), script::args(1))
+        return expected.hash_type
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),
@@ -766,11 +779,12 @@ where
         r#"
 module v018::bad_hash_bytes
 
-action inspect() -> u64
-where
-    let code_hash: Hash = Hash::from_bytes(b"short")
-    let expected = script::new(code_hash, script::hash_type_data1(), script::args_empty())
-    return expected.hash_type
+action inspect() -> u64 {
+    verification
+        let code_hash: Hash = Hash::from_bytes(b"short")
+        let expected = script::new(code_hash, script::hash_type_data1(), script::args_empty())
+        return expected.hash_type
+}
 "#,
         CompileOptions {
             target: Some("riscv64-asm".to_string()),

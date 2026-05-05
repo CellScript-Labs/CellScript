@@ -18,48 +18,53 @@ struct Proof {
     signature: Hash,
 }
 
-action delegate_verify(proof: Proof) -> u64
-where
-    let pid = spawn("secp256k1_verifier")
-    let status = wait()
-    assert_invariant(status == 0, "delegate failed")
-    return pid
+action delegate_verify(proof: Proof) -> u64 {
+    verification
+        let pid = spawn("secp256k1_verifier")
+        let status = wait()
+        require status == 0, "delegate failed"
+        return pid
 
-action pipe_pipeline(value: u64) -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-    pipe_write(write_fd, value)
-    let echoed = pipe_read(read_fd)
-    close(read_fd)
-    close(write_fd)
-    return echoed
+}
+action pipe_pipeline(value: u64) -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        let write_fd = fds.1
+        pipe_write(write_fd, value)
+        let echoed = pipe_read(read_fd)
+        close(read_fd)
+        close(write_fd)
+        return echoed
 
-action capacity_and_time(amount: u64) -> output: Token
-where
-    require_maturity(100)
-    require_time(1714000000)
-    require_epoch_after(10, 0, 1)
-    require_epoch_relative(10, 0, 1)
-    let floor = occupied_capacity("Token")
-    assert_invariant(floor >= 0, "capacity floor visible")
-    create output = Token { amount }
+}
+action capacity_and_time(amount: u64) -> output: Token {
+    verification
+        require_maturity(100)
+        require_time(1714000000)
+        require_epoch_after(10, 0, 1)
+        require_epoch_relative(10, 0, 1)
+        let floor = occupied_capacity("Token")
+        require floor >= 0, "capacity floor visible"
+        create output = Token { amount }
 
+}
 lock owner_lock(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    let view = source::group_input(0)
-    let sig = witness::lock(view)
-    let digest = env::sighash_all(view)
-    require owner == wallet.owner
-    require sig == digest
+    verification
+        let view = source::group_input(0)
+        let sig = witness::lock(view)
+        let digest = env::sighash_all(view)
+        require owner == wallet.owner
+        require sig == digest
 }
 
 lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
-    let input = source::input(0)
-    let output = source::group_output(0)
-    let input_type = witness::input_type(input)
-    let output_type = witness::output_type(output)
-    require input_type == output_type
+    verification
+        let input = source::input(0)
+        let output = source::group_output(0)
+        let input_type = witness::input_type(input)
+        let output_type = witness::output_type(output)
+        require input_type == output_type
 }
 "#;
 
@@ -191,9 +196,10 @@ with_capacity_floor(6100000000)
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -275,9 +281,10 @@ with_default_hash_type(Type)
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -341,9 +348,10 @@ with_default_hash_type(Type)
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -415,10 +423,11 @@ fn v0_14_rejects_tampered_spawn_script_reference_metadata() {
     let source = r#"
 module cellscript::v0_14_spawn_reference_tamper
 
-action delegate_verify() -> u64
-where
-    let pid = spawn("secp256k1_verifier")
-    return pid
+action delegate_verify() -> u64 {
+    verification
+        let pid = spawn("secp256k1_verifier")
+        return pid
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -466,9 +475,10 @@ resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -505,10 +515,11 @@ fn v0_14_compiles_dynamic_blake2b_hash_helper() {
     let source = r#"
 module cellscript::blake2b
 
-action digest(input: Hash, expected: Hash) -> bool
-where
-    let actual = hash_blake2b(input)
-    return actual == expected
+action digest(input: Hash, expected: Hash) -> bool {
+    verification
+        let actual = hash_blake2b(input)
+        return actual == expected
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -543,9 +554,10 @@ fn v0_14_rejects_blake2b_non_hash_input() {
         r#"
 module cellscript::bad_blake2b
 
-action bad(input: u64) -> Hash
-where
-    return hash_blake2b(input)
+action bad(input: u64) -> Hash {
+    verification
+        return hash_blake2b(input)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -560,11 +572,12 @@ fn v0_14_rejects_spawn_ipc_fd_use_after_close() {
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64
-where
-    let (read_fd, write_fd) = pipe()
-    close(read_fd)
-    pipe_read(read_fd)
+action bad(value: u64) -> u64 {
+    verification
+        let (read_fd, write_fd) = pipe()
+        close(read_fd)
+        pipe_read(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -579,12 +592,13 @@ fn v0_14_rejects_spawn_ipc_fd_double_close() {
         r#"
 module cellscript::bad_fd
 
-action bad() -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    close(read_fd)
-    close(read_fd)
+action bad() -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        close(read_fd)
+        close(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -599,13 +613,14 @@ fn v0_14_rejects_spawn_ipc_fd_leak() {
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-    pipe_write(write_fd, value)
-    return pipe_read(read_fd)
+action bad(value: u64) -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        let write_fd = fds.1
+        pipe_write(write_fd, value)
+        return pipe_read(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -622,9 +637,10 @@ module cellscript::static_spawn
 
 const VERIFY_TARGET: String = "secp256k1_verifier";
 
-action delegate() -> u64
-where
-    return spawn(VERIFY_TARGET)
+action delegate() -> u64 {
+    verification
+        return spawn(VERIFY_TARGET)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -635,9 +651,10 @@ where
         r#"
 module cellscript::dynamic_spawn
 
-action delegate(target: String) -> u64
-where
-    return spawn(target)
+action delegate(target: String) -> u64 {
+    verification
+        return spawn(target)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )

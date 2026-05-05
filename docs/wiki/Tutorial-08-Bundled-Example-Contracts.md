@@ -91,18 +91,20 @@ minted.
 `mint` updates authority state and validates a proposed new token output:
 
 ```cellscript
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    require auth_after.token_symbol == auth_before.token_symbol
-    require auth_after.max_supply == auth_before.max_supply
-    require auth_after.minted == auth_before.minted + amount
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
 
-    create token = Token {
-        amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+        create token = Token {
+            amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 ```
 
 Read `auth_before` as the existing authority Cell and `auth_after` as the
@@ -113,23 +115,25 @@ proposed output. The action signature names the input/output topology; the
 under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 `burn` consumes the token and destroys it:
 
 ```cellscript
-action burn(token: Token)
-where
-    assert(token.amount > 0, "cannot burn zero")
-    destroy token
+action burn(token: Token) {
+    verification
+        require token.amount > 0, "cannot burn zero"
+        destroy token
+}
 ```
 
 These three actions show the basic resource effect flow: propose an output,
@@ -145,7 +149,8 @@ When you see a lock like this:
 
 ```cellscript
 lock owner_only(protected asset: NFT, witness claimed_owner: Address) -> bool {
-    require asset.owner == claimed_owner
+    verification
+        require asset.owner == claimed_owner
 }
 ```
 

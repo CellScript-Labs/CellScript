@@ -9,6 +9,7 @@ resource Coin has store, transfer {
     nonce: u64,
 }
 
-action bad(coin: Coin, to: Address)
-where
-    transfer coin to to
+action bad(coin: Coin, to: Address) {
+    verification
+        transfer coin to to
+}

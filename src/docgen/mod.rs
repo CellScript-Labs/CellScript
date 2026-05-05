@@ -1069,9 +1069,10 @@ mod tests {
 module demo
 
 /// adds two numbers
-action add(x: u64, y: u64) -> u64
-where
-    return x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        return x + y
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();

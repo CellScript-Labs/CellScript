@@ -88,8 +88,8 @@ impl<'a> Parser<'a> {
             TokenKind::Invariant => Some("invariant".to_string()),
             TokenKind::Action => Some("action".to_string()),
             TokenKind::Lock => Some("lock".to_string()),
-            TokenKind::Where => Some("where".to_string()),
             TokenKind::Transition => Some("transition".to_string()),
+            TokenKind::Verification => Some("verification".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
             TokenKind::Transfer => Some("transfer".to_string()),
@@ -981,10 +981,10 @@ impl<'a> Parser<'a> {
             }
 
             if self.check(&TokenKind::Assert) {
-                if self.check(&TokenKind::Assert) && !self.check_invariant_call_assert() {
-                    asserts.push(self.parse_invariant_assert()?);
+                if self.current().text == "assert_invariant" {
+                    asserts.push(self.parse_invariant_call_assert()?);
                 } else {
-                    asserts.push(self.parse_expr()?);
+                    asserts.push(self.parse_invariant_assert()?);
                 }
                 self.consume_optional_semi();
                 self.skip_newlines();
@@ -1171,10 +1171,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn check_invariant_call_assert(&self) -> bool {
-        self.peek(1).kind == TokenKind::LParen || self.peek(1).kind == TokenKind::Not
-    }
-
     fn parse_invariant_assert(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Assert)?;
@@ -1183,6 +1179,25 @@ impl<'a> Parser<'a> {
         Ok(Expr::Assert(AssertExpr {
             condition: Box::new(condition),
             message: Box::new(Expr::String("invariant assertion failed".to_string())),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_invariant_call_assert(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Assert)?;
+        self.expect(TokenKind::LParen)?;
+        self.skip_newlines();
+        let condition = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        self.skip_newlines();
+        let message = self.parse_expr()?;
+        self.skip_newlines();
+        let end_span = self.current().span;
+        self.expect(TokenKind::RParen)?;
+        Ok(Expr::Assert(AssertExpr {
+            condition: Box::new(condition),
+            message: Box::new(message),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -1378,8 +1393,7 @@ impl<'a> Parser<'a> {
             (None, Vec::new())
         };
 
-        let state_edges = self.parse_action_clauses()?;
-        let body = self.parse_action_where_block()?;
+        let (state_edges, body) = self.parse_action_body()?;
 
         let end_span = self.current().span;
         let effect_declared = effect.is_some();
@@ -1452,9 +1466,6 @@ impl<'a> Parser<'a> {
                 TokenKind::Transition => {
                     state_edges.extend(self.parse_action_state_edges()?);
                 }
-                TokenKind::Identifier(name) if name == "move" => {
-                    return Err(CompileError::new("state edge clauses use 'transition', not legacy 'move'", self.current().span));
-                }
                 _ => break,
             }
         }
@@ -1462,53 +1473,24 @@ impl<'a> Parser<'a> {
         Ok(state_edges)
     }
 
-    fn parse_action_where_block(&mut self) -> Result<Vec<Stmt>> {
-        if !self.check(&TokenKind::Where) {
-            if self.check(&TokenKind::LBrace) {
-                return Err(CompileError::new(
-                    "action proof blocks use `where`; `{ ... }` action bodies are not part of the current syntax",
-                    self.current().span,
-                ));
-            }
-            return Ok(Vec::new());
-        }
+    fn parse_action_body(&mut self) -> Result<(Vec<ActionStateEdge>, Vec<Stmt>)> {
+        self.skip_newlines();
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
 
-        self.advance();
+        let state_edges = self.parse_action_clauses()?;
+        self.skip_newlines();
+        self.expect(TokenKind::Verification)?;
         self.skip_newlines();
 
         let mut stmts = Vec::new();
-        while !self.check(&TokenKind::Eof) && !self.action_where_block_is_done() {
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             stmts.push(self.parse_stmt()?);
             self.skip_newlines();
         }
+        self.expect(TokenKind::RBrace)?;
 
-        Ok(stmts)
-    }
-
-    fn action_where_block_is_done(&self) -> bool {
-        if self.current().span.column != 1 {
-            return false;
-        }
-
-        matches!(
-            &self.current().kind,
-            TokenKind::Pound
-                | TokenKind::Module
-                | TokenKind::Use
-                | TokenKind::Resource
-                | TokenKind::Shared
-                | TokenKind::Receipt
-                | TokenKind::Struct
-                | TokenKind::Const
-                | TokenKind::Enum
-                | TokenKind::Action
-                | TokenKind::Fn
-                | TokenKind::Lock
-        ) || matches!(
-            &self.current().kind,
-            TokenKind::Identifier(name)
-                if matches!(name.as_str(), "flow" | "with_default_hash_type" | "with_capacity_floor")
-        )
+        Ok((state_edges, stmts))
     }
 
     fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
@@ -1521,30 +1503,10 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             if self.check(&TokenKind::LBrace) {
-                let block_span = self.current().span;
-                self.advance();
-                let mut block_edge_count = 0usize;
-                loop {
-                    self.skip_newlines();
-                    if self.check(&TokenKind::RBrace) {
-                        if block_edge_count == 0 {
-                            return Err(CompileError::new("transition block must contain at least one state edge", block_span));
-                        }
-                        self.advance();
-                        break;
-                    }
-                    if self.check(&TokenKind::Eof) {
-                        return Err(CompileError::new("unterminated transition block", self.current().span));
-                    }
-                    edges.push(self.parse_action_state_edge()?);
-                    block_edge_count += 1;
-                    self.consume_optional_semi();
-                    if self.check(&TokenKind::Comma) {
-                        self.advance();
-                    }
-                }
-                self.skip_newlines();
-                continue;
+                return Err(CompileError::new(
+                    "transition block syntax is not part of the canonical action surface",
+                    self.current().span,
+                ));
             }
             loop {
                 edges.push(self.parse_action_state_edge()?);
@@ -1565,10 +1527,23 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         let first = self.parse_name_path()?;
         if !self.check(&TokenKind::Dot) {
-            return Err(CompileError::new(
-                "state transition must use an explicit input field path: transition input.state: From -> output.state: To",
-                start_span,
-            ));
+            self.expect(TokenKind::Arrow)?;
+            let output_start = self.current().span;
+            let output = self.parse_name_path()?;
+            if self.check(&TokenKind::Dot) {
+                return Err(CompileError::new(
+                    "lineage transition output must be a binding name: transition input -> output",
+                    output_start,
+                ));
+            }
+            let end_span = self.current().span;
+            return Ok(ActionStateEdge {
+                path: StateFieldPath { base: first, field: String::new(), span: start_span },
+                to_path: StateFieldPath { base: output, field: String::new(), span: output_start },
+                from: String::new(),
+                to: String::new(),
+                span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+            });
         }
         self.advance();
         let field = self.parse_name()?;
@@ -1651,7 +1626,17 @@ impl<'a> Parser<'a> {
         } else {
             Type::Bool
         };
-        let body = self.parse_block()?;
+        self.skip_newlines();
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+        self.expect(TokenKind::Verification)?;
+        self.skip_newlines();
+        let mut body = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            body.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::RBrace)?;
 
         let end_span = self.current().span;
         Ok(LockDef {
@@ -2252,7 +2237,6 @@ impl<'a> Parser<'a> {
             TokenKind::ReadRef => self.parse_read_ref_expr(),
             TokenKind::If => self.parse_if_expr(),
             TokenKind::Match => self.parse_match_expr(),
-            TokenKind::Assert => self.parse_assert(),
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
             _ if self.ident_like_name().is_some() => {
@@ -2714,28 +2698,6 @@ impl<'a> Parser<'a> {
         Ok(Expr::ReadRef(ReadRefExpr { ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) }))
     }
 
-    fn parse_assert(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Assert)?;
-        if self.check(&TokenKind::Not) {
-            self.advance();
-        }
-        self.expect(TokenKind::LParen)?;
-        self.skip_newlines();
-        let condition = self.parse_expr()?;
-        self.expect(TokenKind::Comma)?;
-        self.skip_newlines();
-        let message = self.parse_expr()?;
-        self.skip_newlines();
-        let end_span = self.current().span;
-        self.expect(TokenKind::RParen)?;
-        Ok(Expr::Assert(AssertExpr {
-            condition: Box::new(condition),
-            message: Box::new(message),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
     fn parse_require(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Require)?;
@@ -2787,6 +2749,16 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             Some(Box::new(self.parse_expr()?))
+        } else if self.check(&TokenKind::Else) {
+            self.advance();
+            self.skip_newlines();
+            let message_span = self.current().span;
+            if let Some(name) = self.ident_like_name() {
+                self.advance();
+                Some(Box::new(Expr::String(name)))
+            } else {
+                return Err(CompileError::new("require else must name an error identifier", message_span));
+            }
         } else {
             None
         };
@@ -3188,9 +3160,10 @@ resource Token has store {
 module test
 
 #[type_id("cellscript::action:v1")]
-action run() -> u64
-where
+action run() -> u64 {
+    verification
     return 0
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3218,9 +3191,10 @@ resource Vault<T> has store {
         let input = r#"
 module test
 
-action mint(amount: u64) -> token: Token
-where
+action mint(amount: u64) -> token: Token {
+    verification
     create token = Token { amount: amount, symbol: b"TEST" }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3237,10 +3211,11 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-	action accept(input: Offer) -> output: Offer
+	action accept(input: Offer) -> output: Offer {
 	    transition input.state: Live -> output.state: Filled
-	where
-    require output.state == OfferState::Filled
+        verification
+            require output.state == OfferState::Filled
+    }
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3259,17 +3234,16 @@ flow OfferFlow for Offer.state {
     }
 
     #[test]
-    fn test_parse_action_transition_block() {
+    fn test_parse_action_continuation_transitions() {
         let input = r#"
 module test
 
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
-    transition {
-        input.state: Live -> output.state: Filled
-        receipt.state: Open -> next_receipt.state: Closed
-    }
-where
-    require output.state == OfferState::Filled
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+    transition input -> output
+    transition receipt -> next_receipt
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3280,37 +3254,40 @@ where
         assert_eq!(action.state_edges[0].path.base, "input");
         assert_eq!(action.state_edges[1].path.base, "receipt");
         assert_eq!(action.state_edges[1].to_path.base, "next_receipt");
+        assert!(action.state_edges[0].path.field.is_empty());
     }
 
     #[test]
-    fn test_rejects_empty_transition_block() {
+    fn test_rejects_transition_block() {
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition {
     }
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("transition block must contain at least one state edge"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("transition block syntax is not part"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn test_rejects_legacy_move_clause() {
+    fn test_rejects_legacy_move_as_ordinary_unexpected_token() {
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     move input.state: Live -> output.state: Filled
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("use 'transition', not legacy 'move'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -3318,10 +3295,11 @@ where
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.state Live -> output.state Filled
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3329,7 +3307,7 @@ where
     }
 
     #[test]
-    fn test_rejects_action_brace_body() {
+    fn test_rejects_action_brace_body_without_verification() {
         let input = r#"
 module test
 
@@ -3339,7 +3317,7 @@ action accept(input: Offer) -> output: Offer {
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("action proof blocks use `where`"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -3347,9 +3325,10 @@ action accept(input: Offer) -> output: Offer {
         let input = r#"
 module test
 
-action grant(config: read_ref Config) -> grant: Grant
-where
+action grant(config: read_ref Config) -> grant: Grant {
+    verification
     create grant = Grant { admin: config.admin }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3361,9 +3340,10 @@ where
         let input = r#"
 module test
 
-action accept(input: Offer, output output: Offer)
-where
+action accept(input: Offer, output output: Offer) {
+    verification
     require output.state == 1
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3375,10 +3355,11 @@ where
         let input = r#"
 module test
 
-action grant(read config: Config, token: Token) -> grant: Grant
-where
+action grant(read config: Config, token: Token) -> grant: Grant {
+    verification
     consume token
     create grant = Grant { admin: config.admin }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3400,7 +3381,8 @@ where
 module test
 
 lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Address) -> bool {
-    require receipt.owner == claimed_owner
+    verification
+            require receipt.owner == claimed_owner
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -3418,9 +3400,10 @@ lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Addres
         let input = r#"
 module test
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token
-where
+action mint(amount: u64, symbol: [u8; 8]) -> Token {
+    verification
     create Token { amount, symbol }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3432,10 +3415,11 @@ where
         let input = r#"
 module test
 
-action test(x: u64, y: u64) -> u64
-where
+action test(x: u64, y: u64) -> u64 {
+    verification
     let z = x + y * 2
     return z
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3449,10 +3433,11 @@ module test
 
 const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000
 
-action discount(raw: u128) -> u128
-where
+action discount(raw: u128) -> u128 {
+    verification
     let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 }
     return raw - oversize
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3485,9 +3470,10 @@ use cellscript::fungible_token::{Token, MintAuthority}
         let input = r#"
 module test
 
-action bad() -> u64
-where
+action bad() -> u64 {
+    verification
     return launch(Token)
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3499,14 +3485,15 @@ where
         let input = r#"
 module test
 
-action test() -> (u64, u64)
-where
+action test() -> (u64, u64) {
+    verification
     let value = foo(
         1,
         2
     )
 
     (value, 3)
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3540,12 +3527,13 @@ enum Flag {
     Off,
 }
 
-action test(flag: Flag) -> u64
-where
+action test(flag: Flag) -> u64 {
+    verification
     match flag {
         On => 1,
         Off => 0,
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3565,14 +3553,15 @@ resource Offer has store {
     payment_symbol: [u8; 8]
 }
 
-action fill(input: Offer) -> (output: Offer)
-    transition input.state: Live -> output.state: Filled
-where
+action fill(input: Offer) -> (output: Offer) {
+    transition input -> output
+    verification
     preserve output from input {
         seller
         price
         payment_symbol
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3590,13 +3579,14 @@ where
         let input = r#"
 module test
 
-action test(x: u64, y: u64) -> u64
-where
+action test(x: u64, y: u64) -> u64 {
+    verification
     require {
         x > 0
         y > 0
     }
     return x + y
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3617,11 +3607,12 @@ resource Token has store {
     amount: u64
 }
 
-action test(input: Token) -> (output: Token)
-where
+action test(input: Token) -> (output: Token) {
+    verification
     preserve output from input {
         amount
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3647,10 +3638,11 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3663,10 +3655,11 @@ where
         let input = r#"
 module test
 
-action test() -> u64
-where
+action test() -> u64 {
+    verification
     require {
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3679,11 +3672,12 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
         *
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3696,11 +3690,12 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
         except
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3713,10 +3708,11 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input
     return 0
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3733,11 +3729,12 @@ resource Token has store {
     amount: u64
 }
 
-action test(input: Token) -> u64
-where
+action test(input: Token) -> u64 {
+    verification
     require {
         consume input
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3750,8 +3747,8 @@ where
         let input = r#"
 module test
 
-action test(x: u64) -> u64
-where
+action test(x: u64) -> u64 {
+    verification
     require {
         if x > 0 {
             true
@@ -3759,6 +3756,7 @@ where
             false
         }
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();

@@ -2,11 +2,12 @@
 
 ## Status
 
-Superseded for action/update syntax by
-[`CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`](archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md).
+Superseded for action syntax by
+[`CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md`](CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md).
 Keep this RFC as historical design context only. The active surface uses
-signature-direction action outputs, `where` proof blocks, singular
-`transition input.state: A -> output.state: B`, prefix source qualifiers.
+signature-direction action outputs, braced action/lock bodies with
+`verification`, repeated action-level `transition` declarations, and prefix
+source qualifiers.
 
 0.13 low-risk surface pass implemented. Authority-sensitive binding remains
 deferred.
@@ -425,9 +426,8 @@ the seven-example CKB production matrix.
 - namespace module declaration;
 - resource, shared, and receipt declarations;
 - create/consume/destroy flows;
-- named action outputs plus `transition`/`require` constraints for update semantics;
-- `protected`, `lock_args`, `witness`, and `require` lock-boundary syntax;
-- named action outputs plus `transition`/`require` constraints for update semantics;
+- named action outputs plus `transition`/`require` constraints for state
+  continuation semantics;
 - `protected`, `lock_args`, `witness`, and `require` lock-boundary syntax;
 - field shorthand;
 - bounded collection literals;

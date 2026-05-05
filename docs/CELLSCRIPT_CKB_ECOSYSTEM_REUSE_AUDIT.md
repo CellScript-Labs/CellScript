@@ -1,14 +1,18 @@
 # CellScript CKB Ecosystem Reuse Audit
 
-**Status**: engineering audit of CellScript overlap with `ckb-std` and
-`ckb-sdk-rust`.
+**Status**: 0.19 scope implementation landed for `ckb-std` ABI parity,
+inline runtime alignment, the formal headless CKB adapter crate, and focused
+local-node adapter acceptance.
 
 **Audit date**: 2026-05-05.
 
 This document records where CellScript is correctly reusing the CKB ecosystem,
 where overlap is an acceptable compiler boundary, and where the project is at
 risk of maintaining duplicate infrastructure that should belong to `ckb-std`,
-`ckb-sdk-rust`, or the future `cellscript-ckb-adapter`.
+`ckb-sdk-rust`, or `cellscript-ckb-adapter`.
+
+This is not 0.18 protocol-equivalence evidence. It is a 0.19 planning contract
+for the registry, deployment, adapter, and Action Builder layer.
 
 ## Summary
 
@@ -19,6 +23,10 @@ mostly emit metadata, intent, evidence schemas, and unresolved transaction
 plans. That is appropriate compiler output. They do not perform live-cell
 selection, CellDep/HeaderDep resolution, fee/change calculation, signing,
 tx-pool acceptance, or submission.
+
+`cellc action build --json` now makes that boundary machine-readable through an
+adapter contract and packed-materialization requirements, while still marking
+the draft as not submittable and not CKB-VM executed.
 
 The real duplication risk is on the contract-side CKB runtime boundary:
 
@@ -42,12 +50,12 @@ with `ckb-std` and CKB VM behavior.
 | CellDep/HeaderDep resolution | Emits metadata slots and unresolved deps | `ckb-sdk-rust` resolvers / adapter | Low | Keep compiler output declarative. |
 | Signing and lock unlocking | Emits explicit signer/witness requirements | `ckb-sdk-rust` signers and wallets | Low | Keep signer authority outside compiler. |
 | RPC acceptance | Not implemented by compiler | CKB node via `ckb-sdk-rust` RPC | Low | Adapter must run `estimate_cycles`, `test_tx_pool_accept`, and optional `send_transaction`. |
-| CKB syscall/source constants | Hand-written in codegen | `ckb-std::ckb_constants` | Medium | Inline only with parity tests; Rust backend should import `ckb-std` constants. |
-| WitnessArgs parsing | Hand-written RISC-V parser | `ckb-std` / `ckb-types` for `WitnessArgs`; CellScript for `CSARGv1` | Medium | Keep inline parser only as implementation duplication; Rust backend should use `ckb-std` loaders and keep CellScript-specific payload decoding. |
+| CKB syscall/source constants | Centralized in `src/ckb_abi.rs`, consumed by codegen and generated stdlib | `ckb-std::ckb_constants` | Low | Keep inline ABI table parity-tested against `ckb-std`; Rust backend should import `ckb-std` constants. |
+| WitnessArgs parsing | Hand-written RISC-V parser with `ckb-types` layout fixtures | `ckb-std` / `ckb-types` for `WitnessArgs`; CellScript for `CSARGv1` | Medium | Keep inline parser only as implementation duplication; Rust backend should use `ckb-std` loaders and keep CellScript-specific payload decoding. |
 | TYPE_ID evidence | Emits builder plans and metadata validation | `ckb-std::type_id`, adapter, SDK | Medium | Keep metadata plan; test against `ckb-std` semantics and adapter outputs. |
-| Since/epoch encoding | Hand-written helpers | `ckb-std::since` | Medium | Keep compiler helpers; add parity tests. |
-| Occupied capacity | Hand-computes from lock/type/data bytes in runtime helper | CKB `CellField::OccupiedCapacity`, `ckb-std`, `ckb-types` | High | Rust backend should use `load_cell_occupied_capacity`; inline backend should prefer field 6 or prove fallback equivalence. |
-| Generated syscall stdlib | `StdLib::generate_syscalls` emits a second assembly syscall surface | `ckb-std` and main codegen runtime helpers | High | Deprecate, remove, or generate from one ABI table. |
+| Since/epoch encoding | Hand-written helpers with `ckb-std::since` parity tests | `ckb-std::since` | Low | Keep compiler helpers and parity tests. |
+| Occupied capacity | Inline helper reads CKB `CellField::OccupiedCapacity` through `LOAD_CELL_BY_FIELD` | CKB `CellField::OccupiedCapacity`, `ckb-std`, `ckb-types` | Low | Rust backend should use `load_cell_occupied_capacity`; inline backend now uses the same field id. |
+| Generated syscall stdlib | `StdLib::generate_syscalls` now uses the same `src/ckb_abi.rs` table as codegen | `ckb-std` and main codegen runtime helpers | Medium | Keep internal/debug-only until removed or replaced by generated shim output. |
 
 ## Safe Boundaries
 
@@ -64,8 +72,8 @@ These CellScript surfaces are not duplicate transaction infrastructure:
 - `cellc validate-tx` validates metadata and builder evidence, not CKB VM,
   consensus, live-cell availability, cycles, or tx-pool acceptance.
 
-This division is correct. The future adapter should consume these outputs and
-use `ckb-sdk-rust` for the chain-facing work.
+This division is correct. `crates/cellscript-ckb-adapter` consumes these
+outputs and uses `ckb-sdk-rust` for the chain-facing materialization boundary.
 
 ## Runtime Policy
 
@@ -96,8 +104,9 @@ Generate CellScript code for enforcing CellScript semantics.
 
 ## Duplicate Runtime Constants
 
-CellScript currently hand-writes CKB syscall numbers, source values, field ids,
-and since flags in `src/codegen/mod.rs`.
+CellScript now keeps CKB syscall numbers, source values, field ids, and since
+flags in `src/ckb_abi.rs`. `src/codegen/mod.rs` and
+`StdLib::generate_syscalls` consume that table.
 
 This is acceptable only as inline-backend implementation duplication. The
 current RISC-V/ELF output cannot call a Rust `ckb-std` function at runtime, but
@@ -108,13 +117,20 @@ constants:
 ckb-std/src/ckb_constants.rs
 ```
 
-Required mitigation:
+Implemented mitigation:
 
-- add constant parity tests for syscall numbers;
-- add parity tests for `Source::{Input, Output, CellDep, HeaderDep,
+- constant parity tests for syscall numbers;
+- parity tests for `Source::{Input, Output, CellDep, HeaderDep,
   GroupInput, GroupOutput}`;
-- add parity tests for `CellField`, `HeaderField`, and `InputField`;
-- add parity tests for since flag masks used by CellScript epoch helpers;
+- parity tests for `CellField`, `HeaderField`, and `InputField`;
+- parity tests for since encoding used by CellScript epoch helpers;
+- `SourceView` encode/decode tests proving decoded CKB source values match
+  `ckb-std`.
+- `cellc ckb-std-compat --json` emits the ABI source, runtime policy,
+  compatibility evidence, and adapter boundary as a machine-readable report.
+
+Remaining rule:
+
 - keep CellScript's source-level `SourceView` encoding documented as
   CellScript ABI, while proving its decoded CKB source values match `ckb-std`.
 
@@ -132,24 +148,19 @@ This is the clearest repeated wheel.
 use packed `CellOutput::occupied_capacity(...)` for builder-side capacity
 measurement.
 
-CellScript currently has a runtime helper that recomputes occupied capacity
-from:
-
-```text
-8 + lock script occupied bytes + optional type script occupied bytes + data_len
-```
-
-This helper is useful as an executable compatibility experiment, but it should
-not become CellScript's independent capacity standard.
+CellScript previously recomputed occupied capacity from lock/type/data byte
+lengths. That path has been retired from the inline helper. The inline backend
+now reads `CellField::OccupiedCapacity` with `LOAD_CELL_BY_FIELD`, matching
+`ckb-std::high_level::load_cell_occupied_capacity`.
 
 Required mitigation:
 
 - in a Rust verifier/shim backend, use `ckb_std::high_level::load_cell_occupied_capacity`;
-- in the inline backend, prefer `LOAD_CELL_BY_FIELD` with
-  `CellField::OccupiedCapacity` when the CKB profile exposes that field;
-- keep the multi-syscall computation only as a fallback or differential helper;
-- add fixtures proving computed occupied capacity equals CKB field 6 for
-  supported cells;
+- in the inline backend, use `LOAD_CELL_BY_FIELD` with
+  `CellField::OccupiedCapacity`;
+- keep the retired multi-syscall computation out of production claims;
+- add fixtures proving `ckb-types` packed occupied-capacity measurement agrees
+  with the CKB field contract;
 - make the adapter use `ckb-types` / `ckb-sdk-rust` packed capacity APIs for
   final output capacity and under-capacity rejection;
 - keep compiler metadata limited to capacity floors and evidence requirements.
@@ -170,16 +181,17 @@ That is the highest-maintenance overlap:
 - it looks like a standalone CKB runtime library, which is not CellScript's
   role.
 
-Required mitigation:
+Implemented mitigation:
 
-- deprecate `--gen-stdlib` for CKB syscall runtime output, or clearly label it
-  as internal/debug-only;
-- remove duplicated syscall wrapper generation when the main codegen path owns
-  the emitted runtime helper;
-- if the command must stay, generate it from the same ABI table used by
+- generated syscall wrappers use the same `src/ckb_abi.rs` table used by
   `src/codegen/mod.rs`;
-- add tests that compare generated stdlib helper behavior with main codegen
-  helper behavior for the same builtin surface.
+- tests assert the generated stdlib surface contains the same syscall values
+  and no longer uses the old GroupInput pseudo-value.
+
+Remaining mitigation:
+
+- deprecate or remove standalone generated syscall wrappers if they stop being
+  useful as internal/debug output.
 
 The long-term target is one CKB ABI source of truth inside CellScript, tested
 against `ckb-std`.
@@ -203,13 +215,18 @@ A Rust verifier/shim backend should use `ckb-std` to load `WitnessArgs`, then
 let generated CellScript code decode and validate the `CSARGv1` payload and
 action-specific arguments.
 
-Required mitigation:
+Implemented mitigation:
 
-- add differential fixtures against `ckb-types::packed::WitnessArgs`;
-- cover valid fields, `BytesOpt::None`, empty payloads, short tables,
-  non-monotonic offsets, oversized witnesses, and trailing bytes;
-- document exactly which `WitnessArgs` fields CellScript uses for entry
-  payloads and lock signatures;
+- differential fixtures against `ckb-types::packed::WitnessArgs`;
+- coverage for valid fields, `BytesOpt::None`, short tables,
+  non-monotonic offsets, offsets beyond total size, and trailing bytes;
+
+Remaining mitigation:
+
+- **Done as machine-readable policy**: `cellc ckb-std-compat --json` and
+  `cellc action build --json` expose the entry payload ABI, adapter-owned final
+  placement, default action `input_type` placement, and do-not-overwrite lock
+  signature policy;
 - treat `CSARGv1` decoding as CellScript-specific ABI, not as a `ckb-std`
   responsibility;
 - keep final witness placement in the adapter, not compiler core.
@@ -298,6 +315,9 @@ clear field such as:
 }
 ```
 
+Implemented mitigation: `cellc validate-tx --json` now emits these evidence
+boundary fields at the top level of the report.
+
 ## Low-Risk Utilities
 
 `cellc ckb-hash` duplicates a small ecosystem utility, but the risk is low. It
@@ -313,51 +333,87 @@ Keep it if:
 
 ## Adapter Ownership
 
-The future `cellscript-ckb-adapter` should absorb all chain-reality work:
+`cellscript-ckb-adapter` absorbs the first reusable chain-reality boundary:
 
-- deployment transaction construction;
-- live-cell selection;
-- CellDep and HeaderDep resolution;
-- occupied-capacity measurement;
-- fee and change calculation;
-- final `WitnessArgs` placement;
-- signing hooks;
-- `estimate_cycles`;
-- `test_tx_pool_accept`;
-- optional `send_transaction`;
-- machine-readable acceptance reports.
+- action-plan parsing and schema checks;
+- CKB packed transaction materialization;
+- explicit CellDep/HeaderDep/output/witness assembly;
+- occupied-capacity measurement and under-capacity rejection before RPC;
+- final `WitnessArgs` placement helpers;
+- TYPE_ID args and script construction helpers;
+- `estimate_cycles`, `test_tx_pool_accept`, and optional `send_transaction`
+  wrappers;
+- machine-readable preview and acceptance reports.
 
 Those are already available in `ckb-sdk-rust` through RPC clients, transaction
 builders, input iterators, cell collectors, dep resolvers, signers, and packed
 capacity APIs. CellScript should integrate with those APIs rather than grow
 parallel infrastructure.
 
+The checked-in cookbook lives at `examples/ckb-sdk-builder`, but it is now only
+a wrapper around the formal crate. It must not become a second implementation.
+
 ## Prioritized Cleanup
 
 ### P0
 
-1. Add `ckb-std` parity tests for CKB syscall numbers, sources, field ids, and
-   since constants.
-2. Rework occupied-capacity helper to prefer `CellField::OccupiedCapacity`, or
-   explicitly mark the current helper as fallback and prove equivalence.
-3. Deprecate, remove, or unify `StdLib::generate_syscalls` with main codegen's
-   ABI helper source of truth.
+1. **Done**: `tests/ckb_std_compat.rs` compares CKB syscall numbers, sources,
+   field ids, and since encodings against `ckb-std`.
+2. **Done**: inline occupied-capacity lowering uses
+   `CellField::OccupiedCapacity`.
+3. **Done for drift prevention**: `StdLib::generate_syscalls` uses the same
+   `src/ckb_abi.rs` table as main codegen. Full removal/deprecation can remain
+   a cleanup task if the generated stdlib command stops being useful.
 
 ### P1
 
-1. Add `WitnessArgs` differential fixtures against `ckb-types` readers.
-2. Add TYPE_ID differential fixtures against `ckb-std::type_id`.
-3. Add since/epoch parity fixtures against `ckb-std::since`.
-4. Update `validate-tx` output/docs to say metadata/evidence validation, not
+1. **Done for layout parity**: `WitnessArgs` fixtures compare against
+   `ckb-types::packed::WitnessArgs` and malformed table cases.
+2. **Done for contract parity**: TYPE_ID lifecycle and args-hash tests are
+   pinned to the `ckb-std::type_id` API contract.
+3. **Done**: since/epoch parity fixtures cover valid and malformed
+   `ckb-std::since` cases.
+4. **Done**: `validate-tx` output/docs say metadata/evidence validation, not
    node acceptance.
 
 ### P2
 
-1. Add adapter examples that use `ckb-sdk-rust` for capacity, deps, signing,
-   acceptance, and submission.
-2. Add a `ckb-std` compatibility report command or test fixture summary.
-3. Consider an optional generated Rust shim using
+1. **Done as formal headless crate**: `crates/cellscript-ckb-adapter` uses
+   local `ckb-sdk-rust` for packed transaction materialization, capacity
+   checks, CellDep/HeaderDep/output/witness assembly, TYPE_ID args checks,
+   script construction, signer boundary types, and RPC acceptance/submission
+   methods. `examples/ckb-sdk-builder` is now a cookbook wrapper.
+2. **Done**: `cellc ckb-std-compat --json` emits a ckb-std compatibility
+   report for CI and release evidence.
+3. **Done as focused local-node evidence**:
+   `scripts/cellscript_ckb_adapter_acceptance.sh` starts a local CKB devnet,
+   checks a compiler action plan, verifies adapter materialization tests, and
+   records `estimate_cycles` plus `test_tx_pool_accept` evidence in a JSON
+   report.
+4. Consider an optional generated Rust shim using
    `ckb_backend_runtime = "ckb-std"` for mixed Rust/CellScript projects.
+
+Focused validation:
+
+```text
+./scripts/cellscript_ckb_ecosystem_reuse_gate.sh quick
+./scripts/cellscript_ckb_ecosystem_reuse_gate.sh full
+```
+
+This gate is scoped to CKB ecosystem reuse and adapter boundary evidence. It is
+not the package/deployment registry production gate.
+
+Evidence is layered:
+
+```text
+compiler ABI parity          -> tests/ckb_std_compat.rs
+adapter materialization      -> crates/cellscript-ckb-adapter tests
+local CKB adapter acceptance -> scripts/cellscript_ckb_adapter_acceptance.sh
+stateful business flows      -> scripts/ckb_cellscript_acceptance.sh
+```
+
+Known limitations remain explicit: no wallet UI, no CellFabric intent DAG, no
+external audit claim, and no exhaustive adversarial state-space proof.
 
 ## Final Boundary
 

@@ -53,11 +53,14 @@ fields.
 Example:
 
 ```cellscript
-action preserve_coin_boundary(coin_before: Coin) -> coin_after: Coin
-where
-    std::cell::preserve_type(coin_after, coin_before)
-    std::cell::preserve_lock(coin_after, coin_before)
-    std::cell::preserve_capacity(coin_after, coin_before)
+action preserve_coin_boundary(coin_before: Coin) -> coin_after: Coin {
+    transition coin_before -> coin_after
+
+    verification
+        std::cell::preserve_type(coin_after, coin_before)
+        std::cell::preserve_lock(coin_after, coin_before)
+        std::cell::preserve_capacity(coin_after, coin_before)
+}
 ```
 
 `same_lock`, `preserve_lock`, and `preserve_capacity` lower to canonical Cell
@@ -77,9 +80,12 @@ require output.amount == input.amount
 Example:
 
 ```cellscript
-action keep_amount(coin_before: Coin) -> coin_after: Coin
-where
-    std::accounting::conserved(coin_after, coin_before)
+action keep_amount(coin_before: Coin) -> coin_after: Coin {
+    transition coin_before -> coin_after
+
+    verification
+        std::accounting::conserved(coin_after, coin_before)
+}
 ```
 
 Use this only for the simple one-input, one-output amount continuity case. More
@@ -111,12 +117,13 @@ resource Coin has store, create, consume, replace, burn, relock {
     nonce: u64,
 }
 
-action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to) {
-        amount
-        nonce
-    }
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::lifecycle::transfer(coin, next_coin, to) {
+            amount
+            nonce
+        }
+}
 ```
 
 This has the same audit shape as writing the pieces directly:
@@ -141,12 +148,13 @@ receipt Voucher -> Coin has create, consume, burn {
     holder: Address,
 }
 
-action claim_voucher(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin, voucher.holder) {
-        amount
-        nonce
-    }
+action redeem_voucher(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin, voucher.holder) {
+            amount
+            nonce
+        }
+}
 ```
 
 `std::receipt::claim` requires the receipt declaration to name its output type
@@ -156,12 +164,13 @@ compiler does not infer an arbitrary claim output.
 Example settlement:
 
 ```cellscript
-action settle_voucher(voucher: Voucher) -> coin: Coin
-where
-    std::lifecycle::settle(voucher, coin, voucher.holder) {
-        amount
-        nonce
-    }
+action settle_voucher(voucher: Voucher) -> coin: Coin {
+    verification
+        std::lifecycle::settle(voucher, coin, voucher.holder) {
+            amount
+            nonce
+        }
+}
 ```
 
 Use `settle` only when the protocol language really benefits from the word. It

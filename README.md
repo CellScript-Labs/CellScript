@@ -183,18 +183,19 @@ transformations:
   `flow Name for Type.field { A -> B by action; }` or compact
   `flow Type.field { A -> B; }` declares allowed edges. The canonical verifier
   shape separates topology, state edge, and proof obligations:
-  `action(old: T) -> new: T`, `transition old.field: A -> new.field: B`, then a
-  `where` proof block with explicit `require` constraints. Explicit `output`
-  parameters and `consume`/`create` actions remain accepted, but the signature
-  direction is the normal input-to-output surface. Multiple state edges may be
-  grouped in a non-empty `transition { ... }` block.
+  `action(old: T) -> new: T { transition old -> new; verification ... }`.
+  Field-level edges such as `transition old.field: A -> new.field: B` remain
+  available when a declared flow graph needs explicit state values. Explicit
+  `output` parameters and `consume`/`create` actions remain accepted, but the
+  signature direction is the normal input-to-output surface. Multiple state
+  edges are written as repeated action-level `transition` lines.
   Each state field has exactly one flow declaration; split/partial flow merging
   is not supported.
-- **Scoped proof blocks** — action proof logic lives under `where`; `transition` is an
-  action-level state edge declaration before `where`, not a statement inside
-  conditional proof logic. The type checker rejects asymmetric branch
-  constraints when an output field is required in one proof branch but not its
-  siblings.
+- **Scoped verification sections** — action and lock proof logic lives under
+  `verification`. `transition` is an action-level Cell lifecycle declaration
+  before `verification`, not a statement inside conditional proof logic. The
+  type checker rejects asymmetric branch constraints when an output field is
+  required in one proof branch but not its siblings.
 - **Effect inference** — `action` bodies are classified as `Pure`, `ReadOnly`,
   `Mutating`, `Creating`, or `Destroying` based on their Cell operations.
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
@@ -246,23 +247,25 @@ struct Wallet {
 }
 
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    require wallet.owner == claimed_owner
+    verification
+        require wallet.owner == claimed_owner
 }
 ```
 
 **Effects:**
 
 ```cellscript
-action move_token(token: Token, to: Address) -> next_token: Token
-where
-    assert(token.amount > 0, "empty token")
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        require token.amount > 0, "empty token"
 
-    consume token
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 The compiler treats `consume`, `create`, `destroy`, action-boundary source
@@ -307,32 +310,36 @@ resource MintAuthority has store {
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    require auth_after.token_symbol == auth_before.token_symbol
-    require auth_after.max_supply == auth_before.max_supply
-    require auth_after.minted == auth_before.minted + amount
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
 
-    create token = Token {
-        amount: amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+        create token = Token {
+            amount: amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 
-action burn(token: Token)
-where
-    assert(token.amount > 0, "cannot burn zero")
-    destroy token
+action burn(token: Token) {
+    verification
+        require token.amount > 0, "cannot burn zero"
+        destroy token
+}
 ```
 
 **Bundled protocol examples:**
@@ -393,6 +400,12 @@ CellScript includes production-style local language tooling for early users:
   reports, CKB target-profile arguments, and status-bar feedback. It shells out to
   `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
   CI gates.
+
+The 0.19 ecosystem-reuse work adds a formal headless
+`cellscript-ckb-adapter` crate. The compiler emits semantic action plans and
+ABI evidence; the adapter uses `ckb-sdk-rust` to materialize CKB transaction
+shape and local-node acceptance evidence. It is not a wallet UI, frontend kit,
+or CellFabric intent engine.
 
 - [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
 - [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)

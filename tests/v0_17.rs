@@ -13,76 +13,80 @@ action inspect(
     expected_lock_hash: Hash,
     expected_type_hash: Hash,
     relative_distance: i32
-) -> u64
-where
-    let input = source::group_input(0)
-    let output = source::output(0)
-    let owner_output = source::output(1)
-    let header = source::header_dep(0)
-    let capacity = ckb::cell_capacity(input)
-    let occupied = ckb::cell_occupied_capacity(input)
-    let unoccupied = ckb::cell_unoccupied_capacity(input)
-    let data_size = ckb::cell_data_size(input)
-    let output_index = ckb::cell_output_index(source::group_output(0))
-    let out_point_index = ckb::input_out_point_index(input)
-    let out_point_hash_low = ckb::input_out_point_tx_hash_low(input)
-    let lock_hash_low = ckb::cell_lock_hash_low(input)
-    let type_hash_low = ckb::cell_type_hash_low(input)
-    ckb::require_cell_lock_args_empty(input)
-    ckb::require_cell_type_args_empty(input)
-    ckb::require_current_script_args_empty()
-    ckb::require_cell_lock_args_hash(output, expected_lock_hash)
-    ckb::require_cell_type_args_hash(output, expected_type_hash)
-    ckb::require_cell_lock_script_hash_type(output, expected_lock_hash, 1)
-    ckb::require_cell_type_script_hash_type(output, expected_type_hash, 1)
-    dao::require_header_dep_for_input(input, header)
-    let absolute_since = ckb::since_epoch_absolute(42, 0, 1)
-    let relative_since = ckb::since_epoch_relative(42, 0, 1)
-    dao::require_input_since_at_least(input, relative_since)
-    dao::require_input_relative_epoch_since_at_least(input, 42, 0, 1)
-    let rate = dao::accumulated_rate(header)
-    let input_rate = dao::input_accumulated_rate(input)
-    let has_dao_type = dao::has_dao_type(input)
-    let is_deposit_data = dao::is_deposit_data(input)
-    let is_withdrawal_request_data = dao::is_withdrawal_request_data(input)
-    let low = xudt::amount_low(input)
-    let high = xudt::amount_high(input)
-    ckb::require_cell_lock_hash(input, expected_lock_hash)
-    ckb::require_cell_type_hash(input, expected_type_hash)
-    ckb::require_input_out_point_tx_hash(input, expected_lock_hash)
-    ckb::require_input_out_point(input, expected_lock_hash, out_point_index)
-    ckb::require_metapoint_relative(owner_output, output, relative_distance)
-    ckb::require_lock_type_metapoint_pairs(source::output(0), relative_distance)
-    ckb::require_type_lock_metapoint_pairs(source::input(0), relative_distance)
-    ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
-    ckb::require_lock_type_metapoint_pairs_from_i32_data(source::output(0), 52)
-    ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(source::input(0), 0, expected_type_hash, 2)
-    ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered(source::output(0), 52, expected_type_hash, 1)
-    ckb::require_lock_match_master_out_point_pairs_from_data(source::input(0), source::output(0), 16, 20, 52)
-    let current_script_hash: Hash = ckb::current_script_hash()
-    ckb::require_cell_type_hash(input, current_script_hash)
-    xudt::require_owner_mode_input_type(input, expected_type_hash)
-    xudt::require_owner_mode_type_args(input, expected_lock_hash, 2147483648)
-    xudt::require_owner_mode_type_args(input, current_script_hash, 2147483648)
-    xudt::require_owner_mode_type_args_current_script(input, 2147483648)
-    xudt::require_group_amount_conserved()
-    assert_invariant(ckb::current_role() == 2, "action role must be type")
-    let deposit_flag = if is_deposit_data { 1 } else { 0 }
-    let withdrawal_flag = if is_withdrawal_request_data { 1 } else { 0 }
-    let dao_type_flag = if has_dao_type { 1 } else { 0 }
-    return capacity + occupied + unoccupied + data_size + output_index + out_point_index + out_point_hash_low + lock_hash_low + type_hash_low + rate + input_rate + dao_type_flag + deposit_flag + withdrawal_flag + low + high + absolute_since + relative_since
+) -> u64 {
+    verification
+        let input = source::group_input(0)
+        let output = source::output(0)
+        let owner_output = source::output(1)
+        let header = source::header_dep(0)
+        let capacity = ckb::cell_capacity(input)
+        let occupied = ckb::cell_occupied_capacity(input)
+        let unoccupied = ckb::cell_unoccupied_capacity(input)
+        let data_size = ckb::cell_data_size(input)
+        let output_index = ckb::cell_output_index(source::group_output(0))
+        let out_point_index = ckb::input_out_point_index(input)
+        let out_point_hash_low = ckb::input_out_point_tx_hash_low(input)
+        let lock_hash_low = ckb::cell_lock_hash_low(input)
+        let type_hash_low = ckb::cell_type_hash_low(input)
+        ckb::require_cell_lock_args_empty(input)
+        ckb::require_cell_type_args_empty(input)
+        ckb::require_current_script_args_empty()
+        ckb::require_cell_lock_args_hash(output, expected_lock_hash)
+        ckb::require_cell_type_args_hash(output, expected_type_hash)
+        ckb::require_cell_lock_script_hash_type(output, expected_lock_hash, 1)
+        ckb::require_cell_type_script_hash_type(output, expected_type_hash, 1)
+        dao::require_header_dep_for_input(input, header)
+        let absolute_since = ckb::since_epoch_absolute(42, 0, 1)
+        let relative_since = ckb::since_epoch_relative(42, 0, 1)
+        dao::require_input_since_at_least(input, relative_since)
+        dao::require_input_relative_epoch_since_at_least(input, 42, 0, 1)
+        let rate = dao::accumulated_rate(header)
+        let input_rate = dao::input_accumulated_rate(input)
+        let has_dao_type = dao::has_dao_type(input)
+        let is_deposit_data = dao::is_deposit_data(input)
+        let is_withdrawal_request_data = dao::is_withdrawal_request_data(input)
+        let low = xudt::amount_low(input)
+        let high = xudt::amount_high(input)
+        ckb::require_cell_lock_hash(input, expected_lock_hash)
+        ckb::require_cell_type_hash(input, expected_type_hash)
+        ckb::require_input_out_point_tx_hash(input, expected_lock_hash)
+        ckb::require_input_out_point(input, expected_lock_hash, out_point_index)
+        ckb::require_metapoint_relative(owner_output, output, relative_distance)
+        ckb::require_lock_type_metapoint_pairs(source::output(0), relative_distance)
+        ckb::require_type_lock_metapoint_pairs(source::input(0), relative_distance)
+        ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
+        ckb::require_lock_type_metapoint_pairs_from_i32_data(source::output(0), 52)
+        ckb::require_type_lock_metapoint_pairs_from_i32_data_filtered(source::input(0), 0, expected_type_hash, 2)
+        ckb::require_lock_type_metapoint_pairs_from_i32_data_filtered(source::output(0), 52, expected_type_hash, 1)
+        ckb::require_lock_match_master_out_point_pairs_from_data(source::input(0), source::output(0), 16, 20, 52)
+        let current_script_hash: Hash = ckb::current_script_hash()
+        ckb::require_cell_type_hash(input, current_script_hash)
+        xudt::require_owner_mode_input_type(input, expected_type_hash)
+        xudt::require_owner_mode_type_args(input, expected_lock_hash, 2147483648)
+        xudt::require_owner_mode_type_args(input, current_script_hash, 2147483648)
+        xudt::require_owner_mode_type_args_current_script(input, 2147483648)
+        xudt::require_group_amount_conserved()
+        require ckb::current_role() == 2, "action role must be type"
+        let deposit_flag = if is_deposit_data { 1 } else { 0 }
+        let withdrawal_flag = if is_withdrawal_request_data { 1 } else { 0 }
+        let dao_type_flag = if has_dao_type { 1 } else { 0 }
+        return capacity + occupied + unoccupied + data_size + output_index + out_point_index + out_point_hash_low + lock_hash_low + type_hash_low + rate + input_rate + dao_type_flag + deposit_flag + withdrawal_flag + low + high + absolute_since + relative_since
 
-action verify_xudt_mint_delta(delta: u128)
-where
-    xudt::require_group_amount_minted(delta)
+}
+action verify_xudt_mint_delta(delta: u128) {
+    verification
+        xudt::require_group_amount_minted(delta)
 
-action verify_xudt_burn_delta(delta: u128)
-where
-    xudt::require_group_amount_burned(delta)
+}
+action verify_xudt_burn_delta(delta: u128) {
+    verification
+        xudt::require_group_amount_burned(delta)
 
+}
 lock guard(token: protected Token) -> bool {
-    require ckb::current_role() == 1
-    require token.amount > 0
+    verification
+        require ckb::current_role() == 1
+        require token.amount > 0
 }
 "#;
 
@@ -100,9 +104,10 @@ resource Token has store, create, consume {
     amount: u64
 }
 
-action noop() -> u64
-where
-    return 0
+action noop() -> u64 {
+    verification
+        return 0
+}
 "#;
 
 const XUDT_GROUP_AMOUNT_BRIDGE: &str = r#"
@@ -119,9 +124,10 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify()
-where
-    xudt::require_group_amount_conserved()
+action verify() {
+    verification
+        xudt::require_group_amount_conserved()
+}
 "#;
 
 const XUDT_GROUP_AMOUNT_BRIDGE_MISSING_HELPER: &str = r#"
@@ -138,9 +144,10 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify()
-where
-    require true
+action verify() {
+    verification
+        require true
+}
 "#;
 
 const XUDT_GROUP_AMOUNT_DELTA_BRIDGE: &str = r#"
@@ -164,13 +171,15 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify_mint(minted: u128)
-where
-    xudt::require_group_amount_minted(minted)
+action verify_mint(minted: u128) {
+    verification
+        xudt::require_group_amount_minted(minted)
 
-action verify_burn(burned: u128)
-where
-    xudt::require_group_amount_burned(burned)
+}
+action verify_burn(burned: u128) {
+    verification
+        xudt::require_group_amount_burned(burned)
+}
 "#;
 
 const XUDT_GROUP_AMOUNT_DELTA_MISSING_HELPER: &str = r#"
@@ -187,9 +196,10 @@ resource IckbToken has store, create, consume {
     amount: u128
 }
 
-action verify()
-where
-    require true
+action verify() {
+    verification
+        require true
+}
 "#;
 
 const C256_PROGRAM: &str = r#"
@@ -202,22 +212,23 @@ action check_limit_order_product(
     right_multiplier: u128,
     fee_amount: u128,
     fee_multiplier: u128
-)
-where
-    c256::require_product_lte(left_amount, left_multiplier, right_amount, right_multiplier)
-    c256::require_product_eq(left_amount, left_multiplier, left_amount, left_multiplier)
-    c256::require_sum2_products_lte(
-        left_amount, left_multiplier,
-        fee_amount, fee_multiplier,
-        right_amount, right_multiplier,
-        fee_amount, fee_multiplier
-    )
-    c256::require_sum2_products_eq(
-        left_amount, left_multiplier,
-        fee_amount, fee_multiplier,
-        left_amount, left_multiplier,
-        fee_amount, fee_multiplier
-    )
+) {
+    verification
+        c256::require_product_lte(left_amount, left_multiplier, right_amount, right_multiplier)
+        c256::require_product_eq(left_amount, left_multiplier, left_amount, left_multiplier)
+        c256::require_sum2_products_lte(
+            left_amount, left_multiplier,
+            fee_amount, fee_multiplier,
+            right_amount, right_multiplier,
+            fee_amount, fee_multiplier
+        )
+        c256::require_sum2_products_eq(
+            left_amount, left_multiplier,
+            fee_amount, fee_multiplier,
+            left_amount, left_multiplier,
+            fee_amount, fee_multiplier
+        )
+}
 "#;
 
 const U128_LOCAL_PROGRAM: &str = r#"
@@ -227,14 +238,15 @@ fn add_u128(left: u128, right: u128) -> u128 {
     return left + right
 }
 
-action verify_computed_mint_delta(left: u128, right: u128)
-where
-    let base: u128 = add_u128(left, right)
-    let reduced: u128 = base - 1
-    let product: u128 = reduced * 2
-    let quotient: u128 = product / 2
-    assert_invariant(quotient >= left, "u128 comparison must use high limb")
-    xudt::require_group_amount_minted(quotient)
+action verify_computed_mint_delta(left: u128, right: u128) {
+    verification
+        let base: u128 = add_u128(left, right)
+        let reduced: u128 = base - 1
+        let product: u128 = reduced * 2
+        let quotient: u128 = product / 2
+        require quotient >= left, "u128 comparison must use high limb"
+        xudt::require_group_amount_minted(quotient)
+}
 "#;
 
 const SIGNED_I32_PROGRAM: &str = r#"
@@ -245,13 +257,15 @@ struct MetaPoint {
     relative_index: i32
 }
 
-action signed_relative_order(left: i32, right: i32) -> bool
-where
-    return left < right
+action signed_relative_order(left: i32, right: i32) -> bool {
+    verification
+        return left < right
 
-action signed_field_order(point: MetaPoint, right: i32) -> bool
-where
-    return point.relative_index < right
+}
+action signed_field_order(point: MetaPoint, right: i32) -> bool {
+    verification
+        return point.relative_index < right
+}
 "#;
 
 #[test]
@@ -453,10 +467,9 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
         "xUDT current-script helper must bind type args to the current script hash:\n{assembly}"
     );
     assert!(
-        assembly.contains("CKB occupied capacity = (8 + lock(33+args) + type?(33+args) + data_len) * 100000000")
-            && assembly.contains("Script occupied bytes = molecule_size - 20")
+        assembly.contains("CKB occupied capacity via LOAD_CELL_BY_FIELD CellField::OccupiedCapacity")
             && assembly.contains("SourceView unoccupied capacity = capacity - occupied_capacity"),
-        "occupied/unoccupied capacity helpers must use executable CKB capacity accounting, not a conservative floor:\n{assembly}"
+        "occupied/unoccupied capacity helpers must use the canonical CKB occupied-capacity field:\n{assembly}"
     );
 
     let features = &result.metadata.runtime.ckb_runtime_features;
@@ -503,8 +516,8 @@ fn ckb_source_primitives_lower_to_runtime_helpers() {
     assert!(accesses.contains(&("since-epoch-absolute", "CKB_SINCE_ENCODING", "Expression")), "{accesses:?}");
     assert!(accesses.contains(&("since-epoch-relative", "CKB_SINCE_ENCODING", "Expression")), "{accesses:?}");
     assert!(accesses.contains(&("cell-capacity", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
-    assert!(accesses.contains(&("cell-occupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
-    assert!(accesses.contains(&("cell-unoccupied-capacity", "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("cell-occupied-capacity", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("cell-unoccupied-capacity", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("cell-lock-hash-low", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("cell-type-hash-low", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("cell-lock-hash-require", "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
@@ -989,13 +1002,14 @@ resource Wallet has store, create, consume {
 }
 
 lock witness_size_lock(wallet: protected Wallet, claimed: witness Hash, min_size: u64) -> bool {
-    let view = source::group_input(0)
-    let sz = witness::size(view)
-    ckb::require_witness_size_at_least(view, min_size)
-    let raw = witness::raw(view)
-    let lock_field = witness::lock(view)
-    require raw == claimed
-    require lock_field == claimed
+    verification
+        let view = source::group_input(0)
+        let sz = witness::size(view)
+        ckb::require_witness_size_at_least(view, min_size)
+        let raw = witness::raw(view)
+        let lock_field = witness::lock(view)
+        require raw == claimed
+        require lock_field == claimed
 }
 "#;
 

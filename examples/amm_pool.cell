@@ -17,90 +17,96 @@ shared Pool has store {
     fee_rate_bps: u16,
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt)
-where
-    assert(token_a.symbol != token_b.symbol, "same token")
-    assert(token_a.amount > 0 && token_b.amount > 0, "zero liquidity")
-    assert(fee_rate_bps <= 10000, "fee too high")
-    assert(token_a.type_hash() != token_b.type_hash(), "same token type")
-    let initial_lp = isqrt(token_a.amount * token_b.amount)
-    consume token_a
-    consume token_b
-    create pool = Pool { token_a_symbol: token_a.symbol, token_b_symbol: token_b.symbol, reserve_a: token_a.amount, reserve_b: token_b.amount, total_lp: initial_lp, fee_rate_bps }
-    create receipt = LPReceipt { pool_id: pool.type_hash(), lp_amount: initial_lp, provider } with_lock(provider)
+action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt) {
+    verification
+        require token_a.symbol != token_b.symbol, "same token"
+        require token_a.amount > 0 && token_b.amount > 0, "zero liquidity"
+        require fee_rate_bps <= 10000, "fee too high"
+        require token_a.type_hash() != token_b.type_hash(), "same token type"
+        let initial_lp = isqrt(token_a.amount * token_b.amount)
+        consume token_a
+        consume token_b
+        create pool = Pool { token_a_symbol: token_a.symbol, token_b_symbol: token_b.symbol, reserve_a: token_a.amount, reserve_b: token_b.amount, total_lp: initial_lp, fee_rate_bps }
+        create receipt = LPReceipt { pool_id: pool.type_hash(), lp_amount: initial_lp, provider } with_lock(provider)
 
-action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token)
-where
-    assert(input.symbol == pool_before.token_a_symbol, "wrong input token")
-    let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
-    let net_input = input.amount - fee
-    let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
-    assert(amount_out >= min_output, "slippage exceeded")
-    assert(amount_out < pool_before.reserve_b, "insufficient reserves")
-    preserve pool_after from pool_before {
-        token_a_symbol
-        token_b_symbol
-        total_lp
-        fee_rate_bps
-    }
-    require pool_after.reserve_a == pool_before.reserve_a + input.amount
-    require pool_after.reserve_b == pool_before.reserve_b - amount_out
-    consume input
-    create token_out = Token { amount: amount_out, symbol: pool_before.token_b_symbol } with_lock(to)
+}
+action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
+    verification
+        require input.symbol == pool_before.token_a_symbol, "wrong input token"
+        let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
+        let net_input = input.amount - fee
+        let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
+        require amount_out >= min_output, "slippage exceeded"
+        require amount_out < pool_before.reserve_b, "insufficient reserves"
+        preserve pool_after from pool_before {
+            token_a_symbol
+            token_b_symbol
+            total_lp
+            fee_rate_bps
+        }
+        require pool_after.reserve_a == pool_before.reserve_a + input.amount
+        require pool_after.reserve_b == pool_before.reserve_b - amount_out
+        consume input
+        create token_out = Token { amount: amount_out, symbol: pool_before.token_b_symbol } with_lock(to)
 
-action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt)
-where
-    assert(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
-    assert(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
-    let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
-    let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
-    let lp_amount = min(lp_from_a, lp_from_b)
-    preserve pool_after from pool_before {
-        token_a_symbol
-        token_b_symbol
-        fee_rate_bps
-    }
-    require pool_after.reserve_a == pool_before.reserve_a + token_a.amount
-    require pool_after.reserve_b == pool_before.reserve_b + token_b.amount
-    require pool_after.total_lp == pool_before.total_lp + lp_amount
-    consume token_a
-    consume token_b
-    create receipt = LPReceipt { pool_id: pool_before.type_hash(), lp_amount, provider } with_lock(provider)
+}
+action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt) {
+    verification
+        require token_a.symbol == pool_before.token_a_symbol, "wrong token a"
+        require token_b.symbol == pool_before.token_b_symbol, "wrong token b"
+        let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
+        let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
+        let lp_amount = min(lp_from_a, lp_from_b)
+        preserve pool_after from pool_before {
+            token_a_symbol
+            token_b_symbol
+            fee_rate_bps
+        }
+        require pool_after.reserve_a == pool_before.reserve_a + token_a.amount
+        require pool_after.reserve_b == pool_before.reserve_b + token_b.amount
+        require pool_after.total_lp == pool_before.total_lp + lp_amount
+        consume token_a
+        consume token_b
+        create receipt = LPReceipt { pool_id: pool_before.type_hash(), lp_amount, provider } with_lock(provider)
 
-action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token)
-where
-    assert(receipt.pool_id == pool_before.type_hash(), "wrong pool")
-    let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
-    let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
-    preserve pool_after from pool_before {
-        token_a_symbol
-        token_b_symbol
-        fee_rate_bps
-    }
-    require pool_after.reserve_a == pool_before.reserve_a - amount_a
-    require pool_after.reserve_b == pool_before.reserve_b - amount_b
-    require pool_after.total_lp == pool_before.total_lp - receipt.lp_amount
-    consume receipt
-    create token_a_out = Token { amount: amount_a, symbol: pool_before.token_a_symbol } with_lock(provider)
-    create token_b_out = Token { amount: amount_b, symbol: pool_before.token_b_symbol } with_lock(provider)
+}
+action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token) {
+    verification
+        require receipt.pool_id == pool_before.type_hash(), "wrong pool"
+        let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
+        let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
+        preserve pool_after from pool_before {
+            token_a_symbol
+            token_b_symbol
+            fee_rate_bps
+        }
+        require pool_after.reserve_a == pool_before.reserve_a - amount_a
+        require pool_after.reserve_b == pool_before.reserve_b - amount_b
+        require pool_after.total_lp == pool_before.total_lp - receipt.lp_amount
+        consume receipt
+        create token_a_out = Token { amount: amount_a, symbol: pool_before.token_a_symbol } with_lock(provider)
+        create token_b_out = Token { amount: amount_b, symbol: pool_before.token_b_symbol } with_lock(provider)
 
-action isqrt(n: u64) -> u64
-where
-    if n == 0 {
-        return 0
-    }
-    let mut x = n
-    let mut y = (x + 1) / 2
-    while y < x {
-        x = y
-        y = (x + n / x) / 2
-    }
-    x
+}
+action isqrt(n: u64) -> u64 {
+    verification
+        if n == 0 {
+            return 0
+        }
+        let mut x = n
+        let mut y = (x + 1) / 2
+        while y < x {
+            x = y
+            y = (x + n / x) / 2
+        }
+        x
 
-action min(a: u64, b: u64) -> u64
-where
-    if a < b {
-        a
-    } else {
-        b
-    }
+}
+action min(a: u64, b: u64) -> u64 {
+    verification
+        if a < b {
+            a
+        } else {
+            b
+        }
+}

@@ -55,6 +55,7 @@ pub enum Command {
     Abi(AbiArgs),
     SchedulerPlan(SchedulerPlanArgs),
     CkbHash(CkbHashArgs),
+    CkbStdCompat(CkbStdCompatArgs),
     Explain(ExplainArgs),
     ExplainProfile(ExplainProfileArgs),
     ExplainProof(ExplainProofArgs),
@@ -231,6 +232,11 @@ pub struct CkbHashArgs {
     pub input: Option<String>,
     pub hex: Option<String>,
     pub file: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct CkbStdCompatArgs {
     pub json: bool,
 }
 
@@ -454,6 +460,7 @@ impl CommandExecutor {
             Command::Abi(args) => Self::abi(args),
             Command::SchedulerPlan(args) => Self::scheduler_plan(args),
             Command::CkbHash(args) => Self::ckb_hash(args),
+            Command::CkbStdCompat(args) => Self::ckb_std_compat(args),
             Command::Explain(args) => Self::explain(args),
             Command::ExplainProfile(args) => Self::explain_profile(args),
             Command::ExplainProof(args) => Self::explain_proof(args),
@@ -1482,6 +1489,100 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn ckb_std_compat(args: CkbStdCompatArgs) -> Result<()> {
+        let report = serde_json::json!({
+            "status": "ok",
+            "schema": "cellscript-ckb-std-compat-report-v0.19",
+            "runtime_policy": "inline",
+            "compiler_core_dependency": "no-ckb-std",
+            "compatibility_dependency_scope": "dev-test-and-adapter-contract",
+            "abi_source": "src/ckb_abi.rs",
+            "test_evidence": {
+                "compat_tests": "tests/ckb_std_compat.rs",
+                "constant_parity": true,
+                "source_view_decoding": true,
+                "witness_args_layout": true,
+                "type_id_contract": true,
+                "since_epoch_contract": true,
+                "occupied_capacity_field": true,
+                "packed_transaction_materialization": true,
+                "script_construction_api": true,
+            },
+            "ckb_std_refs": {
+                "constants": "ckb_std::ckb_constants",
+                "witness_args": "ckb_types::packed::WitnessArgs",
+                "type_id": "ckb_std::type_id",
+                "since": "ckb_std::since",
+                "occupied_capacity": "ckb_std::high_level::load_cell_occupied_capacity",
+            },
+            "inline_abi": {
+                "syscalls": {
+                    "load_cell_by_field": crate::ckb_abi::syscall::LOAD_CELL_BY_FIELD,
+                    "load_witness": crate::ckb_abi::syscall::LOAD_WITNESS,
+                    "load_input_by_field": crate::ckb_abi::syscall::LOAD_INPUT_BY_FIELD,
+                    "spawn": crate::ckb_abi::syscall::SPAWN,
+                },
+                "sources": {
+                    "input": crate::ckb_abi::source::INPUT,
+                    "output": crate::ckb_abi::source::OUTPUT,
+                    "group_input": crate::ckb_abi::source::GROUP_INPUT,
+                    "group_output": crate::ckb_abi::source::GROUP_OUTPUT,
+                },
+                "fields": {
+                    "cell_occupied_capacity": crate::ckb_abi::cell_field::OCCUPIED_CAPACITY,
+                    "input_since": crate::ckb_abi::input_field::SINCE,
+                },
+            },
+            "adapter_boundary": {
+                "transaction_realizer": "ckb-sdk-rust-or-CCC-adapter",
+                "compiler_core_uses_ckb_sdk_rust": false,
+                "action_build_contract": "cellscript-ckb-adapter-contract-v0.19",
+                "requires_node_acceptance_for_production": true,
+                "script_construction": {
+                    "owner": "adapter",
+                    "packed_type": "ckb_types::packed::Script",
+                    "evidence_schema": "cellscript-ckb-script-evidence-v0.19",
+                    "supports": [
+                        "arbitrary_code_hash",
+                        "hash_type",
+                        "args",
+                        "script_hash",
+                        "script_ref_readback",
+                        "explicit_cell_dep_binding",
+                        "args_exact_prefix_suffix",
+                        "owner_mode_args"
+                    ],
+                },
+            },
+            "witness_args_policy": {
+                "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "entry_payload_owner": "compiler",
+                "final_witness_args_owner": "adapter",
+                "default_action_payload_field": "input_type",
+                "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
+                "placement_requires_deployment_role": true,
+                "ckb_reference": "ckb_types::packed::WitnessArgs",
+            },
+            "non_goals": [
+                "does-not-execute-ckb-vm",
+                "does-not-query-live-cells",
+                "does-not-resolve-celldeps",
+                "does-not-sign-or-submit"
+            ],
+        });
+
+        if args.json {
+            print_json(&report)?;
+        } else {
+            println!("CKB std compatibility: {}", report["status"].as_str().unwrap_or("unknown"));
+            println!("  Schema: {}", report["schema"].as_str().unwrap_or("unknown"));
+            println!("  Runtime policy: {}", report["runtime_policy"].as_str().unwrap_or("unknown"));
+            println!("  ABI source: {}", report["abi_source"].as_str().unwrap_or("unknown"));
+            println!("  Test evidence: {}", report["test_evidence"]["compat_tests"].as_str().unwrap_or("unknown"));
+        }
+        Ok(())
+    }
+
     fn explain(args: ExplainArgs) -> Result<()> {
         let info = runtime_error_info_from_query(&args.code).ok_or_else(|| {
             crate::error::CompileError::without_span(format!(
@@ -1596,6 +1697,9 @@ impl CommandExecutor {
         let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let summary = serde_json::json!({
             "status": report.status,
+            "validation_level": "cellscript-metadata-evidence",
+            "ckb_vm_execution": false,
+            "tx_pool_acceptance": false,
             "metadata": args.against.display().to_string(),
             "tx": args.tx.display().to_string(),
             "validation": report,
@@ -2016,6 +2120,139 @@ impl CommandExecutor {
             result.metadata.constraints.entry_abi.iter().find(|entry| entry.entry_kind == "action" && entry.entry_name == action.name);
 
         let ckb = result.metadata.constraints.ckb.as_ref();
+        let metadata_bytes = serde_json::to_vec(&result.metadata).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize metadata for digest: {}", error))
+        })?;
+        let metadata_hash = crate::hex_encode(&crate::ckb_blake2b256(&metadata_bytes));
+        let ckb_contract = ckb.map(|ckb| {
+            serde_json::json!({
+                "hash_type_policy": ckb.hash_type_policy,
+                "capacity_evidence_contract": ckb.capacity_evidence_contract,
+                "timelock_policy": ckb.timelock_policy,
+                "tx_size_measurement_required": ckb.tx_size_measurement_required,
+                "occupied_capacity_measurement_required": ckb.occupied_capacity_measurement_required,
+                "dry_run_required_for_production": ckb.dry_run_required_for_production,
+            })
+        });
+        let transaction_draft = serde_json::json!({
+            "format": "cellscript-ccc-transaction-draft-v1",
+            "state": "ActionPlan",
+            "status": "template",
+            "ccc_compatible": true,
+            "can_submit": false,
+            "ckb_vm_execution": false,
+            "tx_pool_acceptance": false,
+            "requires_live_cell_resolution": true,
+            "requires_packed_materialization": true,
+            "packed_materialization": {
+                "transaction": "ckb_types::packed::Transaction",
+                "cell_output": "ckb_types::packed::CellOutput",
+                "cell_dep": "ckb_types::packed::CellDep",
+                "out_point": "ckb_types::packed::OutPoint",
+                "script": "ckb_types::packed::Script",
+                "witness_args": "ckb_types::packed::WitnessArgs",
+                "realizer": "cellscript-ckb-adapter via ckb-sdk-rust or CCC",
+            },
+            "cell_deps": [],
+            "header_deps": [],
+            "inputs": [],
+            "outputs": [],
+            "outputs_data": [],
+            "witnesses": [],
+            "required_evidence": [
+                "live_cell_resolution",
+                "outputs_data_pairing",
+                "witness_args_placement",
+                "celldep_resolution",
+                "occupied_capacity",
+                "fee_and_change",
+                "estimate_cycles",
+                "tx_pool_acceptance"
+            ],
+            "notes": [
+                "This is a headless draft template produced from compiler metadata.",
+                "A builder adapter must resolve live cells, fill args, calculate fees/capacity, dry-run, sign, and submit."
+            ]
+        });
+        let resolved_tx_required_fields = serde_json::json!([
+            "schema",
+            "state",
+            "metadata_hash",
+            "artifact_hash",
+            "deployment_ref",
+            "action_selector",
+            "inputs",
+            "outputs",
+            "outputs_data",
+            "witnesses",
+            "cell_deps",
+            "header_deps",
+            "capacity_evidence",
+            "fee_policy",
+            "change_policy",
+            "lineage"
+        ]);
+        let acceptance_report_template = serde_json::json!({
+            "schema": "cellscript-ckb-action-acceptance-report-v0.19",
+            "state": "AcceptedActionTx",
+            "metadata_hash": metadata_hash,
+            "artifact_hash": result.metadata.artifact_hash,
+            "deployment_ref": serde_json::Value::Null,
+            "action_selector": action.name,
+            "ckb_vm_execution": serde_json::Value::Null,
+            "estimate_cycles": serde_json::Value::Null,
+            "tx_pool_acceptance": serde_json::Value::Null,
+            "submitted_tx_hash": serde_json::Value::Null,
+            "serialized_tx_size_bytes": serde_json::Value::Null,
+            "occupied_capacity_shannons": serde_json::Value::Null,
+            "fee_shannons": serde_json::Value::Null,
+            "lineage": [],
+            "known_limitations": [
+                "Template only: adapter must fill live cells, deployment refs, packed transaction bytes, signer policy, and node evidence."
+            ],
+        });
+        let adapter_contract = serde_json::json!({
+            "schema": "cellscript-ckb-adapter-contract-v0.19",
+            "headless": true,
+            "compiler_core_dependency": "no-ckb-sdk-rust",
+            "compiler_output_state": "ActionPlan",
+            "adapter_output_state": "ResolvedActionTx",
+            "accepted_output_state": "AcceptedActionTx",
+            "transaction_realizer": "ckb-sdk-rust-or-CCC-adapter",
+            "must_not_infer_protocol_semantics_from_action_name": true,
+            "must_keep_signer_authority_explicit": true,
+            "must_preserve_outputs_outputs_data_pairing": true,
+            "must_emit_lineage": true,
+            "witness_policy": {
+                "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "entry_payload_owner": "compiler",
+                "final_witness_args_owner": "adapter",
+                "default_action_payload_field": "input_type",
+                "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
+                "placement_requires_deployment_role": true,
+            },
+            "acceptance_methods": ["estimate_cycles", "test_tx_pool_accept", "send_transaction_optional"],
+            "not_proven_by_this_plan": ["live_cell_availability", "ckb_vm_execution", "tx_pool_acceptance", "submission"],
+            "resolved_tx_required_fields": resolved_tx_required_fields,
+            "acceptance_report_template": acceptance_report_template,
+        });
+        let preview = serde_json::json!({
+            "format": "cellscript-action-preview-v1",
+            "action": action.name,
+            "summary": format!("Build a CKB transaction for CellScript action {}", action.name),
+            "consumes": action.transaction_runtime_input_requirements,
+            "creates": action.create_set,
+            "transitions": action.mutate_set,
+            "witnesses": {
+                "selector": action.name,
+                "args": action.params,
+            },
+            "warnings": [
+                "Builder preview is metadata-backed; live cell freshness and final fee/capacity must be checked at build time."
+            ],
+            "estimatedFee": serde_json::Value::Null,
+            "requiredSigners": []
+        });
         let plan = serde_json::json!({
             "status": "ok",
             "policy": "cellscript-action-builder-plan-v1",
@@ -2038,47 +2275,10 @@ impl CommandExecutor {
                 "runtime_input_requirements": action.transaction_runtime_input_requirements,
                 "fail_closed_runtime_features": action.fail_closed_runtime_features,
             },
-            "ckb": ckb.map(|ckb| serde_json::json!({
-                "hash_type_policy": ckb.hash_type_policy,
-                "capacity_evidence_contract": ckb.capacity_evidence_contract,
-                "timelock_policy": ckb.timelock_policy,
-                "tx_size_measurement_required": ckb.tx_size_measurement_required,
-                "occupied_capacity_measurement_required": ckb.occupied_capacity_measurement_required,
-                "dry_run_required_for_production": ckb.dry_run_required_for_production,
-            })),
-            "transaction_draft": {
-                "format": "cellscript-ccc-transaction-draft-v1",
-                "status": "template",
-                "ccc_compatible": true,
-                "requires_live_cell_resolution": true,
-                "cell_deps": [],
-                "header_deps": [],
-                "inputs": [],
-                "outputs": [],
-                "outputs_data": [],
-                "witnesses": [],
-                "notes": [
-                    "This is a headless draft template produced from compiler metadata.",
-                    "A builder adapter must resolve live cells, fill args, calculate fees/capacity, dry-run, sign, and submit."
-                ]
-            },
-            "preview": {
-                "format": "cellscript-action-preview-v1",
-                "action": action.name,
-                "summary": format!("Build a CKB transaction for CellScript action {}", action.name),
-                "consumes": action.transaction_runtime_input_requirements,
-                "creates": action.create_set,
-                "transitions": action.mutate_set,
-                "witnesses": {
-                    "selector": action.name,
-                    "args": action.params,
-                },
-                "warnings": [
-                    "Builder preview is metadata-backed; live cell freshness and final fee/capacity must be checked at build time."
-                ],
-                "estimatedFee": serde_json::Value::Null,
-                "requiredSigners": []
-            },
+            "ckb": ckb_contract,
+            "transaction_draft": transaction_draft,
+            "adapter_contract": adapter_contract,
+            "preview": preview,
             "constraints_status": result.metadata.constraints.status,
             "constraints_failures": result.metadata.constraints.failures,
             "constraints_warnings": result.metadata.constraints.warnings,
@@ -5745,6 +5945,11 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
             )
             .subcommand(
+                ClapCommand::new("ckb-std-compat")
+                    .about("Report the ckb-std ABI compatibility boundary for CellScript's inline CKB backend")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON report")),
+            )
+            .subcommand(
                 ClapCommand::new("explain")
                     .about("Explain a CellScript runtime error code")
                     .arg(Arg::new("code").value_name("CODE").required(true).help("Runtime error code, E-code, or error name"))
@@ -6158,6 +6363,7 @@ impl CliParser {
                 file: m.get_one::<String>("file").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
+            Some(("ckb-std-compat", m)) => Command::CkbStdCompat(CkbStdCompatArgs { json: m.get_flag("json") }),
             Some(("explain", m)) => Command::Explain(ExplainArgs {
                 code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
                 json: m.get_flag("json"),

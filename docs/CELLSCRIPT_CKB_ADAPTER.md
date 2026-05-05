@@ -1,6 +1,6 @@
 # CellScript CKB Adapter
 
-**Status**: design contract for the Rust-side builder, deployment, and
+**Status**: formal 0.19 headless Rust adapter crate plus focused local-node
 acceptance bridge.
 
 See also
@@ -75,19 +75,33 @@ Every adapter-owned JSON/TOML record must include an explicit `schema` and
 `version`. Schema drift must fail closed. The adapter should never silently
 reinterpret metadata emitted by a newer compiler schema.
 
-## First Implementation Shape
+## Implementation Shape
 
-Start as an example crate before promoting a public library:
+The reusable implementation lives in the formal adapter crate:
+
+```text
+crates/cellscript-ckb-adapter/
+```
+
+It parses compiler `ActionPlan` JSON, materializes `ResolvedActionTx` values
+with `ckb-sdk-rust` / CKB packed types, rejects under-capacity outputs before
+RPC, and exposes signer, `estimate_cycles`, `test_tx_pool_accept`, and optional
+submission as adapter-owned node calls. It also tests that CellScript entry
+witness bytes are placed into an explicit `WitnessArgs` field without
+overwriting lock signatures, and that TYPE_ID args are computed from the packed
+first input plus output index before adapter submission.
+
+The cookbook wrapper lives at:
 
 ```text
 examples/ckb-sdk-builder/
 ```
 
-After the shape is proven, promote the stable subset to:
+That crate depends on `cellscript-ckb-adapter` and exists to show the boundary.
+It should not grow an independent implementation.
 
-```text
-crates/cellscript-ckb-adapter/
-```
+Current tests cover the offline adapter shape. Focused node evidence is covered
+by `scripts/cellscript_ckb_adapter_acceptance.sh`.
 
 Do not start with a framework. Start with cookbook-grade examples that complete
 real deployment and transaction acceptance loops.
@@ -176,6 +190,37 @@ Use three distinct states:
 `cellc action build` remains a semantic plan. The adapter turns that plan into a
 chain transaction. Node acceptance is the reality check.
 
+Current machine-readable status: `cellc action build --json` emits
+`adapter_contract.schema = cellscript-ckb-adapter-contract-v0.19` and a
+`transaction_draft.packed_materialization` section naming the CKB packed
+transaction, output, CellDep, and WitnessArgs records that the adapter must
+produce. It also emits `witness_policy`, `resolved_tx_required_fields`, and an
+`acceptance_report_template` for adapter output. The draft still reports
+`can_submit = false`, `ckb_vm_execution = false`, and `tx_pool_acceptance =
+false`.
+
+The adapter-side example also emits a headless `ActionPreview` data model for
+consumed inputs, created outputs, lineage, witnesses, warnings, and estimated
+fee. It is frontend-ready JSON, not a UI layer.
+
+Focused local gate:
+
+```text
+./scripts/cellscript_ckb_ecosystem_reuse_gate.sh quick
+./scripts/cellscript_ckb_ecosystem_reuse_gate.sh full
+```
+
+Focused local-node adapter gate:
+
+```text
+./scripts/cellscript_ckb_adapter_acceptance.sh
+```
+
+That script starts a local CKB devnet, checks a compiler action plan, verifies
+the formal adapter crate materialization path, runs `estimate_cycles`, runs
+`test_tx_pool_accept`, and writes a JSON report. It is adapter-boundary
+evidence, not a replacement for stateful business-flow acceptance.
+
 ## Validation Loop
 
 A production adapter flow should be:
@@ -257,8 +302,8 @@ It does not perform:
 - tx-pool acceptance;
 - submission.
 
-For real CKB transaction construction, use the CKB adapter example or the later
-`cellscript-ckb-adapter` crate.
+For real CKB transaction construction, use `cellscript-ckb-adapter` and the CKB
+SDK. The `examples/ckb-sdk-builder` crate is a cookbook wrapper only.
 
 ## Minimal API
 
@@ -266,13 +311,18 @@ The first library surface should stay small:
 
 ```rust
 load_compile_metadata(path) -> CompileMetadata
-load_action_plan(path) -> ActionBuildPlan
+load_action_plan(path) -> ActionPlan
 load_deployment_manifest(path) -> DeploymentManifest
 
 deploy_artifact_with_type_id(...)
 build_action_transaction(...)
 emit_acceptance_report(...)
 ```
+
+The currently landed stable subset includes `load_action_plan`,
+`load_deployment_manifest`, `build_action_transaction`, script construction and
+script-ref helpers, WitnessArgs placement helpers, TYPE_ID args helpers, and
+acceptance report emission.
 
 Internal modules can exist without becoming stable public API:
 

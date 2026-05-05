@@ -1591,11 +1591,14 @@ impl<'a> TypeChecker<'a> {
             if output_binding.type_name != type_name {
                 return Err(CompileError::new(
                     format!(
-                        "state transition input '{}.{}' has type '{}', but output '{}.{}' has type '{}'",
-                        path.base, path.field, type_name, to_path.base, to_path.field, output_binding.type_name
+                        "state transition input '{}' has type '{}', but output '{}' has type '{}'",
+                        path.base, type_name, to_path.base, output_binding.type_name
                     ),
                     state_edge.span,
                 ));
+            }
+            if path.field.is_empty() && to_path.field.is_empty() && state_edge.from.is_empty() && state_edge.to.is_empty() {
+                continue;
             }
             let spec = self
                 .flows
@@ -6296,9 +6299,10 @@ module app
 use cellscript::left::TokenA
 use cellscript::right::TokenB
 
-action main(a: TokenA) -> u64
-where
-    return a.amount
+action main(a: TokenA) -> u64 {
+    verification
+        return a.amount
+}
 "#,
         );
 
@@ -6339,6 +6343,7 @@ where
             env.insert(param.name.clone(), param.ty.clone(), is_linear, param.is_mut);
         }
         checker.bind_action_outputs(&mut env, &action).unwrap();
+        checker.current_callable = Some(CallableKind::Action);
 
         for stmt in &action.body {
             checker.check_stmt(&mut env, stmt).unwrap();
@@ -6366,11 +6371,12 @@ resource B has store, transfer, destroy {
     amount: bool
 }
 
-action bad_preserve(a: A) -> b: B
-where
-    consume a
-    preserve b from a { amount }
-    create b = B { amount: true }
+action bad_preserve(a: A) -> b: B {
+    verification
+        consume a
+        preserve b from a { amount }
+        create b = B { amount: true }
+}
 "#,
         );
 
@@ -6388,9 +6394,10 @@ resource Coin has store, transfer, destroy {
     amount: u64
 }
 
-action hidden_consume(coin: Coin)
-where
-    require (consume coin) == 0
+action hidden_consume(coin: Coin) {
+    verification
+        require (consume coin) == 0
+}
 "#,
         );
 
@@ -6408,11 +6415,12 @@ receipt Voucher has destroy {
     amount: u64
 }
 
-action hidden_claim(voucher: Voucher)
-where
-    require {
-        std::receipt::claim(voucher, voucher, voucher.amount)
-    }
+action hidden_claim(voucher: Voucher) {
+    verification
+        require {
+            std::receipt::claim(voucher, voucher, voucher.amount)
+        }
+}
 "#,
         );
 
@@ -6426,12 +6434,13 @@ where
             r#"
 module test
 
-action hidden_mutation(flag: bool)
-where
-    let mut ok = flag
-    require {
-        ok = false
-    }
+action hidden_mutation(flag: bool) {
+    verification
+        let mut ok = flag
+        require {
+            ok = false
+        }
+}
 "#,
         );
 
@@ -6449,9 +6458,10 @@ resource Coin has store, transfer, destroy {
     amount: u64
 }
 
-action bad_claim(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::receipt::claim(coin, next_coin, to) { amount }
+action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::receipt::claim(coin, next_coin, to) { amount }
+}
 "#,
         );
 
@@ -6477,9 +6487,10 @@ receipt Voucher -> Coin has destroy {
     amount: u64
 }
 
-action bad_claim(voucher: Voucher, to: Address) -> badge: Badge
-where
-    std::receipt::claim(voucher, badge, to) { amount }
+action bad_claim(voucher: Voucher, to: Address) -> badge: Badge {
+    verification
+        std::receipt::claim(voucher, badge, to) { amount }
+}
 "#,
         );
 
@@ -6501,9 +6512,10 @@ receipt Voucher has destroy {
     amount: u64
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin, coin, coin)
+action bad_claim(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin, coin, coin)
+}
 "#,
         );
 
@@ -6526,9 +6538,10 @@ receipt Voucher has destroy {
     owner: Address
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+action bad_claim(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin, voucher.owner) { amount }
+}
 "#,
         );
 
@@ -6554,9 +6567,10 @@ receipt Voucher -> Coin has destroy {
     amount: u64
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin) { amount }
+action bad_claim(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin) { amount }
+}
 "#,
         );
 
@@ -6574,9 +6588,10 @@ resource Coin has store, transfer, destroy {
     amount: u64
 }
 
-action bad_settle(coin: Coin) -> next_coin: Coin
-where
-    std::lifecycle::settle(coin, next_coin) { amount }
+action bad_settle(coin: Coin) -> next_coin: Coin {
+    verification
+        std::lifecycle::settle(coin, next_coin) { amount }
+}
 "#,
         );
 
@@ -6595,9 +6610,10 @@ resource Coin has store, transfer, destroy {
     owner: Address
 }
 
-action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to) { amount }
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::lifecycle::transfer(coin, next_coin, to) { amount }
+}
 "#,
         );
 
@@ -6625,9 +6641,10 @@ receipt Voucher -> Coin has destroy {
     owner: Address
 }
 
-action bad_claim(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin, voucher.owner) { amount }
+action bad_claim(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin, voucher.owner) { amount }
+}
 "#,
         );
 
@@ -6649,9 +6666,10 @@ resource Coin has store, transfer, destroy {
     amount: u64
 }
 
-action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to, to) { amount }
+action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::lifecycle::transfer(coin, next_coin, to, to) { amount }
+}
 "#,
         );
 

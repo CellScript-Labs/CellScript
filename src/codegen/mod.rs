@@ -1,4 +1,5 @@
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
+use crate::ckb_abi;
 use crate::error::{CompileError, Result};
 use crate::flow::FLOW_STATE_FIELD_NAME;
 use crate::ir::*;
@@ -12,55 +13,56 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CKB_LOAD_HEADER_SYSCALL_NUMBER: u64 = 2072;
-const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = 2082;
-const CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER: u64 = 2083;
-const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = 2074;
-const CKB_LOAD_SCRIPT_SYSCALL_NUMBER: u64 = 2052;
-const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = 2081;
-const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
-const CKB_LOAD_SCRIPT_HASH_SYSCALL_NUMBER: u64 = 2062;
+const CKB_LOAD_HEADER_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_HEADER;
+const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_HEADER_BY_FIELD;
+const CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_INPUT_BY_FIELD;
+const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_WITNESS;
+const CKB_LOAD_SCRIPT_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_SCRIPT;
+const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_CELL_BY_FIELD;
+const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_CELL_DATA;
+const CKB_LOAD_SCRIPT_HASH_SYSCALL_NUMBER: u64 = ckb_abi::syscall::LOAD_SCRIPT_HASH;
 const CLAIM_SECP256K1_VERIFY_SYSCALL_NUMBER: u64 = 3002;
 const CLAIM_LOAD_ECDSA_SIGNATURE_HASH_SYSCALL_NUMBER: u64 = 3004;
-const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
-const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = 1;
-const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = 2;
+const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = ckb_abi::header_field::EPOCH_NUMBER;
+const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = ckb_abi::header_field::EPOCH_START_BLOCK_NUMBER;
+const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = ckb_abi::header_field::EPOCH_LENGTH;
 const CKB_DAO_HEADER_FIELD_ABSOLUTE_OFFSET: u64 = 160;
 const CKB_DAO_HEADER_ACCUMULATED_RATE_ABSOLUTE_OFFSET: u64 = 160 + 8;
 const CKB_DAO_TYPE_HASH_WORDS_LE: [i64; 4] = [-8442554211429484596, 7297449809414763189, -7890662964692133976, 6381290010727626424];
-const CKB_INPUT_FIELD_OUT_POINT: u64 = 0;
-const CKB_INPUT_FIELD_SINCE: u64 = 1;
-const CKB_SINCE_METRIC_TYPE_FLAG_MASK: u64 = 0x6000_0000_0000_0000;
-const CKB_SINCE_EPOCH_NUMBER_WITH_FRACTION_FLAG: u64 = 0x2000_0000_0000_0000;
-const CKB_SINCE_REMAIN_FLAGS_BITS: u64 = 0x1f00_0000_0000_0000;
-const CKB_SINCE_VALUE_MASK: u64 = 0x00ff_ffff_ffff_ffff;
-const CKB_EPOCH_NUMBER_BOUND: u64 = 1 << 24;
-const CKB_EPOCH_FRACTION_BOUND: u64 = 1 << 16;
+const CKB_INPUT_FIELD_OUT_POINT: u64 = ckb_abi::input_field::OUT_POINT;
+const CKB_INPUT_FIELD_SINCE: u64 = ckb_abi::input_field::SINCE;
+const CKB_SINCE_METRIC_TYPE_FLAG_MASK: u64 = ckb_abi::since::METRIC_TYPE_FLAG_MASK;
+const CKB_SINCE_EPOCH_NUMBER_WITH_FRACTION_FLAG: u64 = ckb_abi::since::EPOCH_NUMBER_WITH_FRACTION_FLAG;
+const CKB_SINCE_REMAIN_FLAGS_BITS: u64 = ckb_abi::since::REMAIN_FLAGS_BITS;
+const CKB_SINCE_VALUE_MASK: u64 = ckb_abi::since::VALUE_MASK;
+const CKB_EPOCH_NUMBER_BOUND: u64 = ckb_abi::since::EPOCH_NUMBER_BOUND;
+const CKB_EPOCH_FRACTION_BOUND: u64 = ckb_abi::since::EPOCH_FRACTION_BOUND;
 const CKB_EPOCH_NUMBER_MASK: u64 = CKB_EPOCH_NUMBER_BOUND - 1;
 const CKB_EPOCH_FRACTION_MASK: u64 = CKB_EPOCH_FRACTION_BOUND - 1;
-const CKB_SOURCE_INPUT: u64 = 0x01;
-const CKB_SOURCE_OUTPUT: u64 = 0x02;
-const CKB_SOURCE_CELL_DEP: u64 = 0x03;
-const CKB_SOURCE_HEADER_DEP: u64 = 0x04;
-const CKB_SOURCE_GROUP_FLAG: u64 = 0x0100_0000_0000_0000;
-const CKB_SOURCE_GROUP_INPUT: u64 = 0x0100;
-const CKB_SOURCE_GROUP_OUTPUT: u64 = 0x0200;
-const CKB_SOURCE_VIEW_INPUT: u64 = 1;
-const CKB_SOURCE_VIEW_OUTPUT: u64 = 2;
-const CKB_SOURCE_VIEW_CELL_DEP: u64 = 3;
-const CKB_SOURCE_VIEW_HEADER_DEP: u64 = 4;
-const CKB_SOURCE_VIEW_GROUP_INPUT: u64 = 5;
-const CKB_SOURCE_VIEW_GROUP_OUTPUT: u64 = 6;
-const CKB_SOURCE_VIEW_SHIFT: u64 = 4_294_967_296;
+const CKB_SOURCE_INPUT: u64 = ckb_abi::source::INPUT;
+const CKB_SOURCE_OUTPUT: u64 = ckb_abi::source::OUTPUT;
+const CKB_SOURCE_CELL_DEP: u64 = ckb_abi::source::CELL_DEP;
+const CKB_SOURCE_HEADER_DEP: u64 = ckb_abi::source::HEADER_DEP;
+const CKB_SOURCE_GROUP_FLAG: u64 = ckb_abi::source::GROUP_FLAG;
+const CKB_SOURCE_GROUP_INPUT: u64 = ckb_abi::source::GROUP_INPUT;
+const CKB_SOURCE_GROUP_OUTPUT: u64 = ckb_abi::source::GROUP_OUTPUT;
+const CKB_SOURCE_VIEW_INPUT: u64 = ckb_abi::source_view::INPUT;
+const CKB_SOURCE_VIEW_OUTPUT: u64 = ckb_abi::source_view::OUTPUT;
+const CKB_SOURCE_VIEW_CELL_DEP: u64 = ckb_abi::source_view::CELL_DEP;
+const CKB_SOURCE_VIEW_HEADER_DEP: u64 = ckb_abi::source_view::HEADER_DEP;
+const CKB_SOURCE_VIEW_GROUP_INPUT: u64 = ckb_abi::source_view::GROUP_INPUT;
+const CKB_SOURCE_VIEW_GROUP_OUTPUT: u64 = ckb_abi::source_view::GROUP_OUTPUT;
+const CKB_SOURCE_VIEW_SHIFT: u64 = ckb_abi::source_view::SHIFT;
 const CKB_ROLE_UNKNOWN: u64 = 0;
-const CKB_CELL_FIELD_CAPACITY: u64 = 0;
-const CKB_CELL_FIELD_LOCK: u64 = 2;
-const CKB_CELL_FIELD_TYPE: u64 = 4;
-const CKB_CELL_FIELD_LOCK_HASH: u64 = 3;
-const CKB_CELL_FIELD_TYPE_HASH: u64 = 5;
-const CKB_INDEX_OUT_OF_BOUND: u64 = 1;
-const CKB_ITEM_MISSING: u64 = 2;
-const CKB_LENGTH_NOT_ENOUGH: u64 = 3;
+const CKB_CELL_FIELD_CAPACITY: u64 = ckb_abi::cell_field::CAPACITY;
+const CKB_CELL_FIELD_LOCK: u64 = ckb_abi::cell_field::LOCK;
+const CKB_CELL_FIELD_TYPE: u64 = ckb_abi::cell_field::TYPE;
+const CKB_CELL_FIELD_LOCK_HASH: u64 = ckb_abi::cell_field::LOCK_HASH;
+const CKB_CELL_FIELD_TYPE_HASH: u64 = ckb_abi::cell_field::TYPE_HASH;
+const CKB_CELL_FIELD_OCCUPIED_CAPACITY: u64 = ckb_abi::cell_field::OCCUPIED_CAPACITY;
+const CKB_INDEX_OUT_OF_BOUND: u64 = ckb_abi::syscall_error::INDEX_OUT_OF_BOUND;
+const CKB_ITEM_MISSING: u64 = ckb_abi::syscall_error::ITEM_MISSING;
+const CKB_LENGTH_NOT_ENOUGH: u64 = ckb_abi::syscall_error::LENGTH_NOT_ENOUGH;
 #[allow(dead_code)]
 const CKB_SIG_HASH_ALL: u64 = 1;
 const RUNTIME_SCRATCH_BUFFER_SIZE: usize = 512;
@@ -10708,14 +10710,14 @@ impl CodeGenerator {
     fn emit_runtime_ckb_v014_surface_helpers(&mut self, referenced_helpers: &BTreeSet<String>) {
         let enabled = self.options.target_profile == TargetProfile::Ckb;
         for (name, syscall, detail) in [
-            ("__ckb_spawn", 2601, "spawn bounded verifier child"),
-            ("__ckb_wait", 2602, "wait for bounded verifier child"),
-            ("__ckb_process_id", 2603, "current process id"),
-            ("__ckb_pipe", 2604, "create IPC pipe; returns read fd in a0 and write fd in a1"),
-            ("__ckb_pipe_write", 2605, "write u64 payload to IPC pipe"),
-            ("__ckb_pipe_read", 2606, "read u64 payload from IPC pipe"),
-            ("__ckb_inherited_fd", 2607, "resolve inherited fd"),
-            ("__ckb_close", 2608, "close fd"),
+            ("__ckb_spawn", ckb_abi::syscall::SPAWN, "spawn bounded verifier child"),
+            ("__ckb_wait", ckb_abi::syscall::WAIT, "wait for bounded verifier child"),
+            ("__ckb_process_id", ckb_abi::syscall::PROCESS_ID, "current process id"),
+            ("__ckb_pipe", ckb_abi::syscall::PIPE, "create IPC pipe; returns read fd in a0 and write fd in a1"),
+            ("__ckb_pipe_write", ckb_abi::syscall::WRITE, "write u64 payload to IPC pipe"),
+            ("__ckb_pipe_read", ckb_abi::syscall::READ, "read u64 payload from IPC pipe"),
+            ("__ckb_inherited_fd", ckb_abi::syscall::INHERITED_FDS, "resolve inherited fd"),
+            ("__ckb_close", ckb_abi::syscall::CLOSE, "close fd"),
         ] {
             if !referenced_helpers.contains(name) {
                 continue;
@@ -14783,7 +14785,7 @@ impl CodeGenerator {
     fn emit_runtime_cell_occupied_capacity_helper(&mut self, enabled: bool) {
         self.emit_global("__ckb_cell_occupied_capacity");
         self.emit_label("__ckb_cell_occupied_capacity");
-        self.emit("# cellscript abi: CKB occupied capacity = (8 + lock(33+args) + type?(33+args) + data_len) * 100000000");
+        self.emit("# cellscript abi: CKB occupied capacity via LOAD_CELL_BY_FIELD CellField::OccupiedCapacity");
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("addi a1, a0, 0");
@@ -14793,108 +14795,31 @@ impl CodeGenerator {
 
         let invalid = self.fresh_label("occupied_capacity_source_invalid");
         let failed = self.fresh_label("occupied_capacity_load_failed");
-        let malformed = self.fresh_label("occupied_capacity_script_malformed");
-        let overflow = self.fresh_label("occupied_capacity_overflow");
-        let lock_status_ok = self.fresh_label("occupied_capacity_lock_status_ok");
-        let type_status_ok = self.fresh_label("occupied_capacity_type_status_ok");
-        let type_done = self.fresh_label("occupied_capacity_type_done");
-        let data_status_ok = self.fresh_label("occupied_capacity_data_status_ok");
+        let malformed = self.fresh_label("occupied_capacity_field_malformed");
         let done = self.fresh_label("occupied_capacity_done");
         let abi = self.runtime_abi();
 
-        self.emit("addi sp, sp, -80");
-        self.emit("sd ra, 72(sp)");
+        self.emit("addi sp, sp, -48");
+        self.emit("sd ra, 40(sp)");
         self.emit_decode_source_view_to_t1_t2(&invalid);
         self.emit("sd t1, 0(sp)");
         self.emit("sd t2, 8(sp)");
-        self.emit("# cellscript abi: occupied capacity byte accumulator starts with capacity field width");
-        self.emit("li t6, 8");
-
-        self.emit("# cellscript abi: probe lock Script molecule size; Script occupied bytes = molecule_size - 20");
-        self.emit("li t0, 0");
+        self.emit("li t0, 8");
         self.emit("sd t0, 16(sp)");
         self.emit("addi a0, sp, 24");
         self.emit("addi a1, sp, 16");
         self.emit("li a2, 0");
         self.emit("ld a3, 0(sp)");
         self.emit("ld a4, 8(sp)");
-        self.emit(format!("li a5, {}", CKB_CELL_FIELD_LOCK));
+        self.emit(format!("li a5, {}", CKB_CELL_FIELD_OCCUPIED_CAPACITY));
         self.emit(format!("li a7, {}", abi.load_cell_by_field));
         self.emit("ecall");
-        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
-        self.emit("sub t1, a0, t0");
-        self.emit(format!("beqz t1, {}", lock_status_ok));
-        self.emit(format!("beqz a0, {}", lock_status_ok));
-        self.emit(format!("j {}", failed));
-        self.emit_label(&lock_status_ok);
         self.emit("ld t0, 16(sp)");
-        self.emit("li t1, 53");
-        self.emit("sltu t2, t0, t1");
+        self.emit(format!("bnez a0, {}", failed));
+        self.emit("li t1, 8");
+        self.emit("sub t2, t0, t1");
         self.emit(format!("bnez t2, {}", malformed));
-        self.emit("addi t0, t0, -20");
-        self.emit("add t1, t6, t0");
-        self.emit("sltu t2, t1, t6");
-        self.emit(format!("bnez t2, {}", overflow));
-        self.emit("addi t6, t1, 0");
-
-        self.emit("# cellscript abi: probe optional type Script; ITEM_MISSING contributes zero occupied bytes");
-        self.emit("li t0, 0");
-        self.emit("sd t0, 16(sp)");
-        self.emit("addi a0, sp, 24");
-        self.emit("addi a1, sp, 16");
-        self.emit("li a2, 0");
-        self.emit("ld a3, 0(sp)");
-        self.emit("ld a4, 8(sp)");
-        self.emit(format!("li a5, {}", CKB_CELL_FIELD_TYPE));
-        self.emit(format!("li a7, {}", abi.load_cell_by_field));
-        self.emit("ecall");
-        self.emit(format!("li t0, {}", CKB_ITEM_MISSING));
-        self.emit("sub t1, a0, t0");
-        self.emit(format!("beqz t1, {}", type_done));
-        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
-        self.emit("sub t1, a0, t0");
-        self.emit(format!("beqz t1, {}", type_status_ok));
-        self.emit(format!("beqz a0, {}", type_status_ok));
-        self.emit(format!("j {}", failed));
-        self.emit_label(&type_status_ok);
-        self.emit("ld t0, 16(sp)");
-        self.emit("li t1, 53");
-        self.emit("sltu t2, t0, t1");
-        self.emit(format!("bnez t2, {}", malformed));
-        self.emit("addi t0, t0, -20");
-        self.emit("add t1, t6, t0");
-        self.emit("sltu t2, t1, t6");
-        self.emit(format!("bnez t2, {}", overflow));
-        self.emit("addi t6, t1, 0");
-        self.emit_label(&type_done);
-
-        self.emit("# cellscript abi: add raw cell data bytes to occupied capacity bytes");
-        self.emit("li t0, 0");
-        self.emit("sd t0, 16(sp)");
-        self.emit("addi a0, sp, 24");
-        self.emit("addi a1, sp, 16");
-        self.emit("li a2, 0");
-        self.emit("ld a3, 0(sp)");
-        self.emit("ld a4, 8(sp)");
-        self.emit(format!("li a7, {}", abi.load_cell_data));
-        self.emit("ecall");
-        self.emit(format!("li t0, {}", CKB_LENGTH_NOT_ENOUGH));
-        self.emit("sub t1, a0, t0");
-        self.emit(format!("beqz t1, {}", data_status_ok));
-        self.emit(format!("beqz a0, {}", data_status_ok));
-        self.emit(format!("j {}", failed));
-        self.emit_label(&data_status_ok);
-        self.emit("ld t0, 16(sp)");
-        self.emit("add t1, t6, t0");
-        self.emit("sltu t2, t1, t6");
-        self.emit(format!("bnez t2, {}", overflow));
-        self.emit("addi t6, t1, 0");
-
-        self.emit("# cellscript abi: convert occupied bytes to shannons with checked u64 multiply");
-        self.emit("li t0, 100000000");
-        self.emit("mulhu t1, t6, t0");
-        self.emit(format!("bnez t1, {}", overflow));
-        self.emit("mul a0, t6, t0");
+        self.emit("ld a0, 24(sp)");
         self.emit("li a1, 0");
         self.emit(format!("j {}", done));
 
@@ -14909,13 +14834,9 @@ impl CodeGenerator {
         self.emit_label(&malformed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
         self.emit("addi a1, a0, 0");
-        self.emit(format!("j {}", done));
-        self.emit_label(&overflow);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::NumericOrDiscriminantInvalid.code()));
-        self.emit("addi a1, a0, 0");
         self.emit_label(&done);
-        self.emit("ld ra, 72(sp)");
-        self.emit("addi sp, sp, 80");
+        self.emit("ld ra, 40(sp)");
+        self.emit("addi sp, sp, 48");
         self.emit("ret");
     }
 

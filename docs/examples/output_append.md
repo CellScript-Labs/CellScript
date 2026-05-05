@@ -11,14 +11,17 @@ resource Log has store, create, consume, replace {
     bytes: Vec<u8>,
 }
 
-action append(log: Log, suffix: Vec<u8>) -> next_log: Log
-where
-    let next = log.bytes
-    next.extend_from_slice(suffix)
-    create next_log = Log {
-        owner: log.owner,
-        bytes: next
-    }
+action append(log: Log, suffix: Vec<u8>) -> next_log: Log {
+    transition log -> next_log
+
+    verification
+        let next = log.bytes
+        next.extend_from_slice(suffix)
+        create next_log = Log {
+            owner: log.owner,
+            bytes: next
+        }
+}
 ```
 
 Expected transaction shape:

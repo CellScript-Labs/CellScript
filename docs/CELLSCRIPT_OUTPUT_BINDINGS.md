@@ -6,10 +6,13 @@ CellScript models persistent state as Cell transformations, not in-place object
 mutation. The canonical one-to-one input/output form is:
 
 ```cellscript
-action update(before: State) -> after: State
-where
-    require after.owner == before.owner
-    require after.counter == before.counter + 1
+action advance(before: State) -> after: State {
+    transition before -> after
+
+    verification
+        require after.owner == before.owner
+        require after.counter == before.counter + 1
+}
 ```
 
 Read this as:

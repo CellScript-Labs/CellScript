@@ -152,23 +152,25 @@ struct Wallet {
 }
 
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    require wallet.owner == claimed_owner
+    verification
+        require wallet.owner == claimed_owner
 }
 ```
 
 **效果：**
 
 ```cellscript
-action move_token(token: Token, to: Address) -> next_token: Token
-where
-    assert(token.amount > 0, "empty token")
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        require token.amount > 0, "empty token"
 
-    consume token
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 编译器把 `consume`、`create`、`destroy`、action 边界的来源参数、
@@ -193,34 +195,36 @@ resource MintAuthority has store {
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    create auth_after = MintAuthority {
-        token_symbol: auth_before.token_symbol,
-        max_supply: auth_before.max_supply,
-        minted: auth_before.minted + amount
-    }
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
 
-    create token = Token {
-        amount: amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+        create token = Token {
+            amount: amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 
-action burn(token: Token)
-where
-    assert(token.amount > 0, "cannot burn zero")
-    destroy token
+action burn(token: Token) {
+    verification
+        require token.amount > 0, "cannot burn zero"
+        destroy token
+}
 ```
 
 **内置协议示例：**
@@ -277,6 +281,11 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
   CKB target-profile 参数和状态栏反馈。它调用 `cellc`（或 `cargo run` 回退），
   所以编辑器行为和 CLI/CI 保持一致。
 
+0.19 的 ecosystem reuse 工作加入了正式的 headless
+`cellscript-ckb-adapter` crate。编译器输出语义 action plan 和 ABI evidence；
+adapter 用 `ckb-sdk-rust` 物化 CKB transaction shape，并记录本地节点验收证据。
+它不是钱包 UI、前端组件包，也不是 CellFabric intent engine。
+
 - [VS Code 扩展](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
 - [运行时错误码](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
 - [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
@@ -286,6 +295,9 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity 与 builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [CKB adapter boundary](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_ADAPTER.md)
+- [CKB ecosystem reuse audit](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
+- [ckb-std compatibility](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_STD_COMPAT.md)
 - [线性所有权](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 - [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
 - [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
@@ -336,7 +348,7 @@ graph LR
 从 token 流构建 AST。AST 建模完整 CellScript 表面语法：`resource`、
 `shared`、`receipt`、`struct`、`enum`、`action`、`lock`、`function`、
 `use`、`const`、capability gates、声明式 flow、action `transition`
-子句和非空 `transition { ... }` block、`where` proof block，以及所有语句/表达式形式。
+子句、`verification` proof section，以及所有语句/表达式形式。
 
 **3. 语义分析**（`types/` + `flow/`）
 - *类型检查* — 强制线性资源语义：每个 `resource`/`receipt` 值在 action
@@ -344,8 +356,8 @@ graph LR
   shared-state 可变性规则、capability gates、effect 分类（`Pure` /
   `ReadOnly` / `Mutating` / `Creating` / `Destroying`）和调用签名。
 - *状态转换检查* — 验证显式 state 字段、`flow` 转换图、action
-  `transition` 子句、合法状态转换、静态 create-site 检查，以及 `where`
-  proof block 中的分支输出字段约束一致性。
+  `transition` 子句、合法状态转换、静态 create-site 检查，以及
+  `verification` section 中的分支输出字段约束一致性。
 
 **4. IR 降低**（`ir/` + `optimize/` + `resolve/`）
 - *`resolve/`* — 构建每模块符号表，解析跨包 `use` 导入。

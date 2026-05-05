@@ -315,31 +315,22 @@ impl Formatter {
         } else if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
-        self.push_line(&signature);
-        if action.state_edges.len() == 1 {
-            self.indent_level += 1;
-            self.push_line(&format_action_state_edge("transition ", &action.state_edges[0]));
-            self.indent_level -= 1;
-        } else if !action.state_edges.is_empty() {
-            self.indent_level += 1;
-            self.push_line("transition {");
-            self.indent_level += 1;
-            for state_edge in &action.state_edges {
-                self.push_line(&format_action_state_edge("", state_edge));
-            }
-            self.indent_level -= 1;
-            self.push_line("}");
-            self.indent_level -= 1;
+        self.push_line(&format!("{} {{", signature));
+        self.indent_level += 1;
+        for state_edge in &action.state_edges {
+            self.push_line(&format_action_state_edge("transition ", state_edge));
         }
-        if action.body.is_empty() {
-            return Ok(());
+        if !action.state_edges.is_empty() && !action.body.is_empty() {
+            self.push_line("");
         }
-        self.push_line("where");
+        self.push_line("verification");
         self.indent_level += 1;
         for stmt in &action.body {
             self.format_stmt(stmt);
         }
         self.indent_level -= 1;
+        self.indent_level -= 1;
+        self.push_line("}");
         Ok(())
     }
 
@@ -369,9 +360,12 @@ impl Formatter {
         let params = lock.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
         self.push_line(&format!("lock {}({}) -> {} {{", lock.name, params, format_type(&lock.return_type)));
         self.indent_level += 1;
+        self.push_line("verification");
+        self.indent_level += 1;
         for stmt in &lock.body {
             self.format_stmt(stmt);
         }
+        self.indent_level -= 1;
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -527,11 +521,19 @@ impl Formatter {
                 )
             }
             Expr::Assert(assert_expr) => {
-                format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
+                format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
             Expr::Require(require_expr) => {
                 if let Some(message) = &require_expr.message {
-                    format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                    if let Expr::String(label) = message.as_ref() {
+                        if is_error_label(label) {
+                            format!("require {} else {}", self.format_expr(&require_expr.condition), label)
+                        } else {
+                            format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                        }
+                    } else {
+                        format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                    }
                 } else {
                     format!("require {}", self.format_expr(&require_expr.condition))
                 }
@@ -737,7 +739,18 @@ fn format_action_outputs(outputs: &[ActionOutput]) -> String {
 fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> String {
     let path = &state_edge.path;
     let to_path = &state_edge.to_path;
+    if path.field.is_empty() && to_path.field.is_empty() && state_edge.from.is_empty() && state_edge.to.is_empty() {
+        return format!("{}{} -> {}", prefix, path.base, to_path.base);
+    }
     format!("{}{}.{}: {} -> {}.{}: {}", prefix, path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to)
+}
+
+fn is_error_label(label: &str) -> bool {
+    let mut chars = label.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_uppercase() || first == '_') && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn format_binding_pattern(pattern: &BindingPattern) -> String {
@@ -831,17 +844,18 @@ mod tests {
         let source = r#"
 module demo
 
-action add(x: u64, y: u64) -> u64
-where
-    let z = x + y
-    return z
+action add(x: u64, y: u64) -> u64 {
+    verification
+        let z = x + y
+        return z
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64\nwhere"));
+        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    verification"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
     }
@@ -856,9 +870,10 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> token: Token
-where
-    create token = Token { amount: amount, symbol: symbol }
+action mint(amount: u64, symbol: [u8; 8]) -> token: Token {
+    verification
+        create token = Token { amount: amount, symbol: symbol }
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -868,23 +883,24 @@ where
     }
 
     #[test]
-    fn format_uses_canonical_assert_and_no_const_semicolon() {
+    fn format_uses_canonical_require_and_no_const_semicolon() {
         let source = r#"
 module demo
 
 const LIMIT: u64 = 10;
 
-action check(x: u64) -> bool
-where
-    assert_invariant(x < LIMIT, "too large");
-    require x > 0, "zero"
+action check(x: u64) -> bool {
+    verification
+        require x < LIMIT, "too large";
+        require x > 0, "zero"
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("const LIMIT: u64 = 10\n"), "unexpected formatted source:\n{}", formatted);
-        assert!(formatted.contains("assert(x < LIMIT, \"too large\")"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("assert("), "unexpected formatted source:\n{}", formatted);
         assert!(formatted.contains("require x > 0, \"zero\""), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("assert_invariant"), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("const LIMIT: u64 = 10;"), "unexpected formatted source:\n{}", formatted);
@@ -905,13 +921,14 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> (output: Offer)
-    transition input.state: Live -> output.state: Filled
-where
-    preserve output from input {
-        seller
-        price
-    }
+action fill(input: Offer) -> (output: Offer) {
+    transition input -> output
+    verification
+        preserve output from input {
+            seller
+            price
+        }
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -929,30 +946,29 @@ where
     }
 
     #[test]
-    fn format_action_transition_block_for_multiple_edges() {
+    fn format_action_multiple_transitions_without_block() {
         let source = r#"
 module demo
 
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
-    transition {
-        input.state: Live -> output.state: Filled
-        receipt.state: Open -> next_receipt.state: Closed
-    }
-where
-    require output.owner == input.owner
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+    transition input -> output
+    transition receipt -> next_receipt
+    verification
+        require output.owner == input.owner
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
-        assert!(formatted.contains("transition {\n"), "formatted output should use a transition block:\n{}", formatted);
+        assert!(!formatted.contains("transition {\n"), "formatted output must not use a transition block:\n{}", formatted);
         assert!(
-            formatted.contains("input.state: Live -> output.state: Filled"),
+            formatted.contains("transition input -> output"),
             "formatted output should contain the first transition edge:\n{}",
             formatted
         );
         assert!(
-            formatted.contains("receipt.state: Open -> next_receipt.state: Closed"),
+            formatted.contains("transition receipt -> next_receipt"),
             "formatted output should contain the second transition edge:\n{}",
             formatted
         );
@@ -963,13 +979,14 @@ where
         let source = r#"
 module demo
 
-action check(x: u64, y: u64) -> u64
-where
-    require {
-        x > 0
-        y > 0
-    }
-    return x + y
+action check(x: u64, y: u64) -> u64 {
+    verification
+        require {
+            x > 0
+            y > 0
+        }
+        return x + y
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -989,12 +1006,13 @@ where
         let source = r#"
 module demo
 
-action check(x: u64) -> u64
-where
-    require {
-        x > 0
-    }
-    return x
+action check(x: u64) -> u64 {
+    verification
+        require {
+            x > 0
+        }
+        return x
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -1014,12 +1032,14 @@ resource Coin has store, transfer {
     nonce: u64
 }
 
-action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to) {
-        amount
-        nonce
-    }
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+    transition coin -> next_coin
+    verification
+        std::lifecycle::transfer(coin, next_coin, to) {
+            amount
+            nonce
+        }
+}
 "#;
 
         let tokens = lexer::lex(source).unwrap();

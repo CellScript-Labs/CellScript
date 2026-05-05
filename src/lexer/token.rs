@@ -3,47 +3,47 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    Module,     // module
-    Use,        // use
-    Resource,   // resource
-    Shared,     // shared
-    Receipt,    // receipt
-    Struct,     // struct
-    Const,      // const
-    Enum,       // enum
-    Invariant,  // invariant
-    Action,     // action
-    Fn,         // fn
-    Lock,       // lock
-    Where,      // where
-    Transition, // transition
-    Has,        // has
-    Store,      // store
-    Transfer,   // transfer (capability context)
-    Destroy,    // destroy (capability context)
-    If,         // if
-    Else,       // else
-    For,        // for
-    In,         // in
-    While,      // while
-    Match,      // match
-    Return,     // return
-    Let,        // let
-    Mut,        // mut
-    Ref,        // ref
-    Consume,    // consume
-    Create,     // create
-    ReadRef,    // read_ref
-    DestroyKw,  // destroy (keyword)
-    Launch,     // launch
-    Assert,     // assert / assert_invariant
-    Require,    // require
-    Preserve,   // preserve
-    True,       // true
-    False,      // false
-    Self_,      // self
-    Env,        // env
-    Std,        // std
+    Module,       // module
+    Use,          // use
+    Resource,     // resource
+    Shared,       // shared
+    Receipt,      // receipt
+    Struct,       // struct
+    Const,        // const
+    Enum,         // enum
+    Invariant,    // invariant
+    Action,       // action
+    Fn,           // fn
+    Lock,         // lock
+    Transition,   // transition
+    Verification, // verification
+    Has,          // has
+    Store,        // store
+    Transfer,     // transfer (capability context)
+    Destroy,      // destroy (capability context)
+    If,           // if
+    Else,         // else
+    For,          // for
+    In,           // in
+    While,        // while
+    Match,        // match
+    Return,       // return
+    Let,          // let
+    Mut,          // mut
+    Ref,          // ref
+    Consume,      // consume
+    Create,       // create
+    ReadRef,      // read_ref
+    DestroyKw,    // destroy (keyword)
+    Launch,       // launch
+    Assert,       // assert / assert_invariant
+    Require,      // require
+    Preserve,     // preserve
+    True,         // true
+    False,        // false
+    Self_,        // self
+    Env,          // env
+    Std,          // std
 
     Identifier(String),
     Integer(u64),
@@ -118,8 +118,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Action => write!(f, "'action'"),
             TokenKind::Fn => write!(f, "'fn'"),
             TokenKind::Lock => write!(f, "'lock'"),
-            TokenKind::Where => write!(f, "'where'"),
             TokenKind::Transition => write!(f, "'transition'"),
+            TokenKind::Verification => write!(f, "'verification'"),
             TokenKind::Has => write!(f, "'has'"),
             TokenKind::Store => write!(f, "'store'"),
             TokenKind::Transfer => write!(f, "'transfer'"),
@@ -235,8 +235,8 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "action" => TokenKind::Action,
         "fn" => TokenKind::Fn,
         "lock" => TokenKind::Lock,
-        "where" => TokenKind::Where,
         "transition" => TokenKind::Transition,
+        "verification" => TokenKind::Verification,
         "has" => TokenKind::Has,
         "store" => TokenKind::Store,
         "transfer" => TokenKind::Transfer,

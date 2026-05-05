@@ -8,10 +8,11 @@ fn adversarial_0_13_rejects_unsupported_generic_collection_surfaces() {
             r#"
 module bad_hashmap
 
-action main() -> u64
-where
-    let orders: HashMap<Hash, u64> = HashMap::new()
-    return orders.len()
+action main() -> u64 {
+    verification
+        let orders: HashMap<Hash, u64> = HashMap::new()
+        return orders.len()
+}
 "#,
             "HashMap",
         ),
@@ -24,10 +25,11 @@ resource Token has store {
     amount: u64,
 }
 
-action main() -> u64
-where
-    let cells: Vec<Cell<Token>> = Vec::new()
-    return cells.len()
+action main() -> u64 {
+    verification
+        let cells: Vec<Cell<Token>> = Vec::new()
+        return cells.len()
+}
 "#,
             "Cell",
         ),
@@ -36,9 +38,10 @@ where
             r#"
 module bad_option
 
-action main() -> Option<u64>
-where
-    return Option::some(1)
+action main() -> Option<u64> {
+    verification
+        return Option::some(1)
+}
 "#,
             "Option",
         ),
@@ -62,9 +65,10 @@ with_default_hash_type(Legacy)
     amount: u64,
 }
 
-action main(amount: u64) -> Token
-where
-    create Token { amount: amount }
+action main(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )

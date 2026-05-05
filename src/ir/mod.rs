@@ -6610,14 +6610,15 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> (output: Offer)
+action fill(input: Offer) -> (output: Offer) {
     transition input.state: Live -> output.state: Filled
-where
-    preserve output from input {
-        seller
-        price
-    }
-    require output.payment_symbol == input.payment_symbol
+    verification
+        preserve output from input {
+            seller
+            price
+        }
+        require output.payment_symbol == input.payment_symbol
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir
@@ -6649,13 +6650,14 @@ where
         let source = r#"
 module test
 
-action check(x: u64, y: u64) -> u64
-where
-    require {
-        x > 0
-        y > 0
-    }
-    return x + y
+action check(x: u64, y: u64) -> u64 {
+    verification
+        require {
+            x > 0
+            y > 0
+        }
+        return x + y
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir
@@ -6694,9 +6696,10 @@ resource Coin has store, transfer, destroy {
     amount: u64
 }
 
-action transfer_only(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to) { amount }
+action transfer_only(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::lifecycle::transfer(coin, next_coin, to) { amount }
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir
@@ -6734,9 +6737,10 @@ receipt Voucher -> Coin has destroy {
     holder: Address
 }
 
-action claim_only(voucher: Voucher) -> coin: Coin
-where
-    std::receipt::claim(voucher, coin, voucher.holder) { amount }
+action claim_only(voucher: Voucher) -> coin: Coin {
+    verification
+        std::receipt::claim(voucher, coin, voucher.holder) { amount }
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir
@@ -6770,12 +6774,13 @@ resource Coin has store, transfer, destroy {
     owner: Address
 }
 
-action settle_coin(coin: Coin) -> next_coin: Coin
-where
-    std::lifecycle::settle(coin, next_coin, coin.owner) {
-        amount
-        owner
-    }
+action settle_coin(coin: Coin) -> next_coin: Coin {
+    verification
+        std::lifecycle::settle(coin, next_coin, coin.owner) {
+            amount
+            owner
+        }
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir
