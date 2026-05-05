@@ -2013,7 +2013,7 @@ impl IrGenerator {
             IrConst::Bool(_) => IrType::Bool,
             IrConst::Address(_) => IrType::Address,
             IrConst::Hash(_) => IrType::Hash,
-            IrConst::Array(_) => IrType::Array(Box::new(IrType::U8), 0),
+            IrConst::Array(items) => IrType::Array(Box::new(IrType::U8), items.len()),
         }
     }
 
@@ -3923,6 +3923,27 @@ impl IrGenerator {
                 "Hash::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) })
                 }
+                "script::hash_type_data" if call.args.is_empty() => {
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) })
+                }
+                "script::hash_type_type" if call.args.is_empty() => {
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(1)), current: Some(current) })
+                }
+                "script::hash_type_data1" if call.args.is_empty() => {
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(2)), current: Some(current) })
+                }
+                "script::hash_type_data2" if call.args.is_empty() => {
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(4)), current: Some(current) })
+                }
+                "script::args_empty" if call.args.is_empty() => Some(self.lower_script_args_empty(current, blocks)),
+                "script::args" if call.args.len() == 1 => Some(self.lower_script_args(&call.args[0], current, blocks, vars)),
+                "script::new" if call.args.len() == 3 => Some(self.lower_script_value(call, current, blocks, vars)),
+                "script::require_cell_lock_matches" if call.args.len() == 2 => {
+                    Some(self.lower_script_match_requirement(call, true, current, blocks, vars))
+                }
+                "script::require_cell_type_matches" if call.args.len() == 2 => {
+                    Some(self.lower_script_match_requirement(call, false, current, blocks, vars))
+                }
                 "env::current_timepoint" if call.args.is_empty() => {
                     let dest = self.new_var("current_timepoint", IrType::U64);
                     self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
@@ -4923,6 +4944,202 @@ impl IrGenerator {
         }
     }
 
+    fn lower_script_args_empty(&mut self, current: BlockId, blocks: &mut Vec<IrBlock>) -> LoweredExpr {
+        let aggregate = self.new_var("script_args", IrType::Named(CKB_SCRIPT_ARGS_TYPE.to_string()));
+        let bytes = self.new_var("script_args_bytes", IrType::Array(Box::new(IrType::U8), 0));
+        let len = self.new_var("script_args_len", IrType::U64);
+        let is_empty = self.new_var("script_args_is_empty", IrType::Bool);
+        let block = self.block_mut(blocks, current);
+        block.instructions.push(IrInstruction::LoadConst { dest: bytes.clone(), value: IrConst::Array(Vec::new()) });
+        block.instructions.push(IrInstruction::LoadConst { dest: len.clone(), value: IrConst::U64(0) });
+        block.instructions.push(IrInstruction::LoadConst { dest: is_empty.clone(), value: IrConst::Bool(true) });
+        block.instructions.push(IrInstruction::Tuple {
+            dest: aggregate.clone(),
+            fields: vec![IrOperand::Var(bytes.clone()), IrOperand::Var(len.clone()), IrOperand::Var(is_empty.clone())],
+        });
+        self.aggregate_fields.insert(
+            aggregate.id,
+            HashMap::from([("bytes".to_string(), bytes), ("len".to_string(), len), ("is_empty".to_string(), is_empty)]),
+        );
+        LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(current) }
+    }
+
+    fn lower_script_args(
+        &mut self,
+        raw: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let lowered = match raw {
+            Expr::ByteString(bytes) => LoweredExpr {
+                operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
+                current: Some(current),
+            },
+            _ => self.lower_expr(raw, current, blocks, vars),
+        };
+        let Some(active) = lowered.current else {
+            return lowered;
+        };
+        let raw_ty = self.operand_type(&lowered.operand);
+        let len_value = fixed_byte_width_for_script_args_operand(&lowered.operand, &raw_ty).unwrap_or(0) as u64;
+
+        let aggregate = self.new_var("script_args", IrType::Named(CKB_SCRIPT_ARGS_TYPE.to_string()));
+        let bytes = self.new_var("script_args_bytes", raw_ty);
+        let len = self.new_var("script_args_len", IrType::U64);
+        let is_empty = self.new_var("script_args_is_empty", IrType::Bool);
+        let block = self.block_mut(blocks, active);
+        block.instructions.push(IrInstruction::Move { dest: bytes.clone(), src: lowered.operand.clone() });
+        block.instructions.push(IrInstruction::LoadConst { dest: len.clone(), value: IrConst::U64(len_value) });
+        block.instructions.push(IrInstruction::LoadConst { dest: is_empty.clone(), value: IrConst::Bool(len_value == 0) });
+        block.instructions.push(IrInstruction::Tuple {
+            dest: aggregate.clone(),
+            fields: vec![IrOperand::Var(bytes.clone()), IrOperand::Var(len.clone()), IrOperand::Var(is_empty.clone())],
+        });
+        self.copy_aggregate_metadata(&lowered.operand, bytes.id);
+        self.aggregate_fields.insert(
+            aggregate.id,
+            HashMap::from([("bytes".to_string(), bytes), ("len".to_string(), len), ("is_empty".to_string(), is_empty)]),
+        );
+        LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
+    }
+
+    fn lower_script_value(
+        &mut self,
+        call: &CallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let mut active = current;
+        let code_hash = self.lower_expr(&call.args[0], active, blocks, vars);
+        active = match code_hash.current {
+            Some(next) => next,
+            None => return code_hash,
+        };
+        let hash_type = self.lower_expr(&call.args[1], active, blocks, vars);
+        active = match hash_type.current {
+            Some(next) => next,
+            None => return hash_type,
+        };
+        let args = self.lower_expr(&call.args[2], active, blocks, vars);
+        active = match args.current {
+            Some(next) => next,
+            None => return args,
+        };
+
+        let aggregate = self.new_var("script_value", IrType::Named(CKB_SCRIPT_VALUE_TYPE.to_string()));
+        let code_hash_field = self.new_var("script_code_hash", IrType::Hash);
+        let hash_type_field = self.new_var("script_hash_type", IrType::U64);
+        let args_field = self.new_var("script_args", IrType::Named(CKB_SCRIPT_ARGS_TYPE.to_string()));
+        let block = self.block_mut(blocks, active);
+        block.instructions.push(IrInstruction::Move { dest: code_hash_field.clone(), src: code_hash.operand.clone() });
+        block.instructions.push(IrInstruction::Move { dest: hash_type_field.clone(), src: hash_type.operand.clone() });
+        block.instructions.push(IrInstruction::Move { dest: args_field.clone(), src: args.operand.clone() });
+        block.instructions.push(IrInstruction::Tuple {
+            dest: aggregate.clone(),
+            fields: vec![
+                IrOperand::Var(code_hash_field.clone()),
+                IrOperand::Var(hash_type_field.clone()),
+                IrOperand::Var(args_field.clone()),
+            ],
+        });
+        self.copy_aggregate_metadata(&args.operand, args_field.id);
+        self.aggregate_fields.insert(
+            aggregate.id,
+            HashMap::from([
+                ("code_hash".to_string(), code_hash_field),
+                ("hash_type".to_string(), hash_type_field),
+                ("args".to_string(), args_field),
+            ]),
+        );
+        LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
+    }
+
+    fn lower_script_match_requirement(
+        &mut self,
+        call: &CallExpr,
+        lock_script: bool,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let source = self.lower_expr(&call.args[0], current, blocks, vars);
+        let Some(active) = source.current else {
+            return source;
+        };
+        let script = self.lower_expr(&call.args[1], active, blocks, vars);
+        let Some(active) = script.current else {
+            return script;
+        };
+        let Some(script_var) = (match &script.operand {
+            IrOperand::Var(var) => Some(var.clone()),
+            IrOperand::Const(_) => None,
+        }) else {
+            self.record_error("script::require_cell_*_matches requires a constructed Script value", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(fields) = self.aggregate_fields.get(&script_var.id).cloned() else {
+            self.record_error(
+                "script::require_cell_*_matches requires a Script constructed by script::new in this verifier path",
+                call.span,
+            );
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(code_hash) = fields.get("code_hash").cloned() else {
+            self.record_error("constructed Script is missing code_hash", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(hash_type) = fields.get("hash_type").cloned() else {
+            self.record_error("constructed Script is missing hash_type", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(args) = fields.get("args").cloned() else {
+            self.record_error("constructed Script is missing args", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(args_fields) = self.aggregate_fields.get(&args.id).cloned() else {
+            self.record_error("constructed Script args must come from script::args or script::args_empty", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let Some(args_bytes) = args_fields.get("bytes").cloned() else {
+            self.record_error("constructed ScriptArgs is missing bytes", call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) };
+        };
+        let args_width = fixed_byte_width_for_script_args_var(&args_bytes).unwrap_or(usize::MAX);
+
+        let identity_helper =
+            if lock_script { "__ckb_require_cell_lock_script_hash_type" } else { "__ckb_require_cell_type_script_hash_type" };
+        let block = self.block_mut(blocks, active);
+        block.instructions.push(IrInstruction::Call {
+            dest: None,
+            func: identity_helper.to_string(),
+            args: vec![source.operand.clone(), IrOperand::Var(code_hash), IrOperand::Var(hash_type)],
+        });
+        if args_width == 0 {
+            block.instructions.push(IrInstruction::Call {
+                dest: None,
+                func: if lock_script {
+                    "__ckb_require_cell_lock_args_empty".to_string()
+                } else {
+                    "__ckb_require_cell_type_args_empty".to_string()
+                },
+                args: vec![source.operand],
+            });
+        } else {
+            block.instructions.push(IrInstruction::Call {
+                dest: None,
+                func: if lock_script {
+                    "__ckb_require_cell_lock_args_exact".to_string()
+                } else {
+                    "__ckb_require_cell_type_args_exact".to_string()
+                },
+                args: vec![source.operand, IrOperand::Var(args_bytes)],
+            });
+        }
+        LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(active) }
+    }
+
     fn lower_simple_runtime_call(
         &mut self,
         func: &str,
@@ -5041,6 +5258,17 @@ impl IrGenerator {
     fn lookup_field_ir_type(&self, ty: &IrType, field: &str) -> Option<IrType> {
         match ty {
             IrType::Tuple(items) => field.parse::<usize>().ok().and_then(|index| items.get(index)).cloned(),
+            IrType::Named(name) if name == CKB_SCRIPT_VALUE_TYPE => match field {
+                "code_hash" => Some(IrType::Hash),
+                "hash_type" => Some(IrType::U64),
+                "args" => Some(IrType::Named(CKB_SCRIPT_ARGS_TYPE.to_string())),
+                _ => None,
+            },
+            IrType::Named(name) if name == CKB_SCRIPT_ARGS_TYPE => match field {
+                "len" => Some(IrType::U64),
+                "is_empty" => Some(IrType::Bool),
+                _ => None,
+            },
             IrType::Named(name) => self.type_fields.get(name).and_then(|fields| fields.get(field)).cloned(),
             IrType::Ref(inner) | IrType::MutRef(inner) => self.lookup_field_ir_type(inner, field),
             IrType::Address | IrType::Hash if field == "0" => Some(IrType::Array(Box::new(IrType::U8), 32)),
@@ -5187,6 +5415,8 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
 
 const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
 const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
+const CKB_SCRIPT_ARGS_TYPE: &str = "ScriptArgs";
+const CKB_SCRIPT_VALUE_TYPE: &str = "Script";
 
 fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'static str, &'static str, IrType)> {
     let IrType::Named(name) = ty else {
@@ -5219,6 +5449,27 @@ fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
             IrType::Hash,
         )),
         _ => None,
+    }
+}
+
+fn fixed_byte_width_for_script_args_var(var: &IrVar) -> Option<usize> {
+    match &var.ty {
+        IrType::Hash | IrType::Address => Some(32),
+        IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
+        _ => None,
+    }
+}
+
+fn fixed_byte_width_for_script_args_operand(operand: &IrOperand, ty: &IrType) -> Option<usize> {
+    match operand {
+        IrOperand::Const(IrConst::Hash(_)) | IrOperand::Const(IrConst::Address(_)) => Some(32),
+        IrOperand::Const(IrConst::Array(items)) => Some(items.len()),
+        IrOperand::Var(var) => fixed_byte_width_for_script_args_var(var),
+        _ => match ty {
+            IrType::Hash | IrType::Address => Some(32),
+            IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
+            _ => None,
+        },
     }
 }
 

@@ -987,6 +987,109 @@ pub fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
     out
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CkbScriptHashTypeValue {
+    Data,
+    Type,
+    Data1,
+    Data2,
+}
+
+impl CkbScriptHashTypeValue {
+    pub fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Data),
+            1 => Some(Self::Type),
+            2 => Some(Self::Data1),
+            4 => Some(Self::Data2),
+            _ => None,
+        }
+    }
+
+    pub fn as_byte(self) -> u8 {
+        match self {
+            Self::Data => 0,
+            Self::Type => 1,
+            Self::Data1 => 2,
+            Self::Data2 => 4,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Data => "data",
+            Self::Type => "type",
+            Self::Data1 => "data1",
+            Self::Data2 => "data2",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CkbScriptArgsValue {
+    bytes: Vec<u8>,
+}
+
+impl CkbScriptArgsValue {
+    pub fn empty() -> Self {
+        Self { bytes: Vec::new() }
+    }
+
+    pub fn exact(bytes: impl Into<Vec<u8>>) -> Self {
+        Self { bytes: bytes.into() }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    fn packed_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + self.bytes.len());
+        out.extend_from_slice(&(self.bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.bytes);
+        out
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CkbScriptValue {
+    pub code_hash: [u8; 32],
+    pub hash_type: CkbScriptHashTypeValue,
+    pub args: CkbScriptArgsValue,
+}
+
+impl CkbScriptValue {
+    pub fn new(code_hash: [u8; 32], hash_type: CkbScriptHashTypeValue, args: CkbScriptArgsValue) -> Self {
+        Self { code_hash, hash_type, args }
+    }
+
+    pub fn packed_bytes(&self) -> Vec<u8> {
+        let args = self.args.packed_bytes();
+        let total_size = 16 + 32 + 1 + args.len();
+        let mut out = Vec::with_capacity(total_size);
+        out.extend_from_slice(&(total_size as u32).to_le_bytes());
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&48u32.to_le_bytes());
+        out.extend_from_slice(&49u32.to_le_bytes());
+        out.extend_from_slice(&self.code_hash);
+        out.push(self.hash_type.as_byte());
+        out.extend_from_slice(&args);
+        out
+    }
+
+    pub fn hash(&self) -> [u8; 32] {
+        ckb_blake2b256(&self.packed_bytes())
+    }
+}
+
 fn is_canonical_hash_hex(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
@@ -11660,6 +11763,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_empty"
                             | "__ckb_require_cell_lock_args_hash"
                             | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args_exact"
+                            | "__ckb_require_cell_type_args_exact"
                             | "__ckb_require_cell_lock_args_prefix_hash"
                             | "__ckb_require_cell_type_args_prefix_hash"
                             | "__ckb_require_cell_lock_args_suffix_hash"
@@ -11685,12 +11790,17 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_empty"
                             | "__ckb_require_cell_lock_args_hash"
                             | "__ckb_require_cell_type_args_hash"
+                            | "__ckb_require_cell_lock_args_exact"
+                            | "__ckb_require_cell_type_args_exact"
                             | "__ckb_require_cell_lock_args_prefix_hash"
                             | "__ckb_require_cell_type_args_prefix_hash"
                             | "__ckb_require_cell_lock_args_suffix_hash"
                             | "__ckb_require_cell_type_args_suffix_hash"
                     ) {
                         features.insert("ckb-script-args-requirements".to_string());
+                    }
+                    if matches!(func.as_str(), "__ckb_require_cell_lock_args_exact" | "__ckb_require_cell_type_args_exact") {
+                        features.insert("ckb-script-construction".to_string());
                     }
                     if matches!(
                         func.as_str(),
@@ -12223,6 +12333,12 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_require_cell_type_args_hash" => {
             Some(("cell-type-script-hash-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_args_hash"))
+        }
+        "__ckb_require_cell_lock_args_exact" => {
+            Some(("cell-lock-script-exact-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "script::require_cell_lock_matches"))
+        }
+        "__ckb_require_cell_type_args_exact" => {
+            Some(("cell-type-script-exact-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "script::require_cell_type_matches"))
         }
         "__ckb_require_cell_lock_args_prefix_hash" => Some((
             "cell-lock-script-prefix-hash-args-require",

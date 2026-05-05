@@ -532,6 +532,28 @@ impl LspServer {
                 }
                 return items;
             }
+            "script" => {
+                for (name, insert) in [
+                    ("hash_type_data", "script::hash_type_data()"),
+                    ("hash_type_type", "script::hash_type_type()"),
+                    ("hash_type_data1", "script::hash_type_data1()"),
+                    ("hash_type_data2", "script::hash_type_data2()"),
+                    ("args_empty", "script::args_empty()"),
+                    ("args", "script::args(${1:b\"owner\"})"),
+                    ("new", "script::new(${1:code_hash}, ${2:hash_type}, ${3:args})"),
+                    ("require_cell_lock_matches", "script::require_cell_lock_matches(${1:source::input(0)}, ${2:expected_script})"),
+                    ("require_cell_type_matches", "script::require_cell_type_matches(${1:source::output(0)}, ${2:expected_script})"),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("script::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
             "ckb" => {
                 for (name, insert) in [
                     ("header_epoch_number", "ckb::header_epoch_number()"),
@@ -2490,6 +2512,11 @@ mod tests {
 
         let witness = server.member_completions("file:///test.cell", "witness");
         assert!(witness.iter().any(|item| item.label == "lock"));
+
+        let script = server.member_completions("file:///test.cell", "script");
+        assert!(script.iter().any(|item| item.label == "new"));
+        assert!(script.iter().any(|item| item.label == "args"));
+        assert!(script.iter().any(|item| item.label == "require_cell_lock_matches"));
 
         let ckb = server.member_completions("file:///test.cell", "ckb");
         assert!(ckb.iter().any(|item| item.label == "input_since"));

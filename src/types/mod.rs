@@ -338,6 +338,8 @@ fn type_repr(ty: &Type) -> String {
 
 const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
 const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
+const CKB_SCRIPT_ARGS_TYPE: &str = "ScriptArgs";
+const CKB_SCRIPT_VALUE_TYPE: &str = "Script";
 
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
@@ -2662,7 +2664,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Integer(_) => Ok(Type::U64),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::String(_) => Ok(Type::Named("String".to_string())),
-            Expr::ByteString(_) => Ok(Type::Array(Box::new(Type::U8), 0)),
+            Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
             Expr::Identifier(name) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     Ok(ty)
@@ -3182,6 +3184,29 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn is_script_args_payload_type(ty: &Type) -> bool {
+        match ty {
+            Type::Hash => true,
+            Type::Array(inner, _) => matches!(inner.as_ref(), Type::U8),
+            _ => false,
+        }
+    }
+
+    fn is_script_args_type(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name.split('<').next().unwrap_or(name.as_str()) == CKB_SCRIPT_ARGS_TYPE)
+    }
+
+    fn is_script_value_type(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name.split('<').next().unwrap_or(name.as_str()) == CKB_SCRIPT_VALUE_TYPE)
+    }
+
+    fn validate_script_hash_type_literal(value: u64, span: Span) -> Result<()> {
+        match value {
+            0 | 1 | 2 | 4 => Ok(()),
+            _ => Err(CompileError::new("script hash_type must be one of data(0), type(1), data1(2), or data2(4)", span)),
+        }
+    }
+
     fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
         let ty = self.infer_expr(env, expr)?;
         if !self.is_linear_type(&ty) {
@@ -3673,6 +3698,7 @@ impl<'a> TypeChecker<'a> {
                     || name.starts_with("dao::")
                     || name.starts_with("xudt::")
                     || name.starts_with("witness::")
+                    || name.starts_with("script::require_")
                     || matches!(
                         name.as_str(),
                         "spawn"
@@ -4214,6 +4240,24 @@ impl<'a> TypeChecker<'a> {
                         )),
                     };
                 }
+                if base_name == CKB_SCRIPT_VALUE_TYPE {
+                    return match field {
+                        "code_hash" => Ok(Type::Hash),
+                        "hash_type" => Ok(Type::U64),
+                        "args" => Ok(Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())),
+                        _ => Err(CompileError::new(
+                            format!("unknown Script field '{}'; expected code_hash, hash_type, or args", field),
+                            span,
+                        )),
+                    };
+                }
+                if base_name == CKB_SCRIPT_ARGS_TYPE {
+                    return match field {
+                        "len" => Ok(Type::U64),
+                        "is_empty" => Ok(Type::Bool),
+                        _ => Err(CompileError::new(format!("unknown ScriptArgs field '{}'; expected len or is_empty", field), span)),
+                    };
+                }
                 if let Some(fields) = self.resolve_named_type_fields(base_name) {
                     if let Some(field_ty) = fields.get(field) {
                         return Ok(field_ty.clone());
@@ -4270,6 +4314,44 @@ impl<'a> TypeChecker<'a> {
                         ("env", "current_timepoint") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
+                        }
+                        ("script", "hash_type_data" | "hash_type_type" | "hash_type_data1" | "hash_type_data2") => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::U64
+                        }
+                        ("script", "args_empty") => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())
+                        }
+                        ("script", "args") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if !Self::is_script_args_payload_type(&arg_types[0]) {
+                                return Err(CompileError::new("script::args expects fixed bytes ([u8; N]) or Hash input", call.span));
+                            }
+                            Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())
+                        }
+                        ("script", "new") => {
+                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                            if arg_types[0] != Type::Hash || arg_types[1] != Type::U64 || !Self::is_script_args_type(&arg_types[2]) {
+                                return Err(CompileError::new(
+                                    "script::new expects (code_hash: Hash, hash_type: u64, args: ScriptArgs)",
+                                    call.span,
+                                ));
+                            }
+                            if let Expr::Integer(value) = &call.args[1] {
+                                Self::validate_script_hash_type_literal(*value, call.span)?;
+                            }
+                            Type::Named(CKB_SCRIPT_VALUE_TYPE.to_string())
+                        }
+                        ("script", "require_cell_lock_matches" | "require_cell_type_matches") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || !Self::is_script_value_type(&arg_types[1]) {
+                                return Err(CompileError::new(
+                                    format!("{} expects (source_view: u64, expected_script: Script)", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Unit
                         }
                         ("env", "sighash_all") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -5271,7 +5353,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         match base_name {
-            "String" | "Range" | "Vec" | "usize" | "isize" => return Ok(()),
+            "String" | "Range" | "Vec" | "usize" | "isize" | CKB_SCRIPT_ARGS_TYPE | CKB_SCRIPT_VALUE_TYPE => return Ok(()),
             _ => {}
         }
 
