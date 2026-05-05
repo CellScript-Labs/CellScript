@@ -32,6 +32,34 @@ where
     return lock_hash_type + type_hash_type + lock_empty_flag + type_empty_flag
 "#;
 
+const SCRIPT_REF_PROPERTY_PROGRAM: &str = r#"
+module v018::script_ref_property
+
+action inspect(
+    expected_lock_code_hash: Hash,
+    expected_type_code_hash: Hash,
+    expected_lock_args_hash: Hash,
+    expected_type_args_hash: Hash
+) -> u64
+where
+    let input = source::group_input(0)
+    let lock = input.lock
+    let type_script = input.type
+    let lock_code_hash: Hash = lock.code_hash
+    let type_code_hash: Hash = type_script.code_hash
+    let lock_args_hash: Hash = input.lock.args_hash
+    let type_args_hash: Hash = input.type.args_hash
+    let lock_args_empty = input.lock.args_empty
+    let type_args_empty = input.type.args_empty
+    require lock_code_hash == expected_lock_code_hash
+    require type_code_hash == expected_type_code_hash
+    require lock_args_hash == expected_lock_args_hash
+    require type_args_hash == expected_type_args_hash
+    let lock_empty_flag = if lock_args_empty { 1 } else { 0 }
+    let type_empty_flag = if type_args_empty { 1 } else { 0 }
+    return lock.hash_type + type_script.hash_type + lock_empty_flag + type_empty_flag
+"#;
+
 #[test]
 fn v0_18_script_ref_reads_lower_to_fail_closed_ckb_helpers() {
     let result = compile(
@@ -121,6 +149,74 @@ fn v0_18_script_ref_reads_lower_to_fail_closed_ckb_helpers() {
 }
 
 #[test]
+fn v0_18_script_ref_property_surface_lowers_to_same_helpers() {
+    let result = compile(
+        SCRIPT_REF_PROPERTY_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("0.18 ScriptRef property program should compile");
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    for helper in [
+        "__ckb_cell_lock_code_hash",
+        "__ckb_cell_type_code_hash",
+        "__ckb_cell_lock_hash_type",
+        "__ckb_cell_type_hash_type",
+        "__ckb_cell_lock_args_empty",
+        "__ckb_cell_type_args_empty",
+        "__ckb_cell_lock_args_hash",
+        "__ckb_cell_type_args_hash",
+    ] {
+        assert!(assembly.contains(&format!(".global {helper}")), "missing property helper {helper}:\n{assembly}");
+    }
+    assert!(
+        assembly.contains("read-only ScriptRef Hash field") && assembly.contains("read-only ScriptRef scalar field"),
+        "property ScriptRef reads must reuse the runtime extraction helpers:\n{assembly}"
+    );
+
+    let features = &result.metadata.runtime.ckb_runtime_features;
+    assert!(features.contains(&"ckb-script-ref-read".to_string()), "{features:?}");
+    assert!(features.contains(&"ckb-script-args-read".to_string()), "{features:?}");
+
+    let accesses = result
+        .metadata
+        .runtime
+        .ckb_runtime_accesses
+        .iter()
+        .map(|access| (access.operation.as_str(), access.syscall.as_str(), access.source.as_str()))
+        .collect::<Vec<_>>();
+    for operation in [
+        "cell-lock-script-code-hash-read",
+        "cell-type-script-code-hash-read",
+        "cell-lock-script-hash-type-read",
+        "cell-type-script-hash-type-read",
+        "cell-lock-script-args-empty-read",
+        "cell-type-script-args-empty-read",
+        "cell-lock-script-args-hash-read",
+        "cell-type-script-args-hash-read",
+    ] {
+        assert!(accesses.contains(&(operation, "LOAD_CELL_BY_FIELD", "SourceView")), "{accesses:?}");
+    }
+
+    let elf = compile(
+        SCRIPT_REF_PROPERTY_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("0.18 ScriptRef property program should assemble to ELF");
+    assert!(!elf.artifact_bytes.is_empty());
+}
+
+#[test]
 fn v0_18_script_ref_reads_reject_non_source_view_arguments() {
     let err = compile(
         r#"
@@ -141,6 +237,33 @@ where
 
     assert!(
         err.message.contains("cell_lock_code_hash expects a source view returned by source::*"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn v0_18_script_ref_property_rejects_unknown_script_field() {
+    let err = compile(
+        r#"
+module v018::bad_script_ref_property
+
+action inspect() -> Hash
+where
+    let input = source::group_input(0)
+    return input.lock.owner_hash
+"#,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect_err("ScriptRef property surface must reject unknown fields");
+
+    assert!(
+        err.message.contains("unknown ScriptRef field 'owner_hash'; expected code_hash, hash_type, args_empty, or args_hash"),
         "unexpected error: {}",
         err.message
     );

@@ -3518,6 +3518,29 @@ impl IrGenerator {
         };
 
         if let IrOperand::Var(base_var) = &lowered_base.operand {
+            if matches!(base_var.ty, IrType::U64) && (field.field == "lock" || field.field == "type" || field.field == "type_script") {
+                let script_ref_ty = if field.field == "lock" {
+                    IrType::Named(CKB_LOCK_SCRIPT_REF_TYPE.to_string())
+                } else {
+                    IrType::Named(CKB_TYPE_SCRIPT_REF_TYPE.to_string())
+                };
+                let dest = self.new_var(format!("{}_script_ref", field.field), script_ref_ty);
+                self.block_mut(blocks, active)
+                    .instructions
+                    .push(IrInstruction::Move { dest: dest.clone(), src: lowered_base.operand });
+                return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
+            }
+
+            if let Some((func, dest_name, return_ty)) = script_ref_property_runtime_helper(&base_var.ty, &field.field) {
+                let dest = self.new_var(dest_name, return_ty);
+                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                    dest: Some(dest.clone()),
+                    func: func.to_string(),
+                    args: vec![lowered_base.operand],
+                });
+                return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
+            }
+
             if let Some(fields) = self.aggregate_fields.get(&base_var.id) {
                 if let Some(field_var) = fields.get(&field.field) {
                     return LoweredExpr { operand: IrOperand::Var(field_var.clone()), current: Some(active) };
@@ -5159,6 +5182,43 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
         "Address" => IrType::Address,
         "Hash" => IrType::Hash,
         other => IrType::Named(other.to_string()),
+    }
+}
+
+const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
+const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
+
+fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'static str, &'static str, IrType)> {
+    let IrType::Named(name) = ty else {
+        return None;
+    };
+    let lock_script = name == CKB_LOCK_SCRIPT_REF_TYPE;
+    let type_script = name == CKB_TYPE_SCRIPT_REF_TYPE;
+    if !lock_script && !type_script {
+        return None;
+    }
+    match field {
+        "code_hash" => Some((
+            if lock_script { "__ckb_cell_lock_code_hash" } else { "__ckb_cell_type_code_hash" },
+            if lock_script { "ckb_cell_lock_code_hash" } else { "ckb_cell_type_code_hash" },
+            IrType::Hash,
+        )),
+        "hash_type" => Some((
+            if lock_script { "__ckb_cell_lock_hash_type" } else { "__ckb_cell_type_hash_type" },
+            if lock_script { "ckb_cell_lock_hash_type" } else { "ckb_cell_type_hash_type" },
+            IrType::U64,
+        )),
+        "args_empty" => Some((
+            if lock_script { "__ckb_cell_lock_args_empty" } else { "__ckb_cell_type_args_empty" },
+            if lock_script { "ckb_cell_lock_args_empty" } else { "ckb_cell_type_args_empty" },
+            IrType::Bool,
+        )),
+        "args_hash" => Some((
+            if lock_script { "__ckb_cell_lock_args_hash" } else { "__ckb_cell_type_args_hash" },
+            if lock_script { "ckb_cell_lock_args_hash" } else { "ckb_cell_type_args_hash" },
+            IrType::Hash,
+        )),
+        _ => None,
     }
 }
 

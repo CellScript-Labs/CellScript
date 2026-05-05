@@ -336,6 +336,9 @@ fn type_repr(ty: &Type) -> String {
     }
 }
 
+const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
+const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
+
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
         ParamSource::Default => "default",
@@ -4180,6 +4183,8 @@ impl<'a> TypeChecker<'a> {
 
     fn lookup_field_type(&self, ty: &Type, field: &str, span: Span) -> Result<Type> {
         match ty {
+            Type::U64 if field == "lock" => Ok(Type::Named(CKB_LOCK_SCRIPT_REF_TYPE.to_string())),
+            Type::U64 if field == "type" || field == "type_script" => Ok(Type::Named(CKB_TYPE_SCRIPT_REF_TYPE.to_string())),
             Type::Address | Type::Hash => {
                 if field == "0" {
                     return Ok(Type::Array(Box::new(Type::U8), 32));
@@ -4198,6 +4203,17 @@ impl<'a> TypeChecker<'a> {
             Type::Ref(inner) | Type::MutRef(inner) => self.lookup_field_type(inner, field, span),
             Type::Named(name) => {
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
+                if base_name == CKB_LOCK_SCRIPT_REF_TYPE || base_name == CKB_TYPE_SCRIPT_REF_TYPE {
+                    return match field {
+                        "code_hash" | "args_hash" => Ok(Type::Hash),
+                        "hash_type" => Ok(Type::U64),
+                        "args_empty" => Ok(Type::Bool),
+                        _ => Err(CompileError::new(
+                            format!("unknown ScriptRef field '{}'; expected code_hash, hash_type, args_empty, or args_hash", field),
+                            span,
+                        )),
+                    };
+                }
                 if let Some(fields) = self.resolve_named_type_fields(base_name) {
                     if let Some(field_ty) = fields.get(field) {
                         return Ok(field_ty.clone());

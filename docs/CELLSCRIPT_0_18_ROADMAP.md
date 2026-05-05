@@ -15,22 +15,23 @@ First-class Script API work is deferred from 0.17 to 0.18.
 - `ckb::require_cell_lock_args_hash(...)`
 - `ckb::require_cell_type_args_hash(...)`
 
-0.18 starts with read-only ScriptRef / ScriptArgs. The canonical long-term
-surface remains property-like:
+0.18 starts with read-only ScriptRef / ScriptArgs. The first property-like
+surface is now available for SourceView script reads:
 
-- `cell.lock.code_hash`
-- `cell.lock.hash_type`
-- `cell.lock.args_empty`
-- `cell.lock.args_hash`
-- `cell.type?.code_hash`
-- `cell.type?.hash_type`
-- `cell.type?.args_empty`
-- `cell.type?.args_hash`
+- `source_view.lock.code_hash`
+- `source_view.lock.hash_type`
+- `source_view.lock.args_empty`
+- `source_view.lock.args_hash`
+- `source_view.type.code_hash`
+- `source_view.type.hash_type`
+- `source_view.type.args_empty`
+- `source_view.type.args_hash`
 - exact / prefix / suffix args checks
 
-The first implementation pass exposes the same verifier facts through explicit
-CKB SourceView helper calls while the parser-level property surface is still
-being designed. It is available under `--primitive-strict=0.18`:
+These properties lower to the same explicit CKB SourceView helper calls used by
+the helper-call surface. The helper-call form remains available under
+`--primitive-strict=0.18` and is still the canonical spelling for exact,
+prefix, and suffix args requirements:
 
 - `ckb::cell_lock_code_hash(source) -> Hash`
 - `ckb::cell_type_code_hash(source) -> Hash`
@@ -52,7 +53,12 @@ restricted to exactly 32-byte Script args in this pass, matching the existing
 hash-shaped comparison helpers. The prefix/suffix helpers bind the first or
 last 32 bytes of a Script args payload and require the args payload to be at
 least 32 bytes. Optional type-script reads still fail closed when the source has
-no type script; a true `cell.type?` optional surface remains future work.
+no type script; a true `source_view.type?` optional surface remains future work.
+
+The property surface is intentionally read-only. `source_view.lock` and
+`source_view.type` are verifier references to existing transaction scripts; they
+are not constructible `Script` values, do not synthesize script hashes, and do
+not solve deployment dependencies.
 
 Initial 0.18 scope excludes:
 
