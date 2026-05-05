@@ -131,8 +131,10 @@ where
 
     let minted = receipt.deposit_quantity *
         discounted_ickb_value(receipt.deposit_amount, receipt.deposit_accumulated_rate)
-    // TODO(ickb-benchmark): receipt data binding and group receipt mint-sum
-    // recomputation need generic cell-data decoding plus aggregate lowering.
+    // TODO(ickb-benchmark): active differential rows now bind executable
+    // receipt bytes with generic cell-data decoders. This benchmark spec still
+    // needs protocol-neutral aggregate lowering before the full group receipt
+    // mint sum can move out of fixture-scoped probes.
     xudt::require_group_amount_minted(minted)
 
     consume receipt
@@ -236,12 +238,14 @@ lock withdrawal_owner(request: protected WithdrawalRequest, claimed_owner: witne
 
 // TODO(ickb-benchmark): CellScript can now verify xUDT owner-mode Type args
 // against either an explicit logic hash or LOAD_SCRIPT_HASH(current script),
-// and can bind a cell Type Script code_hash/hash_type through a generic Script
-// identity helper. It still lacks a first-class Script value and arbitrary
-// variable-length args construction across lock/type positions.
+// and first-class fixed-byte Script construction covers exact expected
+// lock/type Script values. Broader variable-length ScriptArgs construction and
+// action-aware Script scans remain outside this benchmark spec.
 // TODO(ickb-benchmark): executable aggregate invariant lowering is required
 // for transaction-wide exact equality across iCKB tokens, receipts, and deposits.
-// TODO(ickb-benchmark): iCKB receipt layout and deposit output matching must
+// TODO(ickb-benchmark): iCKB deposit output matching must
 // remain in the benchmark fixture/differential test layer, not the generic
 // CellScript stdlib, until they are expressible through protocol-neutral
-// SourceView scans, byte decoding, and aggregate equations.
+// SourceView scans and aggregate equations. Receipt quantity/amount byte
+// decoding is now handled by generic CKB cell-data helpers in the differential
+// matrix.

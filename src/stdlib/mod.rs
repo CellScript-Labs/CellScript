@@ -189,6 +189,16 @@ impl StdLib {
                 params: vec![("source_view".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
             },
+            StdFunction {
+                name: "ckb_cell_data_u64_le".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("offset".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_data_u32_le".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("offset".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
             StdFunction { name: "ckb_current_script_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
             StdFunction {
                 name: "ckb_cell_lock_hash_low".to_string(),
@@ -199,6 +209,16 @@ impl StdLib {
                 name: "ckb_cell_type_hash_low".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
             },
             StdFunction {
                 name: "ckb_cell_lock_code_hash".to_string(),
@@ -249,6 +269,11 @@ impl StdLib {
                 name: "ckb_input_out_point_tx_hash_low".to_string(),
                 params: vec![("source_view".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_input_out_point_tx_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
             },
             StdFunction {
                 name: "ckb_require_cell_lock_hash".to_string(),

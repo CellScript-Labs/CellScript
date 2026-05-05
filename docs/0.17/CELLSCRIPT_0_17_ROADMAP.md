@@ -117,9 +117,12 @@ Implemented:
   the iCKB oversized-deposit 10% discount formula to compile directly in
   `tests/benchmarks/ickb_specs/ickb_logic.cell`.
 - executable production-equivalence claim gate in
-  `tests/benchmarks/ickb_diff/matrix.json` and `tests/ickb_diff.rs`; the
-  selected matrix now reaches `EXECUTED_CKB_VM_DIFF` / `PROVEN` with 76
-  original-vs-CellScript differential rows and no active `MODEL` rows.
+  `tests/benchmarks/ickb_diff/matrix.json`,
+  `tests/benchmarks/ickb_diff/claim_manifest.json`, `tests/ickb_diff.rs`, and
+  `cellc verify-ckb-fixtures`; the selected matrix now reaches
+  `EXECUTED_CKB_VM_DIFF` / `PROVEN` with 187 original-vs-CellScript
+  differential rows and no active `MODEL` rows, and the branch manifest closes
+  the declared executable iCKB claim set.
 - hardened 0.16 assurance paths: ProofPlan obligation origin/scope matching,
   duplicate/semantically incomplete ProofPlan record rejection, cell-access
   source/read consistency checks, concrete builder evidence payload validation,
@@ -130,15 +133,13 @@ Implemented:
 - stable 0.17 runtime error families.
 - `tests/v0_17.rs`, `tests/ckb_compat_runner.rs`, and `tests/ickb_diff.rs`.
 
-Still blocked:
+Still open beyond the declared executable iCKB claim set:
 
 - executable computed aggregate lowering beyond the explicit xUDT transfer,
   token-delta, output deposit/receipt, and receipt mint-value bridges;
-- full DAO second-withdrawal binding, broader xUDT compatibility, and original
-  iCKB VM evidence beyond the current fail-closed helper bridges;
-- full `Script`, first-class action-aware `MetaPoint` maps, additional signed
-  integer widths if needed, and first-class C256/u256 value support;
-- CKB VM fixture execution and original iCKB differential execution.
+- first-class action-aware `MetaPoint` maps, additional signed integer widths if
+  needed, and first-class C256/u256 value support;
+- external audit and mainnet-value certification.
 
 ## Relationship To 0.15 And 0.16
 
@@ -244,9 +245,9 @@ The API must fail closed when:
 **Acceptance**
 
 - `wrong_accumulated_rate` and `missing_header_dep` become generated-runtime
-  failures, not model-only failures. The current branch has a generated
-  DAO-field input/HeaderDep equality helper, but fixture verdicts remain
-  model-level until CKB VM/testtool is integrated.
+  failures, not model-only failures. The current branch has generated
+  DAO-field input/HeaderDep equality helpers and selected CKB VM differential
+  rows for the promoted header/rate paths.
 - Metadata records exact HeaderDep reads and source binding.
 - `cellc check --primitive-strict=0.17` rejects any iCKB-style accumulated-rate
   claim that is still witness/builder supplied.

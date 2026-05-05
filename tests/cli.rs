@@ -63,6 +63,51 @@ fn cellc_verify_ckb_fixtures_accepts_standard_manifest() {
 }
 
 #[test]
+fn cellc_verify_ckb_fixtures_accepts_ickb_claim_manifest() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("benchmarks")
+        .join("ickb_diff")
+        .join("claim_manifest.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-ckb-fixtures").arg(&manifest).arg("--json").output().unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["manifest_schema"], "cellscript-ickb-claim-manifest-v1");
+    assert_eq!(report["execution_level"], "DIFFERENTIAL_CKB_VM");
+    assert_eq!(report["ckb_vm_execution"], true);
+    assert_eq!(report["issue_count"], 0);
+    assert!(report["fixture_count"].as_u64().unwrap() >= 8);
+}
+
+#[test]
+fn cellc_verify_ckb_fixtures_rejects_ickb_claim_without_matrix_row() {
+    let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("benchmarks")
+        .join("ickb_diff")
+        .join("claim_manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["families"][0]["branches"][0]["required_scenarios"] =
+        serde_json::json!(["differential: missing iCKB protocol branch original vs CellScript agree"]);
+
+    let dir = tempfile::tempdir().unwrap();
+    let invalid = dir.path().join("claim_manifest.json");
+    std::fs::write(&invalid, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    std::fs::copy(manifest_path.parent().unwrap().join("matrix.json"), dir.path().join("matrix.json")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-ckb-fixtures").arg(&invalid).arg("--json").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
+    assert!(issues.contains("required scenario is missing"), "{issues}");
+}
+
+#[test]
 fn cellc_verify_ckb_fixtures_rejects_invalid_manifest_claim() {
     let manifest_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("compat").join("ckb_standard").join("manifest.json");
@@ -81,7 +126,7 @@ fn cellc_verify_ckb_fixtures_rejects_invalid_manifest_claim() {
     let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
     assert!(issues.contains("manifest schema must be cellscript-ckb-standard-compat-v0.16"), "{issues}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("CKB fixture manifest failed model verification"),
+        String::from_utf8_lossy(&output.stderr).contains("CKB fixture manifest failed verification"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -3633,11 +3678,19 @@ where
     let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(plan["status"], "ok");
     assert_eq!(plan["policy"], "cellscript-action-builder-plan-v1");
+    assert_eq!(plan["headless"], true);
+    assert_eq!(plan["ui_scope"], "none");
     assert_eq!(plan["action"], "mint");
     assert_eq!(plan["target_profile"], "ckb");
     assert!(plan["entry_witness_abi"]["required"].as_bool().unwrap());
     assert_eq!(plan["builder_requirements"]["created_outputs"].as_array().unwrap().len(), 1);
     assert!(plan["ckb"]["capacity_evidence_contract"]["required"].as_bool().unwrap());
+    assert_eq!(plan["transaction_draft"]["format"], "cellscript-ccc-transaction-draft-v1");
+    assert_eq!(plan["transaction_draft"]["ccc_compatible"], true);
+    assert_eq!(plan["transaction_draft"]["requires_live_cell_resolution"], true);
+    assert_eq!(plan["preview"]["format"], "cellscript-action-preview-v1");
+    assert_eq!(plan["preview"]["action"], "mint");
+    assert!(plan["preview"]["warnings"].as_array().is_some_and(|warnings| !warnings.is_empty()));
 }
 
 #[test]

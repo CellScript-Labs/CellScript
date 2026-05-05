@@ -572,6 +572,8 @@ impl LspServer {
                     ("input_out_point_tx_hash_low", "ckb::input_out_point_tx_hash_low(${1:source::group_input(0)})"),
                     ("cell_lock_hash_low", "ckb::cell_lock_hash_low(${1:source::group_input(0)})"),
                     ("cell_type_hash_low", "ckb::cell_type_hash_low(${1:source::group_input(0)})"),
+                    ("cell_lock_hash", "ckb::cell_lock_hash(${1:source::group_input(0)})"),
+                    ("cell_type_hash", "ckb::cell_type_hash(${1:source::group_input(0)})"),
                     ("cell_lock_code_hash", "ckb::cell_lock_code_hash(${1:source::group_input(0)})"),
                     ("cell_type_code_hash", "ckb::cell_type_code_hash(${1:source::group_input(0)})"),
                     ("cell_lock_hash_type", "ckb::cell_lock_hash_type(${1:source::group_input(0)})"),
@@ -658,6 +660,8 @@ impl LspServer {
                         "ckb::require_lock_match_master_out_point_pairs_from_data(${1:source::input(0)}, ${2:source::output(0)}, ${3:action_offset}, ${4:tx_hash_offset}, ${5:index_offset})",
                     ),
                     ("cell_data_size", "ckb::cell_data_size(${1:source::group_input(0)})"),
+                    ("cell_data_u32_le", "ckb::cell_data_u32_le(${1:source::group_input(0)}, ${2:0})"),
+                    ("cell_data_u64_le", "ckb::cell_data_u64_le(${1:source::group_input(0)}, ${2:0})"),
                 ] {
                     items.push(CompletionItem {
                         label: name.to_string(),
@@ -759,8 +763,26 @@ impl LspServer {
                 }
                 return items;
             }
-            "Address" | "Hash" => {
-                // Namespace-style methods.
+            "Address" => {
+                items.push(CompletionItem {
+                    label: "zero".to_string(),
+                    kind: CompletionItemKind::Function,
+                    detail: Some("Address::zero".to_string()),
+                    documentation: None,
+                    insert_text: Some("Address::zero()".to_string()),
+                });
+                return items;
+            }
+            "Hash" => {
+                for (name, insert) in [("zero", "Hash::zero()"), ("from_bytes", "Hash::from_bytes(${1:b\"\\\\x00\\\\x00...\"})")] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("Hash::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
                 return items;
             }
             _ => {}
@@ -2517,6 +2539,10 @@ mod tests {
         assert!(script.iter().any(|item| item.label == "new"));
         assert!(script.iter().any(|item| item.label == "args"));
         assert!(script.iter().any(|item| item.label == "require_cell_lock_matches"));
+
+        let hash = server.member_completions("file:///test.cell", "Hash");
+        assert!(hash.iter().any(|item| item.label == "zero"));
+        assert!(hash.iter().any(|item| item.label == "from_bytes"));
 
         let ckb = server.member_completions("file:///test.cell", "ckb");
         assert!(ckb.iter().any(|item| item.label == "input_since"));

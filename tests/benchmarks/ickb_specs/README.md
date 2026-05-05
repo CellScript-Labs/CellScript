@@ -6,19 +6,34 @@ faithful port of the audited iCKB Rust scripts. It intentionally lives under
 protocol assumptions do not become part of CellScript's generic API surface.
 
 The goal is to keep the scope explicit: each `.cell` file models the invariant
-shape that CellScript can currently express. The 0.17 branch adds runtime-backed
-SourceView, HeaderDep, DAO-rate/header-lineage, script-role, input OutPoint,
-pairwise MetaPoint relative checks, fixed-distance and i32-data-driven
-lock/type MetaPoint pair cardinality scans, and partial xUDT helper calls,
-including executable xUDT group amount conservation. iCKB-specific receipt
-layout, output deposit/receipt pairing, and mint-sum recomputation are kept in
-the benchmark fixture layer rather than generic compiler helpers, so the files
-remain an iCKB-style model rather than an audited port.
+shape needed by the manifest-declared executable iCKB claim set. The 0.17/0.18
+work adds runtime-backed SourceView, HeaderDep, DAO-rate/header-lineage,
+script-role, first-class Script construction/matching, full input OutPoint
+tx-hash/index reads, pairwise MetaPoint relative checks, fixed-distance and
+i32-data-driven lock/type MetaPoint pair cardinality scans, and xUDT helper
+calls, including executable xUDT group amount conservation. The differential
+tests use protocol-neutral `ckb::cell_data_u32_le` /
+`ckb::cell_data_u64_le` helpers to enforce the 12-byte receipt shape, decode
+receipt quantity/amount bytes, and recompute mint sums at runtime, including a
+`quantity = 2` single receipt and a mixed receipt group with different
+quantity/deposit amount bytes.
+The DAO withdrawal differential coverage also includes two-input same-rate
+exact/plus-one rows, mixed-deposit-rate exact/plus-one rows, and
+mixed-withdraw-rate exact/plus-one aggregate capacity rows executed against the
+original DAO ELF and generated CellScript ELF. It also includes three-input
+same-rate exact/plus-one aggregate capacity rows, plus malformed
+second-witness `input_type` missing/empty/short/long and
+withdraw-header/out-of-bounds index reject rows.
+iCKB-specific output deposit/receipt pairing and broader receipt group scans
+remain in the benchmark fixture layer rather than generic compiler helpers, so
+the files remain an iCKB-style protocol-equivalence benchmark rather than an
+audited port or a generic language template.
 
 ## Scope
 
 - `ickb_logic.cell` models deposit phase 1 receipt creation, receipt
-  consumption, iCKB accounting, xUDT binding as a hash placeholder, withdrawal
+  consumption, iCKB accounting, xUDT binding through full hash / Script checks,
+  withdrawal
   request creation, maturity checks, the iCKB 10% oversized-deposit discount
   arithmetic, model-level output-side deposit/receipt pairing, and linear
   no-double-consume behaviour.
@@ -28,15 +43,17 @@ remain an iCKB-style model rather than an audited port.
   rejection.
 - `owned_owner.cell` models owned/owner cell pairing and wrong-owner rejection.
 
-The benchmark does not prove behavioural equivalence with the original iCKB
-scripts. The Rust integration tests under `tests/ickb_benchmark.rs` compile
-these CellScript specs and run deterministic model-level positive, negative, and
-differential fixtures. `tests/v0_17.rs` additionally checks that the new CKB
-source primitives, C256 requirement helpers, and signed `i32` ABI lowering
-compile into generated runtime/assembly helpers. Fixtures that do not execute a
-generated CKB VM binary are labelled `MODEL_LEVEL_ONLY`. The stricter
-production-equivalence claim gate is documented in
-`docs/0.17/ickb_production_equivalence_gate.md`.
+The `.cell` benchmark specs alone do not prove behavioural equivalence with the
+original iCKB scripts. The Rust integration tests under
+`tests/ickb_benchmark.rs` compile these CellScript specs and run deterministic
+model-level positive and negative fixtures, while `tests/ickb_diff.rs` is the
+executable original-vs-CellScript CKB VM differential matrix. `tests/v0_17.rs`
+and `tests/v0_18.rs` additionally check that CKB source primitives, C256
+requirement helpers, signed `i32` ABI lowering, first-class Script
+construction, OutPoint reads, and cell-data decoders compile and execute where
+required. Fixtures that do not execute a generated CKB VM binary are not
+counted as equivalence rows. The stricter production-equivalence claim gate is
+documented in `docs/0.17/ickb_production_equivalence_gate.md`.
 
 ## Original Semantics Mapped
 
@@ -89,15 +106,16 @@ git diff --check
   `ckb::since_epoch_relative(number, index, length)` and
   `dao::require_input_relative_epoch_since_at_least(input, number, index,
   length)` now add generated RFC0017 relative epoch-since checks for
-  redeem-like paths. iCKB-specific receipt data layout, output deposit/receipt
-  pairing, and group receipt mint-sum recomputation are intentionally not
-  exposed as generic `dao::*` helpers; they remain in the benchmark fixture and
-  differential-test layer until CellScript has protocol-neutral SourceView
-  scans, byte decoding, and aggregate equation lowering. `mint_from_receipt`
-  still requires the receipt accumulated rate to match both the supplied
-  HeaderDep rate and the input committed-header rate. Original iCKB VM
-  differential evidence and full second-withdrawal request/deposit/header
-  binding are not proven.
+  redeem-like paths. Receipt quantity/amount byte decoding is covered in the VM
+  differential layer through protocol-neutral `ckb::cell_data_u32_le` /
+  `ckb::cell_data_u64_le`. iCKB-specific output deposit/receipt pairing and
+  broader group receipt scans are intentionally not exposed as generic
+  `dao::*` helpers; they remain in the benchmark fixture and differential-test
+  layer. `mint_from_receipt` still requires the receipt accumulated rate to
+  match both the supplied HeaderDep rate and the input committed-header rate.
+  The declared executable withdrawal claim set is covered by the differential
+  matrix; additional adversarial header/witness permutations are hardening
+  work.
 - The discount arithmetic is expressed directly in CellScript. Plain xUDT
   transfer conservation can declare the exact group amount aggregate and call
   `xudt::require_group_amount_conserved()`; 0.17 strict mode rejects that
@@ -107,13 +125,13 @@ git diff --check
   `xudt::require_group_amount_burned(delta)`; this benchmark uses the
   minted-delta helper in `mint_from_receipt` and the burned-delta helper in
   `request_withdrawal`. Computed local `u128` add/sub/mul/div deltas are now
-  addressable by those helpers. Output-side deposit/receipt pairing, receipt
-  input data binding, receipt mint-value recomputation, and current type-group
-  receipt mint-sum recomputation are model-verified only in the iCKB fixture
-  suite because hardcoding those exact iCKB layouts in the generic compiler
-  would weaken CellScript's protocol neutrality. Redeem accounting that
-  combines input deposits, DAO rates, and token amounts is still model-verified
-  rather than VM-differentially executed.
+  addressable by those helpers. Output-side deposit/receipt pairing and
+  broader current type-group receipt scans stay in the iCKB fixture suite
+  because hardcoding those exact iCKB layouts in the generic compiler would
+  weaken CellScript's protocol neutrality. The stricter differential suite
+  executes receipt quantity/amount data binding, mint-value recomputation, and
+  DAO redeem aggregate boundaries in CKB VM through generic helpers and
+  fixture-scoped protocol rows.
 - xUDT owner-mode args can be checked with
   `xudt::require_owner_mode_type_args(source, owner_hash, flags)` for the
   iCKB-style `[logic_hash, 0x80000000]` pattern, and
@@ -121,8 +139,9 @@ git diff --check
   owner hash to `LOAD_SCRIPT_HASH(current script)`. `mint_from_receipt` also
   calls `ckb::require_cell_type_script_hash_type(source, code_hash, hash_type)`
   so xUDT Type Script identity is bound without an iCKB-specific helper. The
-  benchmark still keeps an `xudt_args_hash` field because CellScript does not
-  yet expose arbitrary first-class `Script` construction.
+  benchmark still keeps an `xudt_args_hash` field for the fixture ABI, while
+  0.18 also exposes first-class fixed-byte `Script` construction for rows that
+  need exact expected Script values.
 - `ckb::current_script_hash()` exposes the current script hash as a reusable
   32-byte `Hash`; `ickb_logic.cell::mint_from_receipt` passes it into the
   generic xUDT owner-mode args verifier before the receipt hash check.
@@ -134,8 +153,9 @@ git diff --check
   and
   `ckb::require_cell_lock_args_empty` / `ckb::require_cell_type_args_empty` plus
   `ckb::require_cell_lock_args_hash` /
-  `ckb::require_cell_type_args_hash` SourceView helpers, but not a full
-  `Script` object or lock/type group scan.
+  `ckb::require_cell_type_args_hash` SourceView helpers, plus 0.18 exact
+  `Script` construction/matching for fixture-bound expected scripts. Generic
+  lock/type group scans remain outside this benchmark spec.
 - cross-cell iCKB mint/redeem accounting across receipts, deposits, DAO rates,
   and token amounts is tested by the benchmark model, not by complete
   executable aggregate invariant lowering.
@@ -159,9 +179,10 @@ git diff --check
   `ckb::require_lock_match_master_out_point_pairs_from_data(input_source,
   output_source, 16, 20, 52)` covers the Limit Order Match bridge where input
   order cells may still encode Mint-relative master distance while output order
-  cells must encode Action::Match with absolute master OutPoint bytes. The
-  remaining gap is a native first-class protocol-specific MetaPoint/OutPoint map
-  abstraction and original iCKB VM differential evidence.
+  cells must encode Action::Match with absolute master OutPoint bytes.
+  `ckb::input_out_point_tx_hash(source)` additionally exposes the full input
+  OutPoint transaction hash as an addressable `Hash`, so generated verifiers no
+  longer need low-word probes for OutPoint identity.
 - Limit Order core product-sum value conservation now uses executable
   `c256::require_sum2_products_lte`; first-class `C256/u256` values,
   additional checked arithmetic operators, and protocol-specific MetaPoint

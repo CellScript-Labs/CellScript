@@ -36,6 +36,33 @@ CCC
   -> RPC / indexer interaction
 ```
 
+Rust-side production workflows use the same compiler outputs through the CKB
+adapter:
+
+```text
+CellScript compiler
+  -> artifact / metadata / ABI / deploy-plan / action build plan / witness bytes
+
+cellscript-ckb-adapter
+  -> reads compiler outputs
+  -> verifies deployment and schema hashes
+  -> materialises CKB transactions through ckb-sdk-rust
+  -> records capacity, CellDep, cycle, tx-pool, and submission evidence
+
+ckb-sdk-rust
+  -> CKB data structures
+  -> RPC / indexer interaction
+  -> transaction construction
+  -> common lock signing
+  -> tx-pool acceptance and submission
+```
+
+The adapter boundary is documented in
+[`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md). It is intentionally
+outside compiler core: CellScript emits verified transaction intent,
+`ckb-sdk-rust` realises that intent, and CKB node acceptance is the production
+evidence.
+
 0.19 also deepens the package and deployment registry design discussed in the
 Nervos forum design thread:
 
@@ -227,6 +254,7 @@ The first implementation should be split by responsibility:
 | `tx-planner` | Compute capacity floors, fee/change policy, HeaderDeps, CellDeps, and ordering. |
 | `preflight` | Run metadata validation, local shape checks, and CKB dry-run before signing. |
 | `ccc-adapter` | Delegate low-level transaction composition, signing, RPC, and indexer calls to CCC. |
+| `ckb-sdk-adapter` | Use `ckb-sdk-rust` for Rust-side deployment, transaction materialisation, signing, tx-pool acceptance, submission, and evidence reports. |
 | `state-tracker` | Track committed outpoints and make follow-up action calls consume the new live outputs. |
 
 ### 3. Builder Contract Types

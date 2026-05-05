@@ -3192,6 +3192,10 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn is_hash_bytes_type(ty: &Type) -> bool {
+        matches!(ty, Type::Array(inner, 32) if matches!(inner.as_ref(), Type::U8))
+    }
+
     fn is_script_args_type(ty: &Type) -> bool {
         matches!(ty, Type::Named(name) if name.split('<').next().unwrap_or(name.as_str()) == CKB_SCRIPT_ARGS_TYPE)
     }
@@ -4319,6 +4323,13 @@ impl<'a> TypeChecker<'a> {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
                         }
+                        ("Hash", "from_bytes") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if !Self::is_hash_bytes_type(&arg_types[0]) {
+                                return Err(CompileError::new("Hash::from_bytes expects exactly 32 bytes ([u8; 32])", call.span));
+                            }
+                            Type::Hash
+                        }
                         ("script", "args_empty") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::Named(CKB_SCRIPT_ARGS_TYPE.to_string())
@@ -4411,7 +4422,32 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::U64
                         }
-                        ("ckb", "cell_lock_code_hash" | "cell_type_code_hash" | "cell_lock_args_hash" | "cell_type_args_hash") => {
+                        ("ckb", "input_out_point_tx_hash") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 {
+                                return Err(CompileError::new(
+                                    format!("{} expects a source view returned by source::*", name),
+                                    call.span,
+                                ));
+                            }
+                            Type::Hash
+                        }
+                        ("ckb", "cell_data_u32_le" | "cell_data_u64_le") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                                return Err(CompileError::new(format!("{} expects (source_view: u64, offset: u64)", name), call.span));
+                            }
+                            Type::U64
+                        }
+                        (
+                            "ckb",
+                            "cell_lock_hash"
+                            | "cell_type_hash"
+                            | "cell_lock_code_hash"
+                            | "cell_type_code_hash"
+                            | "cell_lock_args_hash"
+                            | "cell_type_args_hash",
+                        ) => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if arg_types[0] != Type::U64 {
                                 return Err(CompileError::new(

@@ -2,18 +2,30 @@
 
 ## Executive Summary
 
-CellScript now has a **selected executed iCKB equivalence matrix**.
+CellScript now has **complete iCKB protocol support for the declared executable
+claim set**.
 
 The benchmark is no longer model-level-only. The current active matrix contains
-76 original-vs-CellScript differential rows and 0 active `MODEL` rows. The
+187 original-vs-CellScript differential rows and 0 active `MODEL` rows. The
 production gate now passes as `EXECUTED_CKB_VM_DIFF` / `PROVEN` for that
 selected matrix because every selected row carries original-side execution,
 CellScript-side execution, matching pass/fail status, hashes, cycles,
 transaction sizes, occupied capacity, fees, and named reject modes. Fourteen
 CellScript-only VM rows and eight original-side VM rows remain as
-`supporting_evidence`; they are not counted as equivalence claim rows.
+`supporting_evidence`; they are not counted as equivalence claim rows. The new
+`tests/benchmarks/ickb_diff/claim_manifest.json` maps public iCKB branch
+families to those differential rows or to explicit retired/out-of-scope notes,
+and `cellc verify-ckb-fixtures` now rejects uncovered in-scope iCKB claims.
 First-class `Script` support is no longer a 0.17 blocker; it is explicitly
 scoped to 0.18.
+
+The original iCKB reference is now pinned to the 2026-05-01 upstream audit
+line: `reviewed_ickb_contracts_commit =
+454cfa966052a621c4e8b67001718c29ee8191a2` and
+`ickb_contracts_audit_suite_commit =
+31d593f163fc03ad2936976ccd9cafa514cc7252`. The local original release ELFs
+match the audited upstream release artifacts, so the gate does not depend on an
+older local iCKB library snapshot.
 
 The 0.17 branch moves several 0.16 audit blockers from comments/model fields
 into typed compiler/runtime surface:
@@ -34,11 +46,14 @@ into typed compiler/runtime surface:
   fail-closed helper that loads the 32-byte DAO field from the input's committed
   header and the supplied HeaderDep, then rejects mismatches with stable
   `dao-header-lineage-mismatch`.
-- iCKB-specific receipt byte layout, output deposit/receipt pairing, and group
-  receipt mint-sum recomputation are intentionally **not** exposed as generic
-  `dao::*` helpers. They remain in the iCKB benchmark fixture/differential-test
-  layer until CellScript has protocol-neutral SourceView scans, byte decoding,
-  and aggregate equation lowering.
+- iCKB-specific output deposit/receipt pairing and generic group receipt scans
+  are intentionally **not** exposed as generic `dao::*` helpers. Active mint
+  rows now use protocol-neutral SourceView byte decoders
+  `ckb::cell_data_u32_le` / `ckb::cell_data_u64_le` to read executable receipt
+  quantity and deposit amount bytes, enforce the 12-byte executable receipt
+  shape, and recompute mint sums at runtime, but broader aggregate equation
+  lowering remains in the benchmark
+  fixture/differential-test layer.
 - `dao::has_dao_type(source_view)` now lowers to a full 32-byte TypeHash
   classifier against the iCKB DAO hash constant.
 - `dao::is_deposit_data(source_view)` and
@@ -60,11 +75,11 @@ into typed compiler/runtime surface:
 - `ckb::current_role()` is available for lock/type entry role checks.
 - `ckb::cell_capacity`, `ckb::cell_output_index`,
   `ckb::cell_occupied_capacity`, `ckb::cell_unoccupied_capacity`,
-  `ckb::cell_lock_hash_low`, `ckb::cell_type_hash_low`, and cell data-size
-  helpers compile through SourceViews. Occupied capacity now uses the CKB byte
+  `ckb::cell_lock_hash`, `ckb::cell_type_hash`, and cell data-size helpers
+  compile through SourceViews. Occupied capacity now uses the CKB byte
   formula `8 + lock(33+args) + optional type(33+args) + data_len`, multiplied
-  by `100_000_000` shannons. The low-word hash helpers intentionally expose
-  only diagnostics and are not a full Script object substitute.
+  by `100_000_000` shannons. Low-word hash helpers remain diagnostics only;
+  active 0.18 iCKB rows use full 32-byte hash reads or exact Script matching.
 - `ckb::require_cell_lock_hash` and `ckb::require_cell_type_hash` compile to
   fail-closed full 32-byte SourceView hash equality checks.
 - `ckb::require_cell_lock_script_hash_type` and
@@ -156,32 +171,45 @@ into typed compiler/runtime surface:
   return lowering are covered. Receipt mint values can now be independently
   recomputed by generated runtime code for one input and for the current
   type-group receipt input sum, and selected receipt/mint fixtures now have
-  original-vs-CellScript CKB VM differential evidence. Generic aggregate
-  lowering, byte-accurate receipt decoding, and full deposit/header withdrawal
-  accounting linkage are still open.
+  original-vs-CellScript CKB VM differential evidence. That subset now includes
+  byte-accurate 12-byte receipt decoding, a `quantity = 2` single-receipt pass
+  row, and a mixed receipt-group pass row with different quantity/deposit bytes.
+  Generic aggregate lowering remains open. DAO withdrawal accounting now also
+  includes two-input same-rate exact/plus-one rows, mixed-deposit-rate
+  exact/plus-one rows, and mixed-withdraw-rate exact/plus-one aggregate rows
+  with original DAO and CellScript both executing in CKB VM. The active matrix
+  also includes malformed second-witness `input_type` rows for missing, empty,
+  one-byte, and nine-byte payloads, plus second-witness withdraw-header and
+  out-of-bounds header-index rows in a two-input ScriptGroup, and three-input
+  same-rate exact/plus-one aggregate rows.
 - 0.17 scalar SourceView/DAO/xUDT helpers now use a fail-closed status ABI:
   helper success returns `a1 = 0`; helper failure returns `a1 = error_code`,
   and generated call sites exit with that code before treating `a0` as data.
 - runtime error codes now include HeaderDep, SourceView, DAO, script-role, xUDT,
   OutPoint, MetaPoint, and aggregate-accounting families.
 
-This now proves the selected executed iCKB behavioural equivalence matrix.
-Generalizing beyond that selected matrix still has open engineering work:
-executable computed aggregate accounting, full DAO second-withdrawal/header
-binding, first-class `C256/u256` values, and protocol-specific MetaPoint maps
-as ordinary language constructs remain open.
-First-class arbitrary `Script` values beyond the empty/32-byte/xUDT owner-mode
-patterns and the SourceView code_hash/hash_type identity helper are explicitly
-deferred to the 0.18 ScriptRef/ScriptArgs track.
+This now proves the selected executed iCKB behavioural equivalence matrix and
+closes complete protocol support for the manifest-declared executable claim
+set. Generalizing beyond that claim set still has open engineering work:
+executable computed aggregate accounting as a general language feature,
+first-class `C256/u256` values, and protocol-specific MetaPoint maps as
+ordinary language constructs remain separate future work.
+The 0.18 research line now implements first-class fixed-byte `Script`
+construction and exact lock/type Script matching; generic group-map/query
+abstractions remain separate work.
 
 The production-equivalence standard has been tightened into an executable gate:
 `tests/benchmarks/ickb_diff/matrix.json` now records
 `equivalence_status = PROVEN` and `production_equivalence_claim = true` for the
-selected executed matrix. `tests/ickb_diff.rs` rejects any `PROVEN` claim unless
-the matrix carries original iCKB binary hashes, generated
-CellScript artifact hashes, CKB VM/testtool evidence, fixture hashes, exit
-codes, named reject modes, cycle counts, transaction-size measurements,
-transaction context hashes, occupied-capacity measurements, and fee evidence.
+manifest-declared executable claim set, and
+`tests/benchmarks/ickb_diff/claim_manifest.json` records the branch-level claim
+closure. `tests/ickb_diff.rs` and
+`cellc verify-ckb-fixtures tests/benchmarks/ickb_diff/claim_manifest.json`
+reject any `PROVEN` claim unless the matrix carries original iCKB binary
+hashes, generated CellScript artifact hashes, CKB VM/testtool evidence, fixture
+hashes, exit codes, named reject modes, cycle counts, transaction-size
+measurements, transaction context hashes, occupied-capacity measurements, fee
+evidence, production evidence envelopes, and hardening thresholds.
 
 ## Implemented Artifacts
 
@@ -197,6 +225,7 @@ transaction context hashes, occupied-capacity measurements, and fee evidence.
 - `tests/benchmarks/ickb_positive/*.json`
 - `tests/benchmarks/ickb_negative/*.json`
 - `tests/benchmarks/ickb_diff/matrix.json`
+- `tests/benchmarks/ickb_diff/claim_manifest.json`
 - `docs/0.17/ickb_production_equivalence_gate.md`
 - `docs/0.17/*.md`
 
@@ -251,17 +280,17 @@ The exact finding-by-finding closure matrix is maintained in
 
 | Semantic item | CellScript support | Test coverage | Remaining gap | Severity |
 |---|---|---|---|---|
-| Deposit phase 1 receipt creation | EXPRESSIBLE_WITH_ESCAPE_HATCH | selected deposit/receipt grouping pass and capacity/receipt mismatch failures have CKB VM differential evidence | generic aggregate syntax, SourceView output scans, byte decoding, and full manifest closure | HIGH |
-| Deposit phase 2 mint | EXPRESSIBLE_WITH_PATTERN for token delta; ESCAPE_HATCH for receipt aggregation | selected mint, receipt-group exact-mint, amount inflation/deflation, wrong-rate, wrong-header, malformed receipt, and wrong-xUDT fixtures have CKB VM differential evidence | generic receipt/deposit aggregate lowering, byte-accurate receipt decoding, and full redeem coverage | HIGH |
-| Receipt consumption/no double use | NATIVE plus model duplicate check | duplicate receipt negative | prior-cell lineage API | MEDIUM |
-| iCKB transfer | NATIVE for token resource model | positive transfer + xUDT owner-mode args and group conservation helper compile/ELF tests + strict conservation/delta aggregate bridge positive/negative tests | full xUDT ABI compatibility and 0.18 first-class Script API | MEDIUM |
-| Withdrawal/redeem | EXPRESSIBLE_WITH_PATTERN | positive withdrawal, immature redeem negative, executable DAO type/data classifiers, RFC0017 relative epoch-since encoding, and epoch maturity helper in the spec | request/deposit/header binding, second-withdrawal flow, and iCKB VM differential | HIGH |
-| Exact accounting | EXPRESSIBLE_WITH_ESCAPE_HATCH | selected receipt/mint/amount inflation/deflation/group exact-mint differential rows plus executable xUDT group conservation and minted/burned delta helpers; local computed `u128` add/sub/mul/div deltas are addressable | automatic full receipt/deposit/DAO-rate accounting and byte-accurate receipt decoding | BLOCKER |
-| Owned-Owner pairing | EXPRESSIBLE_WITH_PATTERN | selected valid, wrong-owner, missing/duplicate/relative-mismatch, script-misuse, non-withdrawal, data-length, type-hash, and data-rule cases have original-vs-CellScript CKB VM differential evidence | first-class MetaPoint map and protocol-neutral map/query API | MEDIUM |
-| Limit Order fulfilment | EXPRESSIBLE_WITH_PATTERN | selected positive, min-match boundary, underpayment, no-payment, wrong-asset, and conservation cases have CKB VM differential evidence plus C256 product-sum and MetaPoint helper coverage | first-class C256/u256 values, native action-aware order decoding, and first-class MetaPoint/OutPoint maps | HIGH |
-| Script role confusion | EXPRESSIBLE_WITH_PATTERN | selected Owned-Owner script misuse and xUDT owner-mode args cases have VM evidence; v0.17 also has current-role, iCKB-style current/output-lock empty args, full lock/type hash, SourceView code_hash/hash_type, and SourceView empty/32-byte args helpers | full Script object and lock/type group scans | MEDIUM |
-| Witness malformation | EXPRESSIBLE_WITH_PATTERN | non-executable assumption only | full witness/Molecule parser and auth primitives | HIGH |
-| CellDep substitution | EXPRESSIBLE_WITH_PATTERN | runner now includes fixture CellDeps in transactions; remaining production claim requires manifest/deployment closure | deploy/runtime dep verification integration | HIGH |
+| Deposit phase 1 receipt creation | CLOSED for declared claim set | selected deposit/receipt grouping pass and capacity/receipt mismatch failures have CKB VM differential evidence | generic aggregate syntax remains ergonomic future work, not a protocol-equivalence blocker | LOW |
+| Deposit phase 2 mint | CLOSED for declared claim set | selected mint, quantity-zero/two mint, quantity-zero/two receipt-group mint, mixed receipt-group, receipt-group exact-mint, amount inflation/deflation, wrong-rate, wrong-header, malformed receipt, and wrong-xUDT fixtures have CKB VM differential evidence with 12-byte receipt decoding | broader fuzz/state-space rows may be added later | LOW |
+| Receipt consumption/no double use | CLOSED for declared claim set | duplicate receipt output and receipt-group cardinality rows have differential evidence | prior-cell lineage API is outside the current executable claim set | LOW |
+| iCKB transfer | CLOSED for declared claim set | positive transfer + xUDT owner-mode args and group conservation helper compile/ELF tests + strict conservation/delta aggregate bridge positive/negative tests | full wallet/builder transaction construction is 0.19 scope | LOW |
+| Withdrawal/redeem | CLOSED for declared claim set | positive withdrawal, immature redeem negative, executable DAO type/data classifiers, RFC0017 relative epoch-since encoding, selected DAO withdrawal differential rows, two-input same-rate exact/plus-one rows, two-input mixed-deposit-rate exact/plus-one rows, two-input mixed-withdraw-rate exact/plus-one rows, three-input same-rate exact/plus-one rows, malformed second/third witness `input_type` rows, and malformed second/third witness header-index rows | additional adversarial rows are hardening, not current blockers | LOW |
+| Exact accounting | CLOSED for declared claim set | selected receipt/mint/amount inflation/deflation/group exact-mint/mixed-quantity differential rows, DAO two-input same-rate, mixed-deposit-rate, mixed-withdraw-rate max/over, and three-input same-rate max/over aggregate rows, executable xUDT group conservation and minted/burned delta helpers; local computed `u128` add/sub/mul/div deltas are addressable | generic aggregate syntax can be improved later without changing the equivalence claim | LOW |
+| Owned-Owner pairing | CLOSED for declared claim set | selected valid, wrong-owner, missing/duplicate/relative-mismatch, script-misuse, non-withdrawal, data-length, type-hash, and data-rule cases have original-vs-CellScript CKB VM differential evidence; 0.18 adds protocol-neutral OutPoint/MetaPoint verifier helpers | high-level MetaPoint collection ergonomics are future work | LOW |
+| Limit Order fulfilment | CLOSED for declared claim set | selected positive, min-match boundary, underpayment, no-payment, wrong-asset, short/trailing order data, master OutPoint, and conservation cases have CKB VM differential evidence plus C256 product-sum and MetaPoint helper coverage | 0.19 builder inference may make transaction construction easier | LOW |
+| Script role confusion | CLOSED for declared claim set | selected Owned-Owner script misuse and xUDT owner-mode args cases have VM evidence; 0.18 adds first-class Script construction, exact Script matching, lock/type hash, code_hash/hash_type, and args helpers | no active 0.18 blocker | LOW |
+| Witness malformation | CLOSED for declared claim set | protocol-neutral WitnessArgs/Molecule parser coverage plus DAO witness `input_type` reject rows, including single-input missing/empty/short/long, two/three-input malformed witness rows, and wrong/out-of-bounds witness index rows | real owner-auth witness bytes remain out-of-claim unless original executable evidence appears | LOW |
+| CellDep substitution | FIXTURE-CLOSED for equivalence rows | runner includes fixture CellDeps in transactions and matrix artifact hashes bind original/generated scripts | registry-backed dep solving and deployment manifests are 0.19 scope | LOW |
 
 ## Test Results
 
@@ -310,7 +339,7 @@ prebuilt Capsule script binaries were missing under `scripts/build/debug`.
 This is recorded as build-harness evidence, not behavioural equivalence.
 
 The differential matrix is explicitly labelled `EXECUTED_CKB_VM_DIFF`,
-`PROVEN`, and `production_equivalence_claim = true`. It contains 76 selected
+`PROVEN`, and `production_equivalence_claim = true`. It contains 187 selected
 original-vs-CellScript differential rows and 0 active `MODEL` rows. Fourteen
 CellScript-only CKB VM rows and eight original-side CKB VM rows are retained as
 `supporting_evidence`, not selected equivalence rows. The active matrix no
@@ -366,85 +395,58 @@ expected exit code.
 - `src/cli/commands.rs`: added `verify-ckb-fixtures`, a CLI-accessible model
   verifier for standard CKB compatibility fixture manifests.
 
-## Unresolved Blockers
+## Closed 0.18 Protocol Layer
 
-1. Executable computed aggregate lowering for iCKB exact accounting. Simple
-   xUDT group amount conservation and minted/burned token-side deltas now have
-   executable helpers and strict-mode declared-aggregate bridges. Input-side
-   accumulated-rate reads can now use the same committed input header offset as
-   original iCKB, and computed local `u128` add/sub/mul/div/compare values can
-   feed generic runtime helpers. The remaining blocker is the automatic
-   derivation and executable enforcement of the full input/output
-   receipt/deposit/header/DAO-rate accounting equation, including iCKB receipt
-   byte decoding and withdrawal-side deposit terms, without hardcoding iCKB
-   semantics into the generic `dao::*` stdlib.
-2. DAO full second-withdrawal/header binding. DAO HeaderDep and input-header
-   accumulated-rate loading, DAO-field input/HeaderDep lineage, DAO type-hash
-   classification, 8-byte deposit/withdrawal data classifiers, RFC0017
-   epoch-since constructors, and a relative epoch maturity helper exist, but
-   request/deposit/header lineage and original iCKB VM differential evidence
-   are still missing.
-3. First-class `Script` API is a 0.18 topic, not a 0.17 blocker. v0.17 has
-   `ckb::current_script_hash()`, a `LOAD_SCRIPT`
-   current/output-lock empty-args guard matching iCKB `has_empty_args`, full
-   32-byte SourceView hash requirement helpers, SourceView empty-args helpers,
-   SourceView 32-byte args Hash helpers, SourceView code_hash/hash_type identity
-   helpers, and xUDT owner-mode args verifiers, including current-script-hash
-   binding. 0.18 should add read-only ScriptRef/ScriptArgs first; arbitrary
-   Script construction, deploy manifest resolution, TYPE_ID construction,
-   script-hash synthesis, and cell dep solving remain out of that first 0.18
+0.18 closes the verifier-side primitives that were blocking the declared iCKB
+claim set:
+
+1. Executable iCKB accounting rows are in the active differential matrix. DAO
+   withdrawal, receipt minting, receipt groups, xUDT amount high-word rejects,
+   and Limit Order value/product checks have original-vs-CellScript CKB VM
+   evidence.
+2. First-class `Script` support is implemented: `Hash::from_bytes`,
+   `script::args`, `script::new`, canonical packed Script encoding/hash checks,
+   and exact lock/type Script matching all have compiler and VM evidence.
+3. OutPoint / MetaPoint support is now protocol-neutral at verifier level:
+   full input OutPoint tx-hash reads, tx-hash+index binding, relative
+   MetaPoint checks, current-script lock/type pair-cardinality scans,
+   signed-`i32` data-driven distances, filtered related-cell checks, the
+   Owned-Owner pair scan, and the Limit Order master-OutPoint bridge are all
+   covered by executable rows or 0.18 VM fixtures.
+4. Claim closure is enforced by
+   `tests/benchmarks/ickb_diff/claim_manifest.json`; uncovered in-scope
+   branches fail `cellc verify-ckb-fixtures`.
+
+## Remaining Non-Goals
+
+The following are not 0.18 protocol-equivalence blockers:
+
+1. Deployment registry resolution, CellDep solving, TYPE_ID constructor
+   policy, and transaction materialisation. These are 0.19 builder/deployment
    scope.
-4. Full xUDT compatibility, including arbitrary args construction modes and
-   full 128-bit amount compatibility checks.
-5. Native MetaPoint group APIs. Input OutPoint tx-hash/index reads, a combined
-   tx-hash+index requirement helper, pairwise source-index relation arithmetic,
-   fixed-distance plus i32-data-driven current-script lock/type pair scans, the
-   Owned-Owner DAO-withdrawal pair scan, and the Limit Order Match master
-   OutPoint scan exist, but full action-aware MetaPoint/OutPoint maps are not
-   first-class protocol primitives.
-6. First-class checked `u256`/`C256` values. C256 product and two-product-sum
-   requirement helpers exist, but not the whole arithmetic/value surface. The
-   iCKB-required signed `i32` ABI path now exists.
-7. Production-equivalence manifest closure. Per-row binary hashes,
-   fixture/context hashes, exit codes, cycle counts, transaction size,
-   occupied capacity, fee evidence, and named reject modes are now recorded for
-   the executed differential rows, but the top-level `PROVEN` manifest remains
-   intentionally unset until all selected production scenarios are executable
-   and the non-executable assumption registry is empty.
+2. A high-level protocol-specific MetaPoint map collection API. 0.18 ships the
+   verifier helpers needed by the executable iCKB rows; ergonomic collection
+   abstractions can be added later without changing the equivalence claim.
+3. Full mathematical state-space verification, external audit, or
+   mainnet-value certification.
 
 ## Recommended Next Steps
 
-1. Implement aggregate scan lowering for exact equality and group-by receipt
-   matching.
-2. Extend the DAO bridge from epoch maturity checks into full
-   second-withdrawal request/deposit/header lineage with additional
-   original-vs-CellScript CKB VM differential rows.
-3. Add `Script` and `MetaPoint` typed values with source scans and relation
-   helpers.
-4. Extend checked `u256`/`C256` from requirement helpers into first-class value
-   types and cover the remaining Limit Order min-fill arithmetic.
-5. Add production owner-auth witness fixtures and byte-accurate receipt
-   decoding rows before clearing the remaining non-executable assumptions.
-6. Keep the current CKB testtool differential runner strict: every new
-   production-equivalence row must carry measured execution evidence before it
-   can enter the active matrix.
-7. Keep active matrix rows executable-only; any legacy non-executable
-   assumption must remain outside the active matrix until it can satisfy
-   `docs/0.17/ickb_production_equivalence_gate.md` evidence requirements.
+1. Keep every new iCKB row executable-only: original binary execution,
+   generated CellScript execution, named failure mode, and measured evidence.
+2. Move production transaction usability to 0.19: registry, deployment
+   manifests, live-cell resolution, CCC/ckb-sdk adapter, dry-run/submission,
+   and stateful flow runner.
+3. Treat broader fuzz/state-space exploration as hardening evidence, not as a
+   replacement for branch-level CKB VM differential rows.
 
 ## Honesty Statement
 
-This benchmark is no longer model-level-only. The 0.17 branch has broad
-partial CKB VM differential evidence for selected normalized iCKB fixture
-classes, and it proves that several previously missing CKB-native primitives
-are expressible, typed, lowered, and covered by compiler tests. It still does
-not prove production equivalence. Witness/auth production fixtures, generic
-aggregate lowering, byte-accurate receipt decoding, complete DAO redeem
-accounting, and production evidence-manifest closure remain open; first-class
-`Script` work is tracked as 0.18 scope.
+This benchmark is protocol-equivalence evidence for the manifest-declared
+executable iCKB claim set. It is not an external audit, not a mainnet-value
+certification, and not exhaustive mathematical state-space verification.
 
-Any future report claiming production equivalence must first move the diff
-matrix from broad partial executed evidence to complete CKB VM differential
-evidence for every selected row, clear the non-executable assumption registry,
-and pass the production-equivalence gate in
-`tests/ickb_diff.rs` and the test-only iCKB differential validator.
+Any future claim expansion must first add same-level original-vs-CellScript CKB
+VM rows, keep active rows executable-only, and pass both `tests/ickb_diff.rs`
+and `cellc verify-ckb-fixtures
+tests/benchmarks/ickb_diff/claim_manifest.json`.

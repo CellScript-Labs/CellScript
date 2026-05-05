@@ -1,5 +1,8 @@
 # CellScript 0.18 Roadmap
 
+**Status**: Protocol-equivalence verifier scope complete; deployment,
+registry, and transaction-builder scope remains in 0.19.
+
 ## First-Class Script API
 
 0.18 promotes Script handling from helper fragments into a first-class,
@@ -34,6 +37,8 @@ The helper-call form remains available under `--primitive-strict=0.18`:
 
 - `ckb::cell_lock_code_hash(source) -> Hash`
 - `ckb::cell_type_code_hash(source) -> Hash`
+- `ckb::cell_lock_hash(source) -> Hash`
+- `ckb::cell_type_hash(source) -> Hash`
 - `ckb::cell_lock_hash_type(source) -> u64`
 - `ckb::cell_type_hash_type(source) -> u64`
 - `ckb::cell_lock_args_empty(source) -> bool`
@@ -48,6 +53,7 @@ The helper-call form remains available under `--primitive-strict=0.18`:
 0.18 also adds constructed Script values:
 
 ```cell
+let code_hash = Hash::from_bytes(b"...32 bytes...")
 let args = script::args(b"owner")
 let expected = script::new(code_hash, hash_type, args)
 
@@ -72,6 +78,35 @@ Hash type constructors are explicit:
 
 Unsupported literal hash types fail in the type checker. `script::args(...)`
 accepts fixed byte arrays and `Hash`; non-byte operands fail closed.
+`Hash::from_bytes(...)` accepts exactly `[u8; 32]`, so verifier-side Script
+construction can use literal code hashes without relying on placeholder
+`Hash::zero()` values.
+
+0.18 also adds protocol-neutral fixed-width cell data decoders for CKB
+SourceViews:
+
+- `ckb::cell_data_u32_le(source, offset) -> u64`
+- `ckb::cell_data_u64_le(source, offset) -> u64`
+
+These helpers lower to fail-closed `LOAD_CELL_DATA` reads and accept CKB's
+`LENGTH_NOT_ENOUGH` prefix-read status only when the loaded byte span still
+covers the requested width. They are intentionally generic byte decoders, not
+iCKB-specific receipt helpers.
+
+0.18 closes the verifier-side OutPoint / MetaPoint surface needed by the iCKB
+equivalence work:
+
+- `ckb::input_out_point_tx_hash(source) -> Hash`
+- `ckb::input_out_point_index(source) -> u64`
+- `ckb::require_input_out_point_tx_hash(source, expected_hash)`
+- `ckb::require_input_out_point(source, expected_hash, expected_index)`
+- `ckb::require_metapoint_relative(base, related, relative_distance)`
+- lock/type MetaPoint pair-cardinality helpers, including signed `i32`
+  distances read from cell data and filtered related-cell checks.
+
+The full tx-hash read is addressable as a normal `Hash`, so verifier code can
+read an input OutPoint once and feed that value into later equality or binding
+requirements. These are verifier helpers, not transaction-builder inference.
 
 ## Canonical CKB Encoding
 
@@ -99,11 +134,37 @@ fixed-byte args through `__ckb_require_cell_*_args_exact`.
 0.18 Script construction is covered by `tests/v0_18.rs`:
 
 - compiler/lowering evidence for constructed `Script` requirements;
+- literal code-hash construction through `Hash::from_bytes([u8; 32])`;
 - typechecker rejection of unsupported hash_type and non-byte args;
 - canonical packed Script byte/hash comparison against `ckb-types`;
 - `ckb-testtool` VM fixture with a real type ScriptGroup continuation:
   - matching input lock args accepted;
   - mismatched input lock args rejected.
+- iCKB Limit Order rows now compare full 32-byte input/output Type Script
+  hashes through `ckb::cell_type_hash`, replacing the previous low-word
+  diagnostic probe.
+- iCKB Owned-Owner related type/data mismatch rows now use the first-class
+  Script matcher for expected auxiliary type scripts instead of low-word
+  type-hash probes.
+- iCKB DAO withdrawal coverage now includes two-input same-rate exact/plus-one,
+  mixed-deposit-rate exact/plus-one, and mixed-withdraw-rate exact/plus-one
+  aggregate capacity rows where the original DAO ELF and generated CellScript
+  ELF agree in CKB VM. It also includes three-input same-rate exact/plus-one
+  aggregate capacity rows.
+- iCKB DAO two-input coverage now also includes malformed second-witness
+  `input_type` missing/empty/short/long reject rows and second-witness
+  withdraw-header/out-of-bounds index reject rows where original DAO and
+  generated CellScript agree in CKB VM.
+- iCKB mint and receipt-group rows now decode executable receipt
+  quantity/amount bytes through `ckb::cell_data_u32_le` /
+  `ckb::cell_data_u64_le`, enforce the 12-byte executable receipt shape, and
+  recompute expected xUDT output amounts in the generated verifier. The active
+  matrix includes a `quantity = 2` single-receipt mint row and a mixed
+  receipt-group row with different quantity/deposit amount bytes.
+- `ckb::input_out_point_tx_hash` is covered by lowering metadata and a
+  `ckb-testtool` VM fixture:
+  - input/group-input OutPoint tx-hash read accepted;
+  - non-input SourceView rejected fail-closed.
 
 The VM fixture also caught and fixed three production-only lowering bugs:
 
@@ -128,4 +189,5 @@ The VM fixture also caught and fixed three production-only lowering bugs:
 
 Those remain separate builder/0.19+ topics. 0.18's claim is narrower and
 stronger: arbitrary fixed-byte Script construction and exact lock/type Script
-matching are now first-class verifier capabilities with CKB VM evidence.
+matching plus protocol-neutral OutPoint / MetaPoint verifier helpers are now
+first-class verifier capabilities with CKB VM evidence.

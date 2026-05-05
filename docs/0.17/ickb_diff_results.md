@@ -3,24 +3,24 @@
 The differential harness has advanced from model-only to a selected executed
 iCKB equivalence matrix.
 
-`tests/benchmarks/ickb_diff/matrix.json` records the comparison matrix. The
-manifest uses schema `cellscript-ickb-diff-matrix-v1` and is also the executable
-production-equivalence claim gate. The integration test `tests/ickb_diff.rs`
-validates that every selected row's evidence level is correctly declared, and
-rejects any `PROVEN` claim that lacks binary hashes, CKB VM/testtool evidence,
-fixture hashes, exit codes, cycle counts, transaction-context hashes, capacity
-and fee measurements, or named reject modes.
+`tests/benchmarks/ickb_diff/matrix.json` records the comparison matrix.
+`tests/benchmarks/ickb_diff/claim_manifest.json` records the branch-level iCKB
+claim set. The integration test `tests/ickb_diff.rs` and
+`cellc verify-ckb-fixtures .../claim_manifest.json` validate that every selected
+row's evidence level is correctly declared and every in-scope claim branch maps
+to differential VM evidence, production evidence, and hardening thresholds.
 
 Current manifest status:
 
 - `mode`: `EXECUTED_CKB_VM_DIFF`
 - `equivalence_status`: `PROVEN`
 - `production_equivalence_claim`: `true`
+- `claim_manifest status`: `complete-executable-claim-set`
 - `equivalence_evidence`: populated
 
 Selected equivalence row counts:
 
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 76
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 187
 - `MODEL`: 0
 
 Supporting evidence outside the selected equivalence rows:
@@ -95,6 +95,7 @@ creation remains original-side only.
 | receipt without deposit original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_without_deposit_rejected |
 | duplicate receipt output original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | duplicate_receipt_output |
 | receipt group exact mint original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 96832 | pass / 26288 | n/a |
+| receipt group mixed quantities original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 96832 | pass / 30744 | n/a |
 | receipt group over-mint original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_group_over_mint |
 | receipt group missing header original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_group_missing_header_dep |
 | receipt group wrong accumulated rate original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_group_wrong_accumulated_rate |
@@ -103,6 +104,7 @@ creation remains original-side only.
 | receipt group second malformed receipt data original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_group_second_malformed_receipt_data |
 | receipt group under-mint original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | receipt_group_under_mint |
 | mint from receipt original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 90980 | pass / 24293 | n/a |
+| mint from quantity-two receipt original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 90980 | pass / 26703 | n/a |
 | mint from malformed receipt data original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | mint_malformed_receipt_data |
 | amount inflation original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | amount_inflation |
 | amount deflation original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | amount_deflation |
@@ -111,6 +113,20 @@ creation remains original-side only.
 | missing header dep original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | missing_header_dep |
 | DAO mature withdrawal original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 7840 | n/a |
 | DAO max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
+| DAO two-input max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 19524 | pass / 21540 | n/a |
+| DAO two-input over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_over_withdraw_capacity |
+| DAO two-input mixed deposit-rate max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 19524 | pass / 22227 | n/a |
+| DAO two-input mixed deposit-rate over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_mixed_deposit_rate_over_withdraw_capacity |
+| DAO two-input mixed withdraw-rate max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 19524 | pass / 21540 | n/a |
+| DAO two-input mixed withdraw-rate over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_mixed_withdraw_rate_over_withdraw_capacity |
+| DAO two-input second missing witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_missing_witness_input_type |
+| DAO two-input second empty witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_empty_witness_input_type |
+| DAO two-input second short witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_short_witness_input_type |
+| DAO two-input second long witness input_type original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_long_witness_input_type |
+| DAO two-input second withdraw-header witness index original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_withdraw_header_witness_index |
+| DAO two-input second out-of-bounds witness index original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_two_input_second_oob_witness_index |
+| DAO three-input max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 24747 | pass / 28040 | n/a |
+| DAO three-input over-withdraw capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_three_input_over_withdraw_capacity |
 | DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
 | DAO withdraw-rate adjusted max withdrawal capacity original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | pass / 14301 | pass / 15038 | n/a |
 | DAO immature withdrawal original vs CellScript agree | DIFFERENTIAL_CKB_VM_EXECUTED | fail / 0 | fail / 0 | dao_incorrect_since |
@@ -173,6 +189,10 @@ deposit-too-big row uses a 150,000,000,000,000 shannon deposit capacity and a
 400,000,000,000,000 shannon funding input; patched original iCKB rejects with
 exit `8`, while the generated upper-bound probe rejects with exit `7` under
 `deposit_capacity_upper_bound_rejected`.
+The deposit receipt quantity-zero row keeps the DAO deposit output valid but
+sets receipt quantity to `0`; patched original iCKB rejects with exit `9`,
+while the generated deposit probe rejects with exit `12` under
+`deposit_receipt_quantity_zero`.
 The receipt-without-deposit row uses one receipt output with no deposit output. The
 duplicate receipt output row uses one DAO deposit output and two receipt
 outputs with the same receipt amount; both sides reject with exit code 10. This
@@ -184,6 +204,9 @@ header. The exact-mint row emits two receipts worth of xUDT and both sides pass
 one shannon more than two receipts worth of xUDT; the under-mint row emits only
 one receipt worth of xUDT. Original iCKB rejects both bad rows with exit `11`,
 while the CellScript aggregate probe rejects both with exit `36`. The
+high-word amount row keeps the exact low 64-bit amount but sets the xUDT output
+amount high word to `1`; original iCKB rejects with exit `12`, while the
+CellScript aggregate probe rejects with exit `33`. The
 missing-header row keeps the exact output amount but omits the DAO header dep
 for both linked receipt inputs; original iCKB rejects with exit `2`, while the
 CellScript aggregate probe rejects with exit `28`. The wrong accumulated-rate
@@ -203,7 +226,12 @@ exit `37` under `receipt_group_malformed_receipt_data`. The second malformed
 receipt-data row keeps the first receipt valid and shortens the second receipt
 input to 4 bytes; both sides reject again with original exit `4` and CellScript
 exit `37` under `receipt_group_second_malformed_receipt_data`. These rows are
-not duplicate receipt-id proof. The missing-second-input row keeps one valid
+not duplicate receipt-id proof. The valid receipt-group rows now also enforce
+the executable 12-byte receipt shape before decoding quantity and deposit
+amount, including a mixed group where the second receipt carries `quantity = 2`
+and a different deposit-amount byte value, a two-receipt quantity-zero row that
+mints zero xUDT, and a two-receipt quantity-two row that mints four receipt
+units. The missing-second-input row keeps one valid
 receipt input and mints the two-receipt xUDT amount; original iCKB rejects with
 exit `11`, while the CellScript aggregate probe rejects with exit `46` under
 `receipt_group_missing_second_input`. This is executable group-cardinality
@@ -225,6 +253,42 @@ probe, and sets output capacity to the observed original DAO boundary
 shape but sets output capacity to `123468305679`, one shannon above that
 observed boundary; original DAO rejects with exit `-15`, while the CellScript
 capacity probe rejects with exit `48` under `dao_over_withdraw_capacity`. The
+two-input max-capacity row spends two mature DAO withdrawal inputs in the same
+ScriptGroup, supplies a witness for each input, and creates one withdrawn
+capacity output at `246936611356`, the exact sum of two per-input compensation
+maxima; original DAO and CellScript both pass. The two-input over-withdraw row
+uses the same shape but sets output capacity to `246936611357`, one shannon
+above the aggregate boundary; original DAO rejects with exit `-15`, while the
+CellScript aggregate probe rejects with exit `48`. The
+two-input mixed deposit-rate max row keeps both inputs in the same ScriptGroup,
+uses two deposit header deps with accumulated rates `10000000` and `10000001`,
+and accepts the exact aggregate boundary `246936599829` on both sides. The
+two-input mixed deposit-rate over row uses the same mixed-header shape but sets
+output capacity to `246936599830`, one shannon above that mixed-rate aggregate
+boundary; original DAO rejects with exit `-15`, while the CellScript aggregate
+probe rejects with exit `48`. The two-input mixed withdraw-rate max row links
+the second withdrawing input to a committed withdraw header with accumulated
+rate `10000999`, keeps both witnesses pointed at the same deposit header, and
+accepts aggregate boundary `246936599830` on both sides. The two-input mixed
+withdraw-rate over row uses the same committed-header shape but sets output
+capacity to `246936599831`, one shannon above that mixed-withdraw-rate
+aggregate boundary; original DAO rejects with exit `-15`, while the CellScript
+aggregate probe rejects with exit `48`. The four two-input malformed
+second-witness rows keep the exact two-input aggregate capacity boundary but
+mutate only the second input witness `input_type`: missing, empty, one byte, and
+nine bytes. Original DAO rejects each shape with exit `-11`; the generated
+CellScript witness-shape probe rejects the same normalized fixtures with exit
+`44`. Two additional two-input second-witness index rows keep the same fixture
+but set the second `input_type` to the withdraw header index `0` or to
+out-of-bounds header index `2`; original DAO rejects with exits `-14` and `1`,
+while the generated CellScript witness-index probe rejects both with exit `46`.
+The three-input max-capacity row spends three mature DAO withdrawal inputs in
+the same ScriptGroup, supplies three witnesses pointing to the deposit header,
+and creates one withdrawn capacity output at `370404917034`, the exact sum of
+three per-input compensation maxima; original DAO and CellScript both pass. The
+three-input over-withdraw row sets output capacity to `370404917035`, one
+shannon above that aggregate boundary; original DAO rejects with exit `-15`,
+while the CellScript aggregate probe rejects with exit `48`. The
 deposit-rate adjusted max row changes the deposit header accumulated rate from
 `10000000` to `10000001` and sets output capacity to the fixture-rate maximum
 `123468294151`; both sides pass. The withdraw-rate adjusted max row changes the
@@ -291,9 +355,14 @@ owner-mode args, and exact xUDT output valid, but shortens the receipt input
 data to 4 bytes; original iCKB rejects with exit `4`, while the CellScript
 receipt-data-size probe rejects with exit `37` under
 `mint_malformed_receipt_data`. The CellScript side checks the fixture-bound
-input rate, xUDT owner args, output xUDT amount, and selected receipt data-size
-boundaries; full receipt byte decoding and aggregate recomputation remain open
-work. Only the intended script-under-test code cell and script hash differ
+12-byte receipt shape, input rate, and xUDT owner args, then decodes executable receipt data bytes with
+`ckb::cell_data_u32_le(receipt, 0)` for quantity and
+`ckb::cell_data_u64_le(receipt, 4)` for deposit amount. The expected xUDT output
+amount is recomputed from those decoded receipt bytes for both single-receipt
+and receipt-group mint rows, including a `quantity = 2` single-receipt pass row.
+Broader receipt fields and generic output
+deposit/receipt pairing remain open work. Only the intended script-under-test
+code cell and script hash differ
 between original iCKB and CellScript. The matrix records
 fixture hashes, transaction context hashes, original and generated artifact
 hashes, exit codes, status, cycles, transaction size, occupied capacity, and
@@ -304,7 +373,8 @@ and a shared auxiliary always-success UDT type code cell. The input order
 encodes `Action::Mint` with a stable relative master point; the output order
 encodes `Action::Match` with the same absolute master OutPoint. The CellScript
 side checks fixture-bound CKB+UDT value conservation, the `ckb_min_match`
-boundary, and, for the wrong-asset case, type-hash low-word equality. This
+boundary, and full 32-byte input/output Type Script hash equality through
+`ckb::cell_type_hash`. This
 gives real original-vs-CellScript VM evidence for the selected CKB-to-UDT
 valid, exact min-match boundary, underpayment, wrong-asset,
 insufficient-match, no-CKB-paid, and UDT-decreased fixtures. The min-match
@@ -379,21 +449,26 @@ expected auxiliary withdrawal type hash, then gives the lock-owned output the
 same auxiliary code with non-empty args so its actual type hash differs while
 the output data remains a nonzero withdrawal-request payload and the owner
 output distance is valid; original rejects with exit code 6 and the CellScript
-output low-word type-hash probe rejects with exit code 46.
+first-class Script matcher constructs the expected auxiliary Script with
+`Hash::from_bytes` + `script::new` and rejects the non-empty args mismatch with
+exit code 38.
 The output related data rule mismatch row keeps the expected auxiliary
 withdrawal type hash on the lock-owned output but changes its data to an 8-byte
 zero/deposit marker instead of a nonzero withdrawal-request payload; original
-rejects with exit code 6 and the CellScript output withdrawal-data guard rejects
-with exit code 47.
+rejects with exit code 6 and the CellScript side first matches the full expected
+auxiliary Script, then rejects the output withdrawal-data guard with exit code
+47.
 The input related type hash mismatch row patches original Owned-Owner to the expected
 auxiliary withdrawal type hash, then gives the lock-owned input the same
 auxiliary code with non-empty args so its actual type hash differs while the
 data remains a nonzero withdrawal-request payload; original rejects with exit
-code 6 and the CellScript low-word type-hash probe rejects with exit code 46.
+code 6 and the CellScript first-class Script matcher rejects the non-empty args
+mismatch with exit code 38.
 The related data rule mismatch row keeps the expected auxiliary withdrawal type
 hash on the lock-owned input but changes its data to an 8-byte zero/deposit
 marker instead of a nonzero withdrawal-request payload; original rejects with
-exit code 6 and the CellScript withdrawal-data guard rejects with exit code 47.
+exit code 6 and the CellScript side first matches the full expected auxiliary
+Script, then rejects the withdrawal-data guard with exit code 47.
 The owner data length mismatch row keeps both lock-owned and type-owner cells
 present, but the owner cell data is only three bytes, so the signed i32
 relative MetaPoint distance cannot be decoded; original rejects with exit code
@@ -403,7 +478,7 @@ cardinality on both input and output views, input/output script-role misuse,
 input/output lock-owned withdrawal-shape guards, input/output related type-hash
 mismatch plus input/output related data-rule mismatch and input/output owner-data
 decoding failures, not full Owned-Owner resource owner semantics or full
-`Script` equality.
+owner-auth witness semantics.
 
 ## iCKB Scenario Model Rows
 
@@ -412,11 +487,11 @@ There are no active `MODEL` rows in the matrix.
 The matrix now removes legacy model rows whose scenarios already have
 fixture-bound `DIFFERENTIAL_CKB_VM_EXECUTED` coverage: `valid deposit phase 1`,
 `valid mint from receipt`, `amount inflation`, `wrong xUDT args`,
-`valid limit order`, and `limit order underpayment`. It also moves the
-duplicate receipt-id model fixture to `non_executable_model_assumptions`, because
-that synthetic `id` field is not present in executable receipt cell data. The
-wrong-owner model fixture is also non-executable under the current fixture
-schema because executable Owned-Owner rows carry owner binding as
+`valid limit order`, and `limit order underpayment`. The duplicate receipt-id
+model fixture is retained only as a retired model assumption because that
+synthetic `id` field is not present in executable receipt cell data. The
+wrong-owner model fixture is also retired under the current fixture schema
+because executable Owned-Owner rows carry owner binding as
 lock/type placement, OutPoint/MetaPoint relative distance, and i32 owner-cell
 data rather than `owner` / `claimed_owner` fields. The immature-redeem model
 fixture is replaced by the DAO immature withdrawal differential row because the
@@ -506,7 +581,7 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
 
 ## What Still Blocks Full Differential Equivalence
 
-- Seventy-six normalized fixtures have full original-vs-CellScript CKB VM
+- Ninety-two normalized fixtures have full original-vs-CellScript CKB VM
   differential evidence.
 - DAO hash patching is still a test-environment bridge and must remain
   explicitly recorded; it is not mainnet identity reconstruction.
@@ -527,15 +602,15 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
   differential VM evidence. These rows cover the executable Owned-Owner
   metapoint fixture shape, not synthetic `owner` / `claimed_owner`
   witness-auth fields.
-- CellScript still lacks full arbitrary `Script`, full DAO
-  second-withdrawal request/deposit/header binding, computed multi-cell iCKB
-  mint-side receipt/deposit/DAO aggregate lowering, and native action-aware
-  MetaPoint map semantics for a true CKB VM differential test.
-- Generic witness/Molecule parsing is implemented and now has protocol-neutral
-  CKB VM coverage plus DAO witness input_type differential reject rows; the
-  remaining language-surface gap is first-class read-only ScriptRef/ScriptArgs.
-  That topic is explicitly deferred to CellScript 0.18 and is not a 0.17
-  differential blocker.
+- First-class fixed-byte `Script` construction is implemented in the 0.18
+  research line and is now used by the Owned-Owner related type/data rows for
+  full expected auxiliary Script matching. Remaining expansion work is
+  broader malformed multi-input DAO header-dep / witness-index variants, computed multi-cell iCKB
+  mint-side receipt/deposit/DAO aggregate lowering, real owner-auth witness
+  bytes if promoted into the claim set, and native action-aware MetaPoint map
+  semantics.
+- Generic witness/Molecule parsing is implemented and has protocol-neutral CKB
+  VM coverage plus DAO witness `input_type` differential reject rows.
 
 ## Next Differential Step
 
@@ -547,10 +622,11 @@ Matrix status for original iCKB rows is `ORIGINAL_ICKB_CKB_VM_EXECUTED`.
    fixture adds real owner-auth bytes or redeem aggregate fields that both
    original iCKB and CellScript can execute.
 
-3. **Defer first-class Script API to 0.18**. The 0.17 line keeps helper-level
-   Script checks; 0.18 should add read-only ScriptRef/ScriptArgs to collapse
-   helper fragmentation without arbitrary Script construction, deploy manifest
-   resolution, or TYPE_ID constructors.
+3. **Keep first-class Script matching in active evidence rows**. 0.18 has
+   crossed from read-only ScriptRef into fixed-byte Script construction and
+   exact lock/type matching. New iCKB rows that depend on concrete Script
+   identity should use that path rather than low-word script-hash probes.
 
-Until every selected scenario has matching original-vs-CellScript CKB VM
-execution evidence, equivalence must not be claimed.
+The selected matrix currently has matching original-vs-CellScript CKB VM
+execution evidence. Any future branch added to the public claim set must meet
+the same evidence level before it can be called equivalent.

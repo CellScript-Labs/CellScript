@@ -41,8 +41,10 @@ High-value active references include:
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` for the active grammar-governance
   direction around transition shape, `where`, `require`, and accounting syntax
-- `CELLSCRIPT_CKB_LANGUAGE_AUDIT.md`
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`
+- `CELLSCRIPT_CKB_ADAPTER.md`
+- `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`
+- `CELLSCRIPT_CKB_STD_COMPAT.md`
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
 - `CELLSCRIPT_RUNTIME_ERROR_CODES.md`
 

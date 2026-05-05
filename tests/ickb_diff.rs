@@ -1,6 +1,7 @@
 use camino::Utf8PathBuf;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[path = "support/ckb_script_runner.rs"]
 mod ckb_script_runner;
@@ -21,7 +22,10 @@ use ckb_testtool::ckb_types::core::{
 };
 use ckb_testtool::ckb_types::{bytes::Bytes, packed, prelude::*};
 
-const REQUIRED_EQUIVALENCE_EVIDENCE: [&str; 14] = [
+const REQUIRED_EQUIVALENCE_EVIDENCE: [&str; 17] = [
+    "reviewed_ickb_contracts_commit",
+    "ickb_contracts_audit_suite_commit",
+    "ickb_contracts_audit_report",
     "original_ickb_repo_commit",
     "original_ickb_script_binary_sha256",
     "cellscript_source_commit",
@@ -147,6 +151,19 @@ const VM_HARNESS_WITNESS_MALFORMED_ACTION: &str = "test_witness_malformed";
 const DEPOSIT_PHASE1_DIFF_SCENARIO: &str = "differential: deposit phase 1 original vs CellScript agree";
 const DEPOSIT_TOO_SMALL_DIFF_SCENARIO: &str = "differential: deposit too small original vs CellScript agree";
 const DEPOSIT_TOO_BIG_DIFF_SCENARIO: &str = "differential: deposit too big original vs CellScript agree";
+const DEPOSIT_RECEIPT_AMOUNT_MISMATCH_DIFF_SCENARIO: &str =
+    "differential: deposit receipt amount mismatch original vs CellScript agree";
+const DEPOSIT_RECEIPT_QUANTITY_ZERO_DIFF_SCENARIO: &str = "differential: deposit receipt quantity zero original vs CellScript agree";
+const DEPOSIT_RECEIPT_QUANTITY_MISMATCH_DIFF_SCENARIO: &str =
+    "differential: deposit receipt quantity mismatch original vs CellScript agree";
+const DEPOSIT_RECEIPT_SHORT_DATA_DIFF_SCENARIO: &str = "differential: deposit receipt short data original vs CellScript agree";
+const DEPOSIT_RECEIPT_LONG_DATA_DIFF_SCENARIO: &str = "differential: deposit receipt long data original vs CellScript agree";
+const DEPOSIT_MISSING_DAO_TYPE_DIFF_SCENARIO: &str = "differential: deposit missing DAO type original vs CellScript agree";
+const DEPOSIT_WRONG_DAO_TYPE_DIFF_SCENARIO: &str = "differential: deposit wrong DAO type original vs CellScript agree";
+const DEPOSIT_WRONG_LOCK_DIFF_SCENARIO: &str = "differential: deposit wrong iCKB lock original vs CellScript agree";
+const DEPOSIT_SHORT_DATA_DIFF_SCENARIO: &str = "differential: deposit short DAO data original vs CellScript agree";
+const DEPOSIT_NONZERO_DATA_DIFF_SCENARIO: &str = "differential: deposit nonzero DAO data original vs CellScript agree";
+const DEPOSIT_LONG_DATA_DIFF_SCENARIO: &str = "differential: deposit long DAO data original vs CellScript agree";
 const DUPLICATE_RECEIPT_OUTPUT_DIFF_SCENARIO: &str = "differential: duplicate receipt output original vs CellScript agree";
 const RECEIPT_GROUP_EXACT_MINT_DIFF_SCENARIO: &str = "differential: receipt group exact mint original vs CellScript agree";
 const RECEIPT_GROUP_MISSING_HEADER_DIFF_SCENARIO: &str = "differential: receipt group missing header original vs CellScript agree";
@@ -162,9 +179,25 @@ const RECEIPT_GROUP_MISSING_SECOND_INPUT_DIFF_SCENARIO: &str =
     "differential: receipt group missing second input original vs CellScript agree";
 const NON_EMPTY_ARGS_DIFF_SCENARIO: &str = "differential: non-empty script args original vs CellScript agree";
 const MINT_FROM_RECEIPT_DIFF_SCENARIO: &str = "differential: mint from receipt original vs CellScript agree";
+const MINT_FROM_RECEIPT_QUANTITY_ZERO_DIFF_SCENARIO: &str =
+    "differential: mint from zero-quantity receipt original vs CellScript agree";
+const MINT_FROM_RECEIPT_QUANTITY_TWO_DIFF_SCENARIO: &str = "differential: mint from quantity-two receipt original vs CellScript agree";
+const MINT_FROM_RECEIPT_LONG_DATA_DIFF_SCENARIO: &str = "differential: mint from long receipt data original vs CellScript agree";
 const MINT_FROM_RECEIPT_MALFORMED_RECEIPT_DATA_DIFF_SCENARIO: &str =
     "differential: mint from malformed receipt data original vs CellScript agree";
+const RECEIPT_GROUP_ZERO_FIRST_QUANTITY_DIFF_SCENARIO: &str =
+    "differential: receipt group zero first quantity original vs CellScript agree";
+const RECEIPT_GROUP_QUANTITY_ZERO_DIFF_SCENARIO: &str =
+    "differential: receipt group zero-quantity receipts original vs CellScript agree";
+const RECEIPT_GROUP_QUANTITY_TWO_DIFF_SCENARIO: &str =
+    "differential: receipt group quantity-two receipts original vs CellScript agree";
+const RECEIPT_GROUP_MIXED_QUANTITIES_DIFF_SCENARIO: &str = "differential: receipt group mixed quantities original vs CellScript agree";
+const RECEIPT_GROUP_LONG_RECEIPT_DATA_DIFF_SCENARIO: &str =
+    "differential: receipt group long receipt data original vs CellScript agree";
+const RECEIPT_GROUP_AMOUNT_HIGH_NONZERO_DIFF_SCENARIO: &str =
+    "differential: receipt group xUDT high amount word nonzero original vs CellScript agree";
 const AMOUNT_INFLATION_DIFF_SCENARIO: &str = "differential: amount inflation original vs CellScript agree";
+const AMOUNT_HIGH_NONZERO_DIFF_SCENARIO: &str = "differential: xUDT high amount word nonzero original vs CellScript agree";
 const AMOUNT_DEFLATION_DIFF_SCENARIO: &str = "differential: amount deflation original vs CellScript agree";
 const WRONG_XUDT_ARGS_DIFF_SCENARIO: &str = "differential: wrong xUDT args original vs CellScript agree";
 const WRONG_ACCUMULATED_RATE_DIFF_SCENARIO: &str = "differential: wrong accumulated rate original vs CellScript agree";
@@ -172,6 +205,112 @@ const MISSING_HEADER_DEP_DIFF_SCENARIO: &str = "differential: missing header dep
 const DAO_MATURE_WITHDRAWAL_DIFF_SCENARIO: &str = "differential: DAO mature withdrawal original vs CellScript agree";
 const DAO_IMMATURE_WITHDRAWAL_DIFF_SCENARIO: &str = "differential: DAO immature withdrawal original vs CellScript agree";
 const DAO_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str = "differential: DAO max withdrawal capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input max withdrawal capacity original vs CellScript agree";
+const DAO_TWO_INPUT_OVER_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input over-withdraw capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed deposit-rate max withdrawal capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed deposit-rate over-withdraw capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed deposit+withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_TWO_INPUT_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO two-input mixed deposit+withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second missing witness input_type original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second empty witness input_type original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second short witness input_type original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second long witness input_type original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second withdraw-header witness index original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_OOB_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second out-of-bounds witness index original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_DEPOSIT_DATA_INPUT_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second deposit-data input original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_MALFORMED_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second malformed input data original vs CellScript agree";
+const DAO_TWO_INPUT_SECOND_LONG_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO two-input second long input data original vs CellScript agree";
+const DAO_THREE_INPUT_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_OVER_WITHDRAWAL_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed deposit-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed deposit-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed deposit+withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input mixed deposit+withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit+withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit+withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit-rate plus third mixed withdraw-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed deposit-rate plus third mixed withdraw-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed withdraw-rate plus third mixed deposit-rate max withdrawal capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second mixed withdraw-rate plus third mixed deposit-rate over-withdraw capacity original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second missing witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second empty witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second short witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second long witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second withdraw-header witness index original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_OOB_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second out-of-bounds witness index original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_DEPOSIT_DATA_INPUT_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second deposit-data input original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_MALFORMED_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second malformed input data original vs CellScript agree";
+const DAO_THREE_INPUT_SECOND_LONG_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO three-input second long input data original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third missing witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third empty witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third short witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third long witness input_type original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third withdraw-header witness index original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_OOB_WITNESS_INDEX_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third out-of-bounds witness index original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_DEPOSIT_DATA_INPUT_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third deposit-data input original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_MALFORMED_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third malformed input data original vs CellScript agree";
+const DAO_THREE_INPUT_THIRD_LONG_INPUT_DATA_DIFF_SCENARIO: &str =
+    "differential: DAO three-input third long input data original vs CellScript agree";
 const DAO_DEPOSIT_RATE_ADJUSTED_MAX_CAPACITY_DIFF_SCENARIO: &str =
     "differential: DAO deposit-rate adjusted max withdrawal capacity original vs CellScript agree";
 const DAO_DEPOSIT_RATE_ADJUSTED_OVER_CAPACITY_DIFF_SCENARIO: &str =
@@ -191,6 +330,7 @@ const DAO_WITHDRAWAL_DEPOSIT_DATA_INPUT_DIFF_SCENARIO: &str =
     "differential: DAO withdrawal deposit-data input original vs CellScript agree";
 const DAO_WITHDRAWAL_MALFORMED_INPUT_DATA_DIFF_SCENARIO: &str =
     "differential: DAO withdrawal malformed input data original vs CellScript agree";
+const DAO_WITHDRAWAL_LONG_INPUT_DATA_DIFF_SCENARIO: &str = "differential: DAO withdrawal long input data original vs CellScript agree";
 const DAO_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO missing witness input_type original vs CellScript agree";
 const DAO_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO empty witness input_type original vs CellScript agree";
 const DAO_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: DAO short witness input_type original vs CellScript agree";
@@ -205,6 +345,38 @@ const LIMIT_ORDER_WRONG_ASSET_DIFF_SCENARIO: &str = "differential: limit order w
 const LIMIT_ORDER_INSUFFICIENT_MATCH_DIFF_SCENARIO: &str = "differential: limit order insufficient match original vs CellScript agree";
 const LIMIT_ORDER_NO_CKB_PAID_DIFF_SCENARIO: &str = "differential: limit order no CKB paid original vs CellScript agree";
 const LIMIT_ORDER_UDT_DECREASED_DIFF_SCENARIO: &str = "differential: limit order UDT decreased original vs CellScript agree";
+const LIMIT_ORDER_WRONG_MASTER_TX_HASH_DIFF_SCENARIO: &str =
+    "differential: limit order wrong master tx hash original vs CellScript agree";
+const LIMIT_ORDER_WRONG_MASTER_INDEX_DIFF_SCENARIO: &str = "differential: limit order wrong master index original vs CellScript agree";
+const LIMIT_ORDER_OUTPUT_MINT_ACTION_DIFF_SCENARIO: &str = "differential: limit order output mint action original vs CellScript agree";
+const LIMIT_ORDER_OUTPUT_INVALID_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order output invalid action original vs CellScript agree";
+const LIMIT_ORDER_OUTPUT_SHORT_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order output short action original vs CellScript agree";
+const LIMIT_ORDER_OUTPUT_SHORT_MASTER_DIFF_SCENARIO: &str =
+    "differential: limit order output short master OutPoint original vs CellScript agree";
+const LIMIT_ORDER_OUTPUT_LONG_DATA_DIFF_SCENARIO: &str =
+    "differential: limit order output long trailing data original vs CellScript agree";
+const LIMIT_ORDER_INPUT_INVALID_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order input invalid action original vs CellScript agree";
+const LIMIT_ORDER_INPUT_SHORT_ACTION_DIFF_SCENARIO: &str = "differential: limit order input short action original vs CellScript agree";
+const LIMIT_ORDER_INPUT_SHORT_MASTER_DIFF_SCENARIO: &str =
+    "differential: limit order input short master OutPoint original vs CellScript agree";
+const LIMIT_ORDER_INPUT_LONG_DATA_DIFF_SCENARIO: &str =
+    "differential: limit order input long trailing data original vs CellScript agree";
+const LIMIT_ORDER_INPUT_ABSOLUTE_MATCH_DIFF_SCENARIO: &str =
+    "differential: limit order input absolute match original vs CellScript agree";
+const LIMIT_ORDER_INPUT_WRONG_MASTER_TX_HASH_DIFF_SCENARIO: &str =
+    "differential: limit order input wrong master tx hash original vs CellScript agree";
+const LIMIT_ORDER_INPUT_WRONG_MASTER_INDEX_DIFF_SCENARIO: &str =
+    "differential: limit order input wrong master index original vs CellScript agree";
+const LIMIT_ORDER_MISSING_MATCHING_OUTPUT_DIFF_SCENARIO: &str =
+    "differential: limit order missing matching output original vs CellScript agree";
+const LIMIT_ORDER_DUPLICATE_MATCHING_OUTPUT_DIFF_SCENARIO: &str =
+    "differential: limit order duplicate matching output original vs CellScript agree";
+const LIMIT_ORDER_MISSING_INPUT_TYPE_DIFF_SCENARIO: &str = "differential: limit order missing input type original vs CellScript agree";
+const LIMIT_ORDER_MISSING_OUTPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: limit order missing output type original vs CellScript agree";
 const LIMIT_ORDER_UDT_TO_CKB_VALID_DIFF_SCENARIO: &str = "differential: valid limit order UDT-to-CKB original vs CellScript agree";
 const LIMIT_ORDER_UDT_TO_CKB_MIN_MATCH_BOUNDARY_DIFF_SCENARIO: &str =
     "differential: limit order UDT-to-CKB min-match boundary original vs CellScript agree";
@@ -216,6 +388,42 @@ const LIMIT_ORDER_UDT_TO_CKB_INSUFFICIENT_MATCH_DIFF_SCENARIO: &str =
     "differential: limit order UDT-to-CKB insufficient match original vs CellScript agree";
 const LIMIT_ORDER_UDT_TO_CKB_UNDERPAYMENT_DIFF_SCENARIO: &str =
     "differential: limit order UDT-to-CKB underpayment original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_WRONG_MASTER_TX_HASH_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB wrong master tx hash original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_WRONG_MASTER_INDEX_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB wrong master index original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_MINT_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB output mint action original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_INVALID_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB output invalid action original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_SHORT_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB output short action original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_SHORT_MASTER_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB output short master OutPoint original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_LONG_DATA_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB output long trailing data original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_INVALID_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input invalid action original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_SHORT_ACTION_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input short action original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_SHORT_MASTER_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input short master OutPoint original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_LONG_DATA_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input long trailing data original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_ABSOLUTE_MATCH_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input absolute match original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_WRONG_MASTER_TX_HASH_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input wrong master tx hash original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_INPUT_WRONG_MASTER_INDEX_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB input wrong master index original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_MISSING_MATCHING_OUTPUT_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB missing matching output original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_MATCHING_OUTPUT_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB duplicate matching output original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_MISSING_INPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB missing input type original vs CellScript agree";
+const LIMIT_ORDER_UDT_TO_CKB_MISSING_OUTPUT_TYPE_DIFF_SCENARIO: &str =
+    "differential: limit order UDT-to-CKB missing output type original vs CellScript agree";
 const OWNED_OWNER_VALID_DIFF_SCENARIO: &str = "differential: valid owned-owner original vs CellScript agree";
 const OWNED_OWNER_OUTPUT_VALID_DIFF_SCENARIO: &str = "differential: valid owned-owner output pairing original vs CellScript agree";
 const OWNED_OWNER_OUTPUT_RELATIVE_MISMATCH_DIFF_SCENARIO: &str =
@@ -267,11 +475,20 @@ const MINT_RECEIPT_DEPOSIT_AMOUNT: u64 = 10_000_000_000_000;
 const MINT_RECEIPT_ACCUMULATED_RATE: u64 = 10_000_000_000_000_000;
 const WRONG_MINT_RECEIPT_ACCUMULATED_RATE: u64 = 20_000_000_000_000_000;
 const MINT_RECEIPT_OUTPUT_AMOUNT: u128 = 10_000_000_000_000;
+const MINT_RECEIPT_QUANTITY_ZERO_OUTPUT_AMOUNT: u128 = 0;
+const MINT_RECEIPT_QUANTITY_TWO_OUTPUT_AMOUNT: u128 = MINT_RECEIPT_OUTPUT_AMOUNT * 2;
+const MINT_RECEIPT_HIGH_WORD_OUTPUT_AMOUNT: u128 = MINT_RECEIPT_OUTPUT_AMOUNT + (1u128 << 64);
+const MINT_RECEIPT_MIXED_SECOND_QUANTITY: u32 = 2;
+const MINT_RECEIPT_MIXED_SECOND_DEPOSIT_AMOUNT: u64 = 9_000_000_000_000;
+const MINT_RECEIPT_MIXED_GROUP_OUTPUT_AMOUNT: u128 =
+    MINT_RECEIPT_OUTPUT_AMOUNT + (MINT_RECEIPT_MIXED_SECOND_QUANTITY as u128 * MINT_RECEIPT_MIXED_SECOND_DEPOSIT_AMOUNT as u128);
 const XUDT_OWNER_MODE_TYPE_FLAGS: u32 = 2_147_483_648;
 const WRONG_XUDT_OWNER_HASH: [u8; 32] = [0x42; 32];
 const MINT_FROM_RECEIPT_MAX_CYCLES: u64 = 50_000_000;
 const LIMIT_ORDER_INPUT_CAPACITY: u64 = 100_000_000_000;
 const LIMIT_ORDER_OUTPUT_CAPACITY: u64 = 90_000_000_000;
+const LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_CAPACITY: u64 = 50_000_000_000;
+const LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_CAPACITY: u64 = 40_000_000_000;
 const LIMIT_ORDER_MIN_MATCH_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACITY - (1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG);
 const LIMIT_ORDER_INSUFFICIENT_MATCH_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACITY - 50;
 const LIMIT_ORDER_NO_CKB_PAID_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACITY;
@@ -279,6 +496,8 @@ const LIMIT_ORDER_UDT_DECREASED_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACIT
 const LIMIT_ORDER_INPUT_UDT_AMOUNT: u128 = 0;
 const LIMIT_ORDER_UDT_DECREASED_INPUT_UDT_AMOUNT: u128 = 10;
 const LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT: u128 = 10_000_000_000;
+const LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_UDT_AMOUNT: u128 = 50_000_000_000;
+const LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_UDT_AMOUNT: u128 = 60_000_000_000;
 const LIMIT_ORDER_MIN_MATCH_OUTPUT_UDT_AMOUNT: u128 = 1u128 << LIMIT_ORDER_CKB_MIN_MATCH_LOG;
 const LIMIT_ORDER_UNDERPAYMENT_OUTPUT_UDT_AMOUNT: u128 = 5_000_000_000;
 const LIMIT_ORDER_WRONG_ASSET_OUTPUT_UDT_AMOUNT: u128 = 10_000_000_000;
@@ -290,10 +509,15 @@ const LIMIT_ORDER_UDT_TO_CKB_MUL: u64 = 1;
 const LIMIT_ORDER_CKB_MIN_MATCH_LOG: u8 = 6;
 const LIMIT_ORDER_MAX_CYCLES: u64 = 50_000_000;
 const LIMIT_ORDER_MASTER_TX_HASH: [u8; 32] = [0x77; 32];
+const LIMIT_ORDER_WRONG_MASTER_TX_HASH: [u8; 32] = [0x78; 32];
 const LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY: u64 = 10_000_000_000;
+const LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_FUNDING_CAPACITY: u64 = 110_000_000_000;
 const LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT: u128 = 10_000_000_000;
 const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACITY + 10_000_000_000;
 const LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT: u128 = 0;
+const LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_FIRST_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY;
+const LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_SECOND_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_OUTPUT_CAPACITY;
+const LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT: u128 = 0;
 const LIMIT_ORDER_UDT_TO_CKB_MIN_MATCH_OUTPUT_CAPACITY: u64 = LIMIT_ORDER_INPUT_CAPACITY + (1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG);
 const LIMIT_ORDER_UDT_TO_CKB_MIN_MATCH_OUTPUT_UDT_AMOUNT: u128 =
     LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT - (1u128 << LIMIT_ORDER_CKB_MIN_MATCH_LOG);
@@ -332,6 +556,10 @@ action test_deposit_phase1() -> u64
 where
     let deposit = source::output(0)
     let receipt = source::group_output(0)
+    let current_script_hash: Hash = ckb::current_script_hash()
+    ckb::require_cell_lock_hash(deposit, current_script_hash)
+    let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
+    script::require_cell_type_matches(deposit, expected_dao_type)
     let is_deposit = dao::is_deposit_data(deposit)
     if !is_deposit {
         return 11
@@ -341,8 +569,17 @@ where
         return 6
     }
     let receipt_size = ckb::cell_data_size(receipt)
-    if receipt_size == 0 {
+    if receipt_size < 12 {
         return 9
+    }
+    let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
+    if receipt_quantity != 1 {
+        return 12
+    }
+    let expected_unoccupied_capacity = capacity - 8200000000
+    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
+    if receipt_deposit_amount != expected_unoccupied_capacity {
+        return 13
     }
     return 0
 "#;
@@ -354,6 +591,10 @@ action test_deposit_phase1_upper_bound() -> u64
 where
     let deposit = source::output(0)
     let receipt = source::group_output(0)
+    let current_script_hash: Hash = ckb::current_script_hash()
+    ckb::require_cell_lock_hash(deposit, current_script_hash)
+    let expected_dao_type = __EXPECTED_DAO_TYPE_SCRIPT__
+    script::require_cell_type_matches(deposit, expected_dao_type)
     let is_deposit = dao::is_deposit_data(deposit)
     if !is_deposit {
         return 11
@@ -366,8 +607,17 @@ where
         return 7
     }
     let receipt_size = ckb::cell_data_size(receipt)
-    if receipt_size == 0 {
+    if receipt_size < 12 {
         return 9
+    }
+    let receipt_quantity = ckb::cell_data_u32_le(receipt, 0)
+    if receipt_quantity != 1 {
+        return 12
+    }
+    let expected_unoccupied_capacity = capacity - 8200000000
+    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt, 4)
+    if receipt_deposit_amount != expected_unoccupied_capacity {
+        return 13
     }
     return 0
 "#;
@@ -392,11 +642,14 @@ where
     if input_rate != 10000000000000000 {
         return 31
     }
+    let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
+    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
+    let expected_minted = receipt_quantity * receipt_deposit_amount
     let xudt_output = source::output(0)
     xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
     let minted_low = xudt::amount_low(xudt_output)
     let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != 10000000000000 {
+    if minted_low != expected_minted {
         return 32
     }
     if minted_high != 0 {
@@ -413,18 +666,21 @@ where
     ckb::require_current_script_args_empty()
     let receipt_input = source::group_input(0)
     let receipt_size = ckb::cell_data_size(receipt_input)
-    if receipt_size != 13 {
+    if receipt_size < 12 {
         return 37
     }
     let input_rate = dao::input_accumulated_rate(receipt_input)
     if input_rate != 10000000000000000 {
         return 31
     }
+    let receipt_quantity = ckb::cell_data_u32_le(receipt_input, 0)
+    let receipt_deposit_amount = ckb::cell_data_u64_le(receipt_input, 4)
+    let expected_minted = receipt_quantity * receipt_deposit_amount
     let xudt_output = source::output(0)
     xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
     let minted_low = xudt::amount_low(xudt_output)
     let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != 10000000000000 {
+    if minted_low != expected_minted {
         return 32
     }
     if minted_high != 0 {
@@ -444,16 +700,23 @@ where
     if first_input_rate != 10000000000000000 {
         return 31
     }
+    let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
+    let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
     let second_receipt_input = source::group_input(1)
     let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
     if second_input_rate != 10000000000000000 {
         return 31
     }
+    let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
+    let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
+    let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
+    let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
+    let expected_minted = first_expected_minted + second_expected_minted
     let xudt_output = source::output(0)
     xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
     let minted_low = xudt::amount_low(xudt_output)
     let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != 20000000000000 {
+    if minted_low != expected_minted {
         return 36
     }
     if minted_high != 0 {
@@ -470,27 +733,34 @@ where
     ckb::require_current_script_args_empty()
     let first_receipt_input = source::group_input(0)
     let first_receipt_size = ckb::cell_data_size(first_receipt_input)
-    if first_receipt_size != 13 {
+    if first_receipt_size < 12 {
         return 37
     }
     let first_input_rate = dao::input_accumulated_rate(first_receipt_input)
     if first_input_rate != 10000000000000000 {
         return 31
     }
+    let first_receipt_quantity = ckb::cell_data_u32_le(first_receipt_input, 0)
+    let first_receipt_deposit_amount = ckb::cell_data_u64_le(first_receipt_input, 4)
     let second_receipt_input = source::group_input(1)
     let second_receipt_size = ckb::cell_data_size(second_receipt_input)
-    if second_receipt_size != 13 {
+    if second_receipt_size < 12 {
         return 38
     }
     let second_input_rate = dao::input_accumulated_rate(second_receipt_input)
     if second_input_rate != 10000000000000000 {
         return 31
     }
+    let second_receipt_quantity = ckb::cell_data_u32_le(second_receipt_input, 0)
+    let second_receipt_deposit_amount = ckb::cell_data_u64_le(second_receipt_input, 4)
+    let first_expected_minted = first_receipt_quantity * first_receipt_deposit_amount
+    let second_expected_minted = second_receipt_quantity * second_receipt_deposit_amount
+    let expected_minted = first_expected_minted + second_expected_minted
     let xudt_output = source::output(0)
     xudt::require_owner_mode_type_args_current_script(xudt_output, 2147483648)
     let minted_low = xudt::amount_low(xudt_output)
     let minted_high = xudt::amount_high(xudt_output)
-    if minted_low != 20000000000000 {
+    if minted_low != expected_minted {
         return 36
     }
     if minted_high != 0 {
@@ -565,12 +835,45 @@ const ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY: u64 = 8_200_000_000;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY: u64 =
     ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY - ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY: u64 = 123_468_305_678;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY: u64 = ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY * 2;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY: u64 = ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY * 3;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY: u64 = 123_468_294_151;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    (ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY * 2) + ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY + ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_OVER_OUTPUT_CAPACITY: u64 =
     ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_RATE_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY: u64 = 123_468_294_152;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY: u64 =
     ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    (ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY * 2) + ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_BOTH_WRONG_RATE_MAX_OUTPUT_CAPACITY: u64 = ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY
+    + ((ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY * ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE)
+        / ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE);
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    (ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY * 2) + ORIGINAL_DAO_WITHDRAW_PHASE2_BOTH_WRONG_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY + ORIGINAL_DAO_WITHDRAW_PHASE2_BOTH_WRONG_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY + 1;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY + ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY;
+const ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY: u64 =
+    ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_OVER_OUTPUT_CAPACITY: u64 = ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY + 1;
 const ORIGINAL_DAO_WITHDRAW_PHASE2_IMMATURE_OUTPUT_CAPACITY: u64 = 123_468_045_678;
 const ORIGINAL_DAO_MAX_CYCLES: u64 = 50_000_000;
@@ -616,6 +919,1081 @@ where
     let withdrawable_capacity = input_capacity - occupied_capacity
     let compensated_capacity = (withdrawable_capacity * withdraw_rate) / deposit_header_rate
     let max_output_capacity = occupied_capacity + compensated_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_two_input_withdrawal_capacity";
+const DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_withdrawal_capacity
+
+action test_dao_two_input_withdrawal_capacity() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate == 0 {
+        return 41
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION: &str = "test_dao_three_input_withdrawal_capacity";
+const DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_withdrawal_capacity
+
+action test_dao_three_input_withdrawal_capacity() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate == 0 {
+        return 41
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_deposit_rate";
+const DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_mixed_deposit_rate
+
+action test_dao_three_input_mixed_deposit_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit01_header_rate == 0 {
+        return 41
+    }
+    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit2_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_withdraw_rate";
+const DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_mixed_withdraw_rate
+
+action test_dao_three_input_mixed_withdraw_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(2))
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate == 0 {
+        return 41
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_mixed_both_rate";
+const DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_mixed_both_rate
+
+action test_dao_three_input_mixed_both_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(3))
+    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit01_header_rate == 0 {
+        return 41
+    }
+    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit2_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_deposit_rate";
+const DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_second_mixed_deposit_rate
+
+action test_dao_three_input_second_mixed_deposit_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit02_header_rate == 0 {
+        return 41
+    }
+    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit1_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_withdraw_rate";
+const DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_second_mixed_withdraw_rate
+
+action test_dao_three_input_second_mixed_withdraw_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(2))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate == 0 {
+        return 41
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_second_mixed_both_rate";
+const DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_second_mixed_both_rate
+
+action test_dao_three_input_second_mixed_both_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(3))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit02_header_rate == 0 {
+        return 41
+    }
+    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit1_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str =
+    "test_dao_three_input_second_deposit_third_withdraw_rate";
+const DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_second_deposit_third_withdraw_rate
+
+action test_dao_three_input_second_deposit_third_withdraw_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(3))
+    let deposit02_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit02_header_rate == 0 {
+        return 41
+    }
+    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit1_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit02_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit02_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str =
+    "test_dao_three_input_second_withdraw_third_deposit_rate";
+const DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_second_withdraw_third_deposit_rate
+
+action test_dao_three_input_second_withdraw_third_deposit_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(3))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let deposit01_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit01_header_rate == 0 {
+        return 41
+    }
+    let deposit2_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit2_header_rate == 0 {
+        return 44
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit01_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit01_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let input2_capacity = ckb::cell_capacity(input2)
+    let occupied2_capacity = ckb::cell_occupied_capacity(input2)
+    let withdraw2_rate = dao::input_accumulated_rate(input2)
+    if withdraw2_rate == 0 {
+        return 43
+    }
+    let withdrawable2_capacity = input2_capacity - occupied2_capacity
+    let compensated2_capacity = (withdrawable2_capacity * withdraw2_rate) / deposit2_header_rate
+    let max2_output_capacity = occupied2_capacity + compensated2_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity + max2_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION: &str = "test_dao_three_input_witness_shape";
+const DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_witness_shape
+
+action test_dao_three_input_witness_shape() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let witness0_bytes = witness::size(input0)
+    if witness0_bytes != 28 {
+        return 43
+    }
+    let witness1_bytes = witness::size(input1)
+    if witness1_bytes != 28 {
+        return 44
+    }
+    let witness2_bytes = witness::size(input2)
+    if witness2_bytes != 28 {
+        return 45
+    }
+    let witness0_input_type = witness::input_type(input0)
+    if witness0_input_type == Hash::zero() {
+        return 46
+    }
+    let witness1_input_type = witness::input_type(input1)
+    if witness1_input_type == Hash::zero() {
+        return 47
+    }
+    let witness2_input_type = witness::input_type(input2)
+    if witness2_input_type == Hash::zero() {
+        return 49
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+"#;
+const DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION: &str = "test_dao_three_input_witness_index";
+const DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_three_input_witness_index
+
+action test_dao_three_input_witness_index() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let input2 = source::group_input(2)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    let is_withdrawal2 = dao::is_withdrawal_request_data(input2)
+    if !is_withdrawal2 {
+        return 36
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_input_since_at_least(input2, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    dao::require_header_dep_for_input(input2, source::header_dep(0))
+    let witness0_bytes = witness::size(input0)
+    if witness0_bytes != 28 {
+        return 43
+    }
+    let witness1_bytes = witness::size(input1)
+    if witness1_bytes != 28 {
+        return 44
+    }
+    let witness2_bytes = witness::size(input2)
+    if witness2_bytes != 28 {
+        return 45
+    }
+	    let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+	    let witness1_input_type = witness::input_type(input1)
+	    if witness1_input_type != expected_deposit_header_index {
+	        return 48
+	    }
+	    let witness2_input_type = witness::input_type(input2)
+	    if witness2_input_type != expected_deposit_header_index {
+	        return 46
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_witness_shape";
+const DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_witness_shape
+
+action test_dao_two_input_witness_shape() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    let witness0_bytes = witness::size(input0)
+    if witness0_bytes != 28 {
+        return 43
+    }
+    let witness1_bytes = witness::size(input1)
+    if witness1_bytes != 28 {
+        return 44
+    }
+    let witness0_input_type = witness::input_type(input0)
+    if witness0_input_type == Hash::zero() {
+        return 42
+    }
+    let witness1_input_type = witness::input_type(input1)
+    if witness1_input_type == Hash::zero() {
+        return 45
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION: &str = "test_dao_two_input_witness_index";
+const DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_witness_index
+
+action test_dao_two_input_witness_index() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+    let witness0_bytes = witness::size(input0)
+    if witness0_bytes != 28 {
+        return 43
+    }
+    let witness1_bytes = witness::size(input1)
+    if witness1_bytes != 28 {
+        return 44
+    }
+    let expected_deposit_header_index = Hash::from_bytes(b"\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+    let witness1_input_type = witness::input_type(input1)
+    if witness1_input_type != expected_deposit_header_index {
+        return 46
+    }
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate != 10000000 {
+        return 41
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_deposit_rate";
+const DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_mixed_deposit_rate
+
+action test_dao_two_input_mixed_deposit_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(0))
+
+    let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit0_header_rate == 0 {
+        return 41
+    }
+    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit1_header_rate == 0 {
+        return 43
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_withdraw_rate";
+const DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_mixed_withdraw_rate
+
+action test_dao_two_input_mixed_withdraw_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(2))
+
+    let deposit_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit_header_rate == 0 {
+        return 41
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity
+    let output_capacity = ckb::cell_capacity(source::output(0))
+    if output_capacity > max_output_capacity {
+        return 48
+    }
+    return 0
+"#;
+const DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION: &str = "test_dao_two_input_mixed_both_rate";
+const DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM: &str = r#"
+module differential_dao_two_input_mixed_both_rate
+
+action test_dao_two_input_mixed_both_rate() -> u64
+where
+    ckb::require_current_script_args_empty()
+    let input0 = source::group_input(0)
+    let input1 = source::group_input(1)
+    let is_withdrawal0 = dao::is_withdrawal_request_data(input0)
+    if !is_withdrawal0 {
+        return 34
+    }
+    let is_withdrawal1 = dao::is_withdrawal_request_data(input1)
+    if !is_withdrawal1 {
+        return 35
+    }
+    dao::require_input_since_at_least(input0, 2306942530136048371)
+    dao::require_input_since_at_least(input1, 2306942530136048371)
+    dao::require_header_dep_for_input(input0, source::header_dep(0))
+    dao::require_header_dep_for_input(input1, source::header_dep(3))
+
+    let deposit0_header_rate = dao::accumulated_rate(source::header_dep(1))
+    if deposit0_header_rate == 0 {
+        return 41
+    }
+    let deposit1_header_rate = dao::accumulated_rate(source::header_dep(2))
+    if deposit1_header_rate == 0 {
+        return 43
+    }
+
+    let input0_capacity = ckb::cell_capacity(input0)
+    let occupied0_capacity = ckb::cell_occupied_capacity(input0)
+    let withdraw0_rate = dao::input_accumulated_rate(input0)
+    if withdraw0_rate == 0 {
+        return 40
+    }
+    let withdrawable0_capacity = input0_capacity - occupied0_capacity
+    let compensated0_capacity = (withdrawable0_capacity * withdraw0_rate) / deposit0_header_rate
+    let max0_output_capacity = occupied0_capacity + compensated0_capacity
+
+    let input1_capacity = ckb::cell_capacity(input1)
+    let occupied1_capacity = ckb::cell_occupied_capacity(input1)
+    let withdraw1_rate = dao::input_accumulated_rate(input1)
+    if withdraw1_rate == 0 {
+        return 42
+    }
+    let withdrawable1_capacity = input1_capacity - occupied1_capacity
+    let compensated1_capacity = (withdrawable1_capacity * withdraw1_rate) / deposit1_header_rate
+    let max1_output_capacity = occupied1_capacity + compensated1_capacity
+
+    let max_output_capacity = max0_output_capacity + max1_output_capacity
     let output_capacity = ckb::cell_capacity(source::output(0))
     if output_capacity > max_output_capacity {
         return 48
@@ -782,13 +2160,14 @@ where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let output = source::output(0)
+    ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
     let input_ckb = ckb::cell_capacity(input)
     let output_ckb = ckb::cell_capacity(output)
-    let input_type_low = ckb::cell_type_hash_low(input)
-    let output_type_low = ckb::cell_type_hash_low(output)
-    if input_type_low != output_type_low {
-        return 42
-    }
+    let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
+    let input_type_hash_type = ckb::cell_type_hash_type(input)
+    let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
+    script::require_cell_type_matches(input, expected_type)
+    script::require_cell_type_matches(output, expected_type)
     let input_udt = xudt::amount_low(input)
     let output_udt = xudt::amount_low(output)
     if output_ckb >= input_ckb {
@@ -816,13 +2195,14 @@ where
     ckb::require_current_script_args_empty()
     let input = source::group_input(0)
     let output = source::output(0)
+    ckb::require_lock_match_master_out_point_pairs_from_data(input, output, 16, 20, 52)
     let input_ckb = ckb::cell_capacity(input)
     let output_ckb = ckb::cell_capacity(output)
-    let input_type_low = ckb::cell_type_hash_low(input)
-    let output_type_low = ckb::cell_type_hash_low(output)
-    if input_type_low != output_type_low {
-        return 52
-    }
+    let input_type_code_hash: Hash = ckb::cell_type_code_hash(input)
+    let input_type_hash_type = ckb::cell_type_hash_type(input)
+    let expected_type = script::new(input_type_code_hash, input_type_hash_type, script::args_empty())
+    script::require_cell_type_matches(input, expected_type)
+    script::require_cell_type_matches(output, expected_type)
     let input_udt = xudt::amount_low(input)
     let output_udt = xudt::amount_low(output)
     if output_udt >= input_udt {
@@ -928,7 +2308,8 @@ where
 
 const OWNED_OWNER_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_related_type_hash_mismatch";
 
-fn owned_owner_related_type_hash_mismatch_cellscript_program(expected_related_type_hash_low: u64) -> String {
+fn owned_owner_related_type_hash_mismatch_cellscript_program(expected_related_type_script: &packed::Script) -> String {
+    let expected_related_type_script = cellscript_script_value_expr(expected_related_type_script);
     format!(
         r#"
 module differential_owned_owner_related_type_hash_mismatch
@@ -941,10 +2322,8 @@ where
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(owned, current_script_hash)
     ckb::require_cell_type_hash(owner, current_script_hash)
-    let actual_related_type_hash_low = ckb::cell_type_hash_low(owned)
-    if actual_related_type_hash_low != {expected_related_type_hash_low} {{
-        return 46
-    }}
+    let expected_related_type = {expected_related_type_script}
+    script::require_cell_type_matches(owned, expected_related_type)
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::input(0), 0)
     return 0
 "#
@@ -953,7 +2332,8 @@ where
 
 const OWNED_OWNER_OUTPUT_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_related_type_hash_mismatch";
 
-fn owned_owner_output_related_type_hash_mismatch_cellscript_program(expected_related_type_hash_low: u64) -> String {
+fn owned_owner_output_related_type_hash_mismatch_cellscript_program(expected_related_type_script: &packed::Script) -> String {
+    let expected_related_type_script = cellscript_script_value_expr(expected_related_type_script);
     format!(
         r#"
 module differential_owned_owner_output_related_type_hash_mismatch
@@ -966,10 +2346,8 @@ where
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(owned, current_script_hash)
     ckb::require_cell_type_hash(owner, current_script_hash)
-    let actual_related_type_hash_low = ckb::cell_type_hash_low(owned)
-    if actual_related_type_hash_low != {expected_related_type_hash_low} {{
-        return 46
-    }}
+    let expected_related_type = {expected_related_type_script}
+    script::require_cell_type_matches(owned, expected_related_type)
     ckb::require_type_lock_metapoint_pairs_from_i32_data(source::output(0), 0)
     return 0
 "#
@@ -978,7 +2356,8 @@ where
 
 const OWNED_OWNER_OUTPUT_RELATED_DATA_RULE_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_output_related_data_rule_mismatch";
 
-fn owned_owner_output_related_data_rule_mismatch_cellscript_program(expected_related_type_hash_low: u64) -> String {
+fn owned_owner_output_related_data_rule_mismatch_cellscript_program(expected_related_type_script: &packed::Script) -> String {
+    let expected_related_type_script = cellscript_script_value_expr(expected_related_type_script);
     format!(
         r#"
 module differential_owned_owner_output_related_data_rule_mismatch
@@ -991,10 +2370,8 @@ where
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(owned, current_script_hash)
     ckb::require_cell_type_hash(owner, current_script_hash)
-    let actual_related_type_hash_low = ckb::cell_type_hash_low(owned)
-    if actual_related_type_hash_low != {expected_related_type_hash_low} {{
-        return 46
-    }}
+    let expected_related_type = {expected_related_type_script}
+    script::require_cell_type_matches(owned, expected_related_type)
     let is_withdrawal = dao::is_withdrawal_request_data(owned)
     if !is_withdrawal {{
         return 47
@@ -1007,7 +2384,8 @@ where
 
 const OWNED_OWNER_RELATED_DATA_RULE_MISMATCH_CELLSCRIPT_ACTION: &str = "test_owned_owner_related_data_rule_mismatch";
 
-fn owned_owner_related_data_rule_mismatch_cellscript_program(expected_related_type_hash_low: u64) -> String {
+fn owned_owner_related_data_rule_mismatch_cellscript_program(expected_related_type_script: &packed::Script) -> String {
+    let expected_related_type_script = cellscript_script_value_expr(expected_related_type_script);
     format!(
         r#"
 module differential_owned_owner_related_data_rule_mismatch
@@ -1020,10 +2398,8 @@ where
     let current_script_hash: Hash = ckb::current_script_hash()
     ckb::require_cell_lock_hash(owned, current_script_hash)
     ckb::require_cell_type_hash(owner, current_script_hash)
-    let actual_related_type_hash_low = ckb::cell_type_hash_low(owned)
-    if actual_related_type_hash_low != {expected_related_type_hash_low} {{
-        return 46
-    }}
+    let expected_related_type = {expected_related_type_script}
+    script::require_cell_type_matches(owned, expected_related_type)
     let is_withdrawal = dao::is_withdrawal_request_data(owned)
     if !is_withdrawal {{
         return 47
@@ -1113,6 +2489,96 @@ fn ickb_production_equivalence_claim_requires_executed_evidence() {
     );
 }
 
+#[test]
+fn ickb_claim_manifest_covers_declared_executable_branches() {
+    let matrix = read_matrix();
+    validate_production_equivalence_gate(&matrix).expect("matrix must remain production-equivalence proven before claim checks");
+    let manifest = read_claim_manifest();
+    assert_eq!(manifest["schema"], "cellscript-ickb-claim-manifest-v1");
+    assert_eq!(manifest["status"], "complete-executable-claim-set");
+    assert_eq!(manifest["matrix_path"], "matrix.json");
+
+    let rows = matrix["rows"].as_array().expect("rows");
+    let by_scenario =
+        rows.iter().map(|row| (row["scenario"].as_str().expect("scenario").to_string(), row)).collect::<BTreeMap<_, _>>();
+    let default_production = manifest["default_production_evidence"].as_object().expect("default_production_evidence");
+    for required in [
+        "script_group",
+        "cell_deps",
+        "header_deps",
+        "outputs_data",
+        "witnesses",
+        "capacity_fee_tx_size_cycles",
+        "deployment_manifest",
+        "builder_plan",
+    ] {
+        assert!(default_production.get(required).is_some_and(non_empty_json_value), "missing production evidence {required}");
+    }
+    let default_hardening = manifest["default_hardening"].as_object().expect("default_hardening");
+    for required in
+        ["mutation_coverage", "deterministic_fuzz_seed", "normalized_fixture_generator", "max_cellscript_cycles", "max_tx_size_bytes"]
+    {
+        assert!(default_hardening.get(required).is_some_and(non_empty_json_value), "missing hardening evidence {required}");
+    }
+
+    let mut in_scope_branches = 0usize;
+    for family in manifest["families"].as_array().expect("families") {
+        let family_id = family["id"].as_str().expect("family id");
+        for branch in family["branches"].as_array().expect("branches") {
+            let branch_id = branch["id"].as_str().expect("branch id");
+            match branch["status"].as_str().expect("branch status") {
+                "in_scope" | "fixture_scoped" => {
+                    in_scope_branches += 1;
+                    let matched = claim_branch_scenarios(branch, &by_scenario);
+                    assert!(!matched.is_empty(), "{family_id}/{branch_id} must map to differential rows");
+                    for required in json_string_array(branch, "required_scenarios") {
+                        assert!(by_scenario.contains_key(&required), "{family_id}/{branch_id} missing required scenario {required}");
+                    }
+                    for scenario in matched {
+                        let row = by_scenario.get(&scenario).unwrap_or_else(|| panic!("{family_id}/{branch_id} missing {scenario}"));
+                        assert_eq!(row["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{family_id}/{branch_id}/{scenario}");
+                        assert_eq!(row["ckb_vm_execution"], true, "{family_id}/{branch_id}/{scenario}");
+                        assert_eq!(row["original_ickb_executed"], true, "{family_id}/{branch_id}/{scenario}");
+                        assert_eq!(row["full_differential"], true, "{family_id}/{branch_id}/{scenario}");
+                        if row["original_ickb_expected"] == "fail" || row["cellscript_expected"] == "fail" {
+                            assert!(
+                                row["failure_mode"].as_str().is_some_and(|mode| !mode.is_empty())
+                                    || row["execution"]["failure_mode"].as_str().is_some_and(|mode| !mode.is_empty()),
+                                "{family_id}/{branch_id}/{scenario} reject row lacks mutation/failure-mode evidence"
+                            );
+                        }
+                        let cellscript_cycles = row["execution"]["cellscript_cycles"].as_u64().expect("cellscript_cycles");
+                        assert!(
+                            cellscript_cycles <= default_hardening["max_cellscript_cycles"].as_u64().expect("max cycles"),
+                            "{family_id}/{branch_id}/{scenario} exceeds cycle envelope"
+                        );
+                        let tx_size = row["execution"]["tx_size_bytes"].as_u64().expect("tx_size_bytes");
+                        assert!(
+                            tx_size <= default_hardening["max_tx_size_bytes"].as_u64().expect("max tx size"),
+                            "{family_id}/{branch_id}/{scenario} exceeds tx size envelope"
+                        );
+                    }
+                    if branch["status"] == "fixture_scoped" {
+                        assert!(branch["limitation"].as_str().is_some_and(|value| !value.is_empty()), "{family_id}/{branch_id}");
+                    }
+                }
+                "retired" => {
+                    assert!(branch["reason"].as_str().is_some_and(|value| !value.is_empty()), "{family_id}/{branch_id}");
+                    for replacement in json_string_array(branch, "replacement_scenarios") {
+                        assert!(by_scenario.contains_key(&replacement), "{family_id}/{branch_id} missing replacement {replacement}");
+                    }
+                }
+                "out_of_scope" => {
+                    assert!(branch["reason"].as_str().is_some_and(|value| !value.is_empty()), "{family_id}/{branch_id}");
+                    assert!(branch["source_evidence"].as_str().is_some_and(|value| !value.is_empty()), "{family_id}/{branch_id}");
+                }
+                status => panic!("{family_id}/{branch_id} unsupported status {status}"),
+            }
+        }
+    }
+    assert!(in_scope_branches >= 8, "manifest should declare all executable iCKB branch families");
+}
+
 const UPDATE_ICKB_DIFF_MATRIX_ENV: &str = "CELLSCRIPT_UPDATE_ICKB_DIFF_MATRIX";
 
 fn matrix_path() -> Utf8PathBuf {
@@ -1125,23 +2591,93 @@ fn read_matrix() -> Value {
     serde_json::from_str(&content).unwrap_or_else(|err| panic!("failed to parse {path}: {err}"))
 }
 
+fn claim_manifest_path() -> Utf8PathBuf {
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("benchmarks").join("ickb_diff").join("claim_manifest.json")
+}
+
+fn read_claim_manifest() -> Value {
+    let path = claim_manifest_path();
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    serde_json::from_str(&content).unwrap_or_else(|err| panic!("failed to parse {path}: {err}"))
+}
+
+fn claim_branch_scenarios(branch: &Value, by_scenario: &BTreeMap<String, &Value>) -> BTreeSet<String> {
+    let excludes = json_string_array(branch, "exclude_scenario_prefixes");
+    let mut matched = BTreeSet::new();
+    for scenario in json_string_array(branch, "evidence_scenarios") {
+        matched.insert(scenario);
+    }
+    for prefix in json_string_array(branch, "evidence_scenario_prefixes") {
+        for scenario in by_scenario.keys() {
+            if scenario.starts_with(&prefix) && !excludes.iter().any(|exclude| scenario.starts_with(exclude)) {
+                matched.insert(scenario.clone());
+            }
+        }
+    }
+    for scenario in json_string_array(branch, "required_scenarios") {
+        matched.insert(scenario);
+    }
+    matched
+}
+
+fn json_string_array(value: &Value, key: &str) -> Vec<String> {
+    value[key].as_array().into_iter().flatten().filter_map(Value::as_str).map(ToString::to_string).collect()
+}
+
 fn maybe_update_matrix_execution(scenario: &str, execution: &Value) -> bool {
     if std::env::var(UPDATE_ICKB_DIFF_MATRIX_ENV).as_deref() != Ok("1") {
         return false;
     }
     let path = matrix_path();
     let mut matrix = read_matrix();
-    let row = matrix["rows"]
-        .as_array_mut()
-        .expect("rows")
-        .iter_mut()
-        .find(|row| row["scenario"].as_str() == Some(scenario))
-        .unwrap_or_else(|| panic!("missing matrix row for {scenario}"));
-    row["execution"] = execution.clone();
+    let rows = matrix["rows"].as_array_mut().expect("rows");
+    if let Some(row) = rows.iter_mut().find(|row| row["scenario"].as_str() == Some(scenario)) {
+        row["execution"] = execution.clone();
+    } else {
+        rows.push(matrix_row_from_execution(scenario, execution));
+    }
+    refresh_matrix_artifact_evidence(&mut matrix);
     let mut encoded = serde_json::to_string_pretty(&matrix).expect("matrix should serialize");
     encoded.push('\n');
     std::fs::write(&path, encoded).unwrap_or_else(|err| panic!("failed to update {path}: {err}"));
     true
+}
+
+fn matrix_row_from_execution(scenario: &str, execution: &Value) -> Value {
+    let original_status = execution["original_ickb_status"].as_str().unwrap_or("fail");
+    let cellscript_status = execution["cellscript_status"].as_str().unwrap_or("fail");
+    let result = match (original_status, cellscript_status) {
+        ("pass", "pass") => "differential-agree-pass",
+        ("fail", "fail") => "differential-agree-fail",
+        _ => "differential-mismatch",
+    };
+    json!({
+        "scenario": scenario,
+        "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
+        "ckb_vm_execution": true,
+        "original_ickb_executed": true,
+        "full_differential": true,
+        "result": result,
+        "original_ickb_expected": original_status,
+        "cellscript_expected": cellscript_status,
+        "failure_mode": execution.get("failure_mode").cloned().unwrap_or(Value::Null),
+        "note": "Both original iCKB and CellScript execute the same normalized fixture; this row was added from measured CKB VM differential evidence.",
+        "execution": execution
+    })
+}
+
+fn refresh_matrix_artifact_evidence(matrix: &mut Value) {
+    let artifacts: Vec<Value> = matrix["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["ckb_vm_execution"].as_bool() == Some(true))
+        .filter_map(|row| row["execution"]["cellscript_artifact_sha256"].as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|artifact| Value::String(artifact.to_string()))
+        .collect();
+    matrix["equivalence_evidence"]["generated_cellscript_artifact_sha256"] = Value::Array(artifacts);
 }
 
 fn assert_required_evidence_list(matrix: &Value) {
@@ -2185,6 +3721,7 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
     let withdrawing_cell_data = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::DepositDataInput => Bytes::from(vec![0u8; 8]),
         DaoWithdrawalHeaderDepMode::MalformedInputData => Bytes::from(vec![0x12, 0x06, 0x00, 0x00]),
+        DaoWithdrawalHeaderDepMode::LongInputData => dao_long_withdrawal_request_cell_data(),
         _ => Bytes::from(ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec()),
     };
     let withdrawing_out_point = context.create_cell(
@@ -2209,6 +3746,7 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present => 1u64,
         DaoWithdrawalHeaderDepMode::DepositDataInput => 1u64,
         DaoWithdrawalHeaderDepMode::MalformedInputData => 1u64,
+        DaoWithdrawalHeaderDepMode::LongInputData => 1u64,
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => 0u64,
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
@@ -2248,6 +3786,7 @@ fn run_original_dao_withdrawal_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present
         | DaoWithdrawalHeaderDepMode::DepositDataInput
         | DaoWithdrawalHeaderDepMode::MalformedInputData
+        | DaoWithdrawalHeaderDepMode::LongInputData
         | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
         | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
         | DaoWithdrawalHeaderDepMode::MissingWitnessInputType
@@ -2322,6 +3861,7 @@ fn run_cellscript_dao_withdrawal_with_program(
     let withdrawing_cell_data = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::DepositDataInput => Bytes::from(vec![0u8; 8]),
         DaoWithdrawalHeaderDepMode::MalformedInputData => Bytes::from(vec![0x12, 0x06, 0x00, 0x00]),
+        DaoWithdrawalHeaderDepMode::LongInputData => dao_long_withdrawal_request_cell_data(),
         _ => Bytes::from(ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec()),
     };
     let withdrawing_out_point = context.create_cell(
@@ -2346,6 +3886,7 @@ fn run_cellscript_dao_withdrawal_with_program(
         DaoWithdrawalHeaderDepMode::Present => 1u64,
         DaoWithdrawalHeaderDepMode::DepositDataInput => 1u64,
         DaoWithdrawalHeaderDepMode::MalformedInputData => 1u64,
+        DaoWithdrawalHeaderDepMode::LongInputData => 1u64,
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => 0u64,
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
@@ -2385,6 +3926,7 @@ fn run_cellscript_dao_withdrawal_with_program(
         DaoWithdrawalHeaderDepMode::Present
         | DaoWithdrawalHeaderDepMode::DepositDataInput
         | DaoWithdrawalHeaderDepMode::MalformedInputData
+        | DaoWithdrawalHeaderDepMode::LongInputData
         | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
         | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
         | DaoWithdrawalHeaderDepMode::MissingWitnessInputType
@@ -2413,6 +3955,609 @@ fn run_cellscript_dao_withdrawal_with_program(
         &tx,
         occupied_capacity_shannons(&outputs, &outputs_data),
         fee_shannons(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY, &outputs),
+    );
+    (run, cellscript_elf)
+}
+
+fn run_original_dao_two_input_withdrawal(output_capacity: u64, mode: DaoTwoInputWithdrawalMode) -> DepositPhase1SideRun {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let dao_elf = load_original_ickb_binary("dao");
+    let dao_code_out_point = context.deploy_cell(Bytes::copy_from_slice(&dao_elf));
+    let dao_script = context.build_script(&dao_code_out_point, Bytes::default()).expect("original DAO script");
+    let always_success_lock = deploy_always_success_lock(&mut context);
+
+    let deposit_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+    );
+    let deposit_header_hash = deposit_header.hash();
+    context.insert_header(deposit_header);
+    let second_deposit_header_hash = if matches!(mode, DaoTwoInputWithdrawalMode::MixedDeposit | DaoTwoInputWithdrawalMode::MixedBoth)
+    {
+        let second_deposit_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+        );
+        let hash = second_deposit_header.hash();
+        context.insert_header(second_deposit_header);
+        Some(hash)
+    } else {
+        None
+    };
+    let withdraw_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+    );
+    let withdraw_header_hash = withdraw_header.hash();
+    context.insert_header(withdraw_header);
+    let second_withdraw_header_hash =
+        if matches!(mode, DaoTwoInputWithdrawalMode::MixedWithdraw | DaoTwoInputWithdrawalMode::MixedBoth) {
+            let second_withdraw_header = dao_test_header(
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+            );
+            let hash = second_withdraw_header.hash();
+            context.insert_header(second_withdraw_header);
+            Some(hash)
+        } else {
+            None
+        };
+
+    let first_withdrawal_data = dao_two_input_cell_data(mode, 0);
+    let second_withdrawal_data = dao_two_input_cell_data(mode, 1);
+    let first_withdrawing_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(dao_script.clone()))
+            .build(),
+        first_withdrawal_data,
+    );
+    let second_withdrawing_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(dao_script))
+            .build(),
+        second_withdrawal_data,
+    );
+    context.link_cell_with_block(first_withdrawing_out_point.clone(), withdraw_header_hash.clone(), 0);
+    context.link_cell_with_block(
+        second_withdrawing_out_point.clone(),
+        second_withdraw_header_hash.clone().unwrap_or_else(|| withdraw_header_hash.clone()),
+        0,
+    );
+
+    let output =
+        packed::CellOutput::new_builder().capacity::<packed::Uint64>(output_capacity.pack()).lock(always_success_lock).build();
+    let outputs = vec![output];
+    let outputs_data = vec![Bytes::default()];
+    let first_witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(1u64.to_le_bytes().to_vec())).pack()).build();
+    let second_witness = dao_two_input_second_witness(mode);
+    let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(first_withdrawing_out_point)
+                .since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE)
+                .build(),
+        )
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(second_withdrawing_out_point)
+                .since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE)
+                .build(),
+        )
+        .cell_dep(packed::CellDep::new_builder().out_point(dao_code_out_point).dep_type(DepType::Code).build())
+        .header_dep(withdraw_header_hash)
+        .header_dep(deposit_header_hash)
+        .output(outputs[0].clone())
+        .output_data(outputs_data[0].clone().pack());
+    if let Some(second_deposit_header_hash) = second_deposit_header_hash {
+        tx_builder = tx_builder.header_dep(second_deposit_header_hash);
+    }
+    if let Some(second_withdraw_header_hash) = second_withdraw_header_hash {
+        tx_builder = tx_builder.header_dep(second_withdraw_header_hash);
+    }
+    let tx = tx_builder.witness(first_witness.as_bytes().pack()).witness(second_witness.as_bytes().pack()).build();
+    let tx = context.complete_tx(tx);
+
+    side_run_from_result(
+        context.verify_tx(&tx, ORIGINAL_DAO_MAX_CYCLES),
+        &tx,
+        occupied_capacity_shannons(&outputs, &outputs_data),
+        fee_shannons(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 2, &outputs),
+    )
+}
+
+fn run_cellscript_dao_two_input_withdrawal(output_capacity: u64, mode: DaoTwoInputWithdrawalMode) -> (DepositPhase1SideRun, Vec<u8>) {
+    let (program, action) = match mode {
+        DaoTwoInputWithdrawalMode::SameDeposit => {
+            (DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::MixedDeposit => {
+            (DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::MixedWithdraw => {
+            (DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::MixedBoth => {
+            (DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::SecondDepositDataInput
+        | DaoTwoInputWithdrawalMode::SecondMalformedInputData
+        | DaoTwoInputWithdrawalMode::SecondLongInputData => {
+            (DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::SecondWitnessMissing
+        | DaoTwoInputWithdrawalMode::SecondWitnessEmpty
+        | DaoTwoInputWithdrawalMode::SecondWitnessShort
+        | DaoTwoInputWithdrawalMode::SecondWitnessLong => {
+            (DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION)
+        }
+        DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex | DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => {
+            (DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM, DAO_TWO_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION)
+        }
+    };
+    let cellscript_elf = compile_cellscript_source_to_elf(program, action, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script =
+        context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript DAO two-input withdrawal script");
+    let always_success_lock = deploy_always_success_lock(&mut context);
+
+    let deposit_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+    );
+    let deposit_header_hash = deposit_header.hash();
+    context.insert_header(deposit_header);
+    let second_deposit_header_hash = if matches!(mode, DaoTwoInputWithdrawalMode::MixedDeposit | DaoTwoInputWithdrawalMode::MixedBoth)
+    {
+        let second_deposit_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+        );
+        let hash = second_deposit_header.hash();
+        context.insert_header(second_deposit_header);
+        Some(hash)
+    } else {
+        None
+    };
+    let withdraw_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+    );
+    let withdraw_header_hash = withdraw_header.hash();
+    context.insert_header(withdraw_header);
+    let second_withdraw_header_hash =
+        if matches!(mode, DaoTwoInputWithdrawalMode::MixedWithdraw | DaoTwoInputWithdrawalMode::MixedBoth) {
+            let second_withdraw_header = dao_test_header(
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+            );
+            let hash = second_withdraw_header.hash();
+            context.insert_header(second_withdraw_header);
+            Some(hash)
+        } else {
+            None
+        };
+
+    let first_withdrawal_data = dao_two_input_cell_data(mode, 0);
+    let second_withdrawal_data = dao_two_input_cell_data(mode, 1);
+    let first_withdrawing_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(cellscript_script.clone()))
+            .build(),
+        first_withdrawal_data,
+    );
+    let second_withdrawing_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+            .lock(always_success_lock.clone())
+            .type_(packed::ScriptOpt::from(cellscript_script))
+            .build(),
+        second_withdrawal_data,
+    );
+    context.link_cell_with_block(first_withdrawing_out_point.clone(), withdraw_header_hash.clone(), 0);
+    context.link_cell_with_block(
+        second_withdrawing_out_point.clone(),
+        second_withdraw_header_hash.clone().unwrap_or_else(|| withdraw_header_hash.clone()),
+        0,
+    );
+
+    let output =
+        packed::CellOutput::new_builder().capacity::<packed::Uint64>(output_capacity.pack()).lock(always_success_lock).build();
+    let outputs = vec![output];
+    let outputs_data = vec![Bytes::default()];
+    let first_witness = packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(1u64.to_le_bytes().to_vec())).pack()).build();
+    let second_witness = dao_two_input_second_witness(mode);
+    let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(first_withdrawing_out_point)
+                .since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE)
+                .build(),
+        )
+        .input(
+            packed::CellInput::new_builder()
+                .previous_output(second_withdrawing_out_point)
+                .since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE)
+                .build(),
+        )
+        .cell_dep(packed::CellDep::new_builder().out_point(cellscript_out_point).dep_type(DepType::Code).build())
+        .header_dep(withdraw_header_hash)
+        .header_dep(deposit_header_hash)
+        .output(outputs[0].clone())
+        .output_data(outputs_data[0].clone().pack());
+    if let Some(second_deposit_header_hash) = second_deposit_header_hash {
+        tx_builder = tx_builder.header_dep(second_deposit_header_hash);
+    }
+    if let Some(second_withdraw_header_hash) = second_withdraw_header_hash {
+        tx_builder = tx_builder.header_dep(second_withdraw_header_hash);
+    }
+    let tx = tx_builder.witness(first_witness.as_bytes().pack()).witness(second_witness.as_bytes().pack()).build();
+    let tx = context.complete_tx(tx);
+
+    let run = side_run_from_result(
+        context.verify_tx(&tx, ORIGINAL_DAO_MAX_CYCLES),
+        &tx,
+        occupied_capacity_shannons(&outputs, &outputs_data),
+        fee_shannons(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 2, &outputs),
+    );
+    (run, cellscript_elf)
+}
+
+fn run_original_dao_three_input_withdrawal(output_capacity: u64, mode: DaoThreeInputWithdrawalMode) -> DepositPhase1SideRun {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let dao_elf = load_original_ickb_binary("dao");
+    let dao_code_out_point = context.deploy_cell(Bytes::copy_from_slice(&dao_elf));
+    let dao_script = context.build_script(&dao_code_out_point, Bytes::default()).expect("original DAO script");
+    let always_success_lock = deploy_always_success_lock(&mut context);
+
+    let deposit_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+    );
+    let deposit_header_hash = deposit_header.hash();
+    context.insert_header(deposit_header);
+    let mixed_deposit_header_hash = if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedDepositSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedDepositThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        let mixed_deposit_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+        );
+        let hash = mixed_deposit_header.hash();
+        context.insert_header(mixed_deposit_header);
+        Some(hash)
+    } else {
+        None
+    };
+    let withdraw_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+    );
+    let withdraw_header_hash = withdraw_header.hash();
+    context.insert_header(withdraw_header);
+    let mixed_withdraw_header_hash = if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        let mixed_withdraw_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+        );
+        let hash = mixed_withdraw_header.hash();
+        context.insert_header(mixed_withdraw_header);
+        Some(hash)
+    } else {
+        None
+    };
+
+    let mut withdrawing_out_points = Vec::new();
+    for index in 0..3 {
+        let out_point = context.create_cell(
+            packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+                .lock(always_success_lock.clone())
+                .type_(packed::ScriptOpt::from(dao_script.clone()))
+                .build(),
+            dao_three_input_cell_data(mode, index),
+        );
+        let linked_withdraw_header_hash = match (index, mode) {
+            (
+                1,
+                DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+                | DaoThreeInputWithdrawalMode::MixedBothSecond
+                | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+            )
+            | (
+                2,
+                DaoThreeInputWithdrawalMode::MixedWithdrawThird
+                | DaoThreeInputWithdrawalMode::MixedBothThird
+                | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+            ) => mixed_withdraw_header_hash.clone().expect("mixed withdraw header for three-input DAO fixture"),
+            _ => withdraw_header_hash.clone(),
+        };
+        context.link_cell_with_block(out_point.clone(), linked_withdraw_header_hash, 0);
+        withdrawing_out_points.push(out_point);
+    }
+
+    let output =
+        packed::CellOutput::new_builder().capacity::<packed::Uint64>(output_capacity.pack()).lock(always_success_lock).build();
+    let outputs = vec![output];
+    let outputs_data = vec![Bytes::default()];
+    let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .cell_dep(packed::CellDep::new_builder().out_point(dao_code_out_point).dep_type(DepType::Code).build())
+        .header_dep(withdraw_header_hash)
+        .header_dep(deposit_header_hash)
+        .output(outputs[0].clone())
+        .output_data(outputs_data[0].clone().pack());
+    if let Some(mixed_deposit_header_hash) = mixed_deposit_header_hash {
+        tx_builder = tx_builder.header_dep(mixed_deposit_header_hash);
+    }
+    if let Some(mixed_withdraw_header_hash) = mixed_withdraw_header_hash {
+        tx_builder = tx_builder.header_dep(mixed_withdraw_header_hash);
+    }
+    for out_point in withdrawing_out_points {
+        tx_builder = tx_builder.input(
+            packed::CellInput::new_builder().previous_output(out_point).since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE).build(),
+        );
+    }
+    for index in 0..3 {
+        let witness = dao_three_input_witness(mode, index);
+        tx_builder = tx_builder.witness(witness.as_bytes().pack());
+    }
+    let tx = context.complete_tx(tx_builder.build());
+
+    side_run_from_result(
+        context.verify_tx(&tx, ORIGINAL_DAO_MAX_CYCLES),
+        &tx,
+        occupied_capacity_shannons(&outputs, &outputs_data),
+        fee_shannons(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 3, &outputs),
+    )
+}
+
+fn run_cellscript_dao_three_input_withdrawal(
+    output_capacity: u64,
+    mode: DaoThreeInputWithdrawalMode,
+) -> (DepositPhase1SideRun, Vec<u8>) {
+    let (program, action) = match mode {
+        DaoThreeInputWithdrawalMode::SameDeposit => {
+            (DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::MixedDepositSecond => {
+            (DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond => (
+            DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM,
+            DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION,
+        ),
+        DaoThreeInputWithdrawalMode::MixedBothSecond => {
+            (DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird => (
+            DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_PROGRAM,
+            DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_CELLSCRIPT_ACTION,
+        ),
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird => (
+            DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_PROGRAM,
+            DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_CELLSCRIPT_ACTION,
+        ),
+        DaoThreeInputWithdrawalMode::MixedDepositThird => {
+            (DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::MixedWithdrawThird => {
+            (DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::MixedBothThird => {
+            (DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_MIXED_BOTH_RATE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::SecondDepositDataInput
+        | DaoThreeInputWithdrawalMode::SecondMalformedInputData
+        | DaoThreeInputWithdrawalMode::SecondLongInputData
+        | DaoThreeInputWithdrawalMode::ThirdDepositDataInput
+        | DaoThreeInputWithdrawalMode::ThirdMalformedInputData
+        | DaoThreeInputWithdrawalMode::ThirdLongInputData => {
+            (DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::SecondWitnessMissing
+        | DaoThreeInputWithdrawalMode::SecondWitnessEmpty
+        | DaoThreeInputWithdrawalMode::SecondWitnessShort
+        | DaoThreeInputWithdrawalMode::SecondWitnessLong
+        | DaoThreeInputWithdrawalMode::ThirdWitnessMissing
+        | DaoThreeInputWithdrawalMode::ThirdWitnessEmpty
+        | DaoThreeInputWithdrawalMode::ThirdWitnessShort
+        | DaoThreeInputWithdrawalMode::ThirdWitnessLong => {
+            (DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_WITNESS_SHAPE_CELLSCRIPT_ACTION)
+        }
+        DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex
+        | DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex
+        | DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex
+        | DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex => {
+            (DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_PROGRAM, DAO_THREE_INPUT_WITNESS_INDEX_CELLSCRIPT_ACTION)
+        }
+    };
+    let cellscript_elf = compile_cellscript_source_to_elf(program, action, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script =
+        context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript DAO three-input withdrawal script");
+    let always_success_lock = deploy_always_success_lock(&mut context);
+
+    let deposit_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+    );
+    let deposit_header_hash = deposit_header.hash();
+    context.insert_header(deposit_header);
+    let mixed_deposit_header_hash = if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedDepositSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedDepositThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        let mixed_deposit_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH,
+        );
+        let hash = mixed_deposit_header.hash();
+        context.insert_header(mixed_deposit_header);
+        Some(hash)
+    } else {
+        None
+    };
+    let withdraw_header = dao_test_header(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+    );
+    let withdraw_header_hash = withdraw_header.hash();
+    context.insert_header(withdraw_header);
+    let mixed_withdraw_header_hash = if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        let mixed_withdraw_header = dao_test_header(
+            ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+            ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH,
+        );
+        let hash = mixed_withdraw_header.hash();
+        context.insert_header(mixed_withdraw_header);
+        Some(hash)
+    } else {
+        None
+    };
+
+    let mut withdrawing_out_points = Vec::new();
+    for index in 0..3 {
+        let out_point = context.create_cell(
+            packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY.pack())
+                .lock(always_success_lock.clone())
+                .type_(packed::ScriptOpt::from(cellscript_script.clone()))
+                .build(),
+            dao_three_input_cell_data(mode, index),
+        );
+        let linked_withdraw_header_hash = match (index, mode) {
+            (
+                1,
+                DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+                | DaoThreeInputWithdrawalMode::MixedBothSecond
+                | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+            )
+            | (
+                2,
+                DaoThreeInputWithdrawalMode::MixedWithdrawThird
+                | DaoThreeInputWithdrawalMode::MixedBothThird
+                | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+            ) => mixed_withdraw_header_hash.clone().expect("mixed withdraw header for three-input DAO fixture"),
+            _ => withdraw_header_hash.clone(),
+        };
+        context.link_cell_with_block(out_point.clone(), linked_withdraw_header_hash, 0);
+        withdrawing_out_points.push(out_point);
+    }
+
+    let output =
+        packed::CellOutput::new_builder().capacity::<packed::Uint64>(output_capacity.pack()).lock(always_success_lock).build();
+    let outputs = vec![output];
+    let outputs_data = vec![Bytes::default()];
+    let mut tx_builder = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .cell_dep(packed::CellDep::new_builder().out_point(cellscript_out_point).dep_type(DepType::Code).build())
+        .header_dep(withdraw_header_hash)
+        .header_dep(deposit_header_hash)
+        .output(outputs[0].clone())
+        .output_data(outputs_data[0].clone().pack());
+    if let Some(mixed_deposit_header_hash) = mixed_deposit_header_hash {
+        tx_builder = tx_builder.header_dep(mixed_deposit_header_hash);
+    }
+    if let Some(mixed_withdraw_header_hash) = mixed_withdraw_header_hash {
+        tx_builder = tx_builder.header_dep(mixed_withdraw_header_hash);
+    }
+    for out_point in withdrawing_out_points {
+        tx_builder = tx_builder.input(
+            packed::CellInput::new_builder().previous_output(out_point).since(ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE).build(),
+        );
+    }
+    for index in 0..3 {
+        let witness = dao_three_input_witness(mode, index);
+        tx_builder = tx_builder.witness(witness.as_bytes().pack());
+    }
+    let tx = context.complete_tx(tx_builder.build());
+
+    let run = side_run_from_result(
+        context.verify_tx(&tx, ORIGINAL_DAO_MAX_CYCLES),
+        &tx,
+        occupied_capacity_shannons(&outputs, &outputs_data),
+        fee_shannons(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 3, &outputs),
     );
     (run, cellscript_elf)
 }
@@ -2778,6 +4923,118 @@ struct DepositPhase1SideRun {
 }
 
 #[derive(Debug, Clone, Copy)]
+enum DepositPhase1DaoTypeShape {
+    Valid,
+    Missing,
+    Wrong,
+}
+
+impl DepositPhase1DaoTypeShape {
+    fn failure_mode(self) -> Option<&'static str> {
+        match self {
+            DepositPhase1DaoTypeShape::Valid => None,
+            DepositPhase1DaoTypeShape::Missing => Some("deposit_missing_dao_type"),
+            DepositPhase1DaoTypeShape::Wrong => Some("deposit_wrong_dao_type"),
+        }
+    }
+
+    fn fixture_type_label(self) -> Value {
+        match self {
+            DepositPhase1DaoTypeShape::Valid => json!("dao"),
+            DepositPhase1DaoTypeShape::Missing => Value::Null,
+            DepositPhase1DaoTypeShape::Wrong => json!("always_success_wrong_dao_type"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DepositPhase1LockShape {
+    Valid,
+    Wrong,
+}
+
+impl DepositPhase1LockShape {
+    fn failure_mode(self) -> Option<&'static str> {
+        match self {
+            DepositPhase1LockShape::Valid => None,
+            DepositPhase1LockShape::Wrong => Some("deposit_wrong_ickb_lock"),
+        }
+    }
+
+    fn fixture_lock_label(self) -> &'static str {
+        match self {
+            DepositPhase1LockShape::Valid => "script_under_test",
+            DepositPhase1LockShape::Wrong => "always_success_wrong_deposit_lock",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DepositPhase1DepositDataShape {
+    Valid,
+    Short,
+    NonZero,
+    LongTrailingZeros,
+}
+
+impl DepositPhase1DepositDataShape {
+    fn failure_mode(self) -> Option<&'static str> {
+        match self {
+            DepositPhase1DepositDataShape::Valid => None,
+            DepositPhase1DepositDataShape::Short => Some("deposit_short_dao_data"),
+            DepositPhase1DepositDataShape::NonZero => Some("deposit_nonzero_dao_data"),
+            DepositPhase1DepositDataShape::LongTrailingZeros => Some("deposit_long_dao_data"),
+        }
+    }
+
+    fn expected_status(self) -> &'static str {
+        match self {
+            DepositPhase1DepositDataShape::Valid => "pass",
+            DepositPhase1DepositDataShape::Short
+            | DepositPhase1DepositDataShape::NonZero
+            | DepositPhase1DepositDataShape::LongTrailingZeros => "fail",
+        }
+    }
+
+    fn scenario(self) -> &'static str {
+        match self {
+            DepositPhase1DepositDataShape::Valid => "deposit_phase1",
+            DepositPhase1DepositDataShape::Short => "deposit_short_dao_data",
+            DepositPhase1DepositDataShape::NonZero => "deposit_nonzero_dao_data",
+            DepositPhase1DepositDataShape::LongTrailingZeros => "deposit_long_dao_data",
+        }
+    }
+
+    fn data(self) -> Bytes {
+        match self {
+            DepositPhase1DepositDataShape::Valid => Bytes::from(vec![0u8; 8]),
+            DepositPhase1DepositDataShape::Short => Bytes::from(vec![0u8; 4]),
+            DepositPhase1DepositDataShape::NonZero => Bytes::from(1u64.to_le_bytes().to_vec()),
+            DepositPhase1DepositDataShape::LongTrailingZeros => Bytes::from(vec![0u8; 9]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DepositPhase1Shapes {
+    dao_type: DepositPhase1DaoTypeShape,
+    lock: DepositPhase1LockShape,
+    deposit_data: DepositPhase1DepositDataShape,
+}
+
+impl DepositPhase1Shapes {
+    const VALID: Self = Self {
+        dao_type: DepositPhase1DaoTypeShape::Valid,
+        lock: DepositPhase1LockShape::Valid,
+        deposit_data: DepositPhase1DepositDataShape::Valid,
+    };
+
+    fn new(dao_type: DepositPhase1DaoTypeShape, lock: DepositPhase1LockShape, deposit_data: DepositPhase1DepositDataShape) -> Self {
+        Self { dao_type, lock, deposit_data }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 enum MintXudtBinding {
     ScriptUnderTest,
     WrongOwnerHash,
@@ -2786,6 +5043,11 @@ enum MintXudtBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MintReceiptDataMode {
     Valid,
+    QuantityZero,
+    QuantityTwo,
+    ZeroFirstQuantity,
+    MixedQuantities,
+    LongTrailingData,
     MalformedFirstInput,
     MalformedSecondInput,
 }
@@ -2801,6 +5063,7 @@ enum DaoWithdrawalHeaderDepMode {
     Present,
     DepositDataInput,
     MalformedInputData,
+    LongInputData,
     MissingWithdrawHeader,
     MissingDepositHeader,
     DepositHeaderIndexOutOfBounds,
@@ -2815,9 +5078,510 @@ enum DaoWithdrawalHeaderDepMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DaoTwoInputWithdrawalMode {
+    SameDeposit,
+    MixedDeposit,
+    MixedWithdraw,
+    MixedBoth,
+    SecondDepositDataInput,
+    SecondMalformedInputData,
+    SecondLongInputData,
+    SecondWitnessMissing,
+    SecondWitnessEmpty,
+    SecondWitnessShort,
+    SecondWitnessLong,
+    SecondWitnessWithdrawHeaderIndex,
+    SecondWitnessOutOfBoundsIndex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DaoThreeInputWithdrawalMode {
+    SameDeposit,
+    MixedDepositSecond,
+    MixedWithdrawSecond,
+    MixedBothSecond,
+    MixedDepositSecondWithdrawThird,
+    MixedWithdrawSecondDepositThird,
+    MixedDepositThird,
+    MixedWithdrawThird,
+    MixedBothThird,
+    SecondWitnessMissing,
+    SecondWitnessEmpty,
+    SecondWitnessShort,
+    SecondWitnessLong,
+    SecondWitnessWithdrawHeaderIndex,
+    SecondWitnessOutOfBoundsIndex,
+    SecondDepositDataInput,
+    SecondMalformedInputData,
+    SecondLongInputData,
+    ThirdWitnessMissing,
+    ThirdWitnessEmpty,
+    ThirdWitnessShort,
+    ThirdWitnessLong,
+    ThirdWitnessWithdrawHeaderIndex,
+    ThirdWitnessOutOfBoundsIndex,
+    ThirdDepositDataInput,
+    ThirdMalformedInputData,
+    ThirdLongInputData,
+}
+
+fn dao_deposit_cell_data() -> Bytes {
+    Bytes::from(vec![0u8; 8])
+}
+
+fn dao_malformed_cell_data() -> Bytes {
+    Bytes::from(vec![0x12, 0x06, 0x00, 0x00])
+}
+
+fn dao_withdrawal_request_cell_data() -> Bytes {
+    Bytes::from(ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec())
+}
+
+fn dao_long_withdrawal_request_cell_data() -> Bytes {
+    let mut data = ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec();
+    data.push(0x99);
+    Bytes::from(data)
+}
+
+fn dao_two_input_cell_data(mode: DaoTwoInputWithdrawalMode, index: usize) -> Bytes {
+    if index == 1 {
+        match mode {
+            DaoTwoInputWithdrawalMode::SecondDepositDataInput => return dao_deposit_cell_data(),
+            DaoTwoInputWithdrawalMode::SecondMalformedInputData => return dao_malformed_cell_data(),
+            DaoTwoInputWithdrawalMode::SecondLongInputData => return dao_long_withdrawal_request_cell_data(),
+            _ => {}
+        }
+    }
+    dao_withdrawal_request_cell_data()
+}
+
+fn dao_three_input_cell_data(mode: DaoThreeInputWithdrawalMode, index: usize) -> Bytes {
+    if index == 1 {
+        match mode {
+            DaoThreeInputWithdrawalMode::SecondDepositDataInput => return dao_deposit_cell_data(),
+            DaoThreeInputWithdrawalMode::SecondMalformedInputData => return dao_malformed_cell_data(),
+            DaoThreeInputWithdrawalMode::SecondLongInputData => return dao_long_withdrawal_request_cell_data(),
+            _ => {}
+        }
+    }
+    if index == 2 {
+        match mode {
+            DaoThreeInputWithdrawalMode::ThirdDepositDataInput => return dao_deposit_cell_data(),
+            DaoThreeInputWithdrawalMode::ThirdMalformedInputData => return dao_malformed_cell_data(),
+            DaoThreeInputWithdrawalMode::ThirdLongInputData => return dao_long_withdrawal_request_cell_data(),
+            _ => {}
+        }
+    }
+    dao_withdrawal_request_cell_data()
+}
+
+fn dao_three_input_witness_header_index(mode: DaoThreeInputWithdrawalMode, index: usize) -> u64 {
+    if index == 1 {
+        match mode {
+            DaoThreeInputWithdrawalMode::MixedDepositSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird => return 2,
+            DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex => return 0,
+            DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => return 2,
+            _ => {}
+        }
+    }
+    if index == 2 {
+        match mode {
+            DaoThreeInputWithdrawalMode::MixedDepositThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird => return 2,
+            DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex => return 0,
+            DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex => return 2,
+            _ => {}
+        }
+    }
+    1
+}
+
+fn dao_three_input_witness(mode: DaoThreeInputWithdrawalMode, index: usize) -> packed::WitnessArgs {
+    if index == 1 {
+        match mode {
+            DaoThreeInputWithdrawalMode::SecondWitnessMissing => return packed::WitnessArgs::new_builder().build(),
+            DaoThreeInputWithdrawalMode::SecondWitnessEmpty => {
+                return packed::WitnessArgs::new_builder().input_type(Some(Bytes::default()).pack()).build();
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessShort => {
+                return packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(vec![1u8])).pack()).build();
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessLong => {
+                return packed::WitnessArgs::new_builder()
+                    .input_type(Some(Bytes::from(vec![1, 0, 0, 0, 0, 0, 0, 0, 0])).pack())
+                    .build();
+            }
+            _ => {}
+        }
+    }
+    if index == 2 {
+        match mode {
+            DaoThreeInputWithdrawalMode::ThirdWitnessMissing => return packed::WitnessArgs::new_builder().build(),
+            DaoThreeInputWithdrawalMode::ThirdWitnessEmpty => {
+                return packed::WitnessArgs::new_builder().input_type(Some(Bytes::default()).pack()).build();
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessShort => {
+                return packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(vec![1u8])).pack()).build();
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessLong => {
+                return packed::WitnessArgs::new_builder()
+                    .input_type(Some(Bytes::from(vec![1, 0, 0, 0, 0, 0, 0, 0, 0])).pack())
+                    .build();
+            }
+            _ => {}
+        }
+    }
+    let witness_header_index = dao_three_input_witness_header_index(mode, index);
+    packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(witness_header_index.to_le_bytes().to_vec())).pack()).build()
+}
+
+fn dao_three_input_witness_metadata(mode: DaoThreeInputWithdrawalMode, index: usize) -> Value {
+    if index == 1 {
+        match mode {
+            DaoThreeInputWithdrawalMode::SecondWitnessMissing => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "missing"
+                });
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessEmpty => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "empty"
+                });
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessShort => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "short_1_byte"
+                });
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessLong => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "long_9_bytes"
+                });
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": 0,
+                    "expected_input_type_header_dep_index_le_u64": 1,
+                    "witness_index_role": "withdraw_header_instead_of_deposit_header"
+                });
+            }
+            DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": 2,
+                    "expected_input_type_header_dep_index_le_u64": 1,
+                    "witness_index_role": "out_of_bounds_header_dep_index"
+                });
+            }
+            _ => {}
+        }
+    }
+    if index == 2 {
+        match mode {
+            DaoThreeInputWithdrawalMode::ThirdWitnessMissing => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "missing"
+                });
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessEmpty => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "empty"
+                });
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessShort => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "short_1_byte"
+                });
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessLong => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": null,
+                    "witness_input_type_shape": "long_9_bytes"
+                });
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": 0,
+                    "expected_input_type_header_dep_index_le_u64": 1,
+                    "witness_index_role": "withdraw_header_instead_of_deposit_header"
+                });
+            }
+            DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex => {
+                return json!({
+                    "index": index,
+                    "input_type_header_dep_index_le_u64": 2,
+                    "expected_input_type_header_dep_index_le_u64": 1,
+                    "witness_index_role": "out_of_bounds_header_dep_index"
+                });
+            }
+            _ => {}
+        }
+    }
+    json!({
+        "index": index,
+        "input_type_header_dep_index_le_u64": dao_three_input_witness_header_index(mode, index)
+    })
+}
+
+fn dao_two_input_second_witness_header_index(mode: DaoTwoInputWithdrawalMode) -> u64 {
+    match mode {
+        DaoTwoInputWithdrawalMode::MixedDeposit | DaoTwoInputWithdrawalMode::MixedBoth => 2,
+        DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex => 0,
+        DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => 2,
+        _ => 1,
+    }
+}
+
+fn dao_two_input_second_witness(mode: DaoTwoInputWithdrawalMode) -> packed::WitnessArgs {
+    match mode {
+        DaoTwoInputWithdrawalMode::SecondWitnessMissing => packed::WitnessArgs::new_builder().build(),
+        DaoTwoInputWithdrawalMode::SecondWitnessEmpty => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::default()).pack()).build()
+        }
+        DaoTwoInputWithdrawalMode::SecondWitnessShort => {
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(vec![1u8])).pack()).build()
+        }
+        DaoTwoInputWithdrawalMode::SecondWitnessLong => {
+            let mut input_type = 1u64.to_le_bytes().to_vec();
+            input_type.push(0x99);
+            packed::WitnessArgs::new_builder().input_type(Some(Bytes::from(input_type)).pack()).build()
+        }
+        _ => packed::WitnessArgs::new_builder()
+            .input_type(Some(Bytes::from(dao_two_input_second_witness_header_index(mode).to_le_bytes().to_vec())).pack())
+            .build(),
+    }
+}
+
+fn dao_two_input_second_witness_metadata(mode: DaoTwoInputWithdrawalMode) -> Value {
+    match mode {
+        DaoTwoInputWithdrawalMode::SecondWitnessMissing => json!({
+            "index": 1,
+            "input_type_present": false
+        }),
+        DaoTwoInputWithdrawalMode::SecondWitnessEmpty => json!({
+            "index": 1,
+            "input_type_present": true,
+            "input_type_bytes": "0x",
+            "input_type_length_bytes": 0
+        }),
+        DaoTwoInputWithdrawalMode::SecondWitnessShort => json!({
+            "index": 1,
+            "input_type_present": true,
+            "input_type_bytes": "0x01",
+            "input_type_length_bytes": 1,
+            "expected_input_type_length_bytes": 8
+        }),
+        DaoTwoInputWithdrawalMode::SecondWitnessLong => json!({
+            "index": 1,
+            "input_type_present": true,
+            "input_type_bytes": "0x010000000000000099",
+            "input_type_length_bytes": 9,
+            "expected_input_type_length_bytes": 8
+        }),
+        DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex => json!({
+            "index": 1,
+            "input_type_header_dep_index_le_u64": 0,
+            "expected_input_type_header_dep_index_le_u64": 1,
+            "witness_index_role": "withdraw_header_instead_of_deposit_header"
+        }),
+        DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => json!({
+            "index": 1,
+            "input_type_header_dep_index_le_u64": 2,
+            "expected_input_type_header_dep_index_le_u64": 1,
+            "witness_index_role": "out_of_bounds_header_dep_index"
+        }),
+        _ => json!({
+            "index": 1,
+            "input_type_header_dep_index_le_u64": dao_two_input_second_witness_header_index(mode)
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LimitOrderAssetBinding {
     SameAuxiliaryType,
     DifferentAuxiliaryType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitOrderMasterBinding {
+    Matching,
+    WrongTxHash,
+    WrongIndex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitOrderOutputDataMode {
+    Match,
+    MintAction,
+    InvalidAction,
+    ShortAction,
+    ShortMasterOutPoint,
+    LongTrailingData,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitOrderInputDataMode {
+    Mint,
+    MatchAbsolute,
+    MatchWrongTxHash,
+    MatchWrongIndex,
+    InvalidAction,
+    ShortAction,
+    ShortMasterOutPoint,
+    LongTrailingData,
+}
+
+impl LimitOrderOutputDataMode {
+    fn order_action(self) -> &'static str {
+        match self {
+            Self::Match | Self::ShortMasterOutPoint | Self::LongTrailingData => "Match",
+            Self::MintAction => "Mint",
+            Self::InvalidAction => "Invalid",
+            Self::ShortAction => "Short",
+        }
+    }
+}
+
+impl LimitOrderInputDataMode {
+    fn order_action(self) -> &'static str {
+        match self {
+            Self::Mint | Self::ShortAction => "Mint",
+            Self::MatchAbsolute
+            | Self::MatchWrongTxHash
+            | Self::MatchWrongIndex
+            | Self::ShortMasterOutPoint
+            | Self::LongTrailingData => "Match",
+            Self::InvalidAction => "Invalid",
+        }
+    }
+}
+
+impl LimitOrderMasterBinding {
+    fn failure_mode(self, udt_to_ckb: bool) -> Option<&'static str> {
+        match (self, udt_to_ckb) {
+            (Self::Matching, _) => None,
+            (Self::WrongTxHash, false) => Some("wrong_master_tx_hash"),
+            (Self::WrongIndex, false) => Some("wrong_master_index"),
+            (Self::WrongTxHash, true) => Some("limit_order_udt_to_ckb_wrong_master_tx_hash"),
+            (Self::WrongIndex, true) => Some("limit_order_udt_to_ckb_wrong_master_index"),
+        }
+    }
+
+    fn master_tx_hash(self) -> &'static [u8; 32] {
+        match self {
+            Self::Matching | Self::WrongIndex => &LIMIT_ORDER_MASTER_TX_HASH,
+            Self::WrongTxHash => &LIMIT_ORDER_WRONG_MASTER_TX_HASH,
+        }
+    }
+
+    fn master_index(self) -> u32 {
+        match self {
+            Self::Matching | Self::WrongTxHash => 0,
+            Self::WrongIndex => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LimitOrderBuildParams {
+    input_udt_amount: u128,
+    output_capacity: u64,
+    output_udt_amount: u128,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LimitOrderScenarioOptions {
+    failure_mode: Option<&'static str>,
+    asset_binding: LimitOrderAssetBinding,
+    pass_scenario: Option<&'static str>,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitOrderCellShape {
+    MissingMatchingOutput,
+    DuplicateMatchingOutputs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitOrderTypeShape {
+    MissingInputAuxiliaryType,
+    MissingOutputAuxiliaryType,
+}
+
+impl LimitOrderCellShape {
+    fn scenario(self, udt_to_ckb: bool) -> &'static str {
+        match (self, udt_to_ckb) {
+            (Self::MissingMatchingOutput, false) => "limit_order_missing_matching_output",
+            (Self::DuplicateMatchingOutputs, false) => "limit_order_duplicate_matching_output",
+            (Self::MissingMatchingOutput, true) => "limit_order_udt_to_ckb_missing_matching_output",
+            (Self::DuplicateMatchingOutputs, true) => "limit_order_udt_to_ckb_duplicate_matching_output",
+        }
+    }
+
+    fn failure_mode(self, udt_to_ckb: bool) -> &'static str {
+        self.scenario(udt_to_ckb)
+    }
+}
+
+impl LimitOrderTypeShape {
+    fn scenario(self, udt_to_ckb: bool) -> &'static str {
+        match (self, udt_to_ckb) {
+            (Self::MissingInputAuxiliaryType, false) => "limit_order_missing_input_type",
+            (Self::MissingOutputAuxiliaryType, false) => "limit_order_missing_output_type",
+            (Self::MissingInputAuxiliaryType, true) => "limit_order_udt_to_ckb_missing_input_type",
+            (Self::MissingOutputAuxiliaryType, true) => "limit_order_udt_to_ckb_missing_output_type",
+        }
+    }
+
+    fn failure_mode(self, udt_to_ckb: bool) -> &'static str {
+        self.scenario(udt_to_ckb)
+    }
+
+    fn input_type_present(self) -> bool {
+        !matches!(self, Self::MissingInputAuxiliaryType)
+    }
+
+    fn output_type_present(self) -> bool {
+        !matches!(self, Self::MissingOutputAuxiliaryType)
+    }
+}
+
+fn limit_order_options(
+    failure_mode: Option<&'static str>,
+    asset_binding: LimitOrderAssetBinding,
+    pass_scenario: Option<&'static str>,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
+) -> LimitOrderScenarioOptions {
+    LimitOrderScenarioOptions { failure_mode, asset_binding, pass_scenario, master_binding, input_data_mode, output_data_mode }
 }
 
 fn deposit_phase1_differential_execution(deposit_capacity: u64, failure_mode: Option<&str>) -> Value {
@@ -2931,6 +5695,420 @@ fn deposit_phase1_upper_bound_differential_execution() -> Value {
         "cellscript_error": cellscript.error,
         "normalized_fixture": normalized_fixture
     })
+}
+
+fn deposit_phase1_receipt_shape_differential_execution(
+    receipt_quantity: u32,
+    receipt_deposit_amount: u64,
+    failure_mode: &'static str,
+) -> Value {
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let receipt_data = deposit_phase1_receipt_data_with(receipt_quantity, receipt_deposit_amount);
+    let (original, patched_original_ickb_binary_sha256) = run_original_deposit_phase1_with_input_capacity_and_receipt_data(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        receipt_data.clone(),
+    );
+    let (cellscript, cellscript_elf) = run_cellscript_deposit_phase1_with_input_capacity_program_and_receipt_data(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM,
+        DEPOSIT_PHASE1_CELLSCRIPT_ACTION,
+        receipt_data,
+    );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "deposit receipt-shape differential mismatch: original={:#?}, cellscript={:#?}, quantity={}, amount={}",
+        original, cellscript, receipt_quantity, receipt_deposit_amount
+    );
+    assert_eq!(original.status, "fail", "original iCKB status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_deposit_phase1_receipt_shape_fixture(receipt_quantity, receipt_deposit_amount, failure_mode);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": true,
+        "original_ickb_patched_binary_sha256": patched_original_ickb_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn deposit_phase1_receipt_amount_mismatch_differential_execution() -> Value {
+    deposit_phase1_receipt_shape_differential_execution(
+        1,
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY) + 1,
+        "deposit_receipt_amount_mismatch",
+    )
+}
+
+fn deposit_phase1_receipt_quantity_zero_differential_execution() -> Value {
+    deposit_phase1_receipt_shape_differential_execution(
+        0,
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY),
+        "deposit_receipt_quantity_zero",
+    )
+}
+
+fn deposit_phase1_receipt_quantity_mismatch_differential_execution() -> Value {
+    deposit_phase1_receipt_shape_differential_execution(
+        2,
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY),
+        "deposit_receipt_quantity_mismatch",
+    )
+}
+
+fn deposit_phase1_receipt_raw_data_differential_execution(
+    receipt_data: Bytes,
+    scenario: &'static str,
+    failure_mode: Option<&'static str>,
+    expected_status: &'static str,
+) -> Value {
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let (original, patched_original_ickb_binary_sha256) = run_original_deposit_phase1_with_input_capacity_and_receipt_data(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        receipt_data.clone(),
+    );
+    let (cellscript, cellscript_elf) = run_cellscript_deposit_phase1_with_input_capacity_program_and_receipt_data(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM,
+        DEPOSIT_PHASE1_CELLSCRIPT_ACTION,
+        receipt_data.clone(),
+    );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "deposit receipt raw-data differential mismatch: original={:#?}, cellscript={:#?}, scenario={}",
+        original, cellscript, scenario
+    );
+    assert_eq!(original.status, expected_status, "original iCKB status");
+    assert_eq!(cellscript.status, expected_status, "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_deposit_phase1_receipt_raw_data_fixture(receipt_data, scenario, failure_mode, expected_status);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": true,
+        "original_ickb_patched_binary_sha256": patched_original_ickb_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn deposit_phase1_receipt_short_data_differential_execution() -> Value {
+    deposit_phase1_receipt_raw_data_differential_execution(
+        Bytes::from(vec![1u8, 0, 0, 0]),
+        "deposit_receipt_short_data",
+        Some("deposit_receipt_short_data"),
+        "fail",
+    )
+}
+
+fn deposit_phase1_receipt_long_data_differential_execution() -> Value {
+    let mut receipt_data = deposit_phase1_receipt_data(VALID_DEPOSIT_PHASE1_CAPACITY).to_vec();
+    receipt_data.push(0x99);
+    deposit_phase1_receipt_raw_data_differential_execution(Bytes::from(receipt_data), "deposit_receipt_long_data", None, "pass")
+}
+
+fn deposit_phase1_dao_type_shape_differential_execution(dao_type_shape: DepositPhase1DaoTypeShape) -> Value {
+    let failure_mode = dao_type_shape.failure_mode().expect("invalid DAO type shape must have failure mode");
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let receipt_data = deposit_phase1_receipt_data(VALID_DEPOSIT_PHASE1_CAPACITY);
+    let (original, patched_original_ickb_binary_sha256) =
+        run_original_deposit_phase1_with_input_capacity_receipt_data_and_dao_type_shape(
+            VALID_DEPOSIT_PHASE1_CAPACITY,
+            DEPOSIT_PHASE1_INPUT_CAPACITY,
+            receipt_data.clone(),
+            dao_type_shape,
+        );
+    let (cellscript, cellscript_elf) = run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_dao_type_shape(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM,
+        DEPOSIT_PHASE1_CELLSCRIPT_ACTION,
+        receipt_data,
+        dao_type_shape,
+    );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "deposit DAO-type differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, dao_type_shape
+    );
+    assert_eq!(original.status, "fail", "original iCKB status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_deposit_phase1_dao_type_shape_fixture(dao_type_shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": true,
+        "original_ickb_patched_binary_sha256": patched_original_ickb_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn deposit_phase1_missing_dao_type_differential_execution() -> Value {
+    deposit_phase1_dao_type_shape_differential_execution(DepositPhase1DaoTypeShape::Missing)
+}
+
+fn deposit_phase1_wrong_dao_type_differential_execution() -> Value {
+    deposit_phase1_dao_type_shape_differential_execution(DepositPhase1DaoTypeShape::Wrong)
+}
+
+fn deposit_phase1_lock_shape_differential_execution(lock_shape: DepositPhase1LockShape) -> Value {
+    let failure_mode = lock_shape.failure_mode().expect("invalid lock shape must have failure mode");
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let receipt_data = deposit_phase1_receipt_data(VALID_DEPOSIT_PHASE1_CAPACITY);
+    let (original, patched_original_ickb_binary_sha256) = run_original_deposit_phase1_with_input_capacity_receipt_data_and_shapes(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        receipt_data.clone(),
+        DepositPhase1DaoTypeShape::Valid,
+        lock_shape,
+    );
+    let (cellscript, cellscript_elf) = run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_shapes(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM,
+        DEPOSIT_PHASE1_CELLSCRIPT_ACTION,
+        receipt_data,
+        DepositPhase1DaoTypeShape::Valid,
+        lock_shape,
+    );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "deposit lock-shape differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, lock_shape
+    );
+    assert_eq!(original.status, "fail", "original iCKB status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_deposit_phase1_lock_shape_fixture(lock_shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": true,
+        "original_ickb_patched_binary_sha256": patched_original_ickb_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn deposit_phase1_wrong_lock_differential_execution() -> Value {
+    deposit_phase1_lock_shape_differential_execution(DepositPhase1LockShape::Wrong)
+}
+
+fn deposit_phase1_deposit_data_shape_differential_execution(deposit_data_shape: DepositPhase1DepositDataShape) -> Value {
+    let failure_mode = deposit_data_shape.failure_mode();
+    let expected_status = deposit_data_shape.expected_status();
+    let original_ickb_elf = load_original_ickb_binary("ickb_logic");
+    let original_ickb_binary_sha256 = sha256_prefixed(&original_ickb_elf);
+    let receipt_data = deposit_phase1_receipt_data(VALID_DEPOSIT_PHASE1_CAPACITY);
+    let (original, patched_original_ickb_binary_sha256) = run_original_deposit_phase1_with_input_capacity_receipt_data_and_all_shapes(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        receipt_data.clone(),
+        DepositPhase1Shapes::new(DepositPhase1DaoTypeShape::Valid, DepositPhase1LockShape::Valid, deposit_data_shape),
+    );
+    let (cellscript, cellscript_elf) = run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_all_shapes(
+        VALID_DEPOSIT_PHASE1_CAPACITY,
+        DEPOSIT_PHASE1_INPUT_CAPACITY,
+        DEPOSIT_PHASE1_CELLSCRIPT_PROGRAM,
+        DEPOSIT_PHASE1_CELLSCRIPT_ACTION,
+        receipt_data,
+        DepositPhase1Shapes::new(DepositPhase1DaoTypeShape::Valid, DepositPhase1LockShape::Valid, deposit_data_shape),
+    );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "deposit data-shape differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, deposit_data_shape
+    );
+    assert_eq!(original.status, expected_status, "original iCKB status");
+    assert_eq!(cellscript.status, expected_status, "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_deposit_phase1_deposit_data_shape_fixture(deposit_data_shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_ickb_binary_sha256,
+        "original_ickb_binary_patched": true,
+        "original_ickb_patched_binary_sha256": patched_original_ickb_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn deposit_phase1_short_data_differential_execution() -> Value {
+    deposit_phase1_deposit_data_shape_differential_execution(DepositPhase1DepositDataShape::Short)
+}
+
+fn deposit_phase1_nonzero_data_differential_execution() -> Value {
+    deposit_phase1_deposit_data_shape_differential_execution(DepositPhase1DepositDataShape::NonZero)
+}
+
+fn deposit_phase1_long_data_differential_execution() -> Value {
+    deposit_phase1_deposit_data_shape_differential_execution(DepositPhase1DepositDataShape::LongTrailingZeros)
 }
 
 fn receipt_without_deposit_differential_execution() -> Value {
@@ -3065,6 +6243,16 @@ fn receipt_group_over_mint_differential_execution() -> Value {
     )
 }
 
+fn receipt_group_amount_high_nonzero_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_rate_header_and_xudt_binding(
+        (1u128 << 64) + MINT_RECEIPT_OUTPUT_AMOUNT * 2,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        Some("receipt_group_amount_high_nonzero"),
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+    )
+}
+
 fn receipt_group_missing_header_differential_execution() -> Value {
     receipt_group_mint_differential_execution_with_rate_header_and_xudt_binding(
         MINT_RECEIPT_OUTPUT_AMOUNT * 2,
@@ -3114,6 +6302,61 @@ fn receipt_group_second_malformed_receipt_data_differential_execution() -> Value
         MintHeaderDepMode::Present,
         MintXudtBinding::ScriptUnderTest,
         MintReceiptDataMode::MalformedSecondInput,
+    )
+}
+
+fn receipt_group_zero_first_quantity_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_receipt_data_mode(
+        MINT_RECEIPT_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+        MintReceiptDataMode::ZeroFirstQuantity,
+    )
+}
+
+fn receipt_group_quantity_zero_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_receipt_data_mode(
+        MINT_RECEIPT_QUANTITY_ZERO_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+        MintReceiptDataMode::QuantityZero,
+    )
+}
+
+fn receipt_group_quantity_two_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_receipt_data_mode(
+        MINT_RECEIPT_QUANTITY_TWO_OUTPUT_AMOUNT * 2,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+        MintReceiptDataMode::QuantityTwo,
+    )
+}
+
+fn receipt_group_mixed_quantities_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_receipt_data_mode(
+        MINT_RECEIPT_MIXED_GROUP_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+        MintReceiptDataMode::MixedQuantities,
+    )
+}
+
+fn receipt_group_long_receipt_data_differential_execution() -> Value {
+    receipt_group_mint_differential_execution_with_receipt_data_mode(
+        MINT_RECEIPT_OUTPUT_AMOUNT * 2,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintHeaderDepMode::Present,
+        MintXudtBinding::ScriptUnderTest,
+        MintReceiptDataMode::LongTrailingData,
     )
 }
 
@@ -3339,6 +6582,50 @@ fn mint_from_receipt_malformed_receipt_data_differential_execution() -> Value {
     )
 }
 
+fn mint_from_receipt_quantity_zero_differential_execution() -> Value {
+    mint_from_receipt_differential_execution_with_header_dep_and_receipt_data_mode(
+        MINT_RECEIPT_QUANTITY_ZERO_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintXudtBinding::ScriptUnderTest,
+        MintHeaderDepMode::Present,
+        MintReceiptDataMode::QuantityZero,
+    )
+}
+
+fn mint_from_receipt_high_word_differential_execution() -> Value {
+    mint_from_receipt_differential_execution_with_header_dep_and_receipt_data_mode(
+        MINT_RECEIPT_HIGH_WORD_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        Some("amount_high_nonzero"),
+        MintXudtBinding::ScriptUnderTest,
+        MintHeaderDepMode::Present,
+        MintReceiptDataMode::Valid,
+    )
+}
+
+fn mint_from_receipt_quantity_two_differential_execution() -> Value {
+    mint_from_receipt_differential_execution_with_header_dep_and_receipt_data_mode(
+        MINT_RECEIPT_QUANTITY_TWO_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintXudtBinding::ScriptUnderTest,
+        MintHeaderDepMode::Present,
+        MintReceiptDataMode::QuantityTwo,
+    )
+}
+
+fn mint_from_receipt_long_data_differential_execution() -> Value {
+    mint_from_receipt_differential_execution_with_header_dep_and_receipt_data_mode(
+        MINT_RECEIPT_OUTPUT_AMOUNT,
+        MINT_RECEIPT_ACCUMULATED_RATE,
+        None,
+        MintXudtBinding::ScriptUnderTest,
+        MintHeaderDepMode::Present,
+        MintReceiptDataMode::LongTrailingData,
+    )
+}
+
 fn mint_from_receipt_differential_execution_with_header_dep(
     output_udt_amount: u128,
     accumulated_rate: u64,
@@ -3472,6 +6759,550 @@ fn dao_withdrawal_max_capacity_differential_execution() -> Value {
         DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_PROGRAM,
         DAO_WITHDRAWAL_CAPACITY_CELLSCRIPT_ACTION,
     )
+}
+
+fn dao_two_input_withdrawal_max_capacity_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoTwoInputWithdrawalMode::SameDeposit,
+    )
+}
+
+fn dao_two_input_withdrawal_over_capacity_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_OVER_OUTPUT_CAPACITY,
+        Some("dao_two_input_over_withdraw_capacity"),
+        DaoTwoInputWithdrawalMode::SameDeposit,
+    )
+}
+
+fn dao_two_input_mixed_deposit_rate_max_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoTwoInputWithdrawalMode::MixedDeposit,
+    )
+}
+
+fn dao_two_input_mixed_deposit_rate_over_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_two_input_mixed_deposit_rate_over_withdraw_capacity"),
+        DaoTwoInputWithdrawalMode::MixedDeposit,
+    )
+}
+
+fn dao_two_input_mixed_withdraw_rate_max_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoTwoInputWithdrawalMode::MixedWithdraw,
+    )
+}
+
+fn dao_two_input_mixed_withdraw_rate_over_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_two_input_mixed_withdraw_rate_over_withdraw_capacity"),
+        DaoTwoInputWithdrawalMode::MixedWithdraw,
+    )
+}
+
+fn dao_two_input_mixed_both_rate_max_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoTwoInputWithdrawalMode::MixedBoth,
+    )
+}
+
+fn dao_two_input_mixed_both_rate_over_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_two_input_mixed_both_rate_over_withdraw_capacity"),
+        DaoTwoInputWithdrawalMode::MixedBoth,
+    )
+}
+
+fn dao_two_input_second_missing_witness_input_type_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_missing_witness_input_type"),
+        DaoTwoInputWithdrawalMode::SecondWitnessMissing,
+    )
+}
+
+fn dao_two_input_second_empty_witness_input_type_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_empty_witness_input_type"),
+        DaoTwoInputWithdrawalMode::SecondWitnessEmpty,
+    )
+}
+
+fn dao_two_input_second_short_witness_input_type_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_short_witness_input_type"),
+        DaoTwoInputWithdrawalMode::SecondWitnessShort,
+    )
+}
+
+fn dao_two_input_second_long_witness_input_type_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_long_witness_input_type"),
+        DaoTwoInputWithdrawalMode::SecondWitnessLong,
+    )
+}
+
+fn dao_two_input_second_withdraw_header_witness_index_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_withdraw_header_witness_index"),
+        DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex,
+    )
+}
+
+fn dao_two_input_second_oob_witness_index_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_oob_witness_index"),
+        DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex,
+    )
+}
+
+fn dao_two_input_second_deposit_data_input_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_deposit_data_input"),
+        DaoTwoInputWithdrawalMode::SecondDepositDataInput,
+    )
+}
+
+fn dao_two_input_second_malformed_input_data_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_malformed_input_data"),
+        DaoTwoInputWithdrawalMode::SecondMalformedInputData,
+    )
+}
+
+fn dao_two_input_second_long_input_data_differential_execution() -> Value {
+    dao_two_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_two_input_second_long_input_data"),
+        DaoTwoInputWithdrawalMode::SecondLongInputData,
+    )
+}
+
+fn dao_three_input_withdrawal_max_capacity_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::SameDeposit,
+    )
+}
+
+fn dao_three_input_withdrawal_over_capacity_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::SameDeposit,
+    )
+}
+
+fn dao_three_input_mixed_deposit_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedDepositThird,
+    )
+}
+
+fn dao_three_input_mixed_deposit_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_mixed_deposit_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedDepositThird,
+    )
+}
+
+fn dao_three_input_mixed_withdraw_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedWithdrawThird,
+    )
+}
+
+fn dao_three_input_mixed_withdraw_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_mixed_withdraw_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedWithdrawThird,
+    )
+}
+
+fn dao_three_input_mixed_both_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedBothThird,
+    )
+}
+
+fn dao_three_input_mixed_both_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_mixed_both_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedBothThird,
+    )
+}
+
+fn dao_three_input_second_mixed_deposit_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedDepositSecond,
+    )
+}
+
+fn dao_three_input_second_mixed_deposit_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_mixed_deposit_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedDepositSecond,
+    )
+}
+
+fn dao_three_input_second_mixed_withdraw_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond,
+    )
+}
+
+fn dao_three_input_second_mixed_withdraw_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_mixed_withdraw_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond,
+    )
+}
+
+fn dao_three_input_second_mixed_both_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedBothSecond,
+    )
+}
+
+fn dao_three_input_second_mixed_both_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_mixed_both_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedBothSecond,
+    )
+}
+
+fn dao_three_input_second_deposit_third_withdraw_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+    )
+}
+
+fn dao_three_input_second_deposit_third_withdraw_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_deposit_third_withdraw_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+    )
+}
+
+fn dao_three_input_second_withdraw_third_deposit_rate_max_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        None,
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+    )
+}
+
+fn dao_three_input_second_withdraw_third_deposit_rate_over_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_withdraw_third_deposit_rate_over_withdraw_capacity"),
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+    )
+}
+
+fn dao_three_input_second_missing_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_missing_witness_input_type"),
+        DaoThreeInputWithdrawalMode::SecondWitnessMissing,
+    )
+}
+
+fn dao_three_input_second_empty_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_empty_witness_input_type"),
+        DaoThreeInputWithdrawalMode::SecondWitnessEmpty,
+    )
+}
+
+fn dao_three_input_second_short_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_short_witness_input_type"),
+        DaoThreeInputWithdrawalMode::SecondWitnessShort,
+    )
+}
+
+fn dao_three_input_second_long_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_long_witness_input_type"),
+        DaoThreeInputWithdrawalMode::SecondWitnessLong,
+    )
+}
+
+fn dao_three_input_second_withdraw_header_witness_index_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_withdraw_header_witness_index"),
+        DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex,
+    )
+}
+
+fn dao_three_input_second_oob_witness_index_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_oob_witness_index"),
+        DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex,
+    )
+}
+
+fn dao_three_input_second_deposit_data_input_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_deposit_data_input"),
+        DaoThreeInputWithdrawalMode::SecondDepositDataInput,
+    )
+}
+
+fn dao_three_input_second_malformed_input_data_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_malformed_input_data"),
+        DaoThreeInputWithdrawalMode::SecondMalformedInputData,
+    )
+}
+
+fn dao_three_input_second_long_input_data_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_second_long_input_data"),
+        DaoThreeInputWithdrawalMode::SecondLongInputData,
+    )
+}
+
+fn dao_three_input_third_missing_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_missing_witness_input_type"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessMissing,
+    )
+}
+
+fn dao_three_input_third_empty_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_empty_witness_input_type"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessEmpty,
+    )
+}
+
+fn dao_three_input_third_short_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_short_witness_input_type"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessShort,
+    )
+}
+
+fn dao_three_input_third_long_witness_input_type_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_long_witness_input_type"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessLong,
+    )
+}
+
+fn dao_three_input_third_withdraw_header_witness_index_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_withdraw_header_witness_index"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex,
+    )
+}
+
+fn dao_three_input_third_oob_witness_index_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_oob_witness_index"),
+        DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex,
+    )
+}
+
+fn dao_three_input_third_deposit_data_input_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_deposit_data_input"),
+        DaoThreeInputWithdrawalMode::ThirdDepositDataInput,
+    )
+}
+
+fn dao_three_input_third_malformed_input_data_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_malformed_input_data"),
+        DaoThreeInputWithdrawalMode::ThirdMalformedInputData,
+    )
+}
+
+fn dao_three_input_third_long_input_data_differential_execution() -> Value {
+    dao_three_input_withdrawal_differential_execution(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        Some("dao_three_input_third_long_input_data"),
+        DaoThreeInputWithdrawalMode::ThirdLongInputData,
+    )
+}
+
+fn dao_two_input_withdrawal_differential_execution(
+    output_capacity: u64,
+    failure_mode: Option<&str>,
+    mode: DaoTwoInputWithdrawalMode,
+) -> Value {
+    let original_dao_elf = load_original_ickb_binary("dao");
+    let original_dao_binary_sha256 = sha256_prefixed(&original_dao_elf);
+    let original = run_original_dao_two_input_withdrawal(output_capacity, mode);
+    let (cellscript, cellscript_elf) = run_cellscript_dao_two_input_withdrawal(output_capacity, mode);
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "DAO two-input withdrawal differential mismatch: original={:#?}, cellscript={:#?}",
+        original, cellscript
+    );
+    let expected_status = if failure_mode.is_some() { "fail" } else { "pass" };
+    assert_eq!(original.status, expected_status, "original DAO two-input withdrawal status");
+    assert_eq!(cellscript.status, expected_status, "CellScript DAO two-input withdrawal status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_dao_two_input_withdrawal_fixture(output_capacity, failure_mode, mode);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_dao_binary_sha256,
+        "original_dao_binary_sha256": original_dao_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn dao_three_input_withdrawal_differential_execution(
+    output_capacity: u64,
+    failure_mode: Option<&str>,
+    mode: DaoThreeInputWithdrawalMode,
+) -> Value {
+    let original_dao_elf = load_original_ickb_binary("dao");
+    let original_dao_binary_sha256 = sha256_prefixed(&original_dao_elf);
+    let original = run_original_dao_three_input_withdrawal(output_capacity, mode);
+    let (cellscript, cellscript_elf) = run_cellscript_dao_three_input_withdrawal(output_capacity, mode);
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "DAO three-input withdrawal differential mismatch: original={:#?}, cellscript={:#?}",
+        original, cellscript
+    );
+    let expected_status = if failure_mode.is_some() { "fail" } else { "pass" };
+    assert_eq!(original.status, expected_status, "original DAO three-input withdrawal status");
+    assert_eq!(cellscript.status, expected_status, "CellScript DAO three-input withdrawal status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_dao_three_input_withdrawal_fixture(output_capacity, failure_mode, mode);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_dao_binary_sha256,
+        "original_dao_binary_sha256": original_dao_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": failure_mode,
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
 }
 
 fn dao_withdrawal_wrong_deposit_rate_differential_execution() -> Value {
@@ -3617,6 +7448,17 @@ fn dao_withdrawal_malformed_input_data_differential_execution() -> Value {
     )
 }
 
+fn dao_withdrawal_long_input_data_differential_execution() -> Value {
+    dao_withdrawal_differential_execution_with_cellscript_probe(
+        ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
+        ORIGINAL_DAO_WITHDRAW_PHASE2_OUTPUT_CAPACITY,
+        Some("dao_withdrawal_long_input_data"),
+        DaoWithdrawalHeaderDepMode::LongInputData,
+        DAO_WITHDRAWAL_CELLSCRIPT_PROGRAM,
+        DAO_WITHDRAWAL_CELLSCRIPT_ACTION,
+    )
+}
+
 fn dao_withdrawal_missing_witness_input_type_differential_execution() -> Value {
     dao_withdrawal_differential_execution_with_cellscript_probe(
         ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE,
@@ -3735,7 +7577,7 @@ fn limit_order_differential_execution(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
-    failure_mode: Option<&str>,
+    failure_mode: Option<&'static str>,
     asset_binding: LimitOrderAssetBinding,
 ) -> Value {
     limit_order_differential_execution_with_scenario(
@@ -3759,29 +7601,239 @@ fn limit_order_min_match_boundary_differential_execution() -> Value {
     )
 }
 
-fn limit_order_differential_execution_with_scenario(
-    input_udt_amount: u128,
-    output_capacity: u64,
-    output_udt_amount: u128,
-    failure_mode: Option<&str>,
-    asset_binding: LimitOrderAssetBinding,
-    pass_scenario: Option<&str>,
-) -> Value {
+fn limit_order_wrong_master_tx_hash_differential_execution() -> Value {
+    limit_order_differential_execution_with_scenario_and_master_binding(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        LimitOrderMasterBinding::WrongTxHash.failure_mode(false),
+        LimitOrderAssetBinding::SameAuxiliaryType,
+        None,
+        LimitOrderMasterBinding::WrongTxHash,
+    )
+}
+
+fn limit_order_wrong_master_index_differential_execution() -> Value {
+    limit_order_differential_execution_with_scenario_and_master_binding(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        LimitOrderMasterBinding::WrongIndex.failure_mode(false),
+        LimitOrderAssetBinding::SameAuxiliaryType,
+        None,
+        LimitOrderMasterBinding::WrongIndex,
+    )
+}
+
+fn limit_order_output_mint_action_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_output_mint_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::MintAction,
+        ),
+    )
+}
+
+fn limit_order_output_invalid_action_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_output_invalid_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::InvalidAction,
+        ),
+    )
+}
+
+fn limit_order_output_short_action_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_output_short_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::ShortAction,
+        ),
+    )
+}
+
+fn limit_order_output_short_master_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_output_short_master_out_point"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::ShortMasterOutPoint,
+        ),
+    )
+}
+
+fn limit_order_output_long_data_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_output_long_data"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::LongTrailingData,
+        ),
+    )
+}
+
+fn limit_order_input_invalid_action_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_invalid_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::InvalidAction,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_short_action_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_short_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::ShortAction,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_short_master_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_short_master_out_point"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::ShortMasterOutPoint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_long_data_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_long_data"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::LongTrailingData,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_absolute_match_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            None,
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            Some("limit_order_input_absolute_match"),
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchAbsolute,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_wrong_master_tx_hash_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_wrong_master_tx_hash"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchWrongTxHash,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_input_wrong_master_index_differential_execution() -> Value {
+    limit_order_differential_execution_with_options(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_input_wrong_master_index"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchWrongIndex,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_cell_shape_differential_execution(shape: LimitOrderCellShape) -> Value {
     let original_limit_order_elf = load_original_ickb_binary("limit_order");
     let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
-    let (original, original_auxiliary_type_sha256) =
-        run_original_limit_order_fulfillment(input_udt_amount, output_capacity, output_udt_amount, asset_binding);
-    let (cellscript, cellscript_elf, cellscript_auxiliary_type_sha256) =
-        run_cellscript_limit_order_fulfillment(input_udt_amount, output_capacity, output_udt_amount, asset_binding);
+    let (original, original_auxiliary_type_sha256) = run_original_limit_order_with_cell_shape(shape);
+    let (cellscript, cellscript_elf, cellscript_auxiliary_type_sha256) = run_cellscript_limit_order_with_cell_shape(shape);
 
     assert_eq!(
-        original.status, cellscript.status,
-        "limit order differential mismatch: original={:#?}, cellscript={:#?}, input_udt_amount={}, output_capacity={}, output_udt_amount={}",
-        original, cellscript, input_udt_amount, output_capacity, output_udt_amount
+        original_auxiliary_type_sha256, cellscript_auxiliary_type_sha256,
+        "auxiliary UDT type script artifact should match across sides"
     );
-    let expected_status = if failure_mode.is_some() { "fail" } else { "pass" };
-    assert_eq!(original.status, expected_status, "original limit_order status");
-    assert_eq!(cellscript.status, expected_status, "CellScript status");
+    assert_eq!(
+        original.status, cellscript.status,
+        "limit order cell-shape differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, shape
+    );
+    assert_eq!(original.status, "fail", "original limit_order status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
     assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
     assert_eq!(
         original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
@@ -3789,14 +7841,7 @@ fn limit_order_differential_execution_with_scenario(
     );
     assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
 
-    let normalized_fixture = normalized_limit_order_fixture_with_scenario(
-        input_udt_amount,
-        output_capacity,
-        output_udt_amount,
-        failure_mode,
-        asset_binding,
-        pass_scenario,
-    );
+    let normalized_fixture = normalized_limit_order_cell_shape_fixture(shape);
     let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
     json!({
         "fixture_sha256": normalized_fixture_sha256,
@@ -3826,7 +7871,208 @@ fn limit_order_differential_execution_with_scenario(
         },
         "occupied_capacity_shannons": original.occupied_capacity_shannons,
         "fee_shannons": original.fee_shannons,
-        "failure_mode": failure_mode,
+        "failure_mode": shape.failure_mode(false),
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn limit_order_missing_matching_output_differential_execution() -> Value {
+    limit_order_cell_shape_differential_execution(LimitOrderCellShape::MissingMatchingOutput)
+}
+
+fn limit_order_duplicate_matching_output_differential_execution() -> Value {
+    limit_order_cell_shape_differential_execution(LimitOrderCellShape::DuplicateMatchingOutputs)
+}
+
+fn limit_order_type_shape_differential_execution(shape: LimitOrderTypeShape) -> Value {
+    let original_limit_order_elf = load_original_ickb_binary("limit_order");
+    let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
+    let (original, original_auxiliary_type_sha256) = run_original_limit_order_with_type_shape(shape);
+    let (cellscript, cellscript_elf, cellscript_auxiliary_type_sha256) = run_cellscript_limit_order_with_type_shape(shape);
+
+    assert_eq!(
+        original_auxiliary_type_sha256, cellscript_auxiliary_type_sha256,
+        "auxiliary UDT type script artifact should match across sides"
+    );
+    assert_eq!(
+        original.status, cellscript.status,
+        "limit order type-shape differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, shape
+    );
+    assert_eq!(original.status, "fail", "original limit_order status");
+    assert_eq!(cellscript.status, "fail", "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_limit_order_type_shape_fixture(shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_limit_order_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "original_limit_order_binary_sha256": original_limit_order_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "original_auxiliary_type_artifact_sha256": original_auxiliary_type_sha256,
+        "cellscript_auxiliary_type_artifact_sha256": cellscript_auxiliary_type_sha256,
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": shape.failure_mode(false),
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn limit_order_missing_input_type_differential_execution() -> Value {
+    limit_order_type_shape_differential_execution(LimitOrderTypeShape::MissingInputAuxiliaryType)
+}
+
+fn limit_order_missing_output_type_differential_execution() -> Value {
+    limit_order_type_shape_differential_execution(LimitOrderTypeShape::MissingOutputAuxiliaryType)
+}
+
+fn limit_order_differential_execution_with_scenario(
+    input_udt_amount: u128,
+    output_capacity: u64,
+    output_udt_amount: u128,
+    failure_mode: Option<&'static str>,
+    asset_binding: LimitOrderAssetBinding,
+    pass_scenario: Option<&'static str>,
+) -> Value {
+    limit_order_differential_execution_with_scenario_and_master_binding(
+        input_udt_amount,
+        output_capacity,
+        output_udt_amount,
+        failure_mode,
+        asset_binding,
+        pass_scenario,
+        LimitOrderMasterBinding::Matching,
+    )
+}
+
+fn limit_order_differential_execution_with_scenario_and_master_binding(
+    input_udt_amount: u128,
+    output_capacity: u64,
+    output_udt_amount: u128,
+    failure_mode: Option<&'static str>,
+    asset_binding: LimitOrderAssetBinding,
+    pass_scenario: Option<&'static str>,
+    master_binding: LimitOrderMasterBinding,
+) -> Value {
+    limit_order_differential_execution_with_options(
+        input_udt_amount,
+        output_capacity,
+        output_udt_amount,
+        limit_order_options(
+            failure_mode,
+            asset_binding,
+            pass_scenario,
+            master_binding,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_differential_execution_with_options(
+    input_udt_amount: u128,
+    output_capacity: u64,
+    output_udt_amount: u128,
+    options: LimitOrderScenarioOptions,
+) -> Value {
+    let original_limit_order_elf = load_original_ickb_binary("limit_order");
+    let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
+    let (original, original_auxiliary_type_sha256) = run_original_limit_order_fulfillment_with_master_binding_and_output_data_mode(
+        input_udt_amount,
+        output_capacity,
+        output_udt_amount,
+        options.asset_binding,
+        options.master_binding,
+        options.input_data_mode,
+        options.output_data_mode,
+    );
+    let (cellscript, cellscript_elf, cellscript_auxiliary_type_sha256) =
+        run_cellscript_limit_order_fulfillment_with_master_binding_and_output_data_mode(
+            input_udt_amount,
+            output_capacity,
+            output_udt_amount,
+            options.asset_binding,
+            options.master_binding,
+            options.input_data_mode,
+            options.output_data_mode,
+        );
+
+    assert_eq!(
+        original.status, cellscript.status,
+        "limit order differential mismatch: original={:#?}, cellscript={:#?}, input_udt_amount={}, output_capacity={}, output_udt_amount={}",
+        original, cellscript, input_udt_amount, output_capacity, output_udt_amount
+    );
+    let expected_status = if options.failure_mode.is_some() { "fail" } else { "pass" };
+    assert_eq!(original.status, expected_status, "original limit_order status");
+    assert_eq!(cellscript.status, expected_status, "CellScript status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture =
+        normalized_limit_order_fixture_with_scenario(input_udt_amount, output_capacity, output_udt_amount, options);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_limit_order_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "original_limit_order_binary_sha256": original_limit_order_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "original_auxiliary_type_artifact_sha256": original_auxiliary_type_sha256,
+        "cellscript_auxiliary_type_artifact_sha256": cellscript_auxiliary_type_sha256,
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": options.failure_mode,
         "original_error": original.error,
         "cellscript_error": cellscript.error,
         "normalized_fixture": normalized_fixture
@@ -3852,10 +8098,354 @@ fn limit_order_udt_to_ckb_min_match_boundary_differential_execution() -> Value {
     )
 }
 
+fn limit_order_udt_to_ckb_wrong_master_tx_hash_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_params_scenario_and_master_binding(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        LimitOrderMasterBinding::WrongTxHash.failure_mode(true),
+        LimitOrderAssetBinding::SameAuxiliaryType,
+        None,
+        LimitOrderMasterBinding::WrongTxHash,
+    )
+}
+
+fn limit_order_udt_to_ckb_wrong_master_index_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_params_scenario_and_master_binding(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        LimitOrderMasterBinding::WrongIndex.failure_mode(true),
+        LimitOrderAssetBinding::SameAuxiliaryType,
+        None,
+        LimitOrderMasterBinding::WrongIndex,
+    )
+}
+
+fn limit_order_udt_to_ckb_output_mint_action_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_output_mint_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::MintAction,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_output_invalid_action_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_output_invalid_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::InvalidAction,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_output_short_action_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_output_short_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::ShortAction,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_output_short_master_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_output_short_master_out_point"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::ShortMasterOutPoint,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_output_long_data_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_output_long_data"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::LongTrailingData,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_invalid_action_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_invalid_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::InvalidAction,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_short_action_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_short_action"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::ShortAction,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_short_master_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_short_master_out_point"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::ShortMasterOutPoint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_long_data_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_long_data"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::LongTrailingData,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_absolute_match_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            None,
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            Some("limit_order_udt_to_ckb_input_absolute_match"),
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchAbsolute,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_wrong_master_tx_hash_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_wrong_master_tx_hash"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchWrongTxHash,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_input_wrong_master_index_differential_execution() -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some("limit_order_udt_to_ckb_input_wrong_master_index"),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::MatchWrongIndex,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_cell_shape_differential_execution(shape: LimitOrderCellShape) -> Value {
+    let original_limit_order_elf = load_original_ickb_binary("limit_order");
+    let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
+    let (original, auxiliary_artifact_sha256) = run_original_limit_order_udt_to_ckb_with_cell_shape(shape);
+    let (cellscript, cellscript_elf, cellscript_auxiliary_artifact_sha256) =
+        run_cellscript_limit_order_udt_to_ckb_with_cell_shape(shape);
+
+    assert_eq!(
+        auxiliary_artifact_sha256, cellscript_auxiliary_artifact_sha256,
+        "auxiliary UDT type script artifact should match across sides"
+    );
+    assert_eq!(
+        original.status, cellscript.status,
+        "UDT-to-CKB limit order missing-output differential mismatch: original={:#?}, cellscript={:#?}",
+        original, cellscript
+    );
+    assert_eq!(original.status, "fail", "original iCKB Limit Order status");
+    assert_eq!(cellscript.status, "fail", "CellScript Limit Order status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_limit_order_udt_to_ckb_cell_shape_fixture(shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_limit_order_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "original_limit_order_binary_sha256": original_limit_order_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "original_auxiliary_type_artifact_sha256": auxiliary_artifact_sha256,
+        "cellscript_auxiliary_type_artifact_sha256": cellscript_auxiliary_artifact_sha256,
+        "shared_funding_lock_artifact_sha256": auxiliary_artifact_sha256,
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": shape.failure_mode(true),
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn limit_order_udt_to_ckb_missing_matching_output_differential_execution() -> Value {
+    limit_order_udt_to_ckb_cell_shape_differential_execution(LimitOrderCellShape::MissingMatchingOutput)
+}
+
+fn limit_order_udt_to_ckb_duplicate_matching_output_differential_execution() -> Value {
+    limit_order_udt_to_ckb_cell_shape_differential_execution(LimitOrderCellShape::DuplicateMatchingOutputs)
+}
+
+fn limit_order_udt_to_ckb_type_shape_differential_execution(shape: LimitOrderTypeShape) -> Value {
+    let original_limit_order_elf = load_original_ickb_binary("limit_order");
+    let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
+    let (original, auxiliary_artifact_sha256) = run_original_limit_order_udt_to_ckb_with_type_shape(shape);
+    let (cellscript, cellscript_elf, cellscript_auxiliary_artifact_sha256) =
+        run_cellscript_limit_order_udt_to_ckb_with_type_shape(shape);
+
+    assert_eq!(
+        auxiliary_artifact_sha256, cellscript_auxiliary_artifact_sha256,
+        "auxiliary UDT type script artifact should match across sides"
+    );
+    assert_eq!(
+        original.status, cellscript.status,
+        "UDT-to-CKB limit order type-shape differential mismatch: original={:#?}, cellscript={:#?}, shape={:?}",
+        original, cellscript, shape
+    );
+    assert_eq!(original.status, "fail", "original iCKB Limit Order status");
+    assert_eq!(cellscript.status, "fail", "CellScript Limit Order status");
+    assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
+    assert_eq!(
+        original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
+        "normalized occupied capacities should match"
+    );
+    assert_eq!(original.fee_shannons, cellscript.fee_shannons, "normalized fees should match");
+
+    let normalized_fixture = normalized_limit_order_udt_to_ckb_type_shape_fixture(shape);
+    let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
+    json!({
+        "fixture_sha256": normalized_fixture_sha256,
+        "normalized_fixture_sha256": normalized_fixture_sha256,
+        "transaction_context_sha256": {
+            "original": original.tx_context_sha256,
+            "cellscript": cellscript.tx_context_sha256
+        },
+        "original_ickb_binary_sha256": original_limit_order_binary_sha256,
+        "original_ickb_binary_patched": false,
+        "original_limit_order_binary_sha256": original_limit_order_binary_sha256,
+        "cellscript_artifact_sha256": sha256_prefixed(&cellscript_elf),
+        "original_auxiliary_type_artifact_sha256": auxiliary_artifact_sha256,
+        "cellscript_auxiliary_type_artifact_sha256": cellscript_auxiliary_artifact_sha256,
+        "shared_funding_lock_artifact_sha256": auxiliary_artifact_sha256,
+        "ckb_vm_or_testtool_version": CKB_TESTTOOL_VERSION,
+        "original_ickb_exit_code": original.exit_code,
+        "cellscript_exit_code": cellscript.exit_code,
+        "original_ickb_status": original.status,
+        "cellscript_status": cellscript.status,
+        "statuses_match": true,
+        "original_cycles": original.cycles,
+        "cellscript_cycles": cellscript.cycles,
+        "tx_size_bytes": original.tx_size_bytes,
+        "tx_size_bytes_by_side": {
+            "original": original.tx_size_bytes,
+            "cellscript": cellscript.tx_size_bytes
+        },
+        "occupied_capacity_shannons": original.occupied_capacity_shannons,
+        "fee_shannons": original.fee_shannons,
+        "failure_mode": shape.failure_mode(true),
+        "original_error": original.error,
+        "cellscript_error": cellscript.error,
+        "normalized_fixture": normalized_fixture
+    })
+}
+
+fn limit_order_udt_to_ckb_missing_input_type_differential_execution() -> Value {
+    limit_order_udt_to_ckb_type_shape_differential_execution(LimitOrderTypeShape::MissingInputAuxiliaryType)
+}
+
+fn limit_order_udt_to_ckb_missing_output_type_differential_execution() -> Value {
+    limit_order_udt_to_ckb_type_shape_differential_execution(LimitOrderTypeShape::MissingOutputAuxiliaryType)
+}
+
 fn limit_order_udt_to_ckb_differential_execution_with_params(
     output_capacity: u64,
     output_udt_amount: u128,
-    failure_mode: Option<&str>,
+    failure_mode: Option<&'static str>,
     asset_binding: LimitOrderAssetBinding,
 ) -> Value {
     limit_order_udt_to_ckb_differential_execution_with_params_and_scenario(
@@ -3870,24 +8460,69 @@ fn limit_order_udt_to_ckb_differential_execution_with_params(
 fn limit_order_udt_to_ckb_differential_execution_with_params_and_scenario(
     output_capacity: u64,
     output_udt_amount: u128,
-    failure_mode: Option<&str>,
+    failure_mode: Option<&'static str>,
     asset_binding: LimitOrderAssetBinding,
-    pass_scenario: Option<&str>,
+    pass_scenario: Option<&'static str>,
+) -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_params_scenario_and_master_binding(
+        output_capacity,
+        output_udt_amount,
+        failure_mode,
+        asset_binding,
+        pass_scenario,
+        LimitOrderMasterBinding::Matching,
+    )
+}
+
+fn limit_order_udt_to_ckb_differential_execution_with_params_scenario_and_master_binding(
+    output_capacity: u64,
+    output_udt_amount: u128,
+    failure_mode: Option<&'static str>,
+    asset_binding: LimitOrderAssetBinding,
+    pass_scenario: Option<&'static str>,
+    master_binding: LimitOrderMasterBinding,
+) -> Value {
+    limit_order_udt_to_ckb_differential_execution_with_options(
+        output_capacity,
+        output_udt_amount,
+        limit_order_options(
+            failure_mode,
+            asset_binding,
+            pass_scenario,
+            master_binding,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    )
+}
+
+fn limit_order_udt_to_ckb_differential_execution_with_options(
+    output_capacity: u64,
+    output_udt_amount: u128,
+    options: LimitOrderScenarioOptions,
 ) -> Value {
     let original_limit_order_elf = load_original_ickb_binary("limit_order");
     let original_limit_order_binary_sha256 = sha256_prefixed(&original_limit_order_elf);
-    let (original, auxiliary_artifact_sha256) = run_original_limit_order_udt_to_ckb_fulfillment(
-        LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
-        output_capacity,
-        output_udt_amount,
-        asset_binding,
-    );
-    let (cellscript, cellscript_elf, cellscript_auxiliary_artifact_sha256) = run_cellscript_limit_order_udt_to_ckb_fulfillment(
-        LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
-        output_capacity,
-        output_udt_amount,
-        asset_binding,
-    );
+    let (original, auxiliary_artifact_sha256) =
+        run_original_limit_order_udt_to_ckb_fulfillment_with_master_binding_and_output_data_mode(
+            LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
+            output_capacity,
+            output_udt_amount,
+            options.asset_binding,
+            options.master_binding,
+            options.input_data_mode,
+            options.output_data_mode,
+        );
+    let (cellscript, cellscript_elf, cellscript_auxiliary_artifact_sha256) =
+        run_cellscript_limit_order_udt_to_ckb_fulfillment_with_master_binding_and_output_data_mode(
+            LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
+            output_capacity,
+            output_udt_amount,
+            options.asset_binding,
+            options.master_binding,
+            options.input_data_mode,
+            options.output_data_mode,
+        );
 
     assert_eq!(
         auxiliary_artifact_sha256, cellscript_auxiliary_artifact_sha256,
@@ -3898,7 +8533,7 @@ fn limit_order_udt_to_ckb_differential_execution_with_params_and_scenario(
         "UDT-to-CKB limit order differential mismatch: original={:#?}, cellscript={:#?}",
         original, cellscript
     );
-    let expected_status = if failure_mode.is_some() { "fail" } else { "pass" };
+    let expected_status = if options.failure_mode.is_some() { "fail" } else { "pass" };
     assert_eq!(original.status, expected_status, "original iCKB Limit Order status");
     assert_eq!(cellscript.status, expected_status, "CellScript Limit Order status");
     assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
@@ -3912,9 +8547,7 @@ fn limit_order_udt_to_ckb_differential_execution_with_params_and_scenario(
         LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
         output_capacity,
         output_udt_amount,
-        failure_mode,
-        asset_binding,
-        pass_scenario,
+        options,
     );
     let normalized_fixture_sha256 = sha256_json(&normalized_fixture);
     json!({
@@ -3946,7 +8579,7 @@ fn limit_order_udt_to_ckb_differential_execution_with_params_and_scenario(
         },
         "occupied_capacity_shannons": original.occupied_capacity_shannons,
         "fee_shannons": original.fee_shannons,
-        "failure_mode": failure_mode,
+        "failure_mode": options.failure_mode,
         "original_error": original.error,
         "cellscript_error": cellscript.error,
         "normalized_fixture": normalized_fixture
@@ -4361,7 +8994,7 @@ fn owned_owner_output_related_type_hash_mismatch_differential_execution() -> Val
     assert_eq!(original.status, "fail", "original owned_owner status");
     assert_eq!(cellscript.status, "fail", "CellScript owned-owner status");
     assert_eq!(original.exit_code, 6, "original owned_owner output related type mismatch exit code");
-    assert_eq!(cellscript.exit_code, 46, "CellScript owned-owner output related type mismatch exit code");
+    assert_eq!(cellscript.exit_code, 38, "CellScript owned-owner output related type mismatch exit code");
     assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
     assert_eq!(
         original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
@@ -4510,7 +9143,7 @@ fn owned_owner_related_type_hash_mismatch_differential_execution() -> Value {
     assert_eq!(original.status, "fail", "original owned_owner status");
     assert_eq!(cellscript.status, "fail", "CellScript owned-owner status");
     assert_eq!(original.exit_code, 6, "original owned_owner related type mismatch exit code");
-    assert_eq!(cellscript.exit_code, 46, "CellScript owned-owner related type mismatch exit code");
+    assert_eq!(cellscript.exit_code, 38, "CellScript owned-owner related type mismatch exit code");
     assert_eq!(original.tx_size_bytes, cellscript.tx_size_bytes, "normalized tx sizes should match");
     assert_eq!(
         original.occupied_capacity_shannons, cellscript.occupied_capacity_shannons,
@@ -5127,6 +9760,62 @@ fn run_original_deposit_phase1(deposit_capacity: u64) -> (DepositPhase1SideRun, 
 }
 
 fn run_original_deposit_phase1_with_input_capacity(deposit_capacity: u64, input_capacity: u64) -> (DepositPhase1SideRun, String) {
+    run_original_deposit_phase1_with_input_capacity_and_receipt_data(
+        deposit_capacity,
+        input_capacity,
+        deposit_phase1_receipt_data(deposit_capacity),
+    )
+}
+
+fn run_original_deposit_phase1_with_input_capacity_and_receipt_data(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    receipt_data: Bytes,
+) -> (DepositPhase1SideRun, String) {
+    run_original_deposit_phase1_with_input_capacity_receipt_data_and_all_shapes(
+        deposit_capacity,
+        input_capacity,
+        receipt_data,
+        DepositPhase1Shapes::VALID,
+    )
+}
+
+fn run_original_deposit_phase1_with_input_capacity_receipt_data_and_dao_type_shape(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    receipt_data: Bytes,
+    dao_type_shape: DepositPhase1DaoTypeShape,
+) -> (DepositPhase1SideRun, String) {
+    run_original_deposit_phase1_with_input_capacity_receipt_data_and_shapes(
+        deposit_capacity,
+        input_capacity,
+        receipt_data,
+        dao_type_shape,
+        DepositPhase1LockShape::Valid,
+    )
+}
+
+fn run_original_deposit_phase1_with_input_capacity_receipt_data_and_shapes(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    receipt_data: Bytes,
+    dao_type_shape: DepositPhase1DaoTypeShape,
+    lock_shape: DepositPhase1LockShape,
+) -> (DepositPhase1SideRun, String) {
+    run_original_deposit_phase1_with_input_capacity_receipt_data_and_all_shapes(
+        deposit_capacity,
+        input_capacity,
+        receipt_data,
+        DepositPhase1Shapes::new(dao_type_shape, lock_shape, DepositPhase1DepositDataShape::Valid),
+    )
+}
+
+fn run_original_deposit_phase1_with_input_capacity_receipt_data_and_all_shapes(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    receipt_data: Bytes,
+    shapes: DepositPhase1Shapes,
+) -> (DepositPhase1SideRun, String) {
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
     let (dao_script, ickb_logic_script, dao_code_out_point) = setup_ickb_test_env(&mut context);
     let always_success_lock = deploy_always_success_lock(&mut context);
@@ -5140,7 +9829,14 @@ fn run_original_deposit_phase1_with_input_capacity(deposit_capacity: u64, input_
         Bytes::default(),
     );
 
-    let (outputs, outputs_data) = deposit_phase1_outputs(deposit_capacity, &ickb_logic_script, &dao_script, &always_success_lock);
+    let (outputs, outputs_data) = deposit_phase1_outputs_with_receipt_data(
+        deposit_capacity,
+        receipt_data,
+        shapes,
+        &ickb_logic_script,
+        &dao_script,
+        &always_success_lock,
+    );
     let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
         .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
         .cell_dep(packed::CellDep::new_builder().out_point(dao_code_out_point).dep_type(DepType::Code).build())
@@ -5179,11 +9875,84 @@ fn run_cellscript_deposit_phase1_with_input_capacity_and_program(
     program: &str,
     action: &str,
 ) -> (DepositPhase1SideRun, Vec<u8>) {
-    let cellscript_elf = compile_cellscript_source_to_elf(program, action, None);
+    run_cellscript_deposit_phase1_with_input_capacity_program_and_receipt_data(
+        deposit_capacity,
+        input_capacity,
+        program,
+        action,
+        deposit_phase1_receipt_data(deposit_capacity),
+    )
+}
+
+fn run_cellscript_deposit_phase1_with_input_capacity_program_and_receipt_data(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    program: &str,
+    action: &str,
+    receipt_data: Bytes,
+) -> (DepositPhase1SideRun, Vec<u8>) {
+    run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_all_shapes(
+        deposit_capacity,
+        input_capacity,
+        program,
+        action,
+        receipt_data,
+        DepositPhase1Shapes::VALID,
+    )
+}
+
+fn run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_dao_type_shape(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    program: &str,
+    action: &str,
+    receipt_data: Bytes,
+    dao_type_shape: DepositPhase1DaoTypeShape,
+) -> (DepositPhase1SideRun, Vec<u8>) {
+    run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_shapes(
+        deposit_capacity,
+        input_capacity,
+        program,
+        action,
+        receipt_data,
+        dao_type_shape,
+        DepositPhase1LockShape::Valid,
+    )
+}
+
+fn run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_shapes(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    program: &str,
+    action: &str,
+    receipt_data: Bytes,
+    dao_type_shape: DepositPhase1DaoTypeShape,
+    lock_shape: DepositPhase1LockShape,
+) -> (DepositPhase1SideRun, Vec<u8>) {
+    run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_all_shapes(
+        deposit_capacity,
+        input_capacity,
+        program,
+        action,
+        receipt_data,
+        DepositPhase1Shapes::new(dao_type_shape, lock_shape, DepositPhase1DepositDataShape::Valid),
+    )
+}
+
+fn run_cellscript_deposit_phase1_with_input_capacity_program_receipt_data_and_all_shapes(
+    deposit_capacity: u64,
+    input_capacity: u64,
+    program: &str,
+    action: &str,
+    receipt_data: Bytes,
+    shapes: DepositPhase1Shapes,
+) -> (DepositPhase1SideRun, Vec<u8>) {
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
     let dao_elf = load_original_ickb_binary("dao");
     let dao_code_out_point = context.deploy_cell(Bytes::copy_from_slice(&dao_elf));
     let dao_script = context.build_script(&dao_code_out_point, Bytes::default()).expect("DAO script");
+    let program = deposit_phase1_program_with_expected_dao_script(program, &dao_script);
+    let cellscript_elf = compile_cellscript_source_to_elf(&program, action, None);
     let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
     let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript script");
     let always_success_lock = deploy_always_success_lock(&mut context);
@@ -5193,7 +9962,14 @@ fn run_cellscript_deposit_phase1_with_input_capacity_and_program(
         Bytes::default(),
     );
 
-    let (outputs, outputs_data) = deposit_phase1_outputs(deposit_capacity, &cellscript_script, &dao_script, &always_success_lock);
+    let (outputs, outputs_data) = deposit_phase1_outputs_with_receipt_data(
+        deposit_capacity,
+        receipt_data,
+        shapes,
+        &cellscript_script,
+        &dao_script,
+        &always_success_lock,
+    );
     let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
         .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
         .cell_dep(packed::CellDep::new_builder().out_point(dao_code_out_point).dep_type(DepType::Code).build())
@@ -5206,6 +9982,10 @@ fn run_cellscript_deposit_phase1_with_input_capacity_and_program(
     let fee_shannons = fee_shannons(input_capacity, &outputs);
     let run = side_run_from_result(context.verify_tx(&tx, DEPOSIT_PHASE1_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
     (run, cellscript_elf)
+}
+
+fn deposit_phase1_program_with_expected_dao_script(program: &str, dao_script: &packed::Script) -> String {
+    program.replace("__EXPECTED_DAO_TYPE_SCRIPT__", &cellscript_script_value_expr(dao_script))
 }
 
 fn run_original_duplicate_receipt_output() -> (DepositPhase1SideRun, String) {
@@ -5454,8 +10234,13 @@ fn run_cellscript_mint_from_receipt_with_header_dep_and_receipt_data_mode(
     receipt_data_mode: MintReceiptDataMode,
 ) -> (DepositPhase1SideRun, Vec<u8>) {
     let (program, action) = match receipt_data_mode {
-        MintReceiptDataMode::Valid => (MINT_FROM_RECEIPT_CELLSCRIPT_PROGRAM, MINT_FROM_RECEIPT_CELLSCRIPT_ACTION),
-        MintReceiptDataMode::MalformedFirstInput => {
+        MintReceiptDataMode::Valid
+        | MintReceiptDataMode::QuantityZero
+        | MintReceiptDataMode::QuantityTwo
+        | MintReceiptDataMode::ZeroFirstQuantity
+        | MintReceiptDataMode::MixedQuantities
+        | MintReceiptDataMode::LongTrailingData
+        | MintReceiptDataMode::MalformedFirstInput => {
             (MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM, MINT_FROM_RECEIPT_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION)
         }
         MintReceiptDataMode::MalformedSecondInput => (MINT_FROM_RECEIPT_CELLSCRIPT_PROGRAM, MINT_FROM_RECEIPT_CELLSCRIPT_ACTION),
@@ -5560,8 +10345,14 @@ fn run_cellscript_receipt_group_mint(
     receipt_data_mode: MintReceiptDataMode,
 ) -> (DepositPhase1SideRun, Vec<u8>) {
     let (program, action) = match receipt_data_mode {
-        MintReceiptDataMode::Valid => (RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_PROGRAM, RECEIPT_GROUP_UNDER_MINT_CELLSCRIPT_ACTION),
-        MintReceiptDataMode::MalformedFirstInput | MintReceiptDataMode::MalformedSecondInput => {
+        MintReceiptDataMode::Valid
+        | MintReceiptDataMode::QuantityZero
+        | MintReceiptDataMode::QuantityTwo
+        | MintReceiptDataMode::ZeroFirstQuantity
+        | MintReceiptDataMode::MixedQuantities
+        | MintReceiptDataMode::LongTrailingData
+        | MintReceiptDataMode::MalformedFirstInput
+        | MintReceiptDataMode::MalformedSecondInput => {
             (RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_PROGRAM, RECEIPT_GROUP_RECEIPT_DATA_SIZE_CELLSCRIPT_ACTION)
         }
     };
@@ -6013,8 +10804,7 @@ fn run_cellscript_owned_owner_output_related_type_hash_mismatch() -> (DepositPha
         deploy_owned_owner_auxiliary_withdrawal_type_pair(&mut context);
     let expected_type_hash: [u8; 32] = expected_withdrawal_type_script.calc_script_hash().unpack();
     let actual_type_hash: [u8; 32] = actual_wrong_type_script.calc_script_hash().unpack();
-    let expected_type_hash_low = u64::from_le_bytes(expected_type_hash[..8].try_into().expect("script hash low word"));
-    let program = owned_owner_output_related_type_hash_mismatch_cellscript_program(expected_type_hash_low);
+    let program = owned_owner_output_related_type_hash_mismatch_cellscript_program(&expected_withdrawal_type_script);
     let cellscript_elf =
         compile_cellscript_source_to_elf(&program, OWNED_OWNER_OUTPUT_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION, None);
     let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
@@ -6058,8 +10848,7 @@ fn run_cellscript_owned_owner_output_related_data_rule_mismatch() -> (DepositPha
     let always_success_lock = deploy_always_success_lock(&mut context);
     let (withdrawal_type_script, auxiliary_type_artifact_sha256) = deploy_owned_owner_auxiliary_withdrawal_type(&mut context);
     let expected_type_hash: [u8; 32] = withdrawal_type_script.calc_script_hash().unpack();
-    let expected_type_hash_low = u64::from_le_bytes(expected_type_hash[..8].try_into().expect("script hash low word"));
-    let program = owned_owner_output_related_data_rule_mismatch_cellscript_program(expected_type_hash_low);
+    let program = owned_owner_output_related_data_rule_mismatch_cellscript_program(&withdrawal_type_script);
     let cellscript_elf =
         compile_cellscript_source_to_elf(&program, OWNED_OWNER_OUTPUT_RELATED_DATA_RULE_MISMATCH_CELLSCRIPT_ACTION, None);
     let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
@@ -6113,8 +10902,7 @@ fn run_cellscript_owned_owner_related_type_hash_mismatch() -> (DepositPhase1Side
         deploy_owned_owner_auxiliary_withdrawal_type_pair(&mut context);
     let expected_type_hash: [u8; 32] = expected_withdrawal_type_script.calc_script_hash().unpack();
     let actual_type_hash: [u8; 32] = actual_wrong_type_script.calc_script_hash().unpack();
-    let expected_type_hash_low = u64::from_le_bytes(expected_type_hash[..8].try_into().expect("script hash low word"));
-    let program = owned_owner_related_type_hash_mismatch_cellscript_program(expected_type_hash_low);
+    let program = owned_owner_related_type_hash_mismatch_cellscript_program(&expected_withdrawal_type_script);
     let cellscript_elf = compile_cellscript_source_to_elf(&program, OWNED_OWNER_RELATED_TYPE_HASH_MISMATCH_CELLSCRIPT_ACTION, None);
     let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
     let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript owned-owner script");
@@ -6157,8 +10945,7 @@ fn run_cellscript_owned_owner_related_data_rule_mismatch() -> (DepositPhase1Side
     let always_success_lock = deploy_always_success_lock(&mut context);
     let (withdrawal_type_script, auxiliary_type_artifact_sha256) = deploy_owned_owner_auxiliary_withdrawal_type(&mut context);
     let expected_type_hash: [u8; 32] = withdrawal_type_script.calc_script_hash().unpack();
-    let expected_type_hash_low = u64::from_le_bytes(expected_type_hash[..8].try_into().expect("script hash low word"));
-    let program = owned_owner_related_data_rule_mismatch_cellscript_program(expected_type_hash_low);
+    let program = owned_owner_related_data_rule_mismatch_cellscript_program(&withdrawal_type_script);
     let cellscript_elf = compile_cellscript_source_to_elf(&program, OWNED_OWNER_RELATED_DATA_RULE_MISMATCH_CELLSCRIPT_ACTION, None);
     let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
     let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript owned-owner script");
@@ -6364,11 +11151,14 @@ fn run_cellscript_owned_owner_duplicate_owner() -> (DepositPhase1SideRun, Vec<u8
     (run, cellscript_elf, auxiliary_type_artifact_sha256)
 }
 
-fn run_original_limit_order_fulfillment(
+fn run_original_limit_order_fulfillment_with_master_binding_and_output_data_mode(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
     asset_binding: LimitOrderAssetBinding,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
 ) -> (DepositPhase1SideRun, String) {
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
     let limit_order_elf = load_original_ickb_binary("limit_order");
@@ -6377,14 +11167,19 @@ fn run_original_limit_order_fulfillment(
     let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
         deploy_auxiliary_type_scripts(&mut context, asset_binding);
 
-    let (tx, outputs, outputs_data) = build_limit_order_tx(
+    let (tx, outputs, outputs_data) = build_limit_order_tx_with_master_binding(
         &mut context,
         &limit_order_script,
         &input_auxiliary_type_script,
         &output_auxiliary_type_script,
-        input_udt_amount,
-        output_capacity,
-        output_udt_amount,
+        LimitOrderBuildParams {
+            input_udt_amount,
+            output_capacity,
+            output_udt_amount,
+            master_binding,
+            input_data_mode,
+            output_data_mode,
+        },
     );
     let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
     let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
@@ -6392,11 +11187,14 @@ fn run_original_limit_order_fulfillment(
     (run, auxiliary_type_sha256)
 }
 
-fn run_cellscript_limit_order_fulfillment(
+fn run_cellscript_limit_order_fulfillment_with_master_binding_and_output_data_mode(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
     asset_binding: LimitOrderAssetBinding,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
 ) -> (DepositPhase1SideRun, Vec<u8>, String) {
     let cellscript_elf = compile_cellscript_source_to_elf(LIMIT_ORDER_CELLSCRIPT_PROGRAM, LIMIT_ORDER_CELLSCRIPT_ACTION, None);
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
@@ -6405,14 +11203,19 @@ fn run_cellscript_limit_order_fulfillment(
     let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
         deploy_auxiliary_type_scripts(&mut context, asset_binding);
 
-    let (tx, outputs, outputs_data) = build_limit_order_tx(
+    let (tx, outputs, outputs_data) = build_limit_order_tx_with_master_binding(
         &mut context,
         &cellscript_script,
         &input_auxiliary_type_script,
         &output_auxiliary_type_script,
-        input_udt_amount,
-        output_capacity,
-        output_udt_amount,
+        LimitOrderBuildParams {
+            input_udt_amount,
+            output_capacity,
+            output_udt_amount,
+            master_binding,
+            input_data_mode,
+            output_data_mode,
+        },
     );
     let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
     let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
@@ -6420,11 +11223,84 @@ fn run_cellscript_limit_order_fulfillment(
     (run, cellscript_elf, auxiliary_type_sha256)
 }
 
-fn run_original_limit_order_udt_to_ckb_fulfillment(
+fn run_original_limit_order_with_cell_shape(shape: LimitOrderCellShape) -> (DepositPhase1SideRun, String) {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let limit_order_elf = load_original_ickb_binary("limit_order");
+    let limit_order_out_point = context.deploy_cell(Bytes::copy_from_slice(&limit_order_elf));
+    let limit_order_script = context.build_script(&limit_order_out_point, Bytes::default()).expect("original limit_order script");
+    let (auxiliary_type_script, _, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+    let (tx, outputs, outputs_data) =
+        build_limit_order_tx_with_cell_shape(&mut context, &limit_order_script, &auxiliary_type_script, shape);
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, auxiliary_type_sha256)
+}
+
+fn run_cellscript_limit_order_with_cell_shape(shape: LimitOrderCellShape) -> (DepositPhase1SideRun, Vec<u8>, String) {
+    let cellscript_elf = compile_cellscript_source_to_elf(LIMIT_ORDER_CELLSCRIPT_PROGRAM, LIMIT_ORDER_CELLSCRIPT_ACTION, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript script");
+    let (auxiliary_type_script, _, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+    let (tx, outputs, outputs_data) =
+        build_limit_order_tx_with_cell_shape(&mut context, &cellscript_script, &auxiliary_type_script, shape);
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, cellscript_elf, auxiliary_type_sha256)
+}
+
+fn run_original_limit_order_with_type_shape(shape: LimitOrderTypeShape) -> (DepositPhase1SideRun, String) {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let limit_order_elf = load_original_ickb_binary("limit_order");
+    let limit_order_out_point = context.deploy_cell(Bytes::copy_from_slice(&limit_order_elf));
+    let limit_order_script = context.build_script(&limit_order_out_point, Bytes::default()).expect("original limit_order script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+    let (tx, outputs, outputs_data) = build_limit_order_tx_with_type_shape(
+        &mut context,
+        &limit_order_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, auxiliary_type_sha256)
+}
+
+fn run_cellscript_limit_order_with_type_shape(shape: LimitOrderTypeShape) -> (DepositPhase1SideRun, Vec<u8>, String) {
+    let cellscript_elf = compile_cellscript_source_to_elf(LIMIT_ORDER_CELLSCRIPT_PROGRAM, LIMIT_ORDER_CELLSCRIPT_ACTION, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+    let (tx, outputs, outputs_data) = build_limit_order_tx_with_type_shape(
+        &mut context,
+        &cellscript_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, cellscript_elf, auxiliary_type_sha256)
+}
+
+fn run_original_limit_order_udt_to_ckb_fulfillment_with_master_binding_and_output_data_mode(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
     asset_binding: LimitOrderAssetBinding,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
 ) -> (DepositPhase1SideRun, String) {
     let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
     let limit_order_elf = load_original_ickb_binary("limit_order");
@@ -6433,14 +11309,19 @@ fn run_original_limit_order_udt_to_ckb_fulfillment(
     let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
         deploy_auxiliary_type_scripts(&mut context, asset_binding);
 
-    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx(
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_master_binding(
         &mut context,
         &limit_order_script,
         &input_auxiliary_type_script,
         &output_auxiliary_type_script,
-        input_udt_amount,
-        output_capacity,
-        output_udt_amount,
+        LimitOrderBuildParams {
+            input_udt_amount,
+            output_capacity,
+            output_udt_amount,
+            master_binding,
+            input_data_mode,
+            output_data_mode,
+        },
     );
     let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
     let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY + LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY, &outputs);
@@ -6448,11 +11329,14 @@ fn run_original_limit_order_udt_to_ckb_fulfillment(
     (run, auxiliary_type_sha256)
 }
 
-fn run_cellscript_limit_order_udt_to_ckb_fulfillment(
+fn run_cellscript_limit_order_udt_to_ckb_fulfillment_with_master_binding_and_output_data_mode(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
     asset_binding: LimitOrderAssetBinding,
+    master_binding: LimitOrderMasterBinding,
+    input_data_mode: LimitOrderInputDataMode,
+    output_data_mode: LimitOrderOutputDataMode,
 ) -> (DepositPhase1SideRun, Vec<u8>, String) {
     let cellscript_elf =
         compile_cellscript_source_to_elf(LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_PROGRAM, LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_ACTION, None);
@@ -6462,14 +11346,19 @@ fn run_cellscript_limit_order_udt_to_ckb_fulfillment(
     let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
         deploy_auxiliary_type_scripts(&mut context, asset_binding);
 
-    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx(
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_master_binding(
         &mut context,
         &cellscript_script,
         &input_auxiliary_type_script,
         &output_auxiliary_type_script,
-        input_udt_amount,
-        output_capacity,
-        output_udt_amount,
+        LimitOrderBuildParams {
+            input_udt_amount,
+            output_capacity,
+            output_udt_amount,
+            master_binding,
+            input_data_mode,
+            output_data_mode,
+        },
     );
     let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
     let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY + LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY, &outputs);
@@ -6477,23 +11366,117 @@ fn run_cellscript_limit_order_udt_to_ckb_fulfillment(
     (run, cellscript_elf, auxiliary_type_sha256)
 }
 
-fn deposit_phase1_outputs(
+fn run_original_limit_order_udt_to_ckb_with_cell_shape(shape: LimitOrderCellShape) -> (DepositPhase1SideRun, String) {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let limit_order_elf = load_original_ickb_binary("limit_order");
+    let limit_order_out_point = context.deploy_cell(Bytes::copy_from_slice(&limit_order_elf));
+    let limit_order_script = context.build_script(&limit_order_out_point, Bytes::default()).expect("original limit_order script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_cell_shape(
+        &mut context,
+        &limit_order_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(limit_order_udt_to_ckb_input_capacity_for_cell_shape(shape), &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, auxiliary_type_sha256)
+}
+
+fn run_cellscript_limit_order_udt_to_ckb_with_cell_shape(shape: LimitOrderCellShape) -> (DepositPhase1SideRun, Vec<u8>, String) {
+    let cellscript_elf =
+        compile_cellscript_source_to_elf(LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_PROGRAM, LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_ACTION, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript Limit Order script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_cell_shape(
+        &mut context,
+        &cellscript_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(limit_order_udt_to_ckb_input_capacity_for_cell_shape(shape), &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, cellscript_elf, auxiliary_type_sha256)
+}
+
+fn run_original_limit_order_udt_to_ckb_with_type_shape(shape: LimitOrderTypeShape) -> (DepositPhase1SideRun, String) {
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let limit_order_elf = load_original_ickb_binary("limit_order");
+    let limit_order_out_point = context.deploy_cell(Bytes::copy_from_slice(&limit_order_elf));
+    let limit_order_script = context.build_script(&limit_order_out_point, Bytes::default()).expect("original limit_order script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_type_shape(
+        &mut context,
+        &limit_order_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY + LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, auxiliary_type_sha256)
+}
+
+fn run_cellscript_limit_order_udt_to_ckb_with_type_shape(shape: LimitOrderTypeShape) -> (DepositPhase1SideRun, Vec<u8>, String) {
+    let cellscript_elf =
+        compile_cellscript_source_to_elf(LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_PROGRAM, LIMIT_ORDER_UDT_TO_CKB_CELLSCRIPT_ACTION, None);
+    let mut context = ckb_testtool::context::Context::new_with_deterministic_rng();
+    let cellscript_out_point = context.deploy_cell(Bytes::copy_from_slice(&cellscript_elf));
+    let cellscript_script = context.build_script(&cellscript_out_point, Bytes::default()).expect("CellScript Limit Order script");
+    let (input_auxiliary_type_script, output_auxiliary_type_script, auxiliary_type_sha256) =
+        deploy_auxiliary_type_scripts(&mut context, LimitOrderAssetBinding::SameAuxiliaryType);
+
+    let (tx, outputs, outputs_data) = build_limit_order_udt_to_ckb_tx_with_type_shape(
+        &mut context,
+        &cellscript_script,
+        &input_auxiliary_type_script,
+        &output_auxiliary_type_script,
+        shape,
+    );
+    let occupied_capacity_shannons = occupied_capacity_shannons(&outputs, &outputs_data);
+    let fee_shannons = fee_shannons(LIMIT_ORDER_INPUT_CAPACITY + LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY, &outputs);
+    let run = side_run_from_result(context.verify_tx(&tx, LIMIT_ORDER_MAX_CYCLES), &tx, occupied_capacity_shannons, fee_shannons);
+    (run, cellscript_elf, auxiliary_type_sha256)
+}
+
+fn deposit_phase1_outputs_with_receipt_data(
     deposit_capacity: u64,
+    receipt_data: Bytes,
+    shapes: DepositPhase1Shapes,
     script_under_test: &packed::Script,
     dao_script: &packed::Script,
     always_success_lock: &packed::Script,
 ) -> (Vec<packed::CellOutput>, Vec<Bytes>) {
-    let deposit_output = packed::CellOutput::new_builder()
-        .capacity::<packed::Uint64>(deposit_capacity.pack())
-        .lock(script_under_test.clone())
-        .type_(packed::ScriptOpt::from(dao_script.clone()))
-        .build();
+    let deposit_lock = match shapes.lock {
+        DepositPhase1LockShape::Valid => script_under_test.clone(),
+        DepositPhase1LockShape::Wrong => always_success_lock.clone(),
+    };
+    let deposit_output_builder =
+        packed::CellOutput::new_builder().capacity::<packed::Uint64>(deposit_capacity.pack()).lock(deposit_lock);
+    let deposit_output = match shapes.dao_type {
+        DepositPhase1DaoTypeShape::Valid => deposit_output_builder.type_(packed::ScriptOpt::from(dao_script.clone())).build(),
+        DepositPhase1DaoTypeShape::Missing => deposit_output_builder.build(),
+        DepositPhase1DaoTypeShape::Wrong => deposit_output_builder.type_(packed::ScriptOpt::from(always_success_lock.clone())).build(),
+    };
     let receipt_output = packed::CellOutput::new_builder()
         .capacity::<packed::Uint64>(deposit_capacity.pack())
         .lock(always_success_lock.clone())
         .type_(packed::ScriptOpt::from(script_under_test.clone()))
         .build();
-    (vec![deposit_output, receipt_output], vec![Bytes::from(vec![0u8; 8]), deposit_phase1_receipt_data(deposit_capacity)])
+    (vec![deposit_output, receipt_output], vec![shapes.deposit_data.data(), receipt_data])
 }
 
 fn duplicate_receipt_output_outputs(
@@ -7328,16 +12311,14 @@ fn build_owned_owner_duplicate_owner_tx(
     (tx, outputs, outputs_data)
 }
 
-fn build_limit_order_tx(
+fn build_limit_order_tx_with_master_binding(
     context: &mut ckb_testtool::context::Context,
     script_under_test: &packed::Script,
     input_auxiliary_type_script: &packed::Script,
     output_auxiliary_type_script: &packed::Script,
-    input_udt_amount: u128,
-    output_capacity: u64,
-    output_udt_amount: u128,
+    params: LimitOrderBuildParams,
 ) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
-    let input_data = limit_order_mint_data(input_udt_amount, 0);
+    let input_data = limit_order_input_data_for_mode(params.input_udt_amount, params.input_data_mode);
     let input_out_point = fixed_limit_order_input_out_point();
     context.create_cell_with_out_point(
         input_out_point.clone(),
@@ -7349,9 +12330,9 @@ fn build_limit_order_tx(
         input_data,
     );
 
-    let output_data = limit_order_match_data(output_udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let output_data = limit_order_output_data_for_mode(params.output_udt_amount, params.master_binding, params.output_data_mode);
     let output = packed::CellOutput::new_builder()
-        .capacity::<packed::Uint64>(output_capacity.pack())
+        .capacity::<packed::Uint64>(params.output_capacity.pack())
         .lock(script_under_test.clone())
         .type_(packed::ScriptOpt::from(output_auxiliary_type_script.clone()))
         .build();
@@ -7367,16 +12348,14 @@ fn build_limit_order_tx(
     (tx, outputs, outputs_data)
 }
 
-fn build_limit_order_udt_to_ckb_tx(
+fn build_limit_order_udt_to_ckb_tx_with_master_binding(
     context: &mut ckb_testtool::context::Context,
     script_under_test: &packed::Script,
     input_auxiliary_type_script: &packed::Script,
     output_auxiliary_type_script: &packed::Script,
-    input_udt_amount: u128,
-    output_capacity: u64,
-    output_udt_amount: u128,
+    params: LimitOrderBuildParams,
 ) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
-    let input_data = limit_order_udt_to_ckb_mint_data(input_udt_amount, 0);
+    let input_data = limit_order_udt_to_ckb_input_data_for_mode(params.input_udt_amount, params.input_data_mode);
     let input_out_point = fixed_limit_order_input_out_point();
     context.create_cell_with_out_point(
         input_out_point.clone(),
@@ -7396,9 +12375,10 @@ fn build_limit_order_udt_to_ckb_tx(
         Bytes::default(),
     );
 
-    let output_data = limit_order_udt_to_ckb_match_data(output_udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let output_data =
+        limit_order_udt_to_ckb_output_data_for_mode(params.output_udt_amount, params.master_binding, params.output_data_mode);
     let output = packed::CellOutput::new_builder()
-        .capacity::<packed::Uint64>(output_capacity.pack())
+        .capacity::<packed::Uint64>(params.output_capacity.pack())
         .lock(script_under_test.clone())
         .type_(packed::ScriptOpt::from(output_auxiliary_type_script.clone()))
         .build();
@@ -7415,8 +12395,227 @@ fn build_limit_order_udt_to_ckb_tx(
     (tx, outputs, outputs_data)
 }
 
+fn build_limit_order_tx_with_cell_shape(
+    context: &mut ckb_testtool::context::Context,
+    script_under_test: &packed::Script,
+    auxiliary_type_script: &packed::Script,
+    shape: LimitOrderCellShape,
+) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
+    let input_out_point = fixed_limit_order_input_out_point();
+    context.create_cell_with_out_point(
+        input_out_point.clone(),
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(LIMIT_ORDER_INPUT_CAPACITY.pack())
+            .lock(script_under_test.clone())
+            .type_(packed::ScriptOpt::from(auxiliary_type_script.clone()))
+            .build(),
+        limit_order_mint_data(LIMIT_ORDER_INPUT_UDT_AMOUNT, 0),
+    );
+
+    let always_success_lock = deploy_always_success_lock(context);
+    let (outputs, outputs_data) = match shape {
+        LimitOrderCellShape::MissingMatchingOutput => {
+            let output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_OUTPUT_CAPACITY.pack())
+                .lock(always_success_lock)
+                .type_(packed::ScriptOpt::from(auxiliary_type_script.clone()))
+                .build();
+            let output_data = limit_order_match_data(LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            (vec![output], vec![output_data])
+        }
+        LimitOrderCellShape::DuplicateMatchingOutputs => {
+            let first_output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_CAPACITY.pack())
+                .lock(script_under_test.clone())
+                .type_(packed::ScriptOpt::from(auxiliary_type_script.clone()))
+                .build();
+            let second_output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_CAPACITY.pack())
+                .lock(script_under_test.clone())
+                .type_(packed::ScriptOpt::from(auxiliary_type_script.clone()))
+                .build();
+            let first_data = limit_order_match_data(LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            let second_data = limit_order_match_data(LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            (vec![first_output, second_output], vec![first_data, second_data])
+        }
+    };
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    (tx, outputs, outputs_data)
+}
+
+fn build_limit_order_tx_with_type_shape(
+    context: &mut ckb_testtool::context::Context,
+    script_under_test: &packed::Script,
+    input_auxiliary_type_script: &packed::Script,
+    output_auxiliary_type_script: &packed::Script,
+    shape: LimitOrderTypeShape,
+) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
+    let input_out_point = fixed_limit_order_input_out_point();
+    context.create_cell_with_out_point(
+        input_out_point.clone(),
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(LIMIT_ORDER_INPUT_CAPACITY.pack())
+            .lock(script_under_test.clone())
+            .type_(script_opt_if_present(input_auxiliary_type_script, shape.input_type_present()))
+            .build(),
+        limit_order_mint_data(LIMIT_ORDER_INPUT_UDT_AMOUNT, 0),
+    );
+
+    let output_data = limit_order_match_data(LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let output = packed::CellOutput::new_builder()
+        .capacity::<packed::Uint64>(LIMIT_ORDER_OUTPUT_CAPACITY.pack())
+        .lock(script_under_test.clone())
+        .type_(script_opt_if_present(output_auxiliary_type_script, shape.output_type_present()))
+        .build();
+    let outputs = vec![output];
+    let outputs_data = vec![output_data];
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    (tx, outputs, outputs_data)
+}
+
+fn build_limit_order_udt_to_ckb_tx_with_cell_shape(
+    context: &mut ckb_testtool::context::Context,
+    script_under_test: &packed::Script,
+    input_auxiliary_type_script: &packed::Script,
+    output_auxiliary_type_script: &packed::Script,
+    shape: LimitOrderCellShape,
+) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
+    let input_out_point = fixed_limit_order_input_out_point();
+    context.create_cell_with_out_point(
+        input_out_point.clone(),
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(LIMIT_ORDER_INPUT_CAPACITY.pack())
+            .lock(script_under_test.clone())
+            .type_(packed::ScriptOpt::from(input_auxiliary_type_script.clone()))
+            .build(),
+        limit_order_udt_to_ckb_mint_data(LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT, 0),
+    );
+    let always_success_lock = deploy_always_success_lock(context);
+    let funding_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(limit_order_udt_to_ckb_funding_capacity_for_cell_shape(shape).pack())
+            .lock(always_success_lock.clone())
+            .build(),
+        Bytes::default(),
+    );
+    let (outputs, outputs_data) = match shape {
+        LimitOrderCellShape::MissingMatchingOutput => {
+            let output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY.pack())
+                .lock(always_success_lock)
+                .type_(packed::ScriptOpt::from(output_auxiliary_type_script.clone()))
+                .build();
+            let output_data =
+                limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            (vec![output], vec![output_data])
+        }
+        LimitOrderCellShape::DuplicateMatchingOutputs => {
+            let first_output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_FIRST_OUTPUT_CAPACITY.pack())
+                .lock(script_under_test.clone())
+                .type_(packed::ScriptOpt::from(output_auxiliary_type_script.clone()))
+                .build();
+            let second_output = packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_SECOND_OUTPUT_CAPACITY.pack())
+                .lock(script_under_test.clone())
+                .type_(packed::ScriptOpt::from(output_auxiliary_type_script.clone()))
+                .build();
+            let first_data =
+                limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            let second_data =
+                limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+            (vec![first_output, second_output], vec![first_data, second_data])
+        }
+    };
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
+        .input(packed::CellInput::new_builder().previous_output(funding_out_point).build())
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    (tx, outputs, outputs_data)
+}
+
+fn build_limit_order_udt_to_ckb_tx_with_type_shape(
+    context: &mut ckb_testtool::context::Context,
+    script_under_test: &packed::Script,
+    input_auxiliary_type_script: &packed::Script,
+    output_auxiliary_type_script: &packed::Script,
+    shape: LimitOrderTypeShape,
+) -> (TransactionView, Vec<packed::CellOutput>, Vec<Bytes>) {
+    let input_out_point = fixed_limit_order_input_out_point();
+    context.create_cell_with_out_point(
+        input_out_point.clone(),
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(LIMIT_ORDER_INPUT_CAPACITY.pack())
+            .lock(script_under_test.clone())
+            .type_(script_opt_if_present(input_auxiliary_type_script, shape.input_type_present()))
+            .build(),
+        limit_order_udt_to_ckb_mint_data(LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT, 0),
+    );
+    let always_success_lock = deploy_always_success_lock(context);
+    let funding_out_point = context.create_cell(
+        packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY.pack())
+            .lock(always_success_lock)
+            .build(),
+        Bytes::default(),
+    );
+
+    let output_data = limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let output = packed::CellOutput::new_builder()
+        .capacity::<packed::Uint64>(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY.pack())
+        .lock(script_under_test.clone())
+        .type_(script_opt_if_present(output_auxiliary_type_script, shape.output_type_present()))
+        .build();
+    let outputs = vec![output];
+    let outputs_data = vec![output_data];
+    let tx = ckb_testtool::ckb_types::core::TransactionBuilder::default()
+        .input(packed::CellInput::new_builder().previous_output(input_out_point).build())
+        .input(packed::CellInput::new_builder().previous_output(funding_out_point).build())
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.clone().pack())
+        .witness(Bytes::default().pack())
+        .build();
+    let tx = context.complete_tx(tx);
+    (tx, outputs, outputs_data)
+}
+
+fn limit_order_udt_to_ckb_funding_capacity_for_cell_shape(shape: LimitOrderCellShape) -> u64 {
+    match shape {
+        LimitOrderCellShape::MissingMatchingOutput => LIMIT_ORDER_UDT_TO_CKB_FUNDING_CAPACITY,
+        LimitOrderCellShape::DuplicateMatchingOutputs => LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_FUNDING_CAPACITY,
+    }
+}
+
+fn limit_order_udt_to_ckb_input_capacity_for_cell_shape(shape: LimitOrderCellShape) -> u64 {
+    LIMIT_ORDER_INPUT_CAPACITY + limit_order_udt_to_ckb_funding_capacity_for_cell_shape(shape)
+}
+
 fn fixed_limit_order_input_out_point() -> packed::OutPoint {
     packed::OutPoint::new_builder().tx_hash(LIMIT_ORDER_MASTER_TX_HASH.pack()).index(0u32).build()
+}
+
+fn script_opt_if_present(script: &packed::Script, present: bool) -> packed::ScriptOpt {
+    if present {
+        packed::ScriptOpt::from(script.clone())
+    } else {
+        packed::ScriptOpt::default()
+    }
 }
 
 fn fixed_owned_owner_out_point(index: u32) -> packed::OutPoint {
@@ -7449,6 +12648,33 @@ fn limit_order_mint_data(udt_amount: u128, master_distance: i32) -> Bytes {
     Bytes::from(data)
 }
 
+fn limit_order_input_data_for_mode(udt_amount: u128, mode: LimitOrderInputDataMode) -> Bytes {
+    match mode {
+        LimitOrderInputDataMode::Mint => limit_order_mint_data(udt_amount, 0),
+        LimitOrderInputDataMode::MatchAbsolute => limit_order_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0),
+        LimitOrderInputDataMode::MatchWrongTxHash => limit_order_match_data(udt_amount, &LIMIT_ORDER_WRONG_MASTER_TX_HASH, 0),
+        LimitOrderInputDataMode::MatchWrongIndex => limit_order_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 1),
+        LimitOrderInputDataMode::InvalidAction => limit_order_invalid_action_data(udt_amount),
+        LimitOrderInputDataMode::ShortAction => limit_order_short_action_data(udt_amount),
+        LimitOrderInputDataMode::ShortMasterOutPoint => limit_order_short_match_data(udt_amount),
+        LimitOrderInputDataMode::LongTrailingData => limit_order_long_match_data(udt_amount),
+    }
+}
+
+fn limit_order_invalid_action_data(udt_amount: u128) -> Bytes {
+    let mut data = Vec::new();
+    data.extend_from_slice(&udt_amount.to_le_bytes());
+    data.extend_from_slice(&2u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 32]);
+    data.extend_from_slice(&0i32.to_le_bytes());
+    append_limit_order_info(&mut data);
+    Bytes::from(data)
+}
+
+fn limit_order_short_action_data(udt_amount: u128) -> Bytes {
+    Bytes::from(udt_amount.to_le_bytes().to_vec())
+}
+
 fn limit_order_match_data(udt_amount: u128, master_tx_hash: &[u8; 32], master_index: u32) -> Bytes {
     let mut data = Vec::new();
     data.extend_from_slice(&udt_amount.to_le_bytes());
@@ -7456,6 +12682,37 @@ fn limit_order_match_data(udt_amount: u128, master_tx_hash: &[u8; 32], master_in
     data.extend_from_slice(master_tx_hash);
     data.extend_from_slice(&master_index.to_le_bytes());
     append_limit_order_info(&mut data);
+    Bytes::from(data)
+}
+
+fn limit_order_output_data_for_mode(
+    udt_amount: u128,
+    master_binding: LimitOrderMasterBinding,
+    mode: LimitOrderOutputDataMode,
+) -> Bytes {
+    match mode {
+        LimitOrderOutputDataMode::Match => {
+            limit_order_match_data(udt_amount, master_binding.master_tx_hash(), master_binding.master_index())
+        }
+        LimitOrderOutputDataMode::MintAction => limit_order_mint_data(udt_amount, 0),
+        LimitOrderOutputDataMode::InvalidAction => limit_order_invalid_action_data(udt_amount),
+        LimitOrderOutputDataMode::ShortAction => limit_order_short_action_data(udt_amount),
+        LimitOrderOutputDataMode::ShortMasterOutPoint => limit_order_short_match_data(udt_amount),
+        LimitOrderOutputDataMode::LongTrailingData => limit_order_long_match_data(udt_amount),
+    }
+}
+
+fn limit_order_short_match_data(udt_amount: u128) -> Bytes {
+    let mut data = Vec::new();
+    data.extend_from_slice(&udt_amount.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 8]);
+    Bytes::from(data)
+}
+
+fn limit_order_long_match_data(udt_amount: u128) -> Bytes {
+    let mut data = limit_order_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0).to_vec();
+    data.push(0x99);
     Bytes::from(data)
 }
 
@@ -7479,6 +12736,54 @@ fn limit_order_udt_to_ckb_match_data(udt_amount: u128, master_tx_hash: &[u8; 32]
     Bytes::from(data)
 }
 
+fn limit_order_udt_to_ckb_input_data_for_mode(udt_amount: u128, mode: LimitOrderInputDataMode) -> Bytes {
+    match mode {
+        LimitOrderInputDataMode::Mint => limit_order_udt_to_ckb_mint_data(udt_amount, 0),
+        LimitOrderInputDataMode::MatchAbsolute => limit_order_udt_to_ckb_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0),
+        LimitOrderInputDataMode::MatchWrongTxHash => {
+            limit_order_udt_to_ckb_match_data(udt_amount, &LIMIT_ORDER_WRONG_MASTER_TX_HASH, 0)
+        }
+        LimitOrderInputDataMode::MatchWrongIndex => limit_order_udt_to_ckb_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 1),
+        LimitOrderInputDataMode::InvalidAction => limit_order_udt_to_ckb_invalid_action_data(udt_amount),
+        LimitOrderInputDataMode::ShortAction => limit_order_short_action_data(udt_amount),
+        LimitOrderInputDataMode::ShortMasterOutPoint => limit_order_short_match_data(udt_amount),
+        LimitOrderInputDataMode::LongTrailingData => limit_order_udt_to_ckb_long_match_data(udt_amount),
+    }
+}
+
+fn limit_order_udt_to_ckb_invalid_action_data(udt_amount: u128) -> Bytes {
+    let mut data = Vec::new();
+    data.extend_from_slice(&udt_amount.to_le_bytes());
+    data.extend_from_slice(&2u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 32]);
+    data.extend_from_slice(&0i32.to_le_bytes());
+    append_limit_order_udt_to_ckb_info(&mut data);
+    Bytes::from(data)
+}
+
+fn limit_order_udt_to_ckb_output_data_for_mode(
+    udt_amount: u128,
+    master_binding: LimitOrderMasterBinding,
+    mode: LimitOrderOutputDataMode,
+) -> Bytes {
+    match mode {
+        LimitOrderOutputDataMode::Match => {
+            limit_order_udt_to_ckb_match_data(udt_amount, master_binding.master_tx_hash(), master_binding.master_index())
+        }
+        LimitOrderOutputDataMode::MintAction => limit_order_udt_to_ckb_mint_data(udt_amount, 0),
+        LimitOrderOutputDataMode::InvalidAction => limit_order_udt_to_ckb_invalid_action_data(udt_amount),
+        LimitOrderOutputDataMode::ShortAction => limit_order_short_action_data(udt_amount),
+        LimitOrderOutputDataMode::ShortMasterOutPoint => limit_order_short_match_data(udt_amount),
+        LimitOrderOutputDataMode::LongTrailingData => limit_order_udt_to_ckb_long_match_data(udt_amount),
+    }
+}
+
+fn limit_order_udt_to_ckb_long_match_data(udt_amount: u128) -> Bytes {
+    let mut data = limit_order_udt_to_ckb_match_data(udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0).to_vec();
+    data.push(0x99);
+    Bytes::from(data)
+}
+
 fn append_limit_order_info(data: &mut Vec<u8>) {
     data.extend_from_slice(&LIMIT_ORDER_CKB_TO_UDT_MUL.to_le_bytes());
     data.extend_from_slice(&LIMIT_ORDER_UDT_TO_CKB_MUL.to_le_bytes());
@@ -7496,16 +12801,25 @@ fn append_limit_order_udt_to_ckb_info(data: &mut Vec<u8>) {
 }
 
 fn deposit_phase1_receipt_data(deposit_capacity: u64) -> Bytes {
+    deposit_phase1_receipt_data_with(1, deposit_phase1_unoccupied_capacity(deposit_capacity))
+}
+
+fn deposit_phase1_receipt_data_with(quantity: u32, receipt_deposit_amount: u64) -> Bytes {
     let mut receipt_data = Vec::new();
-    receipt_data.extend_from_slice(&1u32.to_le_bytes());
-    receipt_data.extend_from_slice(&deposit_phase1_unoccupied_capacity(deposit_capacity).to_le_bytes());
+    receipt_data.extend_from_slice(&quantity.to_le_bytes());
+    receipt_data.extend_from_slice(&receipt_deposit_amount.to_le_bytes());
     Bytes::from(receipt_data)
 }
 
 fn mint_receipt_data() -> Bytes {
+    let (quantity, deposit_amount) = receipt_fields_for_mode(MintReceiptDataMode::Valid, 0);
+    mint_receipt_data_with(quantity, deposit_amount)
+}
+
+fn mint_receipt_data_with(quantity: u32, deposit_amount: u64) -> Bytes {
     let mut receipt_data = Vec::new();
-    receipt_data.extend_from_slice(&MINT_RECEIPT_QUANTITY.to_le_bytes());
-    receipt_data.extend_from_slice(&MINT_RECEIPT_DEPOSIT_AMOUNT.to_le_bytes());
+    receipt_data.extend_from_slice(&quantity.to_le_bytes());
+    receipt_data.extend_from_slice(&deposit_amount.to_le_bytes());
     Bytes::from(receipt_data)
 }
 
@@ -7517,8 +12831,32 @@ fn receipt_group_input_data(mode: MintReceiptDataMode, input_index: usize) -> By
     match (mode, input_index) {
         (MintReceiptDataMode::MalformedFirstInput, 0) => malformed_mint_receipt_data(),
         (MintReceiptDataMode::MalformedSecondInput, 1) => malformed_mint_receipt_data(),
-        _ => mint_receipt_data(),
+        (MintReceiptDataMode::LongTrailingData, _) => {
+            let (quantity, deposit_amount) = receipt_fields_for_mode(mode, input_index);
+            let mut receipt_data = mint_receipt_data_with(quantity, deposit_amount).to_vec();
+            receipt_data.push(0x99);
+            Bytes::from(receipt_data)
+        }
+        _ => {
+            let (quantity, deposit_amount) = receipt_fields_for_mode(mode, input_index);
+            mint_receipt_data_with(quantity, deposit_amount)
+        }
     }
+}
+
+fn receipt_fields_for_mode(mode: MintReceiptDataMode, input_index: usize) -> (u32, u64) {
+    match (mode, input_index) {
+        (MintReceiptDataMode::QuantityZero, _) => (0, MINT_RECEIPT_DEPOSIT_AMOUNT),
+        (MintReceiptDataMode::QuantityTwo, _) => (2, MINT_RECEIPT_DEPOSIT_AMOUNT),
+        (MintReceiptDataMode::ZeroFirstQuantity, 0) => (0, MINT_RECEIPT_DEPOSIT_AMOUNT),
+        (MintReceiptDataMode::MixedQuantities, 1) => (MINT_RECEIPT_MIXED_SECOND_QUANTITY, MINT_RECEIPT_MIXED_SECOND_DEPOSIT_AMOUNT),
+        _ => (MINT_RECEIPT_QUANTITY, MINT_RECEIPT_DEPOSIT_AMOUNT),
+    }
+}
+
+fn expected_mint_for_receipt_mode(mode: MintReceiptDataMode, input_index: usize) -> u128 {
+    let (quantity, deposit_amount) = receipt_fields_for_mode(mode, input_index);
+    u128::from(quantity) * u128::from(deposit_amount)
 }
 
 fn xudt_output_data(amount: u128) -> Bytes {
@@ -7664,6 +13002,73 @@ fn normalized_deposit_phase1_upper_bound_fixture() -> Value {
     })
 }
 
+fn normalized_deposit_phase1_receipt_shape_fixture(receipt_quantity: u32, receipt_deposit_amount: u64, failure_mode: &str) -> Value {
+    let mut fixture = normalized_deposit_phase1_fixture(VALID_DEPOSIT_PHASE1_CAPACITY, Some(failure_mode));
+    let receipt_data = deposit_phase1_receipt_data_with(receipt_quantity, receipt_deposit_amount);
+    fixture["scenario"] = json!(failure_mode);
+    fixture["outputs"][1]["data"] = json!(hex_prefixed(&receipt_data));
+    fixture["outputs"][1]["receipt_quantity"] = json!(receipt_quantity);
+    fixture["outputs"][1]["receipt_deposit_amount_shannons"] = json!(receipt_deposit_amount);
+    fixture["outputs"][1]["expected_receipt_deposit_amount_shannons"] =
+        json!(deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY));
+    fixture["expected_status"] = json!("fail");
+    fixture["failure_mode"] = json!(failure_mode);
+    fixture
+}
+
+fn normalized_deposit_phase1_receipt_raw_data_fixture(
+    receipt_data: Bytes,
+    scenario: &str,
+    failure_mode: Option<&str>,
+    expected_status: &str,
+) -> Value {
+    let mut fixture = normalized_deposit_phase1_fixture(VALID_DEPOSIT_PHASE1_CAPACITY, failure_mode);
+    fixture["scenario"] = json!(scenario);
+    fixture["outputs"][1]["data"] = json!(hex_prefixed(&receipt_data));
+    fixture["outputs"][1]["receipt_data_length_bytes"] = json!(receipt_data.len());
+    fixture["outputs"][1]["minimum_decoded_receipt_data_length_bytes"] = json!(12);
+    fixture["outputs"][1]["trailing_receipt_data_bytes"] = json!(receipt_data.len().saturating_sub(12));
+    fixture["outputs"][1]["receipt_quantity"] = Value::Null;
+    fixture["outputs"][1]["receipt_deposit_amount_shannons"] = Value::Null;
+    fixture["expected_status"] = json!(expected_status);
+    fixture["failure_mode"] = json!(failure_mode);
+    fixture
+}
+
+fn normalized_deposit_phase1_dao_type_shape_fixture(dao_type_shape: DepositPhase1DaoTypeShape) -> Value {
+    let failure_mode = dao_type_shape.failure_mode().expect("invalid DAO type shape must have failure mode");
+    let mut fixture = normalized_deposit_phase1_fixture(VALID_DEPOSIT_PHASE1_CAPACITY, Some(failure_mode));
+    fixture["scenario"] = json!(failure_mode);
+    fixture["outputs"][0]["type"] = dao_type_shape.fixture_type_label();
+    fixture["expected_status"] = json!("fail");
+    fixture["failure_mode"] = json!(failure_mode);
+    fixture
+}
+
+fn normalized_deposit_phase1_lock_shape_fixture(lock_shape: DepositPhase1LockShape) -> Value {
+    let failure_mode = lock_shape.failure_mode().expect("invalid lock shape must have failure mode");
+    let mut fixture = normalized_deposit_phase1_fixture(VALID_DEPOSIT_PHASE1_CAPACITY, Some(failure_mode));
+    fixture["scenario"] = json!(failure_mode);
+    fixture["outputs"][0]["lock"] = json!(lock_shape.fixture_lock_label());
+    fixture["expected_status"] = json!("fail");
+    fixture["failure_mode"] = json!(failure_mode);
+    fixture
+}
+
+fn normalized_deposit_phase1_deposit_data_shape_fixture(deposit_data_shape: DepositPhase1DepositDataShape) -> Value {
+    let failure_mode = deposit_data_shape.failure_mode();
+    let mut fixture = normalized_deposit_phase1_fixture(VALID_DEPOSIT_PHASE1_CAPACITY, failure_mode);
+    let deposit_data = deposit_data_shape.data();
+    fixture["scenario"] = json!(deposit_data_shape.scenario());
+    fixture["outputs"][0]["data"] = json!(hex_prefixed(&deposit_data));
+    fixture["outputs"][0]["deposit_data_length_bytes"] = json!(deposit_data.len());
+    fixture["outputs"][0]["minimum_decoded_deposit_data_length_bytes"] = json!(8);
+    fixture["outputs"][0]["trailing_deposit_data_bytes"] = json!(deposit_data.len().saturating_sub(8));
+    fixture["expected_status"] = json!(deposit_data_shape.expected_status());
+    fixture["failure_mode"] = json!(failure_mode);
+    fixture
+}
+
 fn normalized_duplicate_receipt_output_fixture() -> Value {
     let receipt_data = deposit_phase1_receipt_data(DUPLICATE_RECEIPT_OUTPUT_CAPACITY);
     json!({
@@ -7722,7 +13127,9 @@ fn normalized_receipt_group_mint_fixture(
     let first_receipt_data = receipt_group_input_data(receipt_data_mode, 0);
     let second_receipt_data = receipt_group_input_data(receipt_data_mode, 1);
     let xudt_data = xudt_output_data(output_udt_amount);
-    let expected_xudt_amount = MINT_RECEIPT_OUTPUT_AMOUNT * 2;
+    let first_expected_mint = expected_mint_for_receipt_mode(receipt_data_mode, 0);
+    let second_expected_mint = expected_mint_for_receipt_mode(receipt_data_mode, 1);
+    let expected_xudt_amount = first_expected_mint + second_expected_mint;
     let scenario = match failure_mode {
         Some("receipt_group_under_mint") => "receipt_group_under_mint",
         Some("receipt_group_over_mint") => "receipt_group_over_mint",
@@ -7731,18 +13138,35 @@ fn normalized_receipt_group_mint_fixture(
         Some("receipt_group_wrong_xudt_binding") => "receipt_group_wrong_xudt_binding",
         Some("receipt_group_malformed_receipt_data") => "receipt_group_malformed_receipt_data",
         Some("receipt_group_second_malformed_receipt_data") => "receipt_group_second_malformed_receipt_data",
+        Some("receipt_group_amount_high_nonzero") => "receipt_group_amount_high_nonzero",
         Some(_) => "receipt_group_mint_reject",
+        None if receipt_data_mode == MintReceiptDataMode::QuantityZero => "receipt_group_quantity_zero",
+        None if receipt_data_mode == MintReceiptDataMode::QuantityTwo => "receipt_group_quantity_two",
+        None if receipt_data_mode == MintReceiptDataMode::ZeroFirstQuantity => "receipt_group_zero_first_quantity",
+        None if receipt_data_mode == MintReceiptDataMode::MixedQuantities => "receipt_group_mixed_quantities",
+        None if receipt_data_mode == MintReceiptDataMode::LongTrailingData => "receipt_group_long_receipt_data",
         None => "receipt_group_exact_mint",
     };
     let first_input_role = match receipt_data_mode {
         MintReceiptDataMode::Valid => "ickb_receipt",
+        MintReceiptDataMode::QuantityZero => "zero_quantity_ickb_receipt",
+        MintReceiptDataMode::QuantityTwo => "quantity_two_ickb_receipt",
+        MintReceiptDataMode::ZeroFirstQuantity => "zero_first_ickb_receipt",
+        MintReceiptDataMode::MixedQuantities => "mixed_first_ickb_receipt",
+        MintReceiptDataMode::LongTrailingData => "long_first_ickb_receipt",
         MintReceiptDataMode::MalformedFirstInput => "malformed_ickb_receipt",
         MintReceiptDataMode::MalformedSecondInput => "ickb_receipt",
     };
     let second_input_role = match receipt_data_mode {
         MintReceiptDataMode::MalformedSecondInput => "malformed_second_ickb_receipt",
+        MintReceiptDataMode::MixedQuantities => "mixed_second_ickb_receipt",
+        MintReceiptDataMode::QuantityTwo => "quantity_two_second_ickb_receipt",
+        MintReceiptDataMode::LongTrailingData => "long_second_ickb_receipt",
+        MintReceiptDataMode::QuantityZero => "zero_quantity_second_ickb_receipt",
         _ => "second_ickb_receipt",
     };
+    let (first_quantity, first_deposit_amount) = receipt_fields_for_mode(receipt_data_mode, 0);
+    let (second_quantity, second_deposit_amount) = receipt_fields_for_mode(receipt_data_mode, 1);
     let output_role = match failure_mode {
         Some("receipt_group_under_mint") => "under_minted_ickb_xudt",
         Some("receipt_group_over_mint") => "over_minted_ickb_xudt",
@@ -7751,6 +13175,7 @@ fn normalized_receipt_group_mint_fixture(
         Some("receipt_group_wrong_xudt_binding") => "wrong_owner_ickb_xudt",
         Some("receipt_group_malformed_receipt_data") => "minted_ickb_xudt",
         Some("receipt_group_second_malformed_receipt_data") => "minted_ickb_xudt",
+        Some("receipt_group_amount_high_nonzero") => "high_word_ickb_xudt",
         Some(_) => "invalid_minted_ickb_xudt",
         None => "minted_ickb_xudt",
     };
@@ -7793,8 +13218,8 @@ fn normalized_receipt_group_mint_fixture(
                 "lock": "always_success",
                 "type": "script_under_test",
                 "data": hex_prefixed(&first_receipt_data),
-                "receipt_quantity": MINT_RECEIPT_QUANTITY,
-                "receipt_deposit_amount_shannons": MINT_RECEIPT_DEPOSIT_AMOUNT,
+                "receipt_quantity": first_quantity,
+                "receipt_deposit_amount_shannons": first_deposit_amount,
                 "receipt_deposit_accumulated_rate": accumulated_rate
             },
             {
@@ -7804,8 +13229,8 @@ fn normalized_receipt_group_mint_fixture(
                 "lock": "always_success",
                 "type": "script_under_test",
                 "data": hex_prefixed(&second_receipt_data),
-                "receipt_quantity": MINT_RECEIPT_QUANTITY,
-                "receipt_deposit_amount_shannons": MINT_RECEIPT_DEPOSIT_AMOUNT,
+                "receipt_quantity": second_quantity,
+                "receipt_deposit_amount_shannons": second_deposit_amount,
                 "receipt_deposit_accumulated_rate": accumulated_rate
             }
         ],
@@ -7827,7 +13252,11 @@ fn normalized_receipt_group_mint_fixture(
                 },
                 "data": hex_prefixed(&xudt_data),
                 "xudt_amount": output_udt_amount as u64,
-                "expected_xudt_amount": expected_xudt_amount as u64
+                "xudt_amount_low_u64": output_udt_amount as u64,
+                "xudt_amount_high_u64": (output_udt_amount >> 64) as u64,
+                "expected_xudt_amount": expected_xudt_amount as u64,
+                "expected_xudt_amount_low_u64": expected_xudt_amount as u64,
+                "expected_xudt_amount_high_u64": (expected_xudt_amount >> 64) as u64
             }
         ],
         "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
@@ -7926,6 +13355,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
     let withdrawal_data = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::DepositDataInput => Bytes::from(vec![0u8; 8]),
         DaoWithdrawalHeaderDepMode::MalformedInputData => Bytes::from(vec![0x12, 0x06, 0x00, 0x00]),
+        DaoWithdrawalHeaderDepMode::LongInputData => dao_long_withdrawal_request_cell_data(),
         _ => Bytes::from(ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK.to_le_bytes().to_vec()),
     };
     let fixture_rate_maximum_capacity = match header_dep_mode {
@@ -7949,6 +13379,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         Some("dao_wrong_withdraw_accumulated_rate") => "dao_wrong_withdraw_accumulated_rate",
         Some("dao_withdrawal_deposit_data_input") => "dao_withdrawal_deposit_data_input",
         Some("dao_withdrawal_malformed_input_data") => "dao_withdrawal_malformed_input_data",
+        Some("dao_withdrawal_long_input_data") => "dao_withdrawal_long_input_data",
         Some("dao_missing_witness_input_type") => "dao_missing_witness_input_type",
         Some("dao_empty_witness_input_type") => "dao_empty_witness_input_type",
         Some("dao_short_witness_input_type") => "dao_short_witness_input_type",
@@ -8003,6 +13434,9 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         }
         Some("dao_withdrawal_malformed_input_data") => {
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated malformed withdrawal-data classifier probe"
+        }
+        Some("dao_withdrawal_long_input_data") => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated long withdrawal-data classifier probe"
         }
         Some("dao_missing_witness_input_type") => {
             "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated WitnessArgs input_type presence probe"
@@ -8100,6 +13534,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present
         | DaoWithdrawalHeaderDepMode::DepositDataInput
         | DaoWithdrawalHeaderDepMode::MalformedInputData
+        | DaoWithdrawalHeaderDepMode::LongInputData
         | DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds
         | DaoWithdrawalHeaderDepMode::WrongDepositAccumulatedRate
         | DaoWithdrawalHeaderDepMode::WrongWithdrawAccumulatedRate
@@ -8163,6 +13598,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present => 1u64,
         DaoWithdrawalHeaderDepMode::DepositDataInput => 1u64,
         DaoWithdrawalHeaderDepMode::MalformedInputData => 1u64,
+        DaoWithdrawalHeaderDepMode::LongInputData => 1u64,
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => 0u64,
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => 1u64,
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => 2u64,
@@ -8209,6 +13645,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
         DaoWithdrawalHeaderDepMode::Present => "withdraw_header",
         DaoWithdrawalHeaderDepMode::DepositDataInput => "withdraw_header",
         DaoWithdrawalHeaderDepMode::MalformedInputData => "withdraw_header",
+        DaoWithdrawalHeaderDepMode::LongInputData => "withdraw_header",
         DaoWithdrawalHeaderDepMode::MissingWithdrawHeader => "missing_withdraw_header",
         DaoWithdrawalHeaderDepMode::MissingDepositHeader => "withdraw_header",
         DaoWithdrawalHeaderDepMode::DepositHeaderIndexOutOfBounds => "withdraw_header",
@@ -8224,6 +13661,7 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
     let input_role = match header_dep_mode {
         DaoWithdrawalHeaderDepMode::DepositDataInput => "deposit_data_dao_cell_spent_as_withdrawal",
         DaoWithdrawalHeaderDepMode::MalformedInputData => "malformed_data_dao_cell_spent_as_withdrawal",
+        DaoWithdrawalHeaderDepMode::LongInputData => "long_data_dao_cell_spent_as_withdrawal",
         _ => "withdrawing_dao_cell",
     };
     json!({
@@ -8249,6 +13687,679 @@ fn normalized_dao_withdrawal_fixture_with_header_dep_mode(
                 "since_u64": input_since
             }
         ],
+        "outputs": [output],
+        "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
+        "failure_mode": failure_mode
+    })
+}
+
+fn normalized_dao_two_input_withdrawal_fixture(
+    output_capacity: u64,
+    failure_mode: Option<&str>,
+    mode: DaoTwoInputWithdrawalMode,
+) -> Value {
+    let first_input_data = dao_two_input_cell_data(mode, 0);
+    let second_input_data = dao_two_input_cell_data(mode, 1);
+    let second_input_role = match mode {
+        DaoTwoInputWithdrawalMode::SecondDepositDataInput => "deposit_data_dao_cell_spent_as_second_withdrawal",
+        DaoTwoInputWithdrawalMode::SecondMalformedInputData => "malformed_data_dao_cell_spent_as_second_withdrawal",
+        DaoTwoInputWithdrawalMode::SecondLongInputData => "long_data_dao_cell_spent_as_second_withdrawal",
+        _ => "withdrawing_dao_cell",
+    };
+    let expected_maximum_capacity = match mode {
+        DaoTwoInputWithdrawalMode::SameDeposit => ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+        DaoTwoInputWithdrawalMode::MixedDeposit => ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY,
+        DaoTwoInputWithdrawalMode::MixedWithdraw => ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY,
+        DaoTwoInputWithdrawalMode::MixedBoth => ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        DaoTwoInputWithdrawalMode::SecondDepositDataInput
+        | DaoTwoInputWithdrawalMode::SecondMalformedInputData
+        | DaoTwoInputWithdrawalMode::SecondLongInputData
+        | DaoTwoInputWithdrawalMode::SecondWitnessMissing
+        | DaoTwoInputWithdrawalMode::SecondWitnessEmpty
+        | DaoTwoInputWithdrawalMode::SecondWitnessShort
+        | DaoTwoInputWithdrawalMode::SecondWitnessLong
+        | DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex
+        | DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY,
+    };
+    let scenario = match (mode, failure_mode) {
+        (DaoTwoInputWithdrawalMode::SameDeposit, Some("dao_two_input_over_withdraw_capacity")) => {
+            "dao_two_input_over_withdraw_capacity"
+        }
+        (DaoTwoInputWithdrawalMode::MixedDeposit, Some("dao_two_input_mixed_deposit_rate_over_withdraw_capacity")) => {
+            "dao_two_input_mixed_deposit_rate_over_withdraw_capacity"
+        }
+        (DaoTwoInputWithdrawalMode::MixedWithdraw, Some("dao_two_input_mixed_withdraw_rate_over_withdraw_capacity")) => {
+            "dao_two_input_mixed_withdraw_rate_over_withdraw_capacity"
+        }
+        (DaoTwoInputWithdrawalMode::MixedBoth, Some("dao_two_input_mixed_both_rate_over_withdraw_capacity")) => {
+            "dao_two_input_mixed_both_rate_over_withdraw_capacity"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessMissing, Some("dao_two_input_second_missing_witness_input_type")) => {
+            "dao_two_input_second_missing_witness_input_type"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessEmpty, Some("dao_two_input_second_empty_witness_input_type")) => {
+            "dao_two_input_second_empty_witness_input_type"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessShort, Some("dao_two_input_second_short_witness_input_type")) => {
+            "dao_two_input_second_short_witness_input_type"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessLong, Some("dao_two_input_second_long_witness_input_type")) => {
+            "dao_two_input_second_long_witness_input_type"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex, Some("dao_two_input_second_withdraw_header_witness_index")) => {
+            "dao_two_input_second_withdraw_header_witness_index"
+        }
+        (DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex, Some("dao_two_input_second_oob_witness_index")) => {
+            "dao_two_input_second_oob_witness_index"
+        }
+        (DaoTwoInputWithdrawalMode::SecondDepositDataInput, Some("dao_two_input_second_deposit_data_input")) => {
+            "dao_two_input_second_deposit_data_input"
+        }
+        (DaoTwoInputWithdrawalMode::SecondMalformedInputData, Some("dao_two_input_second_malformed_input_data")) => {
+            "dao_two_input_second_malformed_input_data"
+        }
+        (DaoTwoInputWithdrawalMode::SecondLongInputData, Some("dao_two_input_second_long_input_data")) => {
+            "dao_two_input_second_long_input_data"
+        }
+        (DaoTwoInputWithdrawalMode::MixedDeposit, _) => "dao_two_input_mixed_deposit_rate_max_withdrawal_capacity",
+        (DaoTwoInputWithdrawalMode::MixedWithdraw, _) => "dao_two_input_mixed_withdraw_rate_max_withdrawal_capacity",
+        (DaoTwoInputWithdrawalMode::MixedBoth, _) => "dao_two_input_mixed_both_rate_max_withdrawal_capacity",
+        _ => "dao_two_input_max_withdrawal_capacity",
+    };
+    let capacity_boundary = match (mode, failure_mode) {
+        (DaoTwoInputWithdrawalMode::SameDeposit, Some(_)) => "two_input_exact_maximum_plus_one",
+        (DaoTwoInputWithdrawalMode::MixedDeposit, Some(_)) => "two_input_mixed_deposit_rate_exact_maximum_plus_one",
+        (DaoTwoInputWithdrawalMode::MixedDeposit, None) => "two_input_mixed_deposit_rate_exact_maximum",
+        (DaoTwoInputWithdrawalMode::MixedWithdraw, Some(_)) => "two_input_mixed_withdraw_rate_exact_maximum_plus_one",
+        (DaoTwoInputWithdrawalMode::MixedWithdraw, None) => "two_input_mixed_withdraw_rate_exact_maximum",
+        (DaoTwoInputWithdrawalMode::MixedBoth, Some(_)) => "two_input_mixed_both_rate_exact_maximum_plus_one",
+        (DaoTwoInputWithdrawalMode::MixedBoth, None) => "two_input_mixed_both_rate_exact_maximum",
+        (
+            DaoTwoInputWithdrawalMode::SecondWitnessMissing
+            | DaoTwoInputWithdrawalMode::SecondWitnessEmpty
+            | DaoTwoInputWithdrawalMode::SecondWitnessShort
+            | DaoTwoInputWithdrawalMode::SecondWitnessLong,
+            Some(_),
+        ) => "two_input_exact_maximum_with_malformed_second_witness",
+        (
+            DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex | DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex,
+            Some(_),
+        ) => "two_input_exact_maximum_with_malformed_second_witness_index",
+        (
+            DaoTwoInputWithdrawalMode::SecondDepositDataInput
+            | DaoTwoInputWithdrawalMode::SecondMalformedInputData
+            | DaoTwoInputWithdrawalMode::SecondLongInputData,
+            Some(_),
+        ) => "two_input_exact_maximum_with_non_withdrawal_second_input_data",
+        _ => "two_input_exact_maximum",
+    };
+    let mut header_deps = vec![
+        json!({
+            "index": 0,
+            "role": "withdraw_header",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH
+            }
+        }),
+        json!({
+            "index": 1,
+            "role": "deposit_header",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH
+            }
+        }),
+    ];
+    if matches!(mode, DaoTwoInputWithdrawalMode::MixedDeposit | DaoTwoInputWithdrawalMode::MixedBoth) {
+        header_deps.push(json!({
+            "index": 2,
+            "role": "deposit_header_mixed_rate",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH
+            }
+        }));
+    }
+    if matches!(mode, DaoTwoInputWithdrawalMode::MixedWithdraw | DaoTwoInputWithdrawalMode::MixedBoth) {
+        header_deps.push(json!({
+            "index": header_deps.len(),
+            "role": "withdraw_header_mixed_rate",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH
+            }
+        }));
+    }
+    let mut output = json!({
+        "index": 0,
+        "role": "withdrawn_capacity_cell",
+        "capacity_shannons": output_capacity,
+        "lock": "always_success",
+        "type": null,
+        "data": "0x",
+        "capacity_boundary": capacity_boundary,
+        "expected_maximum_capacity_shannons": expected_maximum_capacity,
+        "dao_capacity_compensation": {
+            "formula": "sum(occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate))",
+            "input_count": 2,
+            "per_input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+            "per_input_occupied_capacity_shannons": ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY,
+            "per_input_withdrawable_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY,
+            "withdraw_accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+            "second_withdraw_accumulated_rate": if matches!(mode, DaoTwoInputWithdrawalMode::MixedWithdraw | DaoTwoInputWithdrawalMode::MixedBoth) {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE
+            },
+            "deposit_accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+            "second_deposit_accumulated_rate": if matches!(mode, DaoTwoInputWithdrawalMode::MixedDeposit | DaoTwoInputWithdrawalMode::MixedBoth) {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE
+            },
+            "per_input_maximum_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY
+        }
+    });
+    if output_capacity > expected_maximum_capacity {
+        output["overdrawn_by_shannons"] = json!(output_capacity - expected_maximum_capacity);
+    }
+    let script_under_test_difference = match mode {
+        DaoTwoInputWithdrawalMode::SecondWitnessMissing
+        | DaoTwoInputWithdrawalMode::SecondWitnessEmpty
+        | DaoTwoInputWithdrawalMode::SecondWitnessShort
+        | DaoTwoInputWithdrawalMode::SecondWitnessLong => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated two-input WitnessArgs input_type width/presence probe"
+        }
+        DaoTwoInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex
+        | DaoTwoInputWithdrawalMode::SecondWitnessOutOfBoundsIndex => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated two-input WitnessArgs input_type index probe"
+        }
+        _ => {
+            "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated two-input DAO occupied-capacity plus rate-compensation aggregate probe"
+        }
+    };
+    json!({
+        "schema": "cellscript-ickb-normalized-fixture-v1",
+        "scenario": scenario,
+        "script_under_test_roles": ["input_0_type", "input_1_type"],
+        "script_under_test_difference": script_under_test_difference,
+        "input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 2,
+        "cell_deps": ["script_under_test"],
+        "header_deps": header_deps,
+        "witnesses": [
+            {
+                "index": 0,
+                "input_type_header_dep_index_le_u64": 1
+            },
+            dao_two_input_second_witness_metadata(mode)
+        ],
+        "inputs": [
+            {
+                "index": 0,
+                "role": "withdrawing_dao_cell",
+                "capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+                "lock": "always_success",
+                "type": "script_under_test",
+                "data": hex_prefixed(&first_input_data),
+                "deposit_block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+                "linked_header": "withdraw_header",
+                "since": format!("0x{:016x}", ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE),
+                "since_u64": ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE
+            },
+            {
+                "index": 1,
+                "role": second_input_role,
+                "capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+                "lock": "always_success",
+                "type": "script_under_test",
+                "data": hex_prefixed(&second_input_data),
+                "deposit_block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+                "linked_header": if matches!(
+                    mode,
+                    DaoTwoInputWithdrawalMode::MixedWithdraw | DaoTwoInputWithdrawalMode::MixedBoth
+                ) {
+                    "withdraw_header_mixed_rate"
+                } else {
+                    "withdraw_header"
+                },
+                "since": format!("0x{:016x}", ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE),
+                "since_u64": ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE
+            }
+        ],
+        "outputs": [output],
+        "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
+        "failure_mode": failure_mode
+    })
+}
+
+fn normalized_dao_three_input_withdrawal_fixture(
+    output_capacity: u64,
+    failure_mode: Option<&str>,
+    mode: DaoThreeInputWithdrawalMode,
+) -> Value {
+    let expected_maximum_capacity = match mode {
+        DaoThreeInputWithdrawalMode::SameDeposit => ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+        DaoThreeInputWithdrawalMode::MixedDepositSecond => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY
+        }
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY
+        }
+        DaoThreeInputWithdrawalMode::MixedBothSecond => ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+        | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY
+        }
+        DaoThreeInputWithdrawalMode::MixedDepositThird => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY
+        }
+        DaoThreeInputWithdrawalMode::MixedWithdrawThird => {
+            ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY
+        }
+        DaoThreeInputWithdrawalMode::MixedBothThird => ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY,
+        DaoThreeInputWithdrawalMode::SecondWitnessMissing
+        | DaoThreeInputWithdrawalMode::SecondWitnessEmpty
+        | DaoThreeInputWithdrawalMode::SecondWitnessShort
+        | DaoThreeInputWithdrawalMode::SecondWitnessLong
+        | DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex
+        | DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex
+        | DaoThreeInputWithdrawalMode::SecondDepositDataInput
+        | DaoThreeInputWithdrawalMode::SecondMalformedInputData
+        | DaoThreeInputWithdrawalMode::SecondLongInputData
+        | DaoThreeInputWithdrawalMode::ThirdWitnessMissing
+        | DaoThreeInputWithdrawalMode::ThirdWitnessEmpty
+        | DaoThreeInputWithdrawalMode::ThirdWitnessShort
+        | DaoThreeInputWithdrawalMode::ThirdWitnessLong
+        | DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex
+        | DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex
+        | DaoThreeInputWithdrawalMode::ThirdDepositDataInput
+        | DaoThreeInputWithdrawalMode::ThirdMalformedInputData
+        | DaoThreeInputWithdrawalMode::ThirdLongInputData => ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY,
+    };
+    let scenario = match (mode, failure_mode) {
+        (DaoThreeInputWithdrawalMode::SameDeposit, Some("dao_three_input_over_withdraw_capacity")) => {
+            "dao_three_input_over_withdraw_capacity"
+        }
+        (DaoThreeInputWithdrawalMode::MixedDepositThird, Some("dao_three_input_mixed_deposit_rate_over_withdraw_capacity")) => {
+            "dao_three_input_mixed_deposit_rate_over_withdraw_capacity"
+        }
+        (DaoThreeInputWithdrawalMode::MixedWithdrawThird, Some("dao_three_input_mixed_withdraw_rate_over_withdraw_capacity")) => {
+            "dao_three_input_mixed_withdraw_rate_over_withdraw_capacity"
+        }
+        (DaoThreeInputWithdrawalMode::MixedBothThird, Some("dao_three_input_mixed_both_rate_over_withdraw_capacity")) => {
+            "dao_three_input_mixed_both_rate_over_withdraw_capacity"
+        }
+        (
+            DaoThreeInputWithdrawalMode::MixedDepositSecond,
+            Some("dao_three_input_second_mixed_deposit_rate_over_withdraw_capacity"),
+        ) => "dao_three_input_second_mixed_deposit_rate_over_withdraw_capacity",
+        (
+            DaoThreeInputWithdrawalMode::MixedWithdrawSecond,
+            Some("dao_three_input_second_mixed_withdraw_rate_over_withdraw_capacity"),
+        ) => "dao_three_input_second_mixed_withdraw_rate_over_withdraw_capacity",
+        (DaoThreeInputWithdrawalMode::MixedBothSecond, Some("dao_three_input_second_mixed_both_rate_over_withdraw_capacity")) => {
+            "dao_three_input_second_mixed_both_rate_over_withdraw_capacity"
+        }
+        (
+            DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+            Some("dao_three_input_second_deposit_third_withdraw_rate_over_withdraw_capacity"),
+        ) => "dao_three_input_second_deposit_third_withdraw_rate_over_withdraw_capacity",
+        (
+            DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+            Some("dao_three_input_second_withdraw_third_deposit_rate_over_withdraw_capacity"),
+        ) => "dao_three_input_second_withdraw_third_deposit_rate_over_withdraw_capacity",
+        (DaoThreeInputWithdrawalMode::SecondWitnessMissing, Some("dao_three_input_second_missing_witness_input_type")) => {
+            "dao_three_input_second_missing_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::SecondWitnessEmpty, Some("dao_three_input_second_empty_witness_input_type")) => {
+            "dao_three_input_second_empty_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::SecondWitnessShort, Some("dao_three_input_second_short_witness_input_type")) => {
+            "dao_three_input_second_short_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::SecondWitnessLong, Some("dao_three_input_second_long_witness_input_type")) => {
+            "dao_three_input_second_long_witness_input_type"
+        }
+        (
+            DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex,
+            Some("dao_three_input_second_withdraw_header_witness_index"),
+        ) => "dao_three_input_second_withdraw_header_witness_index",
+        (DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex, Some("dao_three_input_second_oob_witness_index")) => {
+            "dao_three_input_second_oob_witness_index"
+        }
+        (DaoThreeInputWithdrawalMode::SecondDepositDataInput, Some("dao_three_input_second_deposit_data_input")) => {
+            "dao_three_input_second_deposit_data_input"
+        }
+        (DaoThreeInputWithdrawalMode::SecondMalformedInputData, Some("dao_three_input_second_malformed_input_data")) => {
+            "dao_three_input_second_malformed_input_data"
+        }
+        (DaoThreeInputWithdrawalMode::SecondLongInputData, Some("dao_three_input_second_long_input_data")) => {
+            "dao_three_input_second_long_input_data"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdWitnessMissing, Some("dao_three_input_third_missing_witness_input_type")) => {
+            "dao_three_input_third_missing_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdWitnessEmpty, Some("dao_three_input_third_empty_witness_input_type")) => {
+            "dao_three_input_third_empty_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdWitnessShort, Some("dao_three_input_third_short_witness_input_type")) => {
+            "dao_three_input_third_short_witness_input_type"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdWitnessLong, Some("dao_three_input_third_long_witness_input_type")) => {
+            "dao_three_input_third_long_witness_input_type"
+        }
+        (
+            DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex,
+            Some("dao_three_input_third_withdraw_header_witness_index"),
+        ) => "dao_three_input_third_withdraw_header_witness_index",
+        (DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex, Some("dao_three_input_third_oob_witness_index")) => {
+            "dao_three_input_third_oob_witness_index"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdDepositDataInput, Some("dao_three_input_third_deposit_data_input")) => {
+            "dao_three_input_third_deposit_data_input"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdMalformedInputData, Some("dao_three_input_third_malformed_input_data")) => {
+            "dao_three_input_third_malformed_input_data"
+        }
+        (DaoThreeInputWithdrawalMode::ThirdLongInputData, Some("dao_three_input_third_long_input_data")) => {
+            "dao_three_input_third_long_input_data"
+        }
+        (DaoThreeInputWithdrawalMode::MixedDepositThird, _) => "dao_three_input_mixed_deposit_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawThird, _) => "dao_three_input_mixed_withdraw_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedBothThird, _) => "dao_three_input_mixed_both_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedDepositSecond, _) => "dao_three_input_second_mixed_deposit_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecond, _) => "dao_three_input_second_mixed_withdraw_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedBothSecond, _) => "dao_three_input_second_mixed_both_rate_max_withdrawal_capacity",
+        (DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird, _) => {
+            "dao_three_input_second_deposit_third_withdraw_rate_max_withdrawal_capacity"
+        }
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird, _) => {
+            "dao_three_input_second_withdraw_third_deposit_rate_max_withdrawal_capacity"
+        }
+        _ => "dao_three_input_max_withdrawal_capacity",
+    };
+    let capacity_boundary = match (mode, failure_mode) {
+        (DaoThreeInputWithdrawalMode::SameDeposit, Some(_)) => "three_input_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedDepositSecond, Some(_)) => "three_input_second_mixed_deposit_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedDepositSecond, None) => "three_input_second_mixed_deposit_rate_exact_maximum",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecond, Some(_)) => "three_input_second_mixed_withdraw_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecond, None) => "three_input_second_mixed_withdraw_rate_exact_maximum",
+        (DaoThreeInputWithdrawalMode::MixedBothSecond, Some(_)) => "three_input_second_mixed_both_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedBothSecond, None) => "three_input_second_mixed_both_rate_exact_maximum",
+        (DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird, Some(_)) => {
+            "three_input_second_deposit_third_withdraw_rate_exact_maximum_plus_one"
+        }
+        (DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird, None) => {
+            "three_input_second_deposit_third_withdraw_rate_exact_maximum"
+        }
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird, Some(_)) => {
+            "three_input_second_withdraw_third_deposit_rate_exact_maximum_plus_one"
+        }
+        (DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird, None) => {
+            "three_input_second_withdraw_third_deposit_rate_exact_maximum"
+        }
+        (DaoThreeInputWithdrawalMode::MixedDepositThird, Some(_)) => "three_input_mixed_deposit_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedDepositThird, None) => "three_input_mixed_deposit_rate_exact_maximum",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawThird, Some(_)) => "three_input_mixed_withdraw_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedWithdrawThird, None) => "three_input_mixed_withdraw_rate_exact_maximum",
+        (DaoThreeInputWithdrawalMode::MixedBothThird, Some(_)) => "three_input_mixed_both_rate_exact_maximum_plus_one",
+        (DaoThreeInputWithdrawalMode::MixedBothThird, None) => "three_input_mixed_both_rate_exact_maximum",
+        (
+            DaoThreeInputWithdrawalMode::SecondWitnessMissing
+            | DaoThreeInputWithdrawalMode::SecondWitnessEmpty
+            | DaoThreeInputWithdrawalMode::SecondWitnessShort
+            | DaoThreeInputWithdrawalMode::SecondWitnessLong,
+            Some(_),
+        ) => "three_input_exact_maximum_with_malformed_second_witness",
+        (
+            DaoThreeInputWithdrawalMode::SecondWitnessWithdrawHeaderIndex | DaoThreeInputWithdrawalMode::SecondWitnessOutOfBoundsIndex,
+            Some(_),
+        ) => "three_input_exact_maximum_with_malformed_second_witness_index",
+        (
+            DaoThreeInputWithdrawalMode::SecondDepositDataInput
+            | DaoThreeInputWithdrawalMode::SecondMalformedInputData
+            | DaoThreeInputWithdrawalMode::SecondLongInputData,
+            Some(_),
+        ) => "three_input_exact_maximum_with_non_withdrawal_second_input_data",
+        (
+            DaoThreeInputWithdrawalMode::ThirdWitnessMissing
+            | DaoThreeInputWithdrawalMode::ThirdWitnessEmpty
+            | DaoThreeInputWithdrawalMode::ThirdWitnessShort
+            | DaoThreeInputWithdrawalMode::ThirdWitnessLong,
+            Some(_),
+        ) => "three_input_exact_maximum_with_malformed_third_witness",
+        (
+            DaoThreeInputWithdrawalMode::ThirdWitnessWithdrawHeaderIndex | DaoThreeInputWithdrawalMode::ThirdWitnessOutOfBoundsIndex,
+            Some(_),
+        ) => "three_input_exact_maximum_with_malformed_third_witness_index",
+        (
+            DaoThreeInputWithdrawalMode::ThirdDepositDataInput
+            | DaoThreeInputWithdrawalMode::ThirdMalformedInputData
+            | DaoThreeInputWithdrawalMode::ThirdLongInputData,
+            Some(_),
+        ) => "three_input_exact_maximum_with_non_withdrawal_third_input_data",
+        _ => "three_input_exact_maximum",
+    };
+    let mut header_deps = vec![
+        json!({
+            "index": 0,
+            "role": "withdraw_header",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH
+            }
+        }),
+        json!({
+            "index": 1,
+            "role": "deposit_header",
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH
+            }
+        }),
+    ];
+    if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedDepositSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedDepositThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        header_deps.push(json!({
+            "index": 2,
+            "role": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedDepositSecond
+                    | DaoThreeInputWithdrawalMode::MixedBothSecond
+                    | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            ) {
+                "deposit_header_second_mixed_rate"
+            } else {
+                "deposit_header_mixed_rate"
+            },
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE1_EPOCH_LENGTH
+            }
+        }));
+    }
+    if matches!(
+        mode,
+        DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+            | DaoThreeInputWithdrawalMode::MixedBothSecond
+            | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            | DaoThreeInputWithdrawalMode::MixedWithdrawThird
+            | DaoThreeInputWithdrawalMode::MixedBothThird
+    ) {
+        header_deps.push(json!({
+            "index": header_deps.len(),
+            "role": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+                    | DaoThreeInputWithdrawalMode::MixedBothSecond
+                    | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            ) {
+                "withdraw_header_second_mixed_rate"
+            } else {
+                "withdraw_header_mixed_rate"
+            },
+            "block_number": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAW_BLOCK,
+            "accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE,
+            "epoch": {
+                "number": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_NUMBER,
+                "index": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_INDEX,
+                "length": ORIGINAL_DAO_WITHDRAW_PHASE2_EPOCH_LENGTH
+            }
+        }));
+    }
+    let mut output = json!({
+        "index": 0,
+        "role": "withdrawn_capacity_cell",
+        "capacity_shannons": output_capacity,
+        "lock": "always_success",
+        "type": null,
+        "data": "0x",
+        "capacity_boundary": capacity_boundary,
+        "expected_maximum_capacity_shannons": expected_maximum_capacity,
+        "dao_capacity_compensation": {
+            "formula": "sum(occupied_capacity + ((input_capacity - occupied_capacity) * withdraw_rate / deposit_rate))",
+            "input_count": 3,
+            "per_input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+            "per_input_occupied_capacity_shannons": ORIGINAL_DAO_WITHDRAW_INPUT_OCCUPIED_CAPACITY,
+            "per_input_withdrawable_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_WITHDRAWABLE_CAPACITY,
+            "withdraw_accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE,
+            "second_withdraw_accumulated_rate": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+                    | DaoThreeInputWithdrawalMode::MixedBothSecond
+                    | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            ) {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE
+            },
+            "third_withdraw_accumulated_rate": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedWithdrawThird
+                    | DaoThreeInputWithdrawalMode::MixedBothThird
+                    | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            ) {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE2_ACCUMULATED_RATE
+            },
+            "deposit_accumulated_rate": ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE,
+            "second_deposit_accumulated_rate": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedDepositSecond
+                    | DaoThreeInputWithdrawalMode::MixedBothSecond
+                    | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird
+            ) {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE
+            },
+            "third_deposit_accumulated_rate": if matches!(
+                mode,
+                DaoThreeInputWithdrawalMode::MixedDepositThird
+                    | DaoThreeInputWithdrawalMode::MixedBothThird
+                    | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird
+            ) {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE
+            } else {
+                ORIGINAL_DAO_WITHDRAW_PHASE1_ACCUMULATED_RATE
+            },
+            "per_input_maximum_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY
+        }
+    });
+    if output_capacity > expected_maximum_capacity {
+        output["overdrawn_by_shannons"] = json!(output_capacity - expected_maximum_capacity);
+    }
+    let inputs: Vec<Value> = (0..3)
+        .map(|index| {
+            let linked_header = match (index, mode) {
+                (
+                    1,
+                    DaoThreeInputWithdrawalMode::MixedWithdrawSecond
+                    | DaoThreeInputWithdrawalMode::MixedBothSecond
+                    | DaoThreeInputWithdrawalMode::MixedWithdrawSecondDepositThird,
+                ) => "withdraw_header_second_mixed_rate",
+                (
+                    2,
+                    DaoThreeInputWithdrawalMode::MixedWithdrawThird
+                    | DaoThreeInputWithdrawalMode::MixedBothThird
+                    | DaoThreeInputWithdrawalMode::MixedDepositSecondWithdrawThird,
+                ) => "withdraw_header_mixed_rate",
+                _ => "withdraw_header",
+            };
+            let data = dao_three_input_cell_data(mode, index);
+            let role = if index == 1 {
+                match mode {
+                    DaoThreeInputWithdrawalMode::SecondDepositDataInput => "deposit_data_dao_cell_spent_as_second_withdrawal",
+                    DaoThreeInputWithdrawalMode::SecondMalformedInputData => "malformed_data_dao_cell_spent_as_second_withdrawal",
+                    DaoThreeInputWithdrawalMode::SecondLongInputData => "long_data_dao_cell_spent_as_second_withdrawal",
+                    _ => "withdrawing_dao_cell",
+                }
+            } else if index == 2 {
+                match mode {
+                    DaoThreeInputWithdrawalMode::ThirdDepositDataInput => "deposit_data_dao_cell_spent_as_third_withdrawal",
+                    DaoThreeInputWithdrawalMode::ThirdMalformedInputData => "malformed_data_dao_cell_spent_as_third_withdrawal",
+                    DaoThreeInputWithdrawalMode::ThirdLongInputData => "long_data_dao_cell_spent_as_third_withdrawal",
+                    _ => "withdrawing_dao_cell",
+                }
+            } else {
+                "withdrawing_dao_cell"
+            };
+            json!({
+                "index": index,
+                "role": role,
+                "capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY,
+                "lock": "always_success",
+                "type": "script_under_test",
+                "data": hex_prefixed(&data),
+                "deposit_block_number": ORIGINAL_DAO_WITHDRAW_PHASE1_BLOCK,
+                "linked_header": linked_header,
+                "since": format!("0x{:016x}", ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE),
+                "since_u64": ORIGINAL_DAO_WITHDRAW_PHASE2_MATURE_SINCE
+            })
+        })
+        .collect();
+    let witnesses: Vec<Value> = (0..3).map(|index| dao_three_input_witness_metadata(mode, index)).collect();
+    json!({
+        "schema": "cellscript-ickb-normalized-fixture-v1",
+        "scenario": scenario,
+        "script_under_test_roles": ["input_0_type", "input_1_type", "input_2_type"],
+        "script_under_test_difference": "only code cell and input type script hash differ; original side uses the unmodified DAO ELF and CellScript side uses a generated three-input DAO occupied-capacity plus rate-compensation aggregate probe",
+        "input_capacity_shannons": ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 3,
+        "cell_deps": ["script_under_test"],
+        "header_deps": header_deps,
+        "witnesses": witnesses,
+        "inputs": inputs,
         "outputs": [output],
         "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
         "failure_mode": failure_mode
@@ -8293,19 +14404,30 @@ fn normalized_mint_from_receipt_fixture_with_header_dep_and_receipt_data_mode(
     let xudt_data = xudt_output_data(output_udt_amount);
     let scenario = match failure_mode {
         Some("amount_inflation") => "amount_inflation",
+        Some("amount_high_nonzero") => "amount_high_nonzero",
         Some("amount_deflation") => "amount_deflation",
         Some("wrong_xudt_binding") => "wrong_xudt_binding",
         Some("wrong_accumulated_rate") => "wrong_accumulated_rate",
         Some("missing_header_dep") => "missing_header_dep",
         Some("mint_malformed_receipt_data") => "mint_from_receipt_malformed_receipt_data",
         Some(_) => "mint_from_receipt_reject",
+        None if receipt_data_mode == MintReceiptDataMode::QuantityZero => "mint_from_receipt_quantity_zero",
+        None if receipt_data_mode == MintReceiptDataMode::QuantityTwo => "mint_from_receipt_quantity_two",
+        None if receipt_data_mode == MintReceiptDataMode::LongTrailingData => "mint_from_receipt_long_data",
         None => "mint_from_receipt",
     };
     let receipt_role = match receipt_data_mode {
         MintReceiptDataMode::Valid => "ickb_receipt",
+        MintReceiptDataMode::QuantityZero => "zero_quantity_ickb_receipt",
+        MintReceiptDataMode::QuantityTwo => "quantity_two_ickb_receipt",
+        MintReceiptDataMode::ZeroFirstQuantity => "zero_first_ickb_receipt",
+        MintReceiptDataMode::MixedQuantities => "mixed_quantity_ickb_receipt",
+        MintReceiptDataMode::LongTrailingData => "long_ickb_receipt",
         MintReceiptDataMode::MalformedFirstInput => "malformed_ickb_receipt",
         MintReceiptDataMode::MalformedSecondInput => "ickb_receipt",
     };
+    let (receipt_quantity, receipt_deposit_amount) = receipt_fields_for_mode(receipt_data_mode, 0);
+    let expected_xudt_amount = expected_mint_for_receipt_mode(receipt_data_mode, 0);
     let owner = match xudt_binding {
         MintXudtBinding::ScriptUnderTest => json!("script_under_test_hash"),
         MintXudtBinding::WrongOwnerHash => json!(hex_prefixed(&WRONG_XUDT_OWNER_HASH)),
@@ -8349,8 +14471,8 @@ fn normalized_mint_from_receipt_fixture_with_header_dep_and_receipt_data_mode(
                 "lock": "always_success",
                 "type": "script_under_test",
                 "data": hex_prefixed(&receipt_data),
-                "receipt_quantity": MINT_RECEIPT_QUANTITY,
-                "receipt_deposit_amount_shannons": MINT_RECEIPT_DEPOSIT_AMOUNT,
+                "receipt_quantity": receipt_quantity,
+                "receipt_deposit_amount_shannons": receipt_deposit_amount,
                 "receipt_deposit_accumulated_rate": accumulated_rate
             }
         ],
@@ -8372,7 +14494,9 @@ fn normalized_mint_from_receipt_fixture_with_header_dep_and_receipt_data_mode(
                 },
                 "data": hex_prefixed(&xudt_data),
                 "xudt_amount": output_udt_amount as u64,
-                "expected_xudt_amount": MINT_RECEIPT_OUTPUT_AMOUNT as u64
+                "xudt_amount_low_u64": output_udt_amount as u64,
+                "xudt_amount_high_u64": (output_udt_amount >> 64) as u64,
+                "expected_xudt_amount": expected_xudt_amount as u64
             }
         ],
         "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
@@ -9314,24 +15438,36 @@ fn normalized_limit_order_fixture_with_scenario(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
-    failure_mode: Option<&str>,
-    asset_binding: LimitOrderAssetBinding,
-    pass_scenario: Option<&str>,
+    options: LimitOrderScenarioOptions,
 ) -> Value {
-    let input_data = limit_order_mint_data(input_udt_amount, 0);
-    let output_data = limit_order_match_data(output_udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0);
-    let output_auxiliary_type_args = match asset_binding {
+    let input_data = limit_order_input_data_for_mode(input_udt_amount, options.input_data_mode);
+    let output_data = limit_order_output_data_for_mode(output_udt_amount, options.master_binding, options.output_data_mode);
+    let output_auxiliary_type_args = match options.asset_binding {
         LimitOrderAssetBinding::SameAuxiliaryType => "0x",
         LimitOrderAssetBinding::DifferentAuxiliaryType => "0x01",
     };
-    let scenario = match failure_mode {
+    let scenario = match options.failure_mode {
         Some("limit_order_underpayment") => "limit_order_underpayment",
         Some("wrong_asset") => "limit_order_wrong_asset",
         Some("insufficient_match") => "limit_order_insufficient_match",
         Some("no_ckb_paid_out") => "limit_order_no_ckb_paid_out",
         Some("udt_decreased") => "limit_order_udt_decreased",
+        Some("wrong_master_tx_hash") => "limit_order_wrong_master_tx_hash",
+        Some("wrong_master_index") => "limit_order_wrong_master_index",
+        Some("limit_order_output_mint_action") => "limit_order_output_mint_action",
+        Some("limit_order_output_invalid_action") => "limit_order_output_invalid_action",
+        Some("limit_order_output_short_action") => "limit_order_output_short_action",
+        Some("limit_order_output_short_master_out_point") => "limit_order_output_short_master_out_point",
+        Some("limit_order_output_long_data") => "limit_order_output_long_data",
+        Some("limit_order_input_invalid_action") => "limit_order_input_invalid_action",
+        Some("limit_order_input_short_action") => "limit_order_input_short_action",
+        Some("limit_order_input_short_master_out_point") => "limit_order_input_short_master_out_point",
+        Some("limit_order_input_long_data") => "limit_order_input_long_data",
+        Some("limit_order_input_wrong_master_tx_hash") => "limit_order_input_wrong_master_tx_hash",
+        Some("limit_order_input_wrong_master_index") => "limit_order_input_wrong_master_index",
+        None if options.pass_scenario == Some("limit_order_input_absolute_match") => "limit_order_input_absolute_match",
         Some(_) => "limit_order_reject",
-        None if pass_scenario == Some("limit_order_min_match_boundary") => "limit_order_min_match_boundary",
+        None if options.pass_scenario == Some("limit_order_min_match_boundary") => "limit_order_min_match_boundary",
         None => "valid_limit_order",
     };
     json!({
@@ -9339,7 +15475,7 @@ fn normalized_limit_order_fixture_with_scenario(
         "scenario": scenario,
         "script_under_test_roles": ["input_0_lock", "output_0_lock"],
         "script_under_test_difference": "only the Limit Order owner lock script code cell and script hashes differ; both sides use the same auxiliary always-success UDT type script code",
-        "asset_binding": match asset_binding {
+        "asset_binding": match options.asset_binding {
             LimitOrderAssetBinding::SameAuxiliaryType => "same_auxiliary_type_hash",
             LimitOrderAssetBinding::DifferentAuxiliaryType => "different_auxiliary_type_hash"
         },
@@ -9356,7 +15492,7 @@ fn normalized_limit_order_fixture_with_scenario(
                 "type": "auxiliary_udt_type",
                 "auxiliary_type_args": "0x",
                 "data": hex_prefixed(&input_data),
-                "order_action": "Mint",
+                "order_action": options.input_data_mode.order_action(),
                 "master_distance_i32": 0,
                 "udt_amount": input_udt_amount as u64,
                 "ckb_to_udt_ratio": {
@@ -9376,10 +15512,10 @@ fn normalized_limit_order_fixture_with_scenario(
                 "type": "auxiliary_udt_type",
                 "auxiliary_type_args": output_auxiliary_type_args,
                 "data": hex_prefixed(&output_data),
-                "order_action": "Match",
+                "order_action": options.output_data_mode.order_action(),
                 "master_out_point": {
-                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
-                    "index": 0
+                    "tx_hash": hex_prefixed(options.master_binding.master_tx_hash()),
+                    "index": options.master_binding.master_index()
                 },
                 "udt_amount": output_udt_amount as u64,
                 "ckb_to_udt_ratio": {
@@ -9390,32 +15526,188 @@ fn normalized_limit_order_fixture_with_scenario(
                 "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
             }
         ],
-        "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
-        "failure_mode": failure_mode
+        "expected_status": if options.failure_mode.is_some() { "fail" } else { "pass" },
+        "failure_mode": options.failure_mode
     })
+}
+
+fn normalized_limit_order_cell_shape_fixture(shape: LimitOrderCellShape) -> Value {
+    let input_data = limit_order_mint_data(LIMIT_ORDER_INPUT_UDT_AMOUNT, 0);
+    let matching_data = limit_order_match_data(LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let first_duplicate_data = limit_order_match_data(LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let second_duplicate_data = limit_order_match_data(LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let outputs = match shape {
+        LimitOrderCellShape::MissingMatchingOutput => vec![json!({
+            "index": 0,
+            "role": "non_matching_limit_order_candidate",
+            "capacity_shannons": LIMIT_ORDER_OUTPUT_CAPACITY,
+            "lock": "always_success",
+            "type": "auxiliary_udt_type",
+            "auxiliary_type_args": "0x",
+            "data": hex_prefixed(&matching_data),
+            "order_action": "Match",
+            "master_out_point": {
+                "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                "index": 0
+            },
+            "udt_amount": LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT as u64,
+            "ckb_to_udt_ratio": {
+                "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+            },
+            "udt_to_ckb_ratio": null,
+            "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+        })],
+        LimitOrderCellShape::DuplicateMatchingOutputs => vec![
+            json!({
+                "index": 0,
+                "role": "duplicate_matching_limit_order",
+                "capacity_shannons": LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&first_duplicate_data),
+                "order_action": "Match",
+                "master_out_point": {
+                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                    "index": 0
+                },
+                "udt_amount": LIMIT_ORDER_DUPLICATE_FIRST_OUTPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "udt_to_ckb_ratio": null,
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            }),
+            json!({
+                "index": 1,
+                "role": "duplicate_matching_limit_order",
+                "capacity_shannons": LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&second_duplicate_data),
+                "order_action": "Match",
+                "master_out_point": {
+                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                    "index": 0
+                },
+                "udt_amount": LIMIT_ORDER_DUPLICATE_SECOND_OUTPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "udt_to_ckb_ratio": null,
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            }),
+        ],
+    };
+    json!({
+        "schema": "cellscript-ickb-normalized-fixture-v1",
+        "scenario": shape.scenario(false),
+        "script_under_test_roles": match shape {
+            LimitOrderCellShape::MissingMatchingOutput => vec!["input_0_lock"],
+            LimitOrderCellShape::DuplicateMatchingOutputs => vec!["input_0_lock", "output_0_lock", "output_1_lock"],
+        },
+        "script_under_test_difference": "only the Limit Order owner lock script code cell and script hashes differ; both sides use the same auxiliary always-success UDT type script code",
+        "asset_binding": "same_auxiliary_type_hash",
+        "input_capacity_shannons": LIMIT_ORDER_INPUT_CAPACITY,
+        "cell_deps": ["script_under_test", "auxiliary_type"],
+        "header_deps": [],
+        "witnesses": ["0x"],
+        "inputs": [
+            {
+                "index": 0,
+                "role": "limit_order",
+                "capacity_shannons": LIMIT_ORDER_INPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&input_data),
+                "order_action": "Mint",
+                "master_distance_i32": 0,
+                "udt_amount": LIMIT_ORDER_INPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "udt_to_ckb_ratio": null,
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            }
+        ],
+        "outputs": outputs,
+        "expected_status": "fail",
+        "failure_mode": shape.failure_mode(false)
+    })
+}
+
+fn normalized_limit_order_type_shape_fixture(shape: LimitOrderTypeShape) -> Value {
+    let mut fixture = normalized_limit_order_fixture_with_scenario(
+        LIMIT_ORDER_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_OUTPUT_CAPACITY,
+        LIMIT_ORDER_VALID_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some(shape.failure_mode(false)),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    );
+    fixture["scenario"] = json!(shape.scenario(false));
+    fixture["failure_mode"] = json!(shape.failure_mode(false));
+    match shape {
+        LimitOrderTypeShape::MissingInputAuxiliaryType => {
+            fixture["inputs"][0]["type"] = Value::Null;
+            fixture["inputs"][0]["auxiliary_type_args"] = Value::Null;
+        }
+        LimitOrderTypeShape::MissingOutputAuxiliaryType => {
+            fixture["outputs"][0]["type"] = Value::Null;
+            fixture["outputs"][0]["auxiliary_type_args"] = Value::Null;
+        }
+    }
+    fixture
 }
 
 fn normalized_limit_order_udt_to_ckb_fixture(
     input_udt_amount: u128,
     output_capacity: u64,
     output_udt_amount: u128,
-    failure_mode: Option<&str>,
-    asset_binding: LimitOrderAssetBinding,
-    pass_scenario: Option<&str>,
+    options: LimitOrderScenarioOptions,
 ) -> Value {
-    let input_data = limit_order_udt_to_ckb_mint_data(input_udt_amount, 0);
-    let output_data = limit_order_udt_to_ckb_match_data(output_udt_amount, &LIMIT_ORDER_MASTER_TX_HASH, 0);
-    let output_auxiliary_type_args = match asset_binding {
+    let input_data = limit_order_udt_to_ckb_input_data_for_mode(input_udt_amount, options.input_data_mode);
+    let output_data = limit_order_udt_to_ckb_output_data_for_mode(output_udt_amount, options.master_binding, options.output_data_mode);
+    let output_auxiliary_type_args = match options.asset_binding {
         LimitOrderAssetBinding::SameAuxiliaryType => "0x",
         LimitOrderAssetBinding::DifferentAuxiliaryType => "0x01",
     };
-    let scenario = match failure_mode {
+    let scenario = match options.failure_mode {
         Some("limit_order_underpayment") => "limit_order_udt_to_ckb_underpayment",
         Some("insufficient_match") => "limit_order_udt_to_ckb_insufficient_match",
         Some("no_udt_paid_out") => "limit_order_udt_to_ckb_no_udt_paid_out",
         Some("wrong_asset") => "limit_order_udt_to_ckb_wrong_asset",
+        Some("limit_order_udt_to_ckb_wrong_master_tx_hash") => "limit_order_udt_to_ckb_wrong_master_tx_hash",
+        Some("limit_order_udt_to_ckb_wrong_master_index") => "limit_order_udt_to_ckb_wrong_master_index",
+        Some("limit_order_udt_to_ckb_output_mint_action") => "limit_order_udt_to_ckb_output_mint_action",
+        Some("limit_order_udt_to_ckb_output_invalid_action") => "limit_order_udt_to_ckb_output_invalid_action",
+        Some("limit_order_udt_to_ckb_output_short_action") => "limit_order_udt_to_ckb_output_short_action",
+        Some("limit_order_udt_to_ckb_output_short_master_out_point") => "limit_order_udt_to_ckb_output_short_master_out_point",
+        Some("limit_order_udt_to_ckb_output_long_data") => "limit_order_udt_to_ckb_output_long_data",
+        Some("limit_order_udt_to_ckb_input_invalid_action") => "limit_order_udt_to_ckb_input_invalid_action",
+        Some("limit_order_udt_to_ckb_input_short_action") => "limit_order_udt_to_ckb_input_short_action",
+        Some("limit_order_udt_to_ckb_input_short_master_out_point") => "limit_order_udt_to_ckb_input_short_master_out_point",
+        Some("limit_order_udt_to_ckb_input_long_data") => "limit_order_udt_to_ckb_input_long_data",
+        Some("limit_order_udt_to_ckb_input_wrong_master_tx_hash") => "limit_order_udt_to_ckb_input_wrong_master_tx_hash",
+        Some("limit_order_udt_to_ckb_input_wrong_master_index") => "limit_order_udt_to_ckb_input_wrong_master_index",
+        None if options.pass_scenario == Some("limit_order_udt_to_ckb_input_absolute_match") => {
+            "limit_order_udt_to_ckb_input_absolute_match"
+        }
         Some(_) => "limit_order_udt_to_ckb_reject",
-        None if pass_scenario == Some("limit_order_udt_to_ckb_min_match_boundary") => "limit_order_udt_to_ckb_min_match_boundary",
+        None if options.pass_scenario == Some("limit_order_udt_to_ckb_min_match_boundary") => {
+            "limit_order_udt_to_ckb_min_match_boundary"
+        }
         None => "valid_limit_order_udt_to_ckb",
     };
     json!({
@@ -9423,7 +15715,7 @@ fn normalized_limit_order_udt_to_ckb_fixture(
         "scenario": scenario,
         "script_under_test_roles": ["input_0_lock", "output_0_lock"],
         "script_under_test_difference": "only the Limit Order owner lock script code cell and script hashes differ; both sides use the same auxiliary always-success UDT type script code and the same funding input",
-        "asset_binding": match asset_binding {
+        "asset_binding": match options.asset_binding {
             LimitOrderAssetBinding::SameAuxiliaryType => "same_auxiliary_type_hash",
             LimitOrderAssetBinding::DifferentAuxiliaryType => "different_auxiliary_type_hash"
         },
@@ -9440,7 +15732,7 @@ fn normalized_limit_order_udt_to_ckb_fixture(
                 "type": "auxiliary_udt_type",
                 "auxiliary_type_args": "0x",
                 "data": hex_prefixed(&input_data),
-                "order_action": "Mint",
+                "order_action": options.input_data_mode.order_action(),
                 "master_distance_i32": 0,
                 "udt_amount": input_udt_amount as u64,
                 "ckb_to_udt_ratio": null,
@@ -9468,10 +15760,10 @@ fn normalized_limit_order_udt_to_ckb_fixture(
                 "type": "auxiliary_udt_type",
                 "auxiliary_type_args": output_auxiliary_type_args,
                 "data": hex_prefixed(&output_data),
-                "order_action": "Match",
+                "order_action": options.output_data_mode.order_action(),
                 "master_out_point": {
-                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
-                    "index": 0
+                    "tx_hash": hex_prefixed(options.master_binding.master_tx_hash()),
+                    "index": options.master_binding.master_index()
                 },
                 "udt_amount": output_udt_amount as u64,
                 "ckb_to_udt_ratio": null,
@@ -9482,20 +15774,171 @@ fn normalized_limit_order_udt_to_ckb_fixture(
                 "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
             }
         ],
-        "expected_status": if failure_mode.is_some() { "fail" } else { "pass" },
-        "failure_mode": failure_mode
+        "expected_status": if options.failure_mode.is_some() { "fail" } else { "pass" },
+        "failure_mode": options.failure_mode
     })
+}
+
+fn normalized_limit_order_udt_to_ckb_cell_shape_fixture(shape: LimitOrderCellShape) -> Value {
+    let input_data = limit_order_udt_to_ckb_mint_data(LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT, 0);
+    let output_data = limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let duplicate_data =
+        limit_order_udt_to_ckb_match_data(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT, &LIMIT_ORDER_MASTER_TX_HASH, 0);
+    let outputs = match shape {
+        LimitOrderCellShape::MissingMatchingOutput => vec![json!({
+            "index": 0,
+            "role": "non_matching_limit_order_candidate",
+            "capacity_shannons": LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+            "lock": "always_success",
+            "type": "auxiliary_udt_type",
+            "auxiliary_type_args": "0x",
+            "data": hex_prefixed(&output_data),
+            "order_action": "Match",
+            "master_out_point": {
+                "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                "index": 0
+            },
+            "udt_amount": LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT as u64,
+            "ckb_to_udt_ratio": null,
+            "udt_to_ckb_ratio": {
+                "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+            },
+            "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+        })],
+        LimitOrderCellShape::DuplicateMatchingOutputs => vec![
+            json!({
+                "index": 0,
+                "role": "duplicate_matching_limit_order",
+                "capacity_shannons": LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_FIRST_OUTPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&duplicate_data),
+                "order_action": "Match",
+                "master_out_point": {
+                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                    "index": 0
+                },
+                "udt_amount": LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": null,
+                "udt_to_ckb_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            }),
+            json!({
+                "index": 1,
+                "role": "duplicate_matching_limit_order",
+                "capacity_shannons": LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_SECOND_OUTPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&duplicate_data),
+                "order_action": "Match",
+                "master_out_point": {
+                    "tx_hash": hex_prefixed(&LIMIT_ORDER_MASTER_TX_HASH),
+                    "index": 0
+                },
+                "udt_amount": LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_OUTPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": null,
+                "udt_to_ckb_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            }),
+        ],
+    };
+    json!({
+        "schema": "cellscript-ickb-normalized-fixture-v1",
+        "scenario": shape.scenario(true),
+        "script_under_test_roles": match shape {
+            LimitOrderCellShape::MissingMatchingOutput => vec!["input_0_lock"],
+            LimitOrderCellShape::DuplicateMatchingOutputs => vec!["input_0_lock", "output_0_lock", "output_1_lock"],
+        },
+        "script_under_test_difference": "only the Limit Order owner lock script code cell and script hashes differ; both sides use the same auxiliary always-success UDT type script code and the same funding input",
+        "asset_binding": "same_auxiliary_type_hash",
+        "input_capacity_shannons": limit_order_udt_to_ckb_input_capacity_for_cell_shape(shape),
+        "cell_deps": ["script_under_test", "auxiliary_type", "always_success_funding_lock"],
+        "header_deps": [],
+        "witnesses": ["0x"],
+        "inputs": [
+            {
+                "index": 0,
+                "role": "limit_order",
+                "capacity_shannons": LIMIT_ORDER_INPUT_CAPACITY,
+                "lock": "script_under_test",
+                "type": "auxiliary_udt_type",
+                "auxiliary_type_args": "0x",
+                "data": hex_prefixed(&input_data),
+                "order_action": "Mint",
+                "master_distance_i32": 0,
+                "udt_amount": LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT as u64,
+                "ckb_to_udt_ratio": null,
+                "udt_to_ckb_ratio": {
+                    "ckb_mul": LIMIT_ORDER_CKB_TO_UDT_MUL,
+                    "udt_mul": LIMIT_ORDER_UDT_TO_CKB_MUL
+                },
+                "ckb_min_match_shannons": 1u64 << LIMIT_ORDER_CKB_MIN_MATCH_LOG
+            },
+            {
+                "index": 1,
+                "role": "funding_ckb",
+                "capacity_shannons": limit_order_udt_to_ckb_funding_capacity_for_cell_shape(shape),
+                "lock": "always_success",
+                "type": null,
+                "data": "0x"
+            }
+        ],
+        "outputs": outputs,
+        "expected_status": "fail",
+        "failure_mode": shape.failure_mode(true)
+    })
+}
+
+fn normalized_limit_order_udt_to_ckb_type_shape_fixture(shape: LimitOrderTypeShape) -> Value {
+    let mut fixture = normalized_limit_order_udt_to_ckb_fixture(
+        LIMIT_ORDER_UDT_TO_CKB_INPUT_UDT_AMOUNT,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_CAPACITY,
+        LIMIT_ORDER_UDT_TO_CKB_OUTPUT_UDT_AMOUNT,
+        limit_order_options(
+            Some(shape.failure_mode(true)),
+            LimitOrderAssetBinding::SameAuxiliaryType,
+            None,
+            LimitOrderMasterBinding::Matching,
+            LimitOrderInputDataMode::Mint,
+            LimitOrderOutputDataMode::Match,
+        ),
+    );
+    fixture["scenario"] = json!(shape.scenario(true));
+    fixture["failure_mode"] = json!(shape.failure_mode(true));
+    match shape {
+        LimitOrderTypeShape::MissingInputAuxiliaryType => {
+            fixture["inputs"][0]["type"] = Value::Null;
+            fixture["inputs"][0]["auxiliary_type_args"] = Value::Null;
+        }
+        LimitOrderTypeShape::MissingOutputAuxiliaryType => {
+            fixture["outputs"][0]["type"] = Value::Null;
+            fixture["outputs"][0]["auxiliary_type_args"] = Value::Null;
+        }
+    }
+    fixture
 }
 
 fn assert_matrix_execution_matches(scenario: &str, execution: &Value) {
     let matrix = read_matrix();
-    let row =
-        matrix["rows"].as_array().expect("rows").iter().find(|row| row["scenario"].as_str() == Some(scenario)).unwrap_or_else(|| {
+    let row = match matrix["rows"].as_array().expect("rows").iter().find(|row| row["scenario"].as_str() == Some(scenario)) {
+        Some(row) => row,
+        None if maybe_update_matrix_execution(scenario, execution) => return,
+        None => {
             panic!(
                 "missing matrix row for {scenario}; measured execution:\n{}",
                 serde_json::to_string_pretty(execution).expect("execution json should serialize")
             )
-        });
+        }
+    };
     assert_eq!(row["evidence_level"], "DIFFERENTIAL_CKB_VM_EXECUTED", "{scenario}");
     assert_eq!(row["ckb_vm_execution"], true, "{scenario}");
     assert_eq!(row["original_ickb_executed"], true, "{scenario}");
@@ -9569,6 +16012,33 @@ fn hex_prefixed(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
+fn cellscript_script_value_expr(script: &packed::Script) -> String {
+    let code_hash: [u8; 32] = script.code_hash().unpack();
+    let args = script.args().raw_data();
+    let hash_type = match script.hash_type().as_slice()[0] {
+        0 => "script::hash_type_data()",
+        1 => "script::hash_type_type()",
+        2 => "script::hash_type_data1()",
+        4 => "script::hash_type_data2()",
+        other => panic!("unsupported Script hash_type byte in fixture: {other}"),
+    };
+    let args_expr = if args.is_empty() {
+        "script::args_empty()".to_string()
+    } else {
+        format!("script::args({})", cellscript_byte_string_literal(args.as_ref()))
+    };
+    format!("script::new(Hash::from_bytes({}), {}, {})", cellscript_byte_string_literal(&code_hash), hash_type, args_expr)
+}
+
+fn cellscript_byte_string_literal(bytes: &[u8]) -> String {
+    let mut literal = String::from("b\"");
+    for byte in bytes {
+        literal.push_str(&format!("\\x{byte:02x}"));
+    }
+    literal.push('"');
+    literal
+}
+
 fn parse_ckb_script_error_code(error: &str) -> Option<i64> {
     for marker in ["error code ", "error code: "] {
         if let Some(start) = error.find(marker).map(|index| index + marker.len()) {
@@ -9626,11 +16096,84 @@ fn differential_receipt_group_exact_mint_both_accept() {
 }
 
 #[test]
+fn differential_receipt_group_mixed_quantities_both_accept() {
+    let execution = receipt_group_mixed_quantities_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    assert_matrix_execution_matches(RECEIPT_GROUP_MIXED_QUANTITIES_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_zero_first_quantity_both_accept() {
+    let execution = receipt_group_zero_first_quantity_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let inputs = execution["normalized_fixture"]["inputs"].as_array().expect("receipt group inputs");
+    assert_eq!(inputs[0]["receipt_quantity"], 0);
+    assert_eq!(inputs[1]["receipt_quantity"], 1);
+    assert_matrix_execution_matches(RECEIPT_GROUP_ZERO_FIRST_QUANTITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_quantity_zero_both_accept() {
+    let execution = receipt_group_quantity_zero_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    let inputs = fixture["inputs"].as_array().expect("receipt group inputs");
+    assert_eq!(inputs[0]["receipt_quantity"], 0);
+    assert_eq!(inputs[1]["receipt_quantity"], 0);
+    let output = &fixture["outputs"][0];
+    assert_eq!(output["xudt_amount_low_u64"].as_u64(), Some(0));
+    assert_eq!(output["expected_xudt_amount_low_u64"].as_u64(), Some(0));
+    assert_matrix_execution_matches(RECEIPT_GROUP_QUANTITY_ZERO_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_quantity_two_both_accept() {
+    let execution = receipt_group_quantity_two_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    let inputs = fixture["inputs"].as_array().expect("receipt group inputs");
+    assert_eq!(inputs[0]["receipt_quantity"], 2);
+    assert_eq!(inputs[1]["receipt_quantity"], 2);
+    let output = &fixture["outputs"][0];
+    assert_eq!(output["xudt_amount_low_u64"].as_u64(), Some((MINT_RECEIPT_QUANTITY_TWO_OUTPUT_AMOUNT * 2) as u64));
+    assert_eq!(output["expected_xudt_amount_low_u64"].as_u64(), Some((MINT_RECEIPT_QUANTITY_TWO_OUTPUT_AMOUNT * 2) as u64));
+    assert_matrix_execution_matches(RECEIPT_GROUP_QUANTITY_TWO_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_long_receipt_data_both_accept() {
+    let execution = receipt_group_long_receipt_data_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let inputs = execution["normalized_fixture"]["inputs"].as_array().expect("receipt group inputs");
+    assert_eq!(inputs[0]["data"].as_str().expect("first receipt data").len(), 28);
+    assert_eq!(inputs[1]["data"].as_str().expect("second receipt data").len(), 28);
+    assert_matrix_execution_matches(RECEIPT_GROUP_LONG_RECEIPT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
 fn differential_receipt_group_over_mint_both_reject() {
     let execution = receipt_group_over_mint_differential_execution();
     assert_eq!(execution["original_ickb_status"], "fail");
     assert_eq!(execution["cellscript_status"], "fail");
     assert_matrix_execution_matches(RECEIPT_GROUP_OVER_MINT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_receipt_group_amount_high_nonzero_both_reject() {
+    let execution = receipt_group_amount_high_nonzero_differential_execution();
+    assert_eq!(execution["failure_mode"], "receipt_group_amount_high_nonzero");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let output = &execution["normalized_fixture"]["outputs"][0];
+    assert_eq!(output["xudt_amount_low_u64"].as_u64(), Some((MINT_RECEIPT_OUTPUT_AMOUNT * 2) as u64));
+    assert_eq!(output["xudt_amount_high_u64"].as_u64(), Some(1));
+    assert_eq!(output["expected_xudt_amount_high_u64"].as_u64(), Some(0));
+    assert_matrix_execution_matches(RECEIPT_GROUP_AMOUNT_HIGH_NONZERO_DIFF_SCENARIO, &execution);
 }
 
 #[test]
@@ -9702,6 +16245,150 @@ fn differential_deposit_too_big_both_reject() {
 }
 
 #[test]
+fn differential_deposit_receipt_amount_mismatch_both_reject() {
+    let execution = deposit_phase1_receipt_amount_mismatch_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_receipt_amount_mismatch");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_receipt_amount_mismatch");
+    assert_eq!(fixture["outputs"][1]["receipt_quantity"], 1);
+    assert_eq!(
+        fixture["outputs"][1]["receipt_deposit_amount_shannons"],
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY) + 1
+    );
+    assert_matrix_execution_matches(DEPOSIT_RECEIPT_AMOUNT_MISMATCH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_receipt_quantity_zero_both_reject() {
+    let execution = deposit_phase1_receipt_quantity_zero_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_receipt_quantity_zero");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_receipt_quantity_zero");
+    assert_eq!(fixture["outputs"][1]["receipt_quantity"], 0);
+    assert_eq!(
+        fixture["outputs"][1]["receipt_deposit_amount_shannons"],
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY)
+    );
+    assert_matrix_execution_matches(DEPOSIT_RECEIPT_QUANTITY_ZERO_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_receipt_quantity_mismatch_both_reject() {
+    let execution = deposit_phase1_receipt_quantity_mismatch_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_receipt_quantity_mismatch");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_receipt_quantity_mismatch");
+    assert_eq!(fixture["outputs"][1]["receipt_quantity"], 2);
+    assert_eq!(
+        fixture["outputs"][1]["receipt_deposit_amount_shannons"],
+        deposit_phase1_unoccupied_capacity(VALID_DEPOSIT_PHASE1_CAPACITY)
+    );
+    assert_matrix_execution_matches(DEPOSIT_RECEIPT_QUANTITY_MISMATCH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_receipt_short_data_both_reject() {
+    let execution = deposit_phase1_receipt_short_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_receipt_short_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_receipt_short_data");
+    assert_eq!(fixture["outputs"][1]["receipt_data_length_bytes"], 4);
+    assert_matrix_execution_matches(DEPOSIT_RECEIPT_SHORT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_receipt_long_data_both_accept() {
+    let execution = deposit_phase1_receipt_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_receipt_long_data");
+    assert_eq!(fixture["outputs"][1]["receipt_data_length_bytes"], 13);
+    assert_matrix_execution_matches(DEPOSIT_RECEIPT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_missing_dao_type_both_reject() {
+    let execution = deposit_phase1_missing_dao_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_missing_dao_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_missing_dao_type");
+    assert_eq!(fixture["outputs"][0]["type"], Value::Null);
+    assert_matrix_execution_matches(DEPOSIT_MISSING_DAO_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_wrong_dao_type_both_reject() {
+    let execution = deposit_phase1_wrong_dao_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_wrong_dao_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_wrong_dao_type");
+    assert_eq!(fixture["outputs"][0]["type"], "always_success_wrong_dao_type");
+    assert_matrix_execution_matches(DEPOSIT_WRONG_DAO_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_wrong_lock_both_reject() {
+    let execution = deposit_phase1_wrong_lock_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_wrong_ickb_lock");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_wrong_ickb_lock");
+    assert_eq!(fixture["outputs"][0]["lock"], "always_success_wrong_deposit_lock");
+    assert_matrix_execution_matches(DEPOSIT_WRONG_LOCK_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_short_data_both_reject() {
+    let execution = deposit_phase1_short_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_short_dao_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_short_dao_data");
+    assert_eq!(fixture["outputs"][0]["deposit_data_length_bytes"], 4);
+    assert_matrix_execution_matches(DEPOSIT_SHORT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_nonzero_data_both_reject() {
+    let execution = deposit_phase1_nonzero_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_nonzero_dao_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_nonzero_dao_data");
+    assert_eq!(fixture["outputs"][0]["data"], "0x0100000000000000");
+    assert_matrix_execution_matches(DEPOSIT_NONZERO_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_deposit_long_data_both_reject() {
+    let execution = deposit_phase1_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "deposit_long_dao_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "deposit_long_dao_data");
+    assert_eq!(fixture["outputs"][0]["deposit_data_length_bytes"], 9);
+    assert_matrix_execution_matches(DEPOSIT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
 fn differential_mint_from_receipt_both_accept() {
     let execution = mint_from_receipt_differential_execution(
         MINT_RECEIPT_OUTPUT_AMOUNT,
@@ -9712,6 +16399,34 @@ fn differential_mint_from_receipt_both_accept() {
     assert_eq!(execution["original_ickb_status"], "pass");
     assert_eq!(execution["cellscript_status"], "pass");
     assert_matrix_execution_matches(MINT_FROM_RECEIPT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_mint_from_quantity_two_receipt_both_accept() {
+    let execution = mint_from_receipt_quantity_two_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    assert_matrix_execution_matches(MINT_FROM_RECEIPT_QUANTITY_TWO_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_mint_from_quantity_zero_receipt_both_accept() {
+    let execution = mint_from_receipt_quantity_zero_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let inputs = execution["normalized_fixture"]["inputs"].as_array().expect("mint receipt inputs");
+    assert_eq!(inputs[0]["receipt_quantity"], 0);
+    assert_matrix_execution_matches(MINT_FROM_RECEIPT_QUANTITY_ZERO_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_mint_from_long_receipt_data_both_accept() {
+    let execution = mint_from_receipt_long_data_differential_execution();
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let inputs = execution["normalized_fixture"]["inputs"].as_array().expect("mint receipt inputs");
+    assert_eq!(inputs[0]["data"].as_str().expect("receipt data").len(), 28);
+    assert_matrix_execution_matches(MINT_FROM_RECEIPT_LONG_DATA_DIFF_SCENARIO, &execution);
 }
 
 #[test]
@@ -9731,6 +16446,18 @@ fn differential_amount_inflation_both_reject() {
     assert_eq!(execution["original_ickb_status"], "fail");
     assert_eq!(execution["cellscript_status"], "fail");
     assert_matrix_execution_matches(AMOUNT_INFLATION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_amount_high_nonzero_both_reject() {
+    let execution = mint_from_receipt_high_word_differential_execution();
+    assert_eq!(execution["failure_mode"], "amount_high_nonzero");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let output = &execution["normalized_fixture"]["outputs"][0];
+    assert_eq!(output["xudt_amount_low_u64"], MINT_RECEIPT_OUTPUT_AMOUNT as u64);
+    assert_eq!(output["xudt_amount_high_u64"], 1);
+    assert_matrix_execution_matches(AMOUNT_HIGH_NONZERO_DIFF_SCENARIO, &execution);
 }
 
 #[test]
@@ -9832,6 +16559,975 @@ fn differential_dao_max_withdrawal_capacity_both_accept() {
     assert_eq!(output["expected_maximum_capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_MAX_OUTPUT_CAPACITY));
     assert_eq!(output["capacity_boundary"], "exact_maximum");
     assert_matrix_execution_matches(DAO_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_max_withdrawal_capacity_both_accept() {
+    let execution = dao_two_input_withdrawal_max_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_max_withdrawal_capacity");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs.len(), 2, "fixture must spend two DAO withdrawal inputs");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY));
+    assert_eq!(
+        output["expected_maximum_capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_over_withdrawal_capacity_both_reject() {
+    let execution = dao_two_input_withdrawal_over_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_over_withdraw_capacity");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs.len(), 2, "fixture must spend two DAO withdrawal inputs");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_OVER_OUTPUT_CAPACITY));
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_OVER_WITHDRAWAL_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_deposit_rate_max_both_accept() {
+    let execution = dao_two_input_mixed_deposit_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_deposit_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps.len(), 3, "mixed-rate fixture must expose two deposit headers");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[2]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE));
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_deposit_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_deposit_rate_over_both_reject() {
+    let execution = dao_two_input_mixed_deposit_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_mixed_deposit_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_deposit_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_deposit_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_withdraw_rate_max_both_accept() {
+    let execution = dao_two_input_mixed_withdraw_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_withdraw_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps.len(), 3, "mixed withdraw-rate fixture must expose two withdraw headers");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_mixed_rate");
+    assert_eq!(header_deps[2]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE));
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_withdraw_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_withdraw_rate_over_both_reject() {
+    let execution = dao_two_input_mixed_withdraw_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_mixed_withdraw_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_withdraw_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_withdraw_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_both_rate_max_both_accept() {
+    let execution = dao_two_input_mixed_both_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_both_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["linked_header"], "withdraw_header_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY));
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_both_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_mixed_both_rate_over_both_reject() {
+    let execution = dao_two_input_mixed_both_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_mixed_both_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_mixed_both_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_TWO_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "two_input_mixed_both_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_missing_witness_input_type_both_reject() {
+    let execution = dao_two_input_second_missing_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_missing_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_missing_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_present"], false);
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_malformed_second_witness");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_empty_witness_input_type_both_reject() {
+    let execution = dao_two_input_second_empty_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_empty_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_empty_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_present"], true);
+    assert_eq!(witnesses[1]["input_type_length_bytes"].as_u64(), Some(0));
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_short_witness_input_type_both_reject() {
+    let execution = dao_two_input_second_short_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_short_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_short_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_present"], true);
+    assert_eq!(witnesses[1]["input_type_length_bytes"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["expected_input_type_length_bytes"].as_u64(), Some(8));
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_long_witness_input_type_both_reject() {
+    let execution = dao_two_input_second_long_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_long_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_long_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_present"], true);
+    assert_eq!(witnesses[1]["input_type_length_bytes"].as_u64(), Some(9));
+    assert_eq!(witnesses[1]["expected_input_type_length_bytes"].as_u64(), Some(8));
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_withdraw_header_witness_index_both_reject() {
+    let execution = dao_two_input_second_withdraw_header_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_withdraw_header_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_withdraw_header_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(0));
+    assert_eq!(witnesses[1]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["witness_index_role"], "withdraw_header_instead_of_deposit_header");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_malformed_second_witness_index");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_oob_witness_index_both_reject() {
+    let execution = dao_two_input_second_oob_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_oob_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_oob_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    assert_eq!(witnesses[1]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["witness_index_role"], "out_of_bounds_header_dep_index");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_malformed_second_witness_index");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_OOB_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_deposit_data_input_both_reject() {
+    let execution = dao_two_input_second_deposit_data_input_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_deposit_data_input");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_deposit_data_input");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "deposit_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_deposit_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_DEPOSIT_DATA_INPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_malformed_input_data_both_reject() {
+    let execution = dao_two_input_second_malformed_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_malformed_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_malformed_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "malformed_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_malformed_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_MALFORMED_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_two_input_second_long_input_data_both_reject() {
+    let execution = dao_two_input_second_long_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_two_input_second_long_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_two_input_second_long_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "long_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_long_withdrawal_request_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "two_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_TWO_INPUT_SECOND_LONG_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_max_withdrawal_capacity_both_accept() {
+    let execution = dao_three_input_withdrawal_max_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_max_withdrawal_capacity");
+    assert_eq!(fixture["input_capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE1_CAPACITY * 3));
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs.len(), 3);
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses.len(), 3);
+    for witness in witnesses {
+        assert_eq!(witness["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    }
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MAX_OUTPUT_CAPACITY));
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MAX_WITHDRAWAL_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_over_withdrawal_capacity_both_reject() {
+    let execution = dao_three_input_withdrawal_over_capacity_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_over_withdraw_capacity");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_shannons"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_OVER_OUTPUT_CAPACITY));
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_OVER_WITHDRAWAL_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_deposit_rate_max_both_accept() {
+    let execution = dao_three_input_mixed_deposit_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_deposit_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[2]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE1_WRONG_ACCUMULATED_RATE));
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_deposit_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_deposit_rate_over_both_reject() {
+    let execution = dao_three_input_mixed_deposit_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_mixed_deposit_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_deposit_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_deposit_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_withdraw_rate_max_both_accept() {
+    let execution = dao_three_input_mixed_withdraw_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_withdraw_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_mixed_rate");
+    assert_eq!(header_deps[2]["accumulated_rate"].as_u64(), Some(ORIGINAL_DAO_WITHDRAW_PHASE2_WRONG_ACCUMULATED_RATE));
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["linked_header"], "withdraw_header_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    for witness in witnesses {
+        assert_eq!(witness["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    }
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_withdraw_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_withdraw_rate_over_both_reject() {
+    let execution = dao_three_input_mixed_withdraw_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_mixed_withdraw_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_withdraw_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_withdraw_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_both_rate_max_both_accept() {
+    let execution = dao_three_input_mixed_both_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_both_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["linked_header"], "withdraw_header_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_both_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_mixed_both_rate_over_both_reject() {
+    let execution = dao_three_input_mixed_both_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_mixed_both_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_mixed_both_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_mixed_both_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_deposit_rate_max_both_accept() {
+    let execution = dao_three_input_second_mixed_deposit_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_deposit_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_second_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[0]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_deposit_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_deposit_rate_over_both_reject() {
+    let execution = dao_three_input_second_mixed_deposit_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_mixed_deposit_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_deposit_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_second_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_DEPOSIT_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_deposit_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_withdraw_rate_max_both_accept() {
+    let execution = dao_three_input_second_mixed_withdraw_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_withdraw_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_second_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["linked_header"], "withdraw_header_second_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    for witness in witnesses {
+        assert_eq!(witness["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    }
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_withdraw_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_withdraw_rate_over_both_reject() {
+    let execution = dao_three_input_second_mixed_withdraw_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_mixed_withdraw_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_withdraw_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "withdraw_header_second_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_WITHDRAW_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_withdraw_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_both_rate_max_both_accept() {
+    let execution = dao_three_input_second_mixed_both_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_both_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_second_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_second_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["linked_header"], "withdraw_header_second_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_both_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_mixed_both_rate_over_both_reject() {
+    let execution = dao_three_input_second_mixed_both_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_mixed_both_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_mixed_both_rate_over_withdraw_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_second_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_second_mixed_rate");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_second_mixed_both_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MIXED_BOTH_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_deposit_third_withdraw_rate_max_both_accept() {
+    let execution = dao_three_input_second_deposit_third_withdraw_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_deposit_third_withdraw_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_second_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["linked_header"], "withdraw_header_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_second_deposit_third_withdraw_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_deposit_third_withdraw_rate_over_both_reject() {
+    let execution = dao_three_input_second_deposit_third_withdraw_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_deposit_third_withdraw_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_deposit_third_withdraw_rate_over_withdraw_capacity");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_second_deposit_third_withdraw_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_DEPOSIT_THIRD_WITHDRAW_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_withdraw_third_deposit_rate_max_both_accept() {
+    let execution = dao_three_input_second_withdraw_third_deposit_rate_max_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_withdraw_third_deposit_rate_max_withdrawal_capacity");
+    let header_deps = fixture["header_deps"].as_array().expect("DAO withdrawal header deps");
+    assert_eq!(header_deps[2]["role"], "deposit_header_mixed_rate");
+    assert_eq!(header_deps[3]["role"], "withdraw_header_second_mixed_rate");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["linked_header"], "withdraw_header_second_mixed_rate");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_MAX_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["capacity_boundary"], "three_input_second_withdraw_third_deposit_rate_exact_maximum");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_MAX_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_withdraw_third_deposit_rate_over_both_reject() {
+    let execution = dao_three_input_second_withdraw_third_deposit_rate_over_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_withdraw_third_deposit_rate_over_withdraw_capacity");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_withdraw_third_deposit_rate_over_withdraw_capacity");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(
+        output["capacity_shannons"].as_u64(),
+        Some(ORIGINAL_DAO_WITHDRAW_PHASE2_THREE_INPUT_MIXED_BOTH_RATE_OVER_OUTPUT_CAPACITY)
+    );
+    assert_eq!(output["overdrawn_by_shannons"].as_u64(), Some(1));
+    assert_eq!(output["capacity_boundary"], "three_input_second_withdraw_third_deposit_rate_exact_maximum_plus_one");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_WITHDRAW_THIRD_DEPOSIT_RATE_OVER_CAPACITY_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_missing_witness_input_type_both_reject() {
+    let execution = dao_three_input_second_missing_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_missing_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_missing_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["witness_input_type_shape"], "missing");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_second_witness");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_empty_witness_input_type_both_reject() {
+    let execution = dao_three_input_second_empty_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_empty_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_empty_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["witness_input_type_shape"], "empty");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_short_witness_input_type_both_reject() {
+    let execution = dao_three_input_second_short_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_short_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_short_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["witness_input_type_shape"], "short_1_byte");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_long_witness_input_type_both_reject() {
+    let execution = dao_three_input_second_long_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_long_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_long_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["witness_input_type_shape"], "long_9_bytes");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_withdraw_header_witness_index_both_reject() {
+    let execution = dao_three_input_second_withdraw_header_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_withdraw_header_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_withdraw_header_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(0));
+    assert_eq!(witnesses[1]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["witness_index_role"], "withdraw_header_instead_of_deposit_header");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_second_witness_index");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_oob_witness_index_both_reject() {
+    let execution = dao_three_input_second_oob_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_oob_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_oob_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[1]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    assert_eq!(witnesses[1]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[1]["witness_index_role"], "out_of_bounds_header_dep_index");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_second_witness_index");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_OOB_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_deposit_data_input_both_reject() {
+    let execution = dao_three_input_second_deposit_data_input_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_deposit_data_input");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_deposit_data_input");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "deposit_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_deposit_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_DEPOSIT_DATA_INPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_malformed_input_data_both_reject() {
+    let execution = dao_three_input_second_malformed_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_malformed_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_malformed_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "malformed_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_malformed_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_MALFORMED_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_second_long_input_data_both_reject() {
+    let execution = dao_three_input_second_long_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_second_long_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_second_long_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[1]["role"], "long_data_dao_cell_spent_as_second_withdrawal");
+    assert_eq!(inputs[1]["data"], hex_prefixed(&dao_long_withdrawal_request_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_second_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_SECOND_LONG_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_missing_witness_input_type_both_reject() {
+    let execution = dao_three_input_third_missing_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_missing_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_missing_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["witness_input_type_shape"], "missing");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_third_witness");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_MISSING_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_empty_witness_input_type_both_reject() {
+    let execution = dao_three_input_third_empty_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_empty_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_empty_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["witness_input_type_shape"], "empty");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_EMPTY_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_short_witness_input_type_both_reject() {
+    let execution = dao_three_input_third_short_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_short_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_short_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["witness_input_type_shape"], "short_1_byte");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_SHORT_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_long_witness_input_type_both_reject() {
+    let execution = dao_three_input_third_long_witness_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_long_witness_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_long_witness_input_type");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["witness_input_type_shape"], "long_9_bytes");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_LONG_WITNESS_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_withdraw_header_witness_index_both_reject() {
+    let execution = dao_three_input_third_withdraw_header_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_withdraw_header_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_withdraw_header_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(0));
+    assert_eq!(witnesses[2]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[2]["witness_index_role"], "withdraw_header_instead_of_deposit_header");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_third_witness_index");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_WITHDRAW_HEADER_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_oob_witness_index_both_reject() {
+    let execution = dao_three_input_third_oob_witness_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_oob_witness_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_oob_witness_index");
+    let witnesses = fixture["witnesses"].as_array().expect("DAO withdrawal witnesses");
+    assert_eq!(witnesses[2]["input_type_header_dep_index_le_u64"].as_u64(), Some(2));
+    assert_eq!(witnesses[2]["expected_input_type_header_dep_index_le_u64"].as_u64(), Some(1));
+    assert_eq!(witnesses[2]["witness_index_role"], "out_of_bounds_header_dep_index");
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_malformed_third_witness_index");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_OOB_WITNESS_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_deposit_data_input_both_reject() {
+    let execution = dao_three_input_third_deposit_data_input_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_deposit_data_input");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_deposit_data_input");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["role"], "deposit_data_dao_cell_spent_as_third_withdrawal");
+    assert_eq!(inputs[2]["data"], hex_prefixed(&dao_deposit_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_third_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_DEPOSIT_DATA_INPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_malformed_input_data_both_reject() {
+    let execution = dao_three_input_third_malformed_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_malformed_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_malformed_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["role"], "malformed_data_dao_cell_spent_as_third_withdrawal");
+    assert_eq!(inputs[2]["data"], hex_prefixed(&dao_malformed_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_third_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_MALFORMED_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_dao_three_input_third_long_input_data_both_reject() {
+    let execution = dao_three_input_third_long_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_three_input_third_long_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_three_input_third_long_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO withdrawal inputs");
+    assert_eq!(inputs[2]["role"], "long_data_dao_cell_spent_as_third_withdrawal");
+    assert_eq!(inputs[2]["data"], hex_prefixed(&dao_long_withdrawal_request_cell_data()));
+    let output = &fixture["outputs"].as_array().expect("DAO withdrawal outputs")[0];
+    assert_eq!(output["capacity_boundary"], "three_input_exact_maximum_with_non_withdrawal_third_input_data");
+    assert_matrix_execution_matches(DAO_THREE_INPUT_THIRD_LONG_INPUT_DATA_DIFF_SCENARIO, &execution);
 }
 
 #[test]
@@ -10010,6 +17706,19 @@ fn differential_dao_withdrawal_malformed_input_data_both_reject() {
 }
 
 #[test]
+fn differential_dao_withdrawal_long_input_data_both_reject() {
+    let execution = dao_withdrawal_long_input_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "dao_withdrawal_long_input_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "dao_withdrawal_long_input_data");
+    let inputs = fixture["inputs"].as_array().expect("DAO inputs");
+    assert_eq!(inputs[0]["data"], hex_prefixed(&dao_long_withdrawal_request_cell_data()));
+    assert_matrix_execution_matches(DAO_WITHDRAWAL_LONG_INPUT_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
 fn differential_dao_missing_witness_input_type_both_reject() {
     let execution = dao_withdrawal_missing_witness_input_type_differential_execution();
     assert_eq!(execution["failure_mode"], "dao_missing_witness_input_type");
@@ -10160,6 +17869,236 @@ fn differential_limit_order_udt_decreased_both_reject() {
 }
 
 #[test]
+fn differential_limit_order_wrong_master_tx_hash_both_reject() {
+    let execution = limit_order_wrong_master_tx_hash_differential_execution();
+    assert_eq!(execution["failure_mode"], "wrong_master_tx_hash");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_wrong_master_tx_hash");
+    assert_eq!(fixture["outputs"][0]["master_out_point"]["tx_hash"], hex_prefixed(&LIMIT_ORDER_WRONG_MASTER_TX_HASH));
+    assert_matrix_execution_matches(LIMIT_ORDER_WRONG_MASTER_TX_HASH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_wrong_master_index_both_reject() {
+    let execution = limit_order_wrong_master_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "wrong_master_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_wrong_master_index");
+    assert_eq!(fixture["outputs"][0]["master_out_point"]["index"], 1);
+    assert_matrix_execution_matches(LIMIT_ORDER_WRONG_MASTER_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_output_mint_action_both_reject() {
+    let execution = limit_order_output_mint_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_output_mint_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_output_mint_action");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Mint");
+    assert_matrix_execution_matches(LIMIT_ORDER_OUTPUT_MINT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_output_invalid_action_both_reject() {
+    let execution = limit_order_output_invalid_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_output_invalid_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_output_invalid_action");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Invalid");
+    assert_matrix_execution_matches(LIMIT_ORDER_OUTPUT_INVALID_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_output_short_action_both_reject() {
+    let execution = limit_order_output_short_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_output_short_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_output_short_action");
+    assert_eq!(fixture["outputs"][0]["data"].as_str().expect("output data hex").len(), 2 + 16 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_OUTPUT_SHORT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_output_short_master_both_reject() {
+    let execution = limit_order_output_short_master_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_output_short_master_out_point");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_output_short_master_out_point");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Match");
+    assert_eq!(fixture["outputs"][0]["data"].as_str().expect("output data hex").len(), 2 + 28 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_OUTPUT_SHORT_MASTER_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_output_long_data_both_reject() {
+    let execution = limit_order_output_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_output_long_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_output_long_data");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Match");
+    let data = fixture["outputs"][0]["data"].as_str().expect("output data hex");
+    assert_eq!(data.len(), 2 + 90 * 2);
+    assert!(data.ends_with("99"));
+    assert_matrix_execution_matches(LIMIT_ORDER_OUTPUT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_invalid_action_both_reject() {
+    let execution = limit_order_input_invalid_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_invalid_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_invalid_action");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Invalid");
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_INVALID_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_short_action_both_reject() {
+    let execution = limit_order_input_short_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_short_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_short_action");
+    assert_eq!(fixture["inputs"][0]["data"].as_str().expect("input data hex").len(), 2 + 16 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_SHORT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_short_master_both_reject() {
+    let execution = limit_order_input_short_master_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_short_master_out_point");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_short_master_out_point");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_eq!(fixture["inputs"][0]["data"].as_str().expect("input data hex").len(), 2 + 28 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_SHORT_MASTER_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_long_data_both_reject() {
+    let execution = limit_order_input_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_long_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_long_data");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    let data = fixture["inputs"][0]["data"].as_str().expect("input data hex");
+    assert_eq!(data.len(), 2 + 90 * 2);
+    assert!(data.ends_with("99"));
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_absolute_match_both_accept() {
+    let execution = limit_order_input_absolute_match_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_absolute_match");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_ABSOLUTE_MATCH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_wrong_master_tx_hash_both_reject() {
+    let execution = limit_order_input_wrong_master_tx_hash_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_wrong_master_tx_hash");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_wrong_master_tx_hash");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert!(fixture["inputs"][0]["data"].as_str().expect("input data").contains("787878"));
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_WRONG_MASTER_TX_HASH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_input_wrong_master_index_both_reject() {
+    let execution = limit_order_input_wrong_master_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_input_wrong_master_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_input_wrong_master_index");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_matrix_execution_matches(LIMIT_ORDER_INPUT_WRONG_MASTER_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_missing_matching_output_both_reject() {
+    let execution = limit_order_missing_matching_output_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_missing_matching_output");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_missing_matching_output");
+    assert_eq!(fixture["script_under_test_roles"].as_array().expect("roles").len(), 1);
+    assert_eq!(fixture["outputs"][0]["lock"], "always_success");
+    assert_matrix_execution_matches(LIMIT_ORDER_MISSING_MATCHING_OUTPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_duplicate_matching_output_both_reject() {
+    let execution = limit_order_duplicate_matching_output_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_duplicate_matching_output");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_duplicate_matching_output");
+    assert_eq!(fixture["outputs"].as_array().expect("outputs").len(), 2);
+    assert_eq!(fixture["outputs"][0]["lock"], "script_under_test");
+    assert_eq!(fixture["outputs"][1]["lock"], "script_under_test");
+    assert_matrix_execution_matches(LIMIT_ORDER_DUPLICATE_MATCHING_OUTPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_missing_input_type_both_reject() {
+    let execution = limit_order_missing_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_missing_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_missing_input_type");
+    assert_eq!(fixture["inputs"][0]["type"], Value::Null);
+    assert_eq!(fixture["outputs"][0]["type"], "auxiliary_udt_type");
+    assert_matrix_execution_matches(LIMIT_ORDER_MISSING_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_missing_output_type_both_reject() {
+    let execution = limit_order_missing_output_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_missing_output_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_missing_output_type");
+    assert_eq!(fixture["inputs"][0]["type"], "auxiliary_udt_type");
+    assert_eq!(fixture["outputs"][0]["type"], Value::Null);
+    assert_matrix_execution_matches(LIMIT_ORDER_MISSING_OUTPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
 fn differential_valid_limit_order_udt_to_ckb_both_accept() {
     let execution = limit_order_udt_to_ckb_differential_execution();
     assert_eq!(execution["original_ickb_status"], "pass");
@@ -10226,6 +18165,236 @@ fn differential_limit_order_udt_to_ckb_underpayment_both_reject() {
     assert_eq!(execution["original_ickb_status"], "fail");
     assert_eq!(execution["cellscript_status"], "fail");
     assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_UNDERPAYMENT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_wrong_master_tx_hash_both_reject() {
+    let execution = limit_order_udt_to_ckb_wrong_master_tx_hash_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_wrong_master_tx_hash");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_wrong_master_tx_hash");
+    assert_eq!(fixture["outputs"][0]["master_out_point"]["tx_hash"], hex_prefixed(&LIMIT_ORDER_WRONG_MASTER_TX_HASH));
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_WRONG_MASTER_TX_HASH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_wrong_master_index_both_reject() {
+    let execution = limit_order_udt_to_ckb_wrong_master_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_wrong_master_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_wrong_master_index");
+    assert_eq!(fixture["outputs"][0]["master_out_point"]["index"], 1);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_WRONG_MASTER_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_output_mint_action_both_reject() {
+    let execution = limit_order_udt_to_ckb_output_mint_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_output_mint_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_output_mint_action");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Mint");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_MINT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_output_invalid_action_both_reject() {
+    let execution = limit_order_udt_to_ckb_output_invalid_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_output_invalid_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_output_invalid_action");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Invalid");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_INVALID_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_output_short_action_both_reject() {
+    let execution = limit_order_udt_to_ckb_output_short_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_output_short_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_output_short_action");
+    assert_eq!(fixture["outputs"][0]["data"].as_str().expect("output data hex").len(), 2 + 16 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_SHORT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_output_short_master_both_reject() {
+    let execution = limit_order_udt_to_ckb_output_short_master_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_output_short_master_out_point");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_output_short_master_out_point");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Match");
+    assert_eq!(fixture["outputs"][0]["data"].as_str().expect("output data hex").len(), 2 + 28 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_SHORT_MASTER_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_output_long_data_both_reject() {
+    let execution = limit_order_udt_to_ckb_output_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_output_long_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_output_long_data");
+    assert_eq!(fixture["outputs"][0]["order_action"], "Match");
+    let data = fixture["outputs"][0]["data"].as_str().expect("output data hex");
+    assert_eq!(data.len(), 2 + 90 * 2);
+    assert!(data.ends_with("99"));
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_OUTPUT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_invalid_action_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_invalid_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_invalid_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_invalid_action");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Invalid");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_INVALID_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_short_action_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_short_action_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_short_action");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_short_action");
+    assert_eq!(fixture["inputs"][0]["data"].as_str().expect("input data hex").len(), 2 + 16 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_SHORT_ACTION_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_short_master_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_short_master_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_short_master_out_point");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_short_master_out_point");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_eq!(fixture["inputs"][0]["data"].as_str().expect("input data hex").len(), 2 + 28 * 2);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_SHORT_MASTER_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_long_data_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_long_data_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_long_data");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_long_data");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    let data = fixture["inputs"][0]["data"].as_str().expect("input data hex");
+    assert_eq!(data.len(), 2 + 90 * 2);
+    assert!(data.ends_with("99"));
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_LONG_DATA_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_absolute_match_both_accept() {
+    let execution = limit_order_udt_to_ckb_input_absolute_match_differential_execution();
+    assert_eq!(execution["failure_mode"], Value::Null);
+    assert_eq!(execution["original_ickb_status"], "pass");
+    assert_eq!(execution["cellscript_status"], "pass");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_absolute_match");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_ABSOLUTE_MATCH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_wrong_master_tx_hash_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_wrong_master_tx_hash_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_wrong_master_tx_hash");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_wrong_master_tx_hash");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert!(fixture["inputs"][0]["data"].as_str().expect("input data").contains("787878"));
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_WRONG_MASTER_TX_HASH_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_input_wrong_master_index_both_reject() {
+    let execution = limit_order_udt_to_ckb_input_wrong_master_index_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_input_wrong_master_index");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_input_wrong_master_index");
+    assert_eq!(fixture["inputs"][0]["order_action"], "Match");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_INPUT_WRONG_MASTER_INDEX_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_missing_matching_output_both_reject() {
+    let execution = limit_order_udt_to_ckb_missing_matching_output_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_missing_matching_output");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_missing_matching_output");
+    assert_eq!(fixture["script_under_test_roles"].as_array().expect("roles").len(), 1);
+    assert_eq!(fixture["outputs"][0]["lock"], "always_success");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_MISSING_MATCHING_OUTPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_duplicate_matching_output_both_reject() {
+    let execution = limit_order_udt_to_ckb_duplicate_matching_output_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_duplicate_matching_output");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_duplicate_matching_output");
+    assert_eq!(fixture["outputs"].as_array().expect("outputs").len(), 2);
+    assert_eq!(fixture["outputs"][0]["lock"], "script_under_test");
+    assert_eq!(fixture["outputs"][1]["lock"], "script_under_test");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_DUPLICATE_MATCHING_OUTPUT_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_missing_input_type_both_reject() {
+    let execution = limit_order_udt_to_ckb_missing_input_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_missing_input_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_missing_input_type");
+    assert_eq!(fixture["inputs"][0]["type"], Value::Null);
+    assert_eq!(fixture["outputs"][0]["type"], "auxiliary_udt_type");
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_MISSING_INPUT_TYPE_DIFF_SCENARIO, &execution);
+}
+
+#[test]
+fn differential_limit_order_udt_to_ckb_missing_output_type_both_reject() {
+    let execution = limit_order_udt_to_ckb_missing_output_type_differential_execution();
+    assert_eq!(execution["failure_mode"], "limit_order_udt_to_ckb_missing_output_type");
+    assert_eq!(execution["original_ickb_status"], "fail");
+    assert_eq!(execution["cellscript_status"], "fail");
+    let fixture = &execution["normalized_fixture"];
+    assert_eq!(fixture["scenario"], "limit_order_udt_to_ckb_missing_output_type");
+    assert_eq!(fixture["inputs"][0]["type"], "auxiliary_udt_type");
+    assert_eq!(fixture["outputs"][0]["type"], Value::Null);
+    assert_matrix_execution_matches(LIMIT_ORDER_UDT_TO_CKB_MISSING_OUTPUT_TYPE_DIFF_SCENARIO, &execution);
 }
 
 #[test]

@@ -21,6 +21,21 @@ use std::path::{Path, PathBuf};
 
 const CKB_STANDARD_COMPAT_MANIFEST_SCHEMA: &str = "cellscript-ckb-standard-compat-v0.16";
 const CKB_STANDARD_FIXTURE_SCHEMA: &str = "cellscript-ckb-fixture-v0.16";
+const ICKB_CLAIM_MANIFEST_SCHEMA: &str = "cellscript-ickb-claim-manifest-v1";
+const ICKB_DIFF_MATRIX_SCHEMA: &str = "cellscript-ickb-diff-matrix-v1";
+const ICKB_DIFF_EVIDENCE_LEVEL: &str = "DIFFERENTIAL_CKB_VM_EXECUTED";
+const ICKB_REQUIRED_PRODUCTION_EVIDENCE: [&str; 8] = [
+    "script_group",
+    "cell_deps",
+    "header_deps",
+    "outputs_data",
+    "witnesses",
+    "capacity_fee_tx_size_cycles",
+    "deployment_manifest",
+    "builder_plan",
+];
+const ICKB_REQUIRED_HARDENING_EVIDENCE: [&str; 5] =
+    ["mutation_coverage", "deterministic_fuzz_seed", "normalized_fixture_generator", "max_cellscript_cycles", "max_tx_size_bytes"];
 
 #[derive(Debug)]
 pub enum Command {
@@ -1649,9 +1664,7 @@ impl CommandExecutor {
         if issue_count == 0 {
             Ok(())
         } else {
-            Err(crate::error::CompileError::without_span(format!(
-                "CKB fixture manifest failed model verification: {issue_count} issue(s)"
-            )))
+            Err(crate::error::CompileError::without_span(format!("CKB fixture manifest failed verification: {issue_count} issue(s)")))
         }
     }
 
@@ -2006,6 +2019,8 @@ impl CommandExecutor {
         let plan = serde_json::json!({
             "status": "ok",
             "policy": "cellscript-action-builder-plan-v1",
+            "headless": true,
+            "ui_scope": "none",
             "input": input_path.display().to_string(),
             "action": action.name,
             "target_profile": result.metadata.target_profile.name,
@@ -2031,6 +2046,39 @@ impl CommandExecutor {
                 "occupied_capacity_measurement_required": ckb.occupied_capacity_measurement_required,
                 "dry_run_required_for_production": ckb.dry_run_required_for_production,
             })),
+            "transaction_draft": {
+                "format": "cellscript-ccc-transaction-draft-v1",
+                "status": "template",
+                "ccc_compatible": true,
+                "requires_live_cell_resolution": true,
+                "cell_deps": [],
+                "header_deps": [],
+                "inputs": [],
+                "outputs": [],
+                "outputs_data": [],
+                "witnesses": [],
+                "notes": [
+                    "This is a headless draft template produced from compiler metadata.",
+                    "A builder adapter must resolve live cells, fill args, calculate fees/capacity, dry-run, sign, and submit."
+                ]
+            },
+            "preview": {
+                "format": "cellscript-action-preview-v1",
+                "action": action.name,
+                "summary": format!("Build a CKB transaction for CellScript action {}", action.name),
+                "consumes": action.transaction_runtime_input_requirements,
+                "creates": action.create_set,
+                "transitions": action.mutate_set,
+                "witnesses": {
+                    "selector": action.name,
+                    "args": action.params,
+                },
+                "warnings": [
+                    "Builder preview is metadata-backed; live cell freshness and final fee/capacity must be checked at build time."
+                ],
+                "estimatedFee": serde_json::Value::Null,
+                "requiredSigners": []
+            },
             "constraints_status": result.metadata.constraints.status,
             "constraints_failures": result.metadata.constraints.failures,
             "constraints_warnings": result.metadata.constraints.warnings,
@@ -2756,11 +2804,16 @@ fn ckb_fixture_manifest_report(manifest: &serde_json::Value, base_dir: &Path, ma
     let mut rows = Vec::<serde_json::Value>::new();
     let manifest_hash = crate::hex_encode(&crate::ckb_blake2b256(manifest_bytes));
 
-    if manifest["schema"].as_str() != Some(CKB_STANDARD_COMPAT_MANIFEST_SCHEMA) {
-        issues.push(format!(
-            "manifest schema must be {CKB_STANDARD_COMPAT_MANIFEST_SCHEMA}, got {}",
-            manifest["schema"].as_str().unwrap_or("<missing>")
-        ));
+    match manifest["schema"].as_str() {
+        Some(CKB_STANDARD_COMPAT_MANIFEST_SCHEMA) => {}
+        Some(ICKB_CLAIM_MANIFEST_SCHEMA) => return ickb_claim_manifest_report(manifest, base_dir, manifest_bytes),
+        got => {
+            issues.push(format!(
+                "manifest schema must be {CKB_STANDARD_COMPAT_MANIFEST_SCHEMA} or {ICKB_CLAIM_MANIFEST_SCHEMA}, got {}",
+                got.unwrap_or("<missing>")
+            ));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
     }
 
     let Some(suites) = manifest["suites"].as_array() else {
@@ -2775,6 +2828,72 @@ fn ckb_fixture_manifest_report(manifest: &serde_json::Value, base_dir: &Path, ma
     ckb_fixture_report_json(manifest, manifest_hash, suites.len(), rows, issues)
 }
 
+fn ickb_claim_manifest_report(manifest: &serde_json::Value, base_dir: &Path, manifest_bytes: &[u8]) -> serde_json::Value {
+    let mut issues = Vec::<String>::new();
+    let mut rows = Vec::<serde_json::Value>::new();
+    let manifest_hash = crate::hex_encode(&crate::ckb_blake2b256(manifest_bytes));
+
+    if manifest["schema"].as_str() != Some(ICKB_CLAIM_MANIFEST_SCHEMA) {
+        issues.push(format!(
+            "iCKB claim manifest schema must be {ICKB_CLAIM_MANIFEST_SCHEMA}, got {}",
+            manifest["schema"].as_str().unwrap_or("<missing>")
+        ));
+    }
+
+    let matrix_path = match manifest["matrix_path"].as_str() {
+        Some(path) if !path.is_empty() => base_dir.join(path),
+        _ => {
+            issues.push("iCKB claim manifest matrix_path must be a non-empty string".to_string());
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+
+    let matrix_bytes = match std::fs::read(&matrix_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            issues.push(format!("failed to read iCKB matrix {}: {err}", matrix_path.display()));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+    let matrix: serde_json::Value = match serde_json::from_slice(&matrix_bytes) {
+        Ok(matrix) => matrix,
+        Err(err) => {
+            issues.push(format!("failed to parse iCKB matrix {}: {err}", matrix_path.display()));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+
+    validate_ickb_claim_matrix(&matrix, &mut issues);
+
+    let mut matrix_rows = BTreeMap::<String, &serde_json::Value>::new();
+    if let Some(active_rows) = matrix["rows"].as_array() {
+        for row in active_rows {
+            if let Some(scenario) = row["scenario"].as_str() {
+                if matrix_rows.insert(scenario.to_string(), row).is_some() {
+                    issues.push(format!("iCKB matrix contains duplicate scenario {scenario}"));
+                }
+            } else {
+                issues.push("iCKB matrix row missing scenario".to_string());
+            }
+        }
+    } else {
+        issues.push("iCKB matrix rows must be an array".to_string());
+    }
+
+    let default_production = manifest.get("default_production_evidence");
+    let default_hardening = manifest.get("default_hardening");
+    let Some(families) = manifest["families"].as_array() else {
+        issues.push("iCKB claim manifest families must be an array".to_string());
+        return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+    };
+
+    for family in families {
+        validate_ickb_claim_family(family, &matrix_rows, default_production, default_hardening, &mut rows, &mut issues);
+    }
+
+    ckb_fixture_report_json(manifest, manifest_hash, families.len(), rows, issues)
+}
+
 fn ckb_fixture_report_json(
     manifest: &serde_json::Value,
     manifest_hash: String,
@@ -2782,21 +2901,287 @@ fn ckb_fixture_report_json(
     rows: Vec<serde_json::Value>,
     issues: Vec<String>,
 ) -> serde_json::Value {
+    let is_ickb_claim = manifest["schema"].as_str() == Some(ICKB_CLAIM_MANIFEST_SCHEMA);
     serde_json::json!({
         "schema": "cellscript-ckb-fixture-verification-v0.17",
         "manifest_schema": manifest["schema"].as_str().unwrap_or("unknown"),
         "manifest_status": manifest["status"].as_str().unwrap_or("unknown"),
         "manifest_hash": manifest_hash,
-        "execution_level": "MODEL",
-        "ckb_vm_execution": false,
+        "execution_level": if is_ickb_claim { "DIFFERENTIAL_CKB_VM" } else { "MODEL" },
+        "ckb_vm_execution": is_ickb_claim,
         "suite_count": suite_count,
         "fixture_count": rows.len(),
         "status": if issues.is_empty() { "ok" } else { "failed" },
         "issue_count": issues.len(),
         "issues": issues,
         "fixtures": rows,
-        "vm_execution_note": "This command validates transaction-shape model fixtures only; it does not execute CKB VM or prove production compatibility.",
+        "vm_execution_note": if is_ickb_claim {
+            "This iCKB mode validates a committed claim manifest against existing dual-side CKB VM differential rows and their production evidence envelopes."
+        } else {
+            "This command validates transaction-shape model fixtures only; it does not execute CKB VM or prove production compatibility."
+        },
     })
+}
+
+fn validate_ickb_claim_matrix(matrix: &serde_json::Value, issues: &mut Vec<String>) {
+    if matrix["schema"].as_str() != Some(ICKB_DIFF_MATRIX_SCHEMA) {
+        issues.push(format!(
+            "iCKB matrix schema must be {ICKB_DIFF_MATRIX_SCHEMA}, got {}",
+            matrix["schema"].as_str().unwrap_or("<missing>")
+        ));
+    }
+    if matrix["mode"].as_str() != Some("EXECUTED_CKB_VM_DIFF") {
+        issues.push("iCKB matrix mode must be EXECUTED_CKB_VM_DIFF".to_string());
+    }
+    if matrix["equivalence_status"].as_str() != Some("PROVEN") {
+        issues.push("iCKB matrix equivalence_status must be PROVEN".to_string());
+    }
+    if matrix["production_equivalence_claim"].as_bool() != Some(true) {
+        issues.push("iCKB matrix production_equivalence_claim must be true".to_string());
+    }
+    if matrix["remaining_model_blockers"].as_array().is_none_or(|blockers| !blockers.is_empty()) {
+        issues.push("iCKB matrix remaining_model_blockers must be empty".to_string());
+    }
+    if matrix["non_executable_model_assumptions"].as_array().is_none_or(|assumptions| !assumptions.is_empty()) {
+        issues.push("iCKB matrix non_executable_model_assumptions must be empty".to_string());
+    }
+}
+
+fn validate_ickb_claim_family(
+    family: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    default_production: Option<&serde_json::Value>,
+    default_hardening: Option<&serde_json::Value>,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let family_id = family["id"].as_str().unwrap_or("<missing-family>");
+    if family["id"].as_str().is_none_or(str::is_empty) {
+        issues.push("iCKB claim family id must be a non-empty string".to_string());
+    }
+    let Some(branches) = family["branches"].as_array() else {
+        issues.push(format!("iCKB claim family {family_id} branches must be an array"));
+        return;
+    };
+
+    for branch in branches {
+        validate_ickb_claim_branch(family_id, branch, matrix_rows, default_production, default_hardening, rows, issues);
+    }
+}
+
+fn validate_ickb_claim_branch(
+    family_id: &str,
+    branch: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    default_production: Option<&serde_json::Value>,
+    default_hardening: Option<&serde_json::Value>,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let branch_id = branch["id"].as_str().unwrap_or("<missing-branch>");
+    if branch["id"].as_str().is_none_or(str::is_empty) {
+        issues.push(format!("iCKB claim family {family_id} has branch with missing id"));
+    }
+    let status = branch["status"].as_str().unwrap_or("<missing-status>");
+    let mut matched = ickb_claim_branch_scenarios(branch, matrix_rows);
+
+    match status {
+        "in_scope" | "fixture_scoped" => {
+            validate_ickb_required_scenarios(family_id, branch_id, branch, matrix_rows, &mut matched, issues);
+            if matched.is_empty() {
+                issues.push(format!("iCKB claim branch {family_id}/{branch_id} has no matching matrix rows"));
+            }
+            for scenario in &matched {
+                if let Some(row) = matrix_rows.get(scenario) {
+                    validate_ickb_claim_row(family_id, branch_id, scenario, row, issues);
+                }
+            }
+
+            let production = branch.get("production_evidence").or(default_production);
+            validate_ickb_evidence_object(
+                "production_evidence",
+                &ICKB_REQUIRED_PRODUCTION_EVIDENCE,
+                production,
+                family_id,
+                branch_id,
+                issues,
+            );
+            let hardening = branch.get("hardening").or(default_hardening);
+            validate_ickb_evidence_object("hardening", &ICKB_REQUIRED_HARDENING_EVIDENCE, hardening, family_id, branch_id, issues);
+            validate_ickb_claim_thresholds(family_id, branch_id, hardening, &matched, matrix_rows, issues);
+            if status == "fixture_scoped" && branch["limitation"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB fixture-scoped branch {family_id}/{branch_id} must declare limitation"));
+            }
+        }
+        "retired" => {
+            if branch["reason"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB retired branch {family_id}/{branch_id} must declare reason"));
+            }
+            let replacements = json_string_array(branch, "replacement_scenarios");
+            if replacements.is_empty() {
+                issues.push(format!("iCKB retired branch {family_id}/{branch_id} must declare replacement_scenarios"));
+            }
+            for scenario in replacements {
+                if !matrix_rows.contains_key(&scenario) {
+                    issues.push(format!("iCKB retired branch {family_id}/{branch_id} replacement scenario is missing: {scenario}"));
+                }
+            }
+        }
+        "out_of_scope" => {
+            if branch["reason"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB out-of-scope branch {family_id}/{branch_id} must declare reason"));
+            }
+            if branch["source_evidence"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB out-of-scope branch {family_id}/{branch_id} must declare source_evidence"));
+            }
+        }
+        other => issues.push(format!("iCKB claim branch {family_id}/{branch_id} has unsupported status {other}")),
+    }
+
+    rows.push(serde_json::json!({
+        "family": family_id,
+        "branch": branch_id,
+        "status": status,
+        "matched_rows": matched.len(),
+        "reject_rows": matched.iter().filter(|scenario| {
+            matrix_rows
+                .get(*scenario)
+                .is_some_and(|row| row["original_ickb_expected"].as_str() == Some("fail") || row["cellscript_expected"].as_str() == Some("fail"))
+        }).count(),
+        "evidence_level": if matched.is_empty() { "DECLARATIVE" } else { ICKB_DIFF_EVIDENCE_LEVEL },
+    }));
+}
+
+fn ickb_claim_branch_scenarios(branch: &serde_json::Value, matrix_rows: &BTreeMap<String, &serde_json::Value>) -> BTreeSet<String> {
+    let mut matched = BTreeSet::new();
+    let excludes = json_string_array(branch, "exclude_scenario_prefixes");
+    for scenario in json_string_array(branch, "evidence_scenarios") {
+        matched.insert(scenario);
+    }
+    for prefix in json_string_array(branch, "evidence_scenario_prefixes") {
+        for scenario in matrix_rows.keys() {
+            if scenario.starts_with(&prefix) && !excludes.iter().any(|exclude| scenario.starts_with(exclude)) {
+                matched.insert(scenario.clone());
+            }
+        }
+    }
+    matched
+}
+
+fn validate_ickb_required_scenarios(
+    family_id: &str,
+    branch_id: &str,
+    branch: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    matched: &mut BTreeSet<String>,
+    issues: &mut Vec<String>,
+) {
+    for scenario in json_string_array(branch, "required_scenarios") {
+        if matrix_rows.contains_key(&scenario) {
+            matched.insert(scenario);
+        } else {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} required scenario is missing: {scenario}"));
+        }
+    }
+}
+
+fn validate_ickb_claim_row(family_id: &str, branch_id: &str, scenario: &str, row: &serde_json::Value, issues: &mut Vec<String>) {
+    if row["evidence_level"].as_str() != Some(ICKB_DIFF_EVIDENCE_LEVEL) {
+        issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} must have evidence_level={ICKB_DIFF_EVIDENCE_LEVEL}"
+        ));
+    }
+    if row["ckb_vm_execution"].as_bool() != Some(true)
+        || row["original_ickb_executed"].as_bool() != Some(true)
+        || row["full_differential"].as_bool() != Some(true)
+    {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} is not a full dual-side VM row"));
+    }
+    let original = row["original_ickb_expected"].as_str();
+    let cellscript = row["cellscript_expected"].as_str();
+    if original != cellscript {
+        issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} expectation mismatch original={original:?} cellscript={cellscript:?}"
+        ));
+    }
+    if (original == Some("fail") || cellscript == Some("fail"))
+        && row["failure_mode"].as_str().is_none_or(str::is_empty)
+        && row["execution"]["failure_mode"].as_str().is_none_or(str::is_empty)
+    {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} reject scenario {scenario} lacks named failure mode"));
+    }
+    for field in ["tx_size_bytes", "occupied_capacity_shannons", "fee_shannons"] {
+        if !row["execution"].get(field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution missing {field}"));
+        }
+    }
+    if !row["execution"]["normalized_fixture"].is_object() {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} missing normalized_fixture"));
+    }
+}
+
+fn validate_ickb_evidence_object(
+    label: &str,
+    required: &[&str],
+    object: Option<&serde_json::Value>,
+    family_id: &str,
+    branch_id: &str,
+    issues: &mut Vec<String>,
+) {
+    let Some(object) = object.and_then(serde_json::Value::as_object) else {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} missing {label} object"));
+        return;
+    };
+    for field in required {
+        if !object.get(*field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} {label} missing non-empty {field}"));
+        }
+    }
+}
+
+fn validate_ickb_claim_thresholds(
+    family_id: &str,
+    branch_id: &str,
+    hardening: Option<&serde_json::Value>,
+    scenarios: &BTreeSet<String>,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let max_cycles = hardening.and_then(|value| value["max_cellscript_cycles"].as_u64());
+    let max_tx_size = hardening.and_then(|value| value["max_tx_size_bytes"].as_u64());
+    for scenario in scenarios {
+        let Some(row) = matrix_rows.get(scenario) else {
+            continue;
+        };
+        if let (Some(max), Some(actual)) = (max_cycles, row["execution"]["cellscript_cycles"].as_u64()) {
+            if actual > max {
+                issues.push(format!(
+                    "iCKB claim branch {family_id}/{branch_id} scenario {scenario} cellscript_cycles {actual} exceeds {max}"
+                ));
+            }
+        }
+        if let (Some(max), Some(actual)) = (max_tx_size, row["execution"]["tx_size_bytes"].as_u64()) {
+            if actual > max {
+                issues.push(format!(
+                    "iCKB claim branch {family_id}/{branch_id} scenario {scenario} tx_size_bytes {actual} exceeds {max}"
+                ));
+            }
+        }
+    }
+}
+
+fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value[key].as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).map(ToString::to_string).collect()
+}
+
+fn ckb_fixture_non_empty_json_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(value) => !value.is_empty(),
+        serde_json::Value::Array(values) => !values.is_empty(),
+        serde_json::Value::Object(values) => !values.is_empty(),
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
 }
 
 fn validate_ckb_fixture_suite(

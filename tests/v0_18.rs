@@ -11,6 +11,8 @@ const SCRIPT_REF_READ_PROGRAM: &str = r#"
 module v018::script_ref_read
 
 action inspect(
+    expected_lock_hash: Hash,
+    expected_type_hash: Hash,
     expected_lock_code_hash: Hash,
     expected_type_code_hash: Hash,
     expected_lock_args_hash: Hash,
@@ -18,6 +20,8 @@ action inspect(
 ) -> u64
 where
     let input = source::input(0)
+    let lock_hash: Hash = ckb::cell_lock_hash(input)
+    let type_hash: Hash = ckb::cell_type_hash(input)
     let lock_code_hash: Hash = ckb::cell_lock_code_hash(input)
     let type_code_hash: Hash = ckb::cell_type_code_hash(input)
     let lock_hash_type = ckb::cell_lock_hash_type(input)
@@ -26,6 +30,8 @@ where
     let type_args_empty = ckb::cell_type_args_empty(input)
     let lock_args_hash: Hash = ckb::cell_lock_args_hash(input)
     let type_args_hash: Hash = ckb::cell_type_args_hash(input)
+    require lock_hash == expected_lock_hash
+    require type_hash == expected_type_hash
     require lock_code_hash == expected_lock_code_hash
     require type_code_hash == expected_type_code_hash
     require lock_args_hash == expected_lock_args_hash
@@ -85,6 +91,60 @@ where
     return 0
 "#;
 
+const SCRIPT_LITERAL_CONSTRUCTION_PROGRAM: &str = r#"
+module v018::script_literal_construction
+
+action inspect() -> u64
+where
+    let code_hash: Hash = Hash::from_bytes(b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20")
+    let expected = script::new(code_hash, script::hash_type_data2(), script::args_empty())
+    let same_code_hash: Hash = expected.code_hash
+    require same_code_hash == code_hash
+    require expected.args.is_empty == true
+    return expected.hash_type + expected.args.len
+"#;
+
+const CELL_DATA_DECODE_PROGRAM: &str = r#"
+module v018::cell_data_decode
+
+action inspect() -> u64
+where
+    let input = source::group_input(0)
+    let quantity = ckb::cell_data_u32_le(input, 0)
+    let amount = ckb::cell_data_u64_le(input, 4)
+    if quantity != 7 {
+        return 90
+    }
+    if amount != 123456789 {
+        return 91
+    }
+    return 0
+"#;
+
+const OUT_POINT_API_PROGRAM: &str = r#"
+module v018::out_point_api
+
+action inspect() -> u64
+where
+    let input = source::group_input(0)
+    let tx_hash: Hash = ckb::input_out_point_tx_hash(input)
+    let index = ckb::input_out_point_index(input)
+    ckb::require_input_out_point_tx_hash(input, tx_hash)
+    ckb::require_input_out_point(input, tx_hash, index)
+    return 0
+"#;
+
+const OUT_POINT_OUTPUT_REJECT_PROGRAM: &str = r#"
+module v018::out_point_output_reject
+
+action inspect() -> u64
+where
+    let output = source::output(0)
+    let tx_hash: Hash = ckb::input_out_point_tx_hash(output)
+    ckb::require_input_out_point_tx_hash(output, tx_hash)
+    return 0
+"#;
+
 const ALWAYS_SUCCESS_LOCK_PROGRAM: &str = r#"
 module v018::always_success_lock
 
@@ -125,6 +185,8 @@ fn v0_18_script_ref_reads_lower_to_fail_closed_ckb_helpers() {
     for helper in [
         "__ckb_cell_lock_code_hash",
         "__ckb_cell_type_code_hash",
+        "__ckb_cell_lock_hash",
+        "__ckb_cell_type_hash",
         "__ckb_cell_lock_hash_type",
         "__ckb_cell_type_hash_type",
         "__ckb_cell_lock_args_empty",
@@ -169,6 +231,8 @@ fn v0_18_script_ref_reads_lower_to_fail_closed_ckb_helpers() {
     for operation in [
         "cell-lock-script-code-hash-read",
         "cell-type-script-code-hash-read",
+        "cell-lock-hash-read",
+        "cell-type-hash-read",
         "cell-lock-script-hash-type-read",
         "cell-type-script-hash-type-read",
         "cell-lock-script-args-empty-read",
@@ -194,6 +258,175 @@ fn v0_18_script_ref_reads_lower_to_fail_closed_ckb_helpers() {
     )
     .expect("0.18 ScriptRef read program should assemble to ELF");
     assert!(!elf.artifact_bytes.is_empty());
+}
+
+#[test]
+fn v0_18_cell_data_le_decoders_lower_to_fail_closed_ckb_helpers() {
+    let result = compile(
+        CELL_DATA_DECODE_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("cell data LE decoder program should compile");
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    for helper in ["__ckb_cell_data_u32_le", "__ckb_cell_data_u64_le"] {
+        assert!(assembly.contains(&format!(".global {helper}")), "missing helper {helper}:\n{assembly}");
+    }
+    assert!(
+        assembly.contains("little-endian u32 read via LOAD_CELL_DATA")
+            && assembly.contains("little-endian u64 read via LOAD_CELL_DATA")
+            && assembly.contains("scalar runtime helper status check (a1 == 0)"),
+        "cell data decoders must use fail-closed LOAD_CELL_DATA helpers:\n{assembly}"
+    );
+
+    let features = &result.metadata.runtime.ckb_runtime_features;
+    assert!(features.contains(&"ckb-source-cell-fields".to_string()), "{features:?}");
+    assert!(features.contains(&"ckb-cell-data-decode".to_string()), "{features:?}");
+
+    let accesses = result
+        .metadata
+        .runtime
+        .ckb_runtime_accesses
+        .iter()
+        .map(|access| (access.operation.as_str(), access.syscall.as_str(), access.source.as_str()))
+        .collect::<Vec<_>>();
+    assert!(accesses.contains(&("cell-data-u32-le", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("cell-data-u64-le", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
+}
+
+#[test]
+fn v0_18_cell_data_le_decoders_run_in_ckb_vm() {
+    let type_elf = compile_source_to_elf(CELL_DATA_DECODE_PROGRAM, "inspect");
+    let always_success_elf = compile_source_to_elf(ALWAYS_SUCCESS_LOCK_PROGRAM, "always_success");
+
+    fn run_with_data(type_elf: &[u8], always_success_elf: &[u8], data: Bytes) -> Result<u64, String> {
+        let mut context = Context::new_with_deterministic_rng();
+        let always_success_out_point = context.deploy_cell(Bytes::copy_from_slice(always_success_elf));
+        let type_out_point = context.deploy_cell(Bytes::copy_from_slice(type_elf));
+        let lock = context.build_script(&always_success_out_point, Bytes::default()).expect("always success lock");
+        let type_script = context.build_script(&type_out_point, Bytes::default()).expect("type script under test");
+
+        let input = context.create_cell(
+            packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(100_000_000_000u64.pack())
+                .lock(lock.clone())
+                .type_(packed::ScriptOpt::from(type_script))
+                .build(),
+            data,
+        );
+        let output = packed::CellOutput::new_builder().capacity::<packed::Uint64>(100_000_000_000u64.pack()).lock(lock).build();
+        let tx = TransactionBuilder::default()
+            .input(packed::CellInput::new_builder().previous_output(input).build())
+            .output(output)
+            .output_data(Bytes::default().pack())
+            .witness(Bytes::default().pack())
+            .build();
+        let tx = context.complete_tx(tx);
+        context.verify_tx(&tx, 10_000_000).map_err(|err| format!("{err:?}"))
+    }
+
+    let mut good = Vec::new();
+    good.extend_from_slice(&7u32.to_le_bytes());
+    good.extend_from_slice(&123_456_789u64.to_le_bytes());
+    let pass_cycles = run_with_data(&type_elf, &always_success_elf, Bytes::from(good)).expect("LE data decoder pass");
+    assert!(pass_cycles > 0);
+
+    let reject = run_with_data(&type_elf, &always_success_elf, Bytes::from(vec![7, 0, 0, 0, 1, 2, 3]))
+        .expect_err("short u64 data read must fail closed");
+    assert!(reject.contains("error") || reject.contains("ValidationFailure"), "{reject}");
+}
+
+#[test]
+fn v0_18_out_point_tx_hash_read_lowers_to_addressable_hash() {
+    let result = compile(
+        OUT_POINT_API_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("OutPoint API program should compile");
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    for helper in [
+        "__ckb_input_out_point_tx_hash",
+        "__ckb_input_out_point_index",
+        "__ckb_require_input_out_point_tx_hash",
+        "__ckb_require_input_out_point",
+    ] {
+        assert!(assembly.contains(&format!(".global {helper}")), "missing helper {helper}:\n{assembly}");
+    }
+    assert!(
+        assembly.contains("OutPoint full tx-hash read")
+            && assembly.contains("load SourceView input OutPoint tx hash into addressable Hash")
+            && assembly.contains("OutPoint full tx-hash + index requirement"),
+        "OutPoint API must expose full tx-hash reads and binding checks:\n{assembly}"
+    );
+
+    let features = &result.metadata.runtime.ckb_runtime_features;
+    assert!(features.contains(&"ckb-source-input-out-point".to_string()), "{features:?}");
+    assert!(features.contains(&"ckb-source-cell-fields".to_string()), "{features:?}");
+
+    let accesses = result
+        .metadata
+        .runtime
+        .ckb_runtime_accesses
+        .iter()
+        .map(|access| (access.operation.as_str(), access.syscall.as_str(), access.source.as_str()))
+        .collect::<Vec<_>>();
+    assert!(accesses.contains(&("input-out-point-tx-hash-read", "LOAD_INPUT_BY_FIELD", "SourceView")), "{accesses:?}");
+    assert!(accesses.contains(&("input-out-point-require", "LOAD_INPUT_BY_FIELD", "SourceView")), "{accesses:?}");
+}
+
+#[test]
+fn v0_18_out_point_tx_hash_read_runs_in_ckb_vm() {
+    let type_elf = compile_source_to_elf(OUT_POINT_API_PROGRAM, "inspect");
+    let reject_type_elf = compile_source_to_elf(OUT_POINT_OUTPUT_REJECT_PROGRAM, "inspect");
+    let always_success_elf = compile_source_to_elf(ALWAYS_SUCCESS_LOCK_PROGRAM, "always_success");
+
+    fn run(type_elf: &[u8], always_success_elf: &[u8]) -> Result<u64, String> {
+        let mut context = Context::new_with_deterministic_rng();
+        let always_success_out_point = context.deploy_cell(Bytes::copy_from_slice(always_success_elf));
+        let type_out_point = context.deploy_cell(Bytes::copy_from_slice(type_elf));
+        let lock = context.build_script(&always_success_out_point, Bytes::default()).expect("always success lock");
+        let type_script = context.build_script(&type_out_point, Bytes::default()).expect("type script under test");
+
+        let input = context.create_cell(
+            packed::CellOutput::new_builder()
+                .capacity::<packed::Uint64>(100_000_000_000u64.pack())
+                .lock(lock.clone())
+                .type_(packed::ScriptOpt::from(type_script.clone()))
+                .build(),
+            Bytes::default(),
+        );
+        let output = packed::CellOutput::new_builder()
+            .capacity::<packed::Uint64>(100_000_000_000u64.pack())
+            .lock(lock)
+            .type_(packed::ScriptOpt::from(type_script))
+            .build();
+        let tx = TransactionBuilder::default()
+            .input(packed::CellInput::new_builder().previous_output(input).build())
+            .output(output)
+            .output_data(Bytes::default().pack())
+            .witness(Bytes::default().pack())
+            .build();
+        let tx = context.complete_tx(tx);
+        context.verify_tx(&tx, 10_000_000).map_err(|err| format!("{err:?}"))
+    }
+
+    let pass_cycles = run(&type_elf, &always_success_elf).expect("OutPoint tx-hash read should pass for input SourceView");
+    assert!(pass_cycles > 0);
+
+    let reject =
+        run(&reject_type_elf, &always_success_elf).expect_err("OutPoint tx-hash read must reject non-input SourceView at runtime");
+    assert!(reject.contains("error") || reject.contains("ValidationFailure"), "{reject}");
 }
 
 #[test]
@@ -470,6 +703,26 @@ where
 }
 
 #[test]
+fn v0_18_script_construction_accepts_literal_code_hashes() {
+    let result = compile(
+        SCRIPT_LITERAL_CONSTRUCTION_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("literal Hash-backed Script construction should compile");
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    assert!(
+        assembly.contains(".byte 1\n    .byte 2\n    .byte 3\n    .byte 4"),
+        "literal code_hash should be emitted as fixed bytes:\n{assembly}"
+    );
+}
+
+#[test]
 fn v0_18_script_construction_rejects_bad_operands() {
     let bad_hash_type = compile(
         r#"
@@ -508,4 +761,28 @@ where
     )
     .expect_err("script::args must reject scalar non-byte payloads");
     assert!(bad_args.message.contains("script::args expects fixed bytes"), "unexpected error: {}", bad_args.message);
+
+    let bad_hash_bytes = compile(
+        r#"
+module v018::bad_hash_bytes
+
+action inspect() -> u64
+where
+    let code_hash: Hash = Hash::from_bytes(b"short")
+    let expected = script::new(code_hash, script::hash_type_data1(), script::args_empty())
+    return expected.hash_type
+"#,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect_err("Hash::from_bytes must reject non-32-byte payloads");
+    assert!(
+        bad_hash_bytes.message.contains("Hash::from_bytes expects exactly 32 bytes"),
+        "unexpected error: {}",
+        bad_hash_bytes.message
+    );
 }

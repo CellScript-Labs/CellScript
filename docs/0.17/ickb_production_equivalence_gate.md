@@ -3,10 +3,11 @@
 This gate defines the minimum evidence required before CellScript may claim
 production-equivalent behaviour for any selected iCKB scenario.
 
-Current status: `PROVEN` for the selected executed iCKB equivalence matrix.
+Current status: `PROVEN` for the selected executed iCKB equivalence matrix and
+`complete-executable-claim-set` for the branch-level iCKB claim manifest.
 
-The current benchmark has advanced to `EXECUTED_CKB_VM_DIFF`: seventy-six
-selected rows run original iCKB ELFs and generated CellScript ELFs side by side
+The current benchmark has advanced to `EXECUTED_CKB_VM_DIFF`: 187 selected rows
+run original iCKB ELFs and generated CellScript ELFs side by side
 under real CKB VM/syscall context via `ckb-testtool`, with matching pass/fail
 status, named reject modes, hashes, cycles, transaction sizes, occupied
 capacity, and fees. Fourteen CellScript-only VM rows and eight original-side VM
@@ -25,31 +26,38 @@ the selected equivalence matrix.
 | `DIFFERENTIAL_CKB_VM_EXECUTED` | Original iCKB script and generated CellScript script were run on the same normalized CKB VM/testtool scenario fixture, with pass/fail status matching. | "executed differential subset" |
 | `PROVEN` | Every scenario in the selected equivalence matrix has executed evidence and matching pass/fail behaviour with named reject reasons. | "production-equivalent for the selected executed subset" |
 
-Full iCKB equivalence may be claimed only for the selected executed matrix.
-Any future row outside that matrix must first be promoted to
-`DIFFERENTIAL_CKB_VM_EXECUTED` with the same evidence requirements.
+Complete iCKB protocol support may be claimed only for the executable branch
+set declared in `tests/benchmarks/ickb_diff/claim_manifest.json`. Any future
+row outside that manifest must first be promoted to
+`DIFFERENTIAL_CKB_VM_EXECUTED` with the same evidence requirements and then
+added to the claim manifest.
 
 ## Required Evidence
 
-`tests/benchmarks/ickb_diff/matrix.json` is the executable claim manifest. The
-integration test `tests/ickb_diff.rs` rejects any production equivalence claim
-unless the manifest provides all of the following:
+`tests/benchmarks/ickb_diff/matrix.json` is the executable evidence matrix, and
+`tests/benchmarks/ickb_diff/claim_manifest.json` is the branch-level claim
+manifest. The integration test `tests/ickb_diff.rs` and
+`cellc verify-ckb-fixtures .../claim_manifest.json` reject any production
+equivalence claim unless the manifests provide all of the following:
 
-1. original iCKB repository commit;
-2. original iCKB script binary SHA-256;
-3. CellScript source commit;
-4. generated CellScript artifact SHA-256;
-5. CKB VM or CKB testtool version;
-6. transaction fixture manifest SHA-256;
-7. proof that both sides used identical inputs, outputs, cell deps, header deps,
+1. reviewed iCKB contracts source commit;
+2. iCKB contracts audit/test suite commit;
+3. iCKB contracts audit report URL;
+4. original iCKB repository commit;
+5. original iCKB script binary SHA-256;
+6. CellScript source commit;
+7. generated CellScript artifact SHA-256;
+8. CKB VM or CKB testtool version;
+9. transaction fixture manifest SHA-256;
+10. proof that both sides used identical inputs, outputs, cell deps, header deps,
    witnesses, and output data for the overlapping scenario;
-8. original and generated script exit codes;
-9. named failure mode for every reject case;
-10. cycle and transaction-size measurements;
-11. per-row execution objects;
-12. pass/fail status match evidence;
-13. transaction context hashes;
-14. capacity and fee measurements.
+11. original and generated script exit codes;
+12. named failure mode for every reject case;
+13. cycle and transaction-size measurements;
+14. per-row execution objects;
+15. pass/fail status match evidence;
+16. transaction context hashes;
+17. capacity and fee measurements.
 
 Each row that claims executed equivalence must additionally contain an
 `execution` object with:
@@ -79,23 +87,26 @@ execution, or has mismatched status/exit-code evidence.
 
 ## Running The Gate
 
-The iCKB-specific gate is executable through Rust integration tests. It is not
-exposed from the generic `cellc` CLI:
+The iCKB-specific gate is executable through Rust integration tests and the
+`verify-ckb-fixtures` CLI:
 
 ```bash
 cargo test --locked -p cellscript --test ickb_diff
 cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat/ckb_standard/manifest.json --json
+cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/benchmarks/ickb_diff/claim_manifest.json --json
 ```
 
 `verify-ckb-fixtures` validates the standard CKB fixture manifest with the
 deterministic model runner and emits a manifest hash. It still reports
-`ckb_vm_execution = false`. `tests/ickb_benchmark.rs` validates the iCKB-style
-positive and adversarial fixtures directly and also reports model-only coverage.
-`tests/ickb_diff.rs` accepts the current `PROVEN` matrix only because every
-selected row is differential and the top-level evidence manifest is present. It
-still fails if any selected row lacks original-side execution, CellScript-side
-execution, matching pass/fail status, per-row execution evidence, or if active
-non-executable model assumptions reappear.
+`ckb_vm_execution = false`. In iCKB claim-manifest mode it reports
+`execution_level = DIFFERENTIAL_CKB_VM` and validates that every in-scope branch
+maps to matrix rows, production evidence, hardening thresholds, or explicit
+retired/out-of-scope notes. `tests/ickb_diff.rs` accepts the current `PROVEN`
+matrix only because every selected row is differential and the top-level
+evidence manifest is present. It still fails if any selected row lacks
+original-side execution, CellScript-side execution, matching pass/fail status,
+per-row execution evidence, or if active non-executable model assumptions
+reappear.
 
 ## Current Enforcement
 
@@ -109,7 +120,7 @@ The current matrix sets:
 
 Current row counts by evidence level:
 
-- `DIFFERENTIAL_CKB_VM_EXECUTED`: 76
+- `DIFFERENTIAL_CKB_VM_EXECUTED`: 187
 - `MODEL`: 0
 
 Supporting evidence outside the selected equivalence rows:
@@ -127,7 +138,7 @@ under `retired_model_assumptions`, each pointing at the replacement
 differential row that executes the closest chain-level fixture shape. Retired
 assumptions are audit notes, not active blockers.
 
-The seventy-six differential rows are:
+The selected differential rows include:
 
 1. **Non-empty script args reject**: unpatched original iCKB Logic and a
    generated CellScript ELF both reject the same normalized non-empty type args
@@ -151,9 +162,17 @@ The seventy-six differential rows are:
    the same amount, with named `duplicate_receipt_output` failure mode. This is
    output-accounting `ReceiptMismatch` evidence, not the model-only duplicate
    receipt-id double-mint fixture.
+   Additional deposit output-shape rows reject zero receipt quantity, quantity
+   mismatch, amount mismatch, and short receipt data while keeping the same
+   normalized deposit/receipt transaction shape.
 7. **Receipt group exact mint**: unpatched original iCKB Logic and a generated
    CellScript aggregate probe both accept the same normalized two-receipt input
-   fixture when the xUDT output mints exactly two receipts worth of iCKB.
+   fixture when the xUDT output mints exactly two receipts worth of iCKB. A
+   second pass row covers mixed receipt bytes where the second receipt has
+   `quantity = 2` and a different deposit amount, proving the sum is decoded
+   from receipt data rather than fixed constants. Additional pass rows cover
+   two zero-quantity receipts minting zero xUDT and two quantity-two receipts
+   minting four receipt units.
 8. **Receipt group over-mint reject**: unpatched original iCKB Logic and a
    generated CellScript aggregate probe both reject the same normalized
    two-receipt input fixture when the xUDT output mints one shannon more than
@@ -197,10 +216,15 @@ The seventy-six differential rows are:
    two-receipt input fixture when the xUDT output mints only one receipt worth
    of iCKB, with named `receipt_group_under_mint` failure mode. This is
    multi-receipt aggregate evidence, not duplicate receipt-id proof.
+   A sibling row also rejects an otherwise exact two-receipt fixture whose xUDT
+   output sets the high 64-bit amount word, with named
+   `receipt_group_amount_high_nonzero` failure mode.
 16. **Valid mint from receipt**: unpatched original iCKB Logic and the generated
    CellScript ELF both accept the same normalized receipt-to-xUDT mint fixture.
    The fixture uses the original xUDT binary with `Data1` hash type and
-   owner-mode args bound to the script-under-test hash.
+   owner-mode args bound to the script-under-test hash. A second pass row uses
+   a `quantity = 2` receipt and mints twice the xUDT amount from decoded receipt
+   bytes.
 17. **Mint from malformed receipt data reject**: unpatched original iCKB Logic
    and a generated CellScript receipt-data-size probe both reject the same
    normalized single-receipt mint fixture when the receipt input has malformed
@@ -238,6 +262,50 @@ The seventy-six differential rows are:
    generated CellScript capacity upper-bound probe both accept the same
    normalized mature phase-2 withdrawal fixture when output capacity is exactly
    the observed original DAO boundary `123468305678`.
+- **DAO two-input max withdrawal capacity**: unmodified original DAO ELF and a
+  generated CellScript aggregate capacity probe both accept the same normalized
+  mature phase-2 fixture with two withdrawing DAO inputs, two witness
+  `input_type` fields, and one output at the exact aggregate boundary
+  `246936611356`.
+- **DAO two-input over-withdraw capacity reject**: the same two-input fixture
+  is rejected by both sides when the output capacity is `246936611357`, one
+  shannon above the aggregate boundary, with named
+  `dao_two_input_over_withdraw_capacity` failure mode.
+- **DAO two-input mixed deposit-rate max withdrawal capacity**: the two-input
+  fixture can bind the second withdrawing input to a separate deposit header
+  dep with accumulated rate `10000001`; both sides accept the exact mixed-rate
+  aggregate boundary `246936599829`.
+- **DAO two-input mixed deposit-rate over-withdraw reject**: the same mixed
+  deposit-header fixture is rejected by both sides when the output capacity is
+  `246936599830`, one shannon above the mixed-rate aggregate boundary, with
+  named `dao_two_input_mixed_deposit_rate_over_withdraw_capacity` failure mode.
+- **DAO two-input mixed withdraw-rate max withdrawal capacity**: the two-input
+  fixture can bind the second withdrawing input to a separate committed
+  withdraw header with accumulated rate `10000999`; both sides accept the exact
+  mixed-withdraw-rate aggregate boundary `246936599830`.
+- **DAO two-input mixed withdraw-rate over-withdraw reject**: the same mixed
+  withdraw-header fixture is rejected by both sides when the output capacity is
+  `246936599831`, one shannon above the mixed-withdraw-rate aggregate boundary,
+  with named `dao_two_input_mixed_withdraw_rate_over_withdraw_capacity` failure
+  mode.
+- **DAO two-input second witness malformed rejects**: the same two-input
+  ScriptGroup shape keeps the exact aggregate capacity boundary but mutates the
+  second witness `input_type`. Missing, empty, one-byte, and nine-byte payloads
+  all reject on both sides, with named
+  `dao_two_input_second_*_witness_input_type` failure modes.
+- **DAO two-input second witness-index malformed rejects**: the same two-input
+  ScriptGroup shape sets the second witness `input_type` to the withdraw-header
+  index `0` and to out-of-bounds header index `2`. Both rows reject on both
+  sides, with named `dao_two_input_second_*_witness_index` failure modes.
+- **DAO three-input max withdrawal capacity**: unmodified original DAO ELF and
+  a generated CellScript aggregate capacity probe both accept a normalized
+  mature phase-2 fixture with three withdrawing DAO inputs, three witness
+  `input_type` fields, and one output at the exact aggregate boundary
+  `370404917034`.
+- **DAO three-input over-withdraw capacity reject**: the same three-input
+  fixture is rejected by both sides when the output capacity is `370404917035`,
+  one shannon above the aggregate boundary, with named
+  `dao_three_input_over_withdraw_capacity` failure mode.
 26. **DAO wrong deposit accumulated rate reject**: unmodified original DAO ELF
    and a generated CellScript capacity/rate probe both reject the same
    normalized mature phase-2 withdrawal fixture when the deposit header
@@ -392,7 +460,9 @@ The seventy-six differential rows are:
    normalized output fixture where the lock-owned output has nonzero
    withdrawal-request data but its type script hash differs from the expected
    auxiliary withdrawal type hash, with named
-   `output_related_type_hash_mismatch` failure mode.
+   `output_related_type_hash_mismatch` failure mode. The CellScript side now
+   constructs the expected auxiliary Script with `Hash::from_bytes` +
+   `script::new` and rejects through `script::require_cell_type_matches`.
 58. **Owned-Owner output related data rule mismatch reject**: patched original
    iCKB Owned-Owner and a generated CellScript ELF both reject the same
    normalized output fixture where the lock-owned output has the expected
@@ -403,7 +473,9 @@ The seventy-six differential rows are:
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    input fixture where the lock-owned input has nonzero withdrawal-request data
    but its type script hash differs from the expected auxiliary withdrawal type
-   hash, with named `related_type_hash_mismatch` failure mode.
+   hash, with named `related_type_hash_mismatch` failure mode. The CellScript
+   side now uses the same first-class expected Script matching path as the
+   output row.
 60. **Owned-Owner related data rule mismatch reject**: patched original iCKB
    Owned-Owner and a generated CellScript ELF both reject the same normalized
    input fixture where the lock-owned input has the expected auxiliary
@@ -488,9 +560,10 @@ The seventy-six differential rows are:
 No model-level rows remain as active benchmark coverage entries. Legacy model
 rows whose scenarios now have fixture-bound differential coverage were removed
 from the active matrix. Duplicate receipt-id, wrong owner, and immature redeem
-were moved to `non_executable_model_assumptions`: executable receipt data has no
-receipt-id byte field; executable Owned-Owner fixtures encode ownership through
-script placement plus OutPoint/MetaPoint relative distance rather than
+are tracked as retired model assumptions outside the active claim: executable
+receipt data has no receipt-id byte field; executable Owned-Owner fixtures
+encode ownership through script placement plus OutPoint/MetaPoint relative
+distance rather than
 `owner` / `claimed_owner` fields; executable DAO redeem maturity is represented
 by input `since`, header deps, and witness input-type data rather than
 `current_epoch` / `maturity_epoch` fields.
@@ -505,20 +578,27 @@ execution evidence fails the test suite.
 
 ## What Still Blocks Equivalence
 
-- Seventy-six normalized fixtures have full original-vs-CellScript differential
+- Ninety-two normalized fixtures have full original-vs-CellScript differential
   execution evidence.
 - DAO hash patching is used for original iCKB Logic in the current test
   environment and is recorded in each differential execution object. This is
   functional evidence under controlled script identity, not mainnet identity
   reconstruction.
-- Selected DAO phase-2 lineage, maturity, occupied capacity, rate, witness
-  input_type, and cell dep substitution paths now have byte-accurate execution
-  rows; full multi-input DAO redeem accounting and production fixture manifest
-  closure still remain outside the proven subset.
+- Selected DAO phase-2 lineage, maturity, occupied capacity, two-input
+  same-rate, mixed-deposit-rate, and mixed-withdraw-rate aggregate capacity
+  pass/reject, three-input same-rate aggregate capacity pass/reject, malformed
+  second-witness input_type/header-index rejects, rate, witness input_type, and
+  cell dep substitution paths now have byte-accurate execution rows; broader
+  malformed multi-input header-dep / witness-index variants and production
+  fixture manifest closure still remain outside the proven subset.
 - Mint from receipt, amount inflation, amount deflation, wrong xUDT args, wrong
-  accumulated rate, and missing header dep now have partial receipt/xUDT
-  differential evidence, but full receipt byte decoding and aggregate
-  recomputation are still not executable CellScript lowering.
+  accumulated rate, and missing header dep now have receipt/xUDT differential
+  evidence where generated CellScript enforces the 12-byte executable receipt
+  shape, decodes quantity and deposit amount bytes with protocol-neutral
+  `ckb::cell_data_u32_le` / `ckb::cell_data_u64_le`, then recomputes the
+  expected xUDT amount at runtime.
+  Broader receipt fields, generic group scanning, and output deposit/receipt
+  pairing remain outside the proven subset.
 - Duplicate receipt output accounting has one executed `ReceiptMismatch` reject
   row. The model-level duplicate receipt-id double-mint fixture is now tracked
   as a non-executable model assumption rather than an active matrix row, because
@@ -529,9 +609,10 @@ execution evidence fails the test suite.
   UDT-to-CKB insufficient-match rejection, UDT-to-CKB underpayment rejection,
   CKB-to-UDT underpayment rejection, CKB-to-UDT wrong-asset rejection,
   CKB-to-UDT insufficient-match rejection, CKB-to-UDT no-CKB-paid rejection,
-  and UDT-decreased rejection now have fixture-bound differential VM evidence,
-  but full action-aware MetaPoint/OutPoint map remains open. First-class
-  `Script` equality semantics are explicitly scoped to 0.18, not the 0.17 gate.
+  and UDT-decreased rejection now have fixture-bound differential VM evidence.
+  On the 0.18 research line these rows use full 32-byte Type Script hash
+  equality through `ckb::cell_type_hash`; full action-aware MetaPoint/OutPoint
+  map remains open.
 - Owned-Owner relative-distance pairing now has input-side and output-side pass
   rows plus input-side and output-side mismatch reject rows, with original DAO
   hash patched to a shared auxiliary withdrawal type hash for ckb-testtool where
@@ -540,9 +621,10 @@ execution evidence fails the test suite.
   role misuse path and input-side lock-owned withdrawal-shape guard without DAO
   patching; the output non-withdrawal request row covers the same
   withdrawal-shape guard on Source::Output. The input-side and output-side
-  related type-hash mismatch rows cover patched auxiliary type-hash binding
-  failures in both source views, and the input-side and output-side related
-  data-rule mismatch rows cover matching-type/non-withdrawal-data failures. The input-side and output-side owner data length mismatch rows cover
+  related type-hash mismatch rows cover patched auxiliary Script binding
+  failures in both source views using first-class Script construction, and the
+  input-side and output-side related data-rule mismatch rows cover
+  matching-Script/non-withdrawal-data failures. The input-side and output-side owner data length mismatch rows cover
   malformed owner-side i32 distance data in both source views.
   The missing-owner reject row covers a patched input withdrawal request whose
   owner pair is absent, and the missing-owned reject row covers the input

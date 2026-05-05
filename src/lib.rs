@@ -11670,6 +11670,7 @@ fn body_ckb_runtime_features(
                         func.as_str(),
                         "__ckb_input_out_point_index"
                             | "__ckb_input_out_point_tx_hash_low"
+                            | "__ckb_input_out_point_tx_hash"
                             | "__ckb_require_input_out_point_tx_hash"
                             | "__ckb_require_input_out_point"
                             | "__ckb_require_metapoint_relative"
@@ -11683,6 +11684,7 @@ fn body_ckb_runtime_features(
                     ) =>
                 {
                     features.insert("ckb-source-input-out-point".to_string());
+                    features.insert("ckb-source-cell-fields".to_string());
                     if matches!(
                         func.as_str(),
                         "__ckb_require_metapoint_relative"
@@ -11737,6 +11739,7 @@ fn body_ckb_runtime_features(
                             | "__ckb_cell_output_index"
                             | "__ckb_input_out_point_index"
                             | "__ckb_input_out_point_tx_hash_low"
+                            | "__ckb_input_out_point_tx_hash"
                             | "__ckb_require_input_out_point_tx_hash"
                             | "__ckb_require_input_out_point"
                             | "__ckb_require_metapoint_relative"
@@ -11749,6 +11752,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_lock_match_master_out_point_pairs_from_data"
                             | "__ckb_cell_lock_hash_low"
                             | "__ckb_cell_type_hash_low"
+                            | "__ckb_cell_lock_hash"
+                            | "__ckb_cell_type_hash"
                             | "__ckb_cell_lock_code_hash"
                             | "__ckb_cell_type_code_hash"
                             | "__ckb_cell_lock_hash_type"
@@ -11772,6 +11777,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_lock_script_hash_type"
                             | "__ckb_require_cell_type_script_hash_type"
                             | "__ckb_cell_data_size"
+                            | "__ckb_cell_data_u32_le"
+                            | "__ckb_cell_data_u64_le"
                     ) =>
                 {
                     features.insert("ckb-source-cell-fields".to_string());
@@ -11804,12 +11811,17 @@ fn body_ckb_runtime_features(
                     }
                     if matches!(
                         func.as_str(),
-                        "__ckb_cell_lock_code_hash"
+                        "__ckb_cell_lock_hash"
+                            | "__ckb_cell_type_hash"
+                            | "__ckb_cell_lock_code_hash"
                             | "__ckb_cell_type_code_hash"
                             | "__ckb_cell_lock_hash_type"
                             | "__ckb_cell_type_hash_type"
                     ) {
                         features.insert("ckb-script-ref-read".to_string());
+                    }
+                    if matches!(func.as_str(), "__ckb_cell_data_u32_le" | "__ckb_cell_data_u64_le") {
+                        features.insert("ckb-cell-data-decode".to_string());
                     }
                     if matches!(func.as_str(), "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type")
                     {
@@ -12239,6 +12251,9 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_input_out_point_tx_hash_low" => {
             Some(("input-out-point-tx-hash-low", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::input_out_point_tx_hash_low"))
         }
+        "__ckb_input_out_point_tx_hash" => {
+            Some(("input-out-point-tx-hash-read", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::input_out_point_tx_hash"))
+        }
         "__ckb_require_input_out_point_tx_hash" => {
             Some(("input-out-point-tx-hash-require", "LOAD_INPUT_BY_FIELD", "SourceView", "ckb::require_input_out_point_tx_hash"))
         }
@@ -12292,6 +12307,8 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_cell_lock_hash_low" => Some(("cell-lock-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_hash_low")),
         "__ckb_cell_type_hash_low" => Some(("cell-type-hash-low", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_hash_low")),
+        "__ckb_cell_lock_hash" => Some(("cell-lock-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_hash")),
+        "__ckb_cell_type_hash" => Some(("cell-type-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_type_hash")),
         "__ckb_cell_lock_code_hash" => {
             Some(("cell-lock-script-code-hash-read", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::cell_lock_code_hash"))
         }
@@ -12378,6 +12395,8 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         )),
         "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
         "__ckb_cell_data_size" => Some(("cell-data-size", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_size")),
+        "__ckb_cell_data_u32_le" => Some(("cell-data-u32-le", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_u32_le")),
+        "__ckb_cell_data_u64_le" => Some(("cell-data-u64-le", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_u64_le")),
         "__dao_accumulated_rate" => Some(("dao-accumulated-rate", "LOAD_HEADER", "HeaderDep", "dao::accumulated_rate")),
         "__dao_input_accumulated_rate" => {
             Some(("dao-input-accumulated-rate", "LOAD_HEADER", "Input/GroupInput", "dao::input_accumulated_rate"))

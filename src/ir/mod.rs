@@ -3923,6 +3923,9 @@ impl IrGenerator {
                 "Hash::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) })
                 }
+                "Hash::from_bytes" if call.args.len() == 1 => {
+                    Some(self.lower_hash_from_bytes(&call.args[0], current, blocks, vars, call.span))
+                }
                 "script::hash_type_data" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) })
                 }
@@ -4086,6 +4089,15 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::input_out_point_tx_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_out_point_tx_hash",
+                    "ckb_input_out_point_tx_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "ckb::cell_lock_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_lock_hash_low",
                     "ckb_cell_lock_hash_low",
@@ -4099,6 +4111,24 @@ impl IrGenerator {
                     "__ckb_cell_type_hash_low",
                     "ckb_cell_type_hash_low",
                     IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_hash",
+                    "ckb_cell_lock_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_type_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_type_hash",
+                    "ckb_cell_type_hash",
+                    IrType::Hash,
                     &call.args,
                     current,
                     blocks,
@@ -4270,6 +4300,24 @@ impl IrGenerator {
                 "ckb::cell_data_size" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_data_size",
                     "ckb_cell_data_size",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_u32_le" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_u32_le",
+                    "ckb_cell_data_u32_le",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_u64_le" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_u64_le",
+                    "ckb_cell_data_u64_le",
                     IrType::U64,
                     &call.args,
                     current,
@@ -4962,6 +5010,40 @@ impl IrGenerator {
             HashMap::from([("bytes".to_string(), bytes), ("len".to_string(), len), ("is_empty".to_string(), is_empty)]),
         );
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(current) }
+    }
+
+    fn lower_hash_from_bytes(
+        &mut self,
+        raw: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+        span: Span,
+    ) -> LoweredExpr {
+        if let Expr::ByteString(bytes) = raw {
+            if bytes.len() == 32 {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(bytes);
+                return LoweredExpr { operand: IrOperand::Const(IrConst::Hash(hash)), current: Some(current) };
+            }
+            self.record_error("Hash::from_bytes expects exactly 32 bytes ([u8; 32])", span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) };
+        }
+
+        let lowered = self.lower_expr(raw, current, blocks, vars);
+        let Some(active) = lowered.current else {
+            return lowered;
+        };
+        let raw_ty = self.operand_type(&lowered.operand);
+        if !matches!(raw_ty, IrType::Array(inner, 32) if matches!(inner.as_ref(), IrType::U8)) {
+            self.record_error("Hash::from_bytes expects exactly 32 bytes ([u8; 32])", span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(active) };
+        }
+
+        let hash = self.new_var("hash_from_bytes", IrType::Hash);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: hash.clone(), src: lowered.operand.clone() });
+        self.copy_aggregate_metadata(&lowered.operand, hash.id);
+        LoweredExpr { operand: IrOperand::Var(hash), current: Some(active) }
     }
 
     fn lower_script_args(
