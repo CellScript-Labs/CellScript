@@ -4,7 +4,7 @@
 inline runtime alignment, the formal headless CKB adapter crate, and focused
 local-node adapter acceptance.
 
-**Audit date**: 2026-05-05.
+**Audit date**: 2026-05-06.
 
 This document records where CellScript is correctly reusing the CKB ecosystem,
 where overlap is an acceptable compiler boundary, and where the project is at
@@ -345,6 +345,21 @@ Keep it if:
   wrappers;
 - machine-readable preview and acceptance reports.
 
+Full transaction lifecycle bridge:
+
+- `CellScriptAdapter`: high-level facade that connects to a CKB node and
+  provides one-call workflows for deploy, submit, estimate, and status query.
+- `ManifestCellDepResolver`: implements `ckb_sdk::traits::CellDepResolver` to
+  resolve on-chain CellDeps from a `DeploymentManifest`.
+- `TransactionSubmitter`: wraps `CkbRpcClient` for submit + confirm + evidence.
+- `SigningAdapter`: tracks signing state and signer labels without re-implementing
+  `ckb_sdk::traits::Signer`.
+- `CapacityBridge`: wraps `ckb_sdk::tx_builder::CapacityBalancer` construction.
+- `TransactionLifecycleEvidence`: end-to-end lifecycle evidence from deploy
+  through commit.
+- `cellscript-deploy` CLI: script-driven deploy, build-deploy, action, status,
+  and info commands for users who do not write Rust code.
+
 Those are already available in `ckb-sdk-rust` (5.x) through sync and async
 RPC / indexer clients, `TransactionBuilder`, protocol-specific `tx_builder`
 modules (acp, cheque, dao, omni_lock, transfer, udt), `CellCollector`
@@ -394,7 +409,18 @@ a wrapper around the formal crate. It must not become a second implementation.
    checks a compiler action plan, verifies adapter materialization tests, and
    records `estimate_cycles` plus `test_tx_pool_accept` evidence in a JSON
    report.
-4. Consider an optional generated Rust shim using
+4. **Done as full lifecycle bridge**: `CellScriptAdapter` facade provides
+   `connect()`, `deploy_artifact()`, `build_deploy()`, `submit_transaction()`,
+   `wait_for_commitment()`, `get_transaction_status()`, `estimate_cycles()`,
+   `test_tx_pool_accept()`, and `get_tip_block_number()`. The bridge includes
+   `ManifestCellDepResolver` (implements `ckb_sdk::traits::CellDepResolver`),
+   `TransactionSubmitter` (submit + confirm), `SigningAdapter` (signing
+   state tracking), `CapacityBridge` (wraps `CapacityBalancer`), and
+   `TransactionLifecycleEvidence` (end-to-end evidence).
+5. **Done as CLI**: `cellscript-deploy` binary provides `deploy`,
+   `build-deploy`, `action`, `status`, and `info` subcommands for script-driven
+   workflows without writing Rust code.
+6. Consider an optional generated Rust shim using
    `ckb_backend_runtime = "ckb-std"` for mixed Rust/CellScript projects.
 
 Focused validation:
@@ -412,6 +438,8 @@ Evidence is layered:
 ```text
 compiler ABI parity          -> tests/ckb_std_compat.rs
 adapter materialization      -> crates/cellscript-ckb-adapter tests
+lifecycle bridge             -> CellScriptAdapter + ManifestCellDepResolver + TransactionSubmitter + SigningAdapter + CapacityBridge
+CLI integration              -> cellscript-deploy deploy/build-deploy/action/status/info
 local CKB adapter acceptance -> scripts/cellscript_ckb_adapter_acceptance.sh
 stateful business flows      -> scripts/ckb_cellscript_acceptance.sh
 ```
