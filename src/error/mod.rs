@@ -104,8 +104,6 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 /// mode they appear as warnings with migration hints instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationDiagnostic {
-    /// CS0150: legacy `has transfer` capability must be expressed as kernel effects
-    Cs0150,
     /// CS0151: legacy `has destroy` capability must be expressed as kernel effects
     Cs0151,
     /// CS0152: `Address` cannot be used as `LockHash` without a resolver
@@ -131,7 +129,6 @@ pub enum MigrationDiagnostic {
 impl MigrationDiagnostic {
     pub fn code(self) -> &'static str {
         match self {
-            Self::Cs0150 => "CS0150",
             Self::Cs0151 => "CS0151",
             Self::Cs0152 => "CS0152",
             Self::Cs0153 => "CS0153",
@@ -147,7 +144,6 @@ impl MigrationDiagnostic {
 
     pub fn message(self) -> &'static str {
         match self {
-            Self::Cs0150 => "legacy transfer capability must use replace + relock kernel effects",
             Self::Cs0151 => "legacy destroy capability must use consume + burn kernel effects",
             Self::Cs0152 => "Address cannot be used as LockHash without a resolver",
             Self::Cs0153 => "CKB entry role must be explicit",
@@ -163,9 +159,6 @@ impl MigrationDiagnostic {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Cs0150 => {
-                "replace `has transfer` with `has replace, relock`; use explicit lifecycle proof forms for transfer semantics"
-            }
             Self::Cs0151 => {
                 "replace `has destroy` with `has consume, burn`; use a policy-specific destruction form when the proof needs one"
             }
@@ -175,7 +168,7 @@ impl MigrationDiagnostic {
             Self::Cs0155 => {
                 "add `identity = ckb_type_id` to the resource declaration and use create_unique/replace_unique/destroy_unique"
             }
-            Self::Cs0156 => "replace `has transfer` with `has replace, relock` and `has destroy` with `has consume, burn`",
+            Self::Cs0156 => "replace `has destroy` with `has consume, burn`",
             Self::Cs0157 => "add `preserve_layout<T>()` or `migrate_layout<T>(from=..., to=...)` to the replacement",
             Self::Cs0158 => "add `trigger:` and `scope:` to the invariant declaration",
             Self::Cs0159 => "add `acknowledge_coverage` or restructure to `scope: group`",

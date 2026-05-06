@@ -126,7 +126,7 @@ Compile-time safety guarantees:
 ```cellscript
 consume token                                       // consume Cell input
 create Token { amount: 100 } with_lock(recipient)   // create Cell output
-transfer token to recipient                         // consume + create
+std::lifecycle::transfer(token, next_token, recipient) { amount } // consume + create
 destroy token                                       // destroy when capability allows it
 read_ref OracleData                                 // read CellDep without consuming it
 mutate pool { reserve_a: pool.reserve_a + delta }   // replacement-style update
@@ -707,7 +707,7 @@ v0.15 migration keeps old code buildable while making new semantics explicit:
 
 - `--primitive-compat=0.14`;
 - `--primitive-strict=0.15`;
-- CS0150-CS0160 migration diagnostics;
+- CS0151-CS0160 migration diagnostics;
 - ProofPlan diagnostics for metadata-only obligations;
 - source and metadata renames for `ckb_type_script_hash` and
   `ckb_lock_script_hash`;

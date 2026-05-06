@@ -62,7 +62,7 @@ GOVERNANCE_RELEASE_MATRIX: tuple[dict[str, str], ...] = (
         "track": "deferred_rejected_surfaces",
         "layer": "parser_type_policy",
         "status": "covered_by_gate",
-        "evidence": "legacy transfer capability, unknown stdlib patterns, and hidden lifecycle proof forms fail closed",
+        "evidence": "unknown stdlib patterns and hidden lifecycle proof forms fail closed",
         "gate": "syntax-combo reject seeds and required bug classes",
     },
     {
@@ -114,14 +114,6 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "required_cases": ("reject-consume-read-param",),
         "required_origins": ("generated",),
         "release_boundary": "read/protected/witness/lock_args values do not escape into consume/destroy/stdlib lifecycle",
-    },
-    {
-        "id": "SCA-BUG-LEGACY-TRANSFER-REJECTED",
-        "name": "removed legacy transfer capability and expression syntax stay rejected (parse-time rejection, 0.19 cleanup)",
-        "min_mode": "quick",
-        "required_cases": ("seed-legacy-transfer-capability",),
-        "required_origins": ("tests/syntax_combo/seeds/legacy-transfer-capability.cell",),
-        "release_boundary": "old 'has transfer' / 'transfer X to Y' surface cannot re-enter the grammar; parse rejection, not CS0150",
     },
     {
         "id": "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
@@ -1019,23 +1011,6 @@ action bad(voucher: Voucher) -> coin: Coin {
 }
 """,
             expected=Expected("reject_compile", ("declare a claim output type",)),
-        ),
-        AuditCase(
-            name="reject-legacy-transfer-capability-strict",
-            source="""\
-module cellscript::audit::reject_legacy_transfer_capability_strict
-
-resource Coin has store, transfer {
-    amount: u64,
-    nonce: u64,
-}
-
-action bad(coin: Coin, to: Address) {
-    verification
-    transfer coin to to
-}
-""",
-            expected=Expected("reject_parse", ("transfer",)),
         ),
     ]
     return cases

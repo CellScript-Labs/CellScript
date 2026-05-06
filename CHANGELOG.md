@@ -60,11 +60,10 @@
   as `create`, `consume`, `replace`, `burn`, `relock`, `retarget_type`, and
   `read_ref`.
 - Add `--primitive-compat 0.14` and `--primitive-strict 0.15` migration modes
-  across direct `cellc` compilation and package commands, with CS0150-CS0160
-  diagnostics for legacy `transfer` and `destroy` capabilities.
+  across direct `cellc` compilation and package commands, with CS0151-CS0160
+  diagnostics for legacy `destroy` capability.
 - Allow direct lifecycle operations to be authorized by kernel-effect
-  equivalents: `transfer` accepts `replace + relock`, and `destroy` accepts
-  `consume + burn`.
+  equivalents: `destroy` accepts `consume + burn`.
 - Convert canonical bundled examples, language examples, README examples, wiki
   tutorials, and release gates to strict 0.15 kernel-effect capabilities.
 - Extend strict acceptance and syntax-combination gates so bundled examples

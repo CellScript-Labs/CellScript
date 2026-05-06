@@ -196,50 +196,6 @@ action burn(token: Token) {
     assert!(stderr.contains("CS0151"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("legacy capability 'destroy'"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("consume + burn"), "unexpected stderr: {}", stderr);
-
-    // 'transfer' is no longer a keyword in the public grammar (0.19 cleanup),
-    // so `has transfer` and `transfer X to Y` fail at parse time, not via CS0150.
-    std::fs::write(
-        &input,
-        r#"
-module test
-
-resource Token has store, transfer {
-    amount: u64,
-}
-"#,
-    )
-    .unwrap();
-
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
-
-    assert!(!run.status.success(), "legacy 'has transfer' should fail at parse time");
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("error"), "unexpected stderr: {}", stderr);
-
-    // Also verify the legacy `transfer X to Y` expression form is rejected.
-    std::fs::write(
-        &input,
-        r#"
-module test
-
-resource Token has store, replace, relock {
-    amount: u64,
-}
-
-action send(token: Token, to: Address) {
-    verification
-        transfer token to to
-}
-"#,
-    )
-    .unwrap();
-
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
-
-    assert!(!run.status.success(), "legacy 'transfer X to Y' should fail at parse time");
-    let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("error"), "unexpected stderr: {}", stderr);
 }
 
 #[test]

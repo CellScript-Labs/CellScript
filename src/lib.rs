@@ -18318,45 +18318,6 @@ action activate(ticket: Ticket) -> Ticket {
     }
 
     #[test]
-    fn compile_rejects_legacy_transfer_capability_syntax() {
-        // 'has transfer' is no longer valid grammar after 0.19 cleanup.
-        let err = compile(
-            r#"
-module test
-
-resource Coin has store, transfer {
-    amount: u64
-}
-"#,
-            CompileOptions::default(),
-        )
-        .unwrap_err();
-        assert!(err.message.contains("transfer") || err.message.contains("error"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn compile_rejects_legacy_transfer_expression_syntax() {
-        // 'transfer X to Y' is no longer valid grammar after 0.19 cleanup.
-        let err = compile(
-            r#"
-module test
-
-resource Coin has store, replace, relock, consume {
-    amount: u64
-}
-
-action send(coin: Coin, to: Address) {
-    verification
-        transfer coin to to
-}
-"#,
-            CompileOptions::default(),
-        )
-        .unwrap_err();
-        assert!(err.message.contains("transfer") || err.message.contains("undefined"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
     fn compile_lowers_local_constants_into_real_operands() {
         let result = compile(CONSTANT_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();

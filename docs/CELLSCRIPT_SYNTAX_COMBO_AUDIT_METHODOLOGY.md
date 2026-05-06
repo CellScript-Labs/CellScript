@@ -124,7 +124,7 @@ The report also emits:
 
 `quick`, `ci`, and `deep` have escalating required bug classes. Losing a
 required case such as stdlib locked-output lowering, preserve type equivalence,
-require-block purity, legacy transfer rejection, stdlib argument validation, or
+require-block purity, stdlib argument validation, or
 deep hidden-lifecycle rejection fails the audit before release wording can be
 updated.
 

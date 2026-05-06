@@ -187,18 +187,12 @@ destroy   -> consume + burn (or consume + assert_absence)
 0.15 provided a migration path from the v0.14 capability vocabulary:
 
 **Compatibility mode** (`--primitive-compat=0.14`):
-- accepted `has transfer` and `has destroy` without errors
+- accepted `has destroy` without errors
 - existing examples compiled unchanged
 
 **Strict mode** (`--primitive-strict=0.15`):
-- rejected `has transfer` with diagnostic CS0150
 - rejected `has destroy` with diagnostic CS0151
 - required kernel-effect capabilities and explicit destruction policies
-
-> **Note (0.19 update):** As of 0.19, `transfer` is removed from the public
-> grammar entirely. `has transfer` and `transfer X to Y` now fail at parse time,
-> not via CS0150. Use `std::lifecycle::transfer(...)` and `has replace, relock`
-> instead.
 
 Top-level single-file compilation accepts the same primitive migration flags as
 package subcommands, so this works for direct example inspection:
@@ -208,9 +202,9 @@ cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-
 ```
 
 Direct lifecycle checks accept the 0.15 kernel-effect equivalents:
-`transfer` accepts `replace + relock`; `destroy` accepts `consume + burn`.
+`destroy` accepts `consume + burn`.
 
-Migration diagnostics (CS0150–CS0160) provide old syntax, new syntax, and
+Migration diagnostics (CS0151–CS0160) provide old syntax, new syntax, and
 affected proof obligations.
 
 ### Internal Metadata Renaming

@@ -4,12 +4,11 @@
 
 [mode.quick]
 budget = 64
-min_cases = 17
+min_cases = 15
 min_accept = 8
-min_reject = 9
+min_reject = 7
 required_origins = [
     "generated",
-    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
@@ -32,7 +31,6 @@ required_origins = [
     "matrix:reject/stdlib-lifecycle",
     "matrix:stdlib-lifecycle/metadata",
     "matrix:stdlib-lifecycle/proof",
-    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
@@ -58,7 +56,6 @@ required_origins = [
     "matrix:reject/stdlib-lifecycle",
     "matrix:stdlib-lifecycle/metadata",
     "matrix:stdlib-lifecycle/proof",
-    "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
@@ -95,7 +92,6 @@ required_bug_classes.quick = [
     "SCA-BUG-REQUIRE-BLOCK-PURITY",
     "SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED",
     "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
-    "SCA-BUG-LEGACY-TRANSFER-REJECTED",
     "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
     "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
 ]

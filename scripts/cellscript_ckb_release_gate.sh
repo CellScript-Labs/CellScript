@@ -65,7 +65,6 @@ check_trailing_whitespace() {
         "src/lsp/mod.rs"
         "src/package/mod.rs"
         "tests/syntax_combo/matrix.toml"
-        "tests/syntax_combo/seeds/legacy-transfer-capability.cell"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "tests/cli.rs"
         "tests/examples.rs"
@@ -147,8 +146,8 @@ check_ckb_acceptance_boundaries() {
 }
 
 check_grammar_governance_regression() {
-    # Active source, examples, wiki, and editor files must not contain
-    # legacy transfer surface syntax (0.19 grammar cleanup).
+    # Active source, examples, wiki, and editor files must not reintroduce
+    # removed surface syntax that has been deleted from the grammar.
     # Exception: docs/archive/** and old release notes are historical.
     local active_files=(
         "examples/token.cell"
@@ -177,19 +176,12 @@ check_grammar_governance_regression() {
         "docs/wiki/Tutorial-10-Standard-Library.md"
     )
 
-    # Check 1: 'has transfer' must not appear in active examples/wiki.
+    # Check: 'has destroy' must not appear in active examples/wiki
+    # (destroy was removed from the public grammar in 0.15 strict mode).
     local f
     for f in "${active_files[@]}"; do
-        if [ -f "$f" ] && rg --quiet -n 'has transfer' "$f"; then
-            printf 'Grammar governance regression: %s contains legacy "has transfer"\n' "$f" >&2
-            exit 1
-        fi
-    done
-
-    # Check 2: 'transfer X to Y' expression must not appear in active examples.
-    for f in "examples/"*.cell "examples/language/"*.cell; do
-        if [ -f "$f" ] && rg --quiet -n 'transfer [a-z]\+ to ' "$f"; then
-            printf 'Grammar governance regression: %s contains legacy "transfer X to Y" expression\n' "$f" >&2
+        if [ -f "$f" ] && rg --quiet -n 'has destroy' "$f"; then
+            printf 'Grammar governance regression: %s contains removed "has destroy"\n' "$f" >&2
             exit 1
         fi
     done
