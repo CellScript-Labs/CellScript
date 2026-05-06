@@ -11,7 +11,8 @@ license = "MIT"
 anyhow = "1.0"
 ckb-jsonrpc-types = "1.0.0"
 ckb-hash = "1.0.0"
-ckb-sdk = { path = "../../../ckb-sdk-rust", default-features = false }
+ckb-sdk = { path = "../../../ckb-sdk-rust" }
 ckb-types = "1.0.0"
+hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

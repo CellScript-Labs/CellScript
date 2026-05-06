@@ -369,6 +369,25 @@ deploy_tx = {
 deploy_estimate = rpc("estimate_cycles", [deploy_tx])
 deploy_tx_pool_accept = rpc("test_tx_pool_accept", [deploy_tx, "passthrough"])
 
+# ---- Phase 3: Submit deploy transaction and verify commitment ----
+deploy_tx_hash = rpc("send_transaction", [deploy_tx, "passthrough"])
+# Generate a block to commit the transaction.
+rpc("generate_block")
+# Wait for the transaction to be committed: keep generating blocks until the code cell is live.
+commit_evidence_status = "unknown"
+commit_block_hash = "0x"
+for _ in range(10):
+    time.sleep(0.5)
+    rpc("generate_block")
+    commit_live_check = wait_live_cell(deploy_tx_hash, 0, attempts=3)
+    if commit_live_check and commit_live_check.get("status") == "live":
+        commit_evidence_status = "committed"
+        break
+if commit_evidence_status != "committed":
+    raise RuntimeError(f"deploy transaction {deploy_tx_hash} not committed after 10 generated blocks")
+commit_live = commit_live_check
+commit_live_output = commit_live["cell"]["output"] if commit_live.get("cell") else {}
+
 report = {
     "schema": "cellscript-ckb-adapter-local-node-acceptance-v0.19",
     "status": "passed",
@@ -424,6 +443,13 @@ report = {
         "outputs_count": len(deploy_tx["outputs"]),
         "outputs_data_count": len(deploy_tx["outputs_data"]),
         "cell_deps_count": len(deploy_tx["cell_deps"]),
+    },
+    "commit_evidence": {
+        "status": commit_evidence_status,
+        "deploy_tx_hash": deploy_tx_hash,
+        "commit_block_hash": commit_block_hash,
+        "code_cell_live": True,
+        "code_cell_has_type_script": commit_live_output.get("type") is not None,
     },
     "known_limitations": [
         "This focused adapter acceptance proves CKB SDK/RPC materialization boundary evidence, not full CellScript business-flow semantics.",

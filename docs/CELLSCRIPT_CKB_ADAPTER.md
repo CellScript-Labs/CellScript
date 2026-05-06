@@ -1,7 +1,7 @@
 # CellScript CKB Adapter
 
-**Status**: formal 0.19 headless Rust adapter crate plus focused local-node
-acceptance bridge.
+**Status**: formal 0.19 headless Rust adapter crate with full transaction lifecycle
+bridge plus focused local-node acceptance evidence.
 
 See also
 [`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
@@ -93,6 +93,16 @@ tests that CellScript entry witness bytes are placed into an explicit
 `WitnessArgs` field without overwriting lock signatures, and that TYPE_ID
 args are computed from the packed first input plus output index before
 adapter submission.
+
+The full transaction lifecycle bridge includes:
+
+| Bridge component | SDK 5.x integration | Purpose |
+|---|---|---|
+| `ManifestCellDepResolver` | `ckb_sdk::traits::CellDepResolver` | Maps deployment manifest entries to concrete CellDeps by code_hash + hash_type |
+| `TransactionSubmitter` | `CkbRpcClient` `send_transaction`, `get_transaction` | Submit + confirm + wait for commitment |
+| `SigningAdapter` | `ckb_sdk::traits::Signer`, `ScriptUnlocker` | Tracks signing state and signer labels |
+| `CapacityBridge` | `ckb_sdk::tx_builder::CapacityBalancer` | Builds balancer with change lock + fee rate |
+| `TransactionLifecycleEvidence` | Combined evidence | Records full deploy/action → sign → balance → accept → submit → commit flow |
 
 The cookbook wrapper lives at:
 
@@ -246,7 +256,8 @@ Focused local-node adapter gate:
 
 That script starts a local CKB devnet, checks a compiler action plan, verifies
 the formal adapter crate materialization path, runs `estimate_cycles`, runs
-`test_tx_pool_accept`, and writes a JSON report. It is adapter-boundary
+`test_tx_pool_accept`, submits the deploy transaction, generates blocks until
+committed, and verifies the code cell is live on-chain. It is adapter-boundary
 evidence, not a replacement for stateful business-flow acceptance.
 
 ## Validation Loop

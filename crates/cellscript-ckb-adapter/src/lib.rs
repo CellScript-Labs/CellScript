@@ -1,16 +1,18 @@
 use anyhow::{bail, Result};
 use ckb_hash::blake2b_256;
-use ckb_jsonrpc_types::{EntryCompleted, EstimateCycles, OutputsValidator, Transaction as RpcTransaction};
-use ckb_sdk::{core::TransactionBuilder, unlock::SecpSighashScriptSigner, CkbRpcClient};
+use ckb_jsonrpc_types::{
+    EntryCompleted, EstimateCycles, OutputsValidator, Status, Transaction as RpcTransaction, TransactionWithStatusResponse,
+};
+use ckb_sdk::{core::TransactionBuilder, traits::CellDepResolver, unlock::SecpSighashScriptSigner, CkbRpcClient};
 use ckb_types::{
     bytes::Bytes,
     core::{Capacity, DepType, ScriptHashType, TransactionView},
-    packed::{self, Byte32, CellDep, CellInput, CellOutput, Script, WitnessArgs},
+    packed::{self, Byte32, CellDep, CellInput, CellOutput, OutPoint, Script, WitnessArgs},
     prelude::*,
-    H256,
+    H160, H256,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 pub const ACTION_PLAN_POLICY: &str = "cellscript-action-builder-plan-v1";
 pub const ADAPTER_CONTRACT_SCHEMA: &str = "cellscript-ckb-adapter-contract-v0.19";
@@ -921,6 +923,252 @@ impl<'a> CkbSdkAcceptance<'a> {
     }
 }
 
+// ---- Full transaction lifecycle bridge ----
+
+/// Deployment-backed CellDep resolver that maps code_hash + hash_type to
+/// concrete on-chain CellDeps from a `DeploymentManifest`.
+///
+/// This implements `ckb_sdk::traits::CellDepResolver` so it can be used
+/// directly with SDK transaction builders and `unlock_tx`.
+#[derive(Debug)]
+pub struct ManifestCellDepResolver {
+    /// Maps (code_hash_bytes, hash_type_byte) -> CellDep.
+    deps: HashMap<([u8; 32], u8), CellDep>,
+}
+
+impl ManifestCellDepResolver {
+    /// Build a resolver from a deployment manifest.
+    pub fn from_manifest(manifest: &DeploymentManifest) -> Result<Self> {
+        let mut deps = HashMap::new();
+        for deployment in &manifest.deployments {
+            let code_hash = hex::decode(deployment.code_hash.trim_start_matches("0x"))
+                .map_err(|e| anyhow::anyhow!("invalid code_hash hex for {}: {e}", deployment.name))?;
+            if code_hash.len() != 32 {
+                bail!("code_hash for {} must be 32 bytes, got {}", deployment.name, code_hash.len());
+            }
+            let mut code_hash_arr = [0u8; 32];
+            code_hash_arr.copy_from_slice(&code_hash);
+            let hash_type_byte = match deployment.hash_type.as_str() {
+                "data" => 0u8,
+                "type" => 1u8,
+                "data1" => 2u8,
+                "data2" => 3u8,
+                other => bail!("unknown hash_type '{}' for {}", other, deployment.name),
+            };
+            // Parse out_point "0x<tx_hash>:<index>".
+            let (tx_hash_hex, index_str) = deployment
+                .out_point
+                .rsplit_once(':')
+                .ok_or_else(|| anyhow::anyhow!("invalid out_point format for {}: expected 0x<hash>:<index>", deployment.name))?;
+            let tx_hash_bytes = hex::decode(tx_hash_hex.trim_start_matches("0x"))
+                .map_err(|e| anyhow::anyhow!("invalid out_point tx_hash for {}: {e}", deployment.name))?;
+            if tx_hash_bytes.len() != 32 {
+                bail!("out_point tx_hash for {} must be 32 bytes", deployment.name);
+            }
+            let mut tx_hash_arr = [0u8; 32];
+            tx_hash_arr.copy_from_slice(&tx_hash_bytes);
+            let index: u32 = index_str.parse().map_err(|e| anyhow::anyhow!("invalid out_point index for {}: {e}", deployment.name))?;
+            let out_point = OutPoint::new_builder().tx_hash(tx_hash_arr.pack()).index(index).build();
+            let dep_type = match deployment.dep_type.as_str() {
+                "code" => DepType::Code,
+                "dep_group" => DepType::DepGroup,
+                other => bail!("unknown dep_type '{}' for {}", other, deployment.name),
+            };
+            let cell_dep = CellDep::new_builder().out_point(out_point).dep_type(dep_type).build();
+            deps.insert((code_hash_arr, hash_type_byte), cell_dep);
+        }
+        Ok(Self { deps })
+    }
+
+    /// Look up a CellDep by script's code_hash and hash_type.
+    pub fn resolve_for_script(&self, script: &Script) -> Option<CellDep> {
+        let mut code_hash = [0u8; 32];
+        code_hash.copy_from_slice(script.code_hash().as_slice());
+        let hash_type_byte: u8 = script.hash_type().as_slice().first().copied().unwrap_or(0);
+        self.deps.get(&(code_hash, hash_type_byte)).cloned()
+    }
+
+    /// Number of deployment entries in the resolver.
+    pub fn len(&self) -> usize {
+        self.deps.len()
+    }
+
+    /// Whether the resolver has any entries.
+    pub fn is_empty(&self) -> bool {
+        self.deps.is_empty()
+    }
+}
+
+impl CellDepResolver for ManifestCellDepResolver {
+    fn resolve(&self, script: &Script) -> Option<CellDep> {
+        self.resolve_for_script(script)
+    }
+}
+
+/// Transaction submission and status tracking.
+///
+/// Wraps `CkbRpcClient` to provide submit + confirm + evidence workflow.
+pub struct TransactionSubmitter<'a> {
+    client: &'a CkbRpcClient,
+}
+
+impl<'a> TransactionSubmitter<'a> {
+    pub fn new(client: &'a CkbRpcClient) -> Self {
+        Self { client }
+    }
+
+    /// Submit a transaction to the CKB node's tx-pool.
+    pub fn submit(&self, tx: &TransactionView) -> std::result::Result<H256, ckb_sdk::RpcError> {
+        self.client.send_transaction(to_rpc_transaction(tx), Some(OutputsValidator::Passthrough))
+    }
+
+    /// Query the status of a previously submitted transaction.
+    ///
+    /// Returns `Some(TransactionWithStatusResponse)` if the node has a record,
+    /// or `None` if the transaction is unknown.
+    pub fn get_transaction_status(
+        &self,
+        tx_hash: &H256,
+    ) -> std::result::Result<Option<TransactionWithStatusResponse>, ckb_sdk::RpcError> {
+        self.client.get_transaction(tx_hash.clone())
+    }
+
+    /// Wait for a transaction to be committed, polling up to `max_attempts` times
+    /// with `delay_ms` between attempts.
+    pub fn wait_committed(&self, tx_hash: &H256, max_attempts: u32, delay_ms: u64) -> Result<CommittedEvidence> {
+        for _ in 0..max_attempts {
+            if let Some(response) = self.get_transaction_status(tx_hash)? {
+                let tx_status = response.tx_status;
+                if tx_status.status == Status::Committed {
+                    let block_hash = tx_status.block_hash.unwrap_or_default();
+                    return Ok(CommittedEvidence { tx_hash: tx_hash.clone(), block_hash, status: "committed".to_string() });
+                }
+                if tx_status.status == Status::Rejected {
+                    bail!("transaction {:?} was rejected by the node", tx_hash);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        bail!("transaction {:?} was not committed within {} attempts", tx_hash, max_attempts)
+    }
+
+    /// Get the tip block number from the node.
+    pub fn get_tip_block_number(&self) -> std::result::Result<u64, ckb_sdk::RpcError> {
+        let header = self.client.get_tip_header()?;
+        Ok(header.inner.number.value())
+    }
+}
+
+/// Evidence that a transaction has been committed on-chain.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommittedEvidence {
+    pub tx_hash: H256,
+    pub block_hash: H256,
+    pub status: String,
+}
+
+/// Adapter-level signing boundary that wraps `ckb_sdk::traits::Signer`.
+///
+/// This struct does not implement signing itself; it provides typed evidence
+/// that signing is an adapter-owned concern. Use `ckb_sdk::unlock_tx` with
+/// concrete `ScriptUnlocker` implementations (SecpSighash, OmniLock, etc.)
+/// for actual signing.
+pub struct SigningAdapter {
+    /// Signer identity labels (e.g., lock script hash prefixes).
+    pub signer_labels: Vec<String>,
+    /// Whether the signing step has been completed.
+    pub signed: bool,
+}
+
+impl SigningAdapter {
+    /// Create a new signing adapter with the given signer labels.
+    pub fn new(signer_labels: Vec<String>) -> Self {
+        Self { signer_labels, signed: false }
+    }
+
+    /// Create a signing adapter for a single secp256k1 sighash signer.
+    pub fn for_secp_sighash(lock_arg: H160) -> Self {
+        Self { signer_labels: vec![format!("secp256k1-sighash:{}", lock_arg)], signed: false }
+    }
+
+    /// Mark the signing step as complete.
+    pub fn mark_signed(&mut self) {
+        self.signed = true;
+    }
+
+    /// Evidence of the signing adapter state.
+    pub fn evidence(&self) -> SigningAdapterEvidence {
+        SigningAdapterEvidence {
+            schema: "cellscript-ckb-signing-adapter-v0.19",
+            signer_count: self.signer_labels.len(),
+            signed: self.signed,
+        }
+    }
+}
+
+/// Evidence record for the signing adapter.
+#[derive(Debug, Clone, Serialize)]
+pub struct SigningAdapterEvidence {
+    pub schema: &'static str,
+    pub signer_count: usize,
+    pub signed: bool,
+}
+
+/// Adapter-level capacity balancing that wraps `ckb_sdk::CapacityBalancer`.
+///
+/// Provides a typed interface for the common pattern of funding a transaction
+/// with additional capacity inputs and producing change.
+pub struct CapacityBridge {
+    /// Lock script for change outputs.
+    pub change_lock: Script,
+    /// Fee rate in shannons per kilobyte.
+    pub fee_rate: u64,
+}
+
+impl CapacityBridge {
+    /// Create a new capacity bridge with the given change lock and fee rate.
+    pub fn new(change_lock: Script, fee_rate: u64) -> Self {
+        Self { change_lock, fee_rate }
+    }
+
+    /// Build a `ckb_sdk::tx_builder::CapacityBalancer` from this bridge configuration.
+    pub fn to_balancer(&self) -> ckb_sdk::tx_builder::CapacityBalancer {
+        let placeholder = WitnessArgs::new_builder().build();
+        ckb_sdk::tx_builder::CapacityBalancer::new_simple(self.change_lock.clone(), placeholder, self.fee_rate)
+    }
+
+    /// Evidence for the capacity bridge configuration.
+    pub fn evidence(&self) -> CapacityBridgeEvidence {
+        CapacityBridgeEvidence {
+            schema: "cellscript-ckb-capacity-bridge-v0.19",
+            change_lock_hash: self.change_lock.calc_script_hash().as_slice().to_vec(),
+            fee_rate: self.fee_rate,
+        }
+    }
+}
+
+/// Evidence record for the capacity bridge.
+#[derive(Debug, Clone, Serialize)]
+pub struct CapacityBridgeEvidence {
+    pub schema: &'static str,
+    pub change_lock_hash: Vec<u8>,
+    pub fee_rate: u64,
+}
+
+/// Full end-to-end transaction lifecycle result.
+#[derive(Debug, Clone, Serialize)]
+pub struct TransactionLifecycleEvidence {
+    pub schema: &'static str,
+    pub deploy_evidence: Option<ResolvedDeployEvidence>,
+    pub action_evidence: Option<ResolvedActionEvidence>,
+    pub signing: SigningAdapterEvidence,
+    pub capacity: Option<CapacityBridgeEvidence>,
+    pub estimate_cycles: Option<u64>,
+    pub tx_pool_accepted: bool,
+    pub submitted: bool,
+    pub committed: Option<CommittedEvidence>,
+}
+
 pub fn signing_boundary_type() -> &'static str {
     std::any::type_name::<SecpSighashScriptSigner>()
 }
@@ -1389,5 +1637,178 @@ mod tests {
         let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
         assert_eq!(evidence.cell_deps, 1);
         assert_eq!(tx.cell_deps().len(), 1);
+    }
+
+    // ---- ManifestCellDepResolver tests ----
+
+    #[test]
+    fn manifest_resolver_resolves_deps_from_deployment_manifest() {
+        let code_hash = blake2b_256(&[0xddu8; 64]);
+        let tx_hash = [0xeeu8; 32];
+        let manifest = DeploymentManifest {
+            schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
+            version: 1,
+            deployments: vec![DeploymentRef {
+                name: "test-token".to_string(),
+                code_hash: format!("0x{}", hex::encode(code_hash)),
+                hash_type: "type".to_string(),
+                args: "0x22".to_string(),
+                dep_type: "code".to_string(),
+                out_point: format!("0x{}:0", hex::encode(tx_hash)),
+            }],
+        };
+
+        let resolver = ManifestCellDepResolver::from_manifest(&manifest).unwrap();
+        assert_eq!(resolver.len(), 1);
+        assert!(!resolver.is_empty());
+
+        // Resolve by constructing a matching script.
+        let script = Script::new_builder()
+            .code_hash(code_hash.pack())
+            .hash_type(ScriptHashType::Type)
+            .args(Bytes::from(vec![0x22]).pack())
+            .build();
+        let dep = resolver.resolve_for_script(&script).expect("should resolve");
+        assert_eq!(dep.dep_type(), DepType::Code.into());
+
+        // Non-matching script should return None.
+        let wrong_script = Script::new_builder()
+            .code_hash([0x99u8; 32].pack())
+            .hash_type(ScriptHashType::Data1)
+            .args(Bytes::from(vec![0x22]).pack())
+            .build();
+        assert!(resolver.resolve_for_script(&wrong_script).is_none());
+    }
+
+    #[test]
+    fn manifest_resolver_rejects_invalid_manifest_entries() {
+        // Invalid code_hash (not 32 bytes).
+        let manifest = DeploymentManifest {
+            schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
+            version: 1,
+            deployments: vec![DeploymentRef {
+                name: "bad".to_string(),
+                code_hash: "0x11".to_string(),
+                hash_type: "type".to_string(),
+                args: "0x22".to_string(),
+                dep_type: "code".to_string(),
+                out_point: format!("0x{}:0", hex::encode([0xeeu8; 32])),
+            }],
+        };
+        let error = ManifestCellDepResolver::from_manifest(&manifest).unwrap_err().to_string();
+        assert!(error.contains("must be 32 bytes"), "{error}");
+    }
+
+    #[test]
+    fn manifest_resolver_supports_data_and_type_hash_types() {
+        let code_hash_data = blake2b_256(&[0x11u8; 32]);
+        let code_hash_type = blake2b_256(&[0x22u8; 32]);
+        let tx_hash = [0xeeu8; 32];
+        let manifest = DeploymentManifest {
+            schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
+            version: 1,
+            deployments: vec![
+                DeploymentRef {
+                    name: "data-dep".to_string(),
+                    code_hash: format!("0x{}", hex::encode(code_hash_data)),
+                    hash_type: "data".to_string(),
+                    args: "0x".to_string(),
+                    dep_type: "code".to_string(),
+                    out_point: format!("0x{}:0", hex::encode(tx_hash)),
+                },
+                DeploymentRef {
+                    name: "type-dep".to_string(),
+                    code_hash: format!("0x{}", hex::encode(code_hash_type)),
+                    hash_type: "type".to_string(),
+                    args: "0x".to_string(),
+                    dep_type: "dep_group".to_string(),
+                    out_point: format!("0x{}:1", hex::encode(tx_hash)),
+                },
+            ],
+        };
+
+        let resolver = ManifestCellDepResolver::from_manifest(&manifest).unwrap();
+        assert_eq!(resolver.len(), 2);
+
+        let data_script =
+            Script::new_builder().code_hash(code_hash_data.pack()).hash_type(ScriptHashType::Data).args(Bytes::new().pack()).build();
+        let dep = resolver.resolve_for_script(&data_script).expect("data dep");
+        assert_eq!(dep.dep_type(), DepType::Code.into());
+
+        let type_script =
+            Script::new_builder().code_hash(code_hash_type.pack()).hash_type(ScriptHashType::Type).args(Bytes::new().pack()).build();
+        let dep = resolver.resolve_for_script(&type_script).expect("type dep");
+        assert_eq!(dep.dep_type(), DepType::DepGroup.into());
+    }
+
+    // ---- SigningAdapter tests ----
+
+    #[test]
+    fn signing_adapter_tracks_signer_labels_and_state() {
+        let mut adapter = SigningAdapter::new(vec!["secp256k1-sighash".to_string()]);
+        assert!(!adapter.signed);
+        assert_eq!(adapter.signer_labels.len(), 1);
+
+        let evidence = adapter.evidence();
+        assert_eq!(evidence.schema, "cellscript-ckb-signing-adapter-v0.19");
+        assert_eq!(evidence.signer_count, 1);
+        assert!(!evidence.signed);
+
+        adapter.mark_signed();
+        assert!(adapter.signed);
+        assert!(adapter.evidence().signed);
+    }
+
+    #[test]
+    fn signing_adapter_for_secp_sighash() {
+        let lock_arg = H160::from([0x44u8; 20]);
+        let adapter = SigningAdapter::for_secp_sighash(lock_arg);
+        assert!(adapter.signer_labels[0].contains("secp256k1-sighash"));
+        assert!(adapter.signer_labels[0].contains("4444"));
+    }
+
+    // ---- CapacityBridge tests ----
+
+    #[test]
+    fn capacity_bridge_builds_balancer_and_evidence() {
+        let change_lock = construct_script(&ScriptSpec::new([0x33u8; 32], ScriptHashType::Data1, vec![0x44u8; 20]));
+        let bridge = CapacityBridge::new(change_lock.clone(), 1000);
+        let balancer = bridge.to_balancer();
+        // CapacityBalancer fields are private; just verify it doesn't panic.
+        drop(balancer);
+
+        let evidence = bridge.evidence();
+        assert_eq!(evidence.schema, "cellscript-ckb-capacity-bridge-v0.19");
+        assert_eq!(evidence.change_lock_hash, change_lock.calc_script_hash().as_slice().to_vec());
+        assert_eq!(evidence.fee_rate, 1000);
+    }
+
+    // ---- TransactionLifecycleEvidence test ----
+
+    #[test]
+    fn lifecycle_evidence_records_full_transaction_flow() {
+        let mut signing = SigningAdapter::new(vec!["test-signer".to_string()]);
+        signing.mark_signed();
+
+        let lifecycle = TransactionLifecycleEvidence {
+            schema: "cellscript-ckb-tx-lifecycle-v0.19",
+            deploy_evidence: None,
+            action_evidence: None,
+            signing: signing.evidence(),
+            capacity: None,
+            estimate_cycles: Some(45_000),
+            tx_pool_accepted: true,
+            submitted: true,
+            committed: None,
+        };
+
+        assert!(lifecycle.signing.signed);
+        assert_eq!(lifecycle.estimate_cycles, Some(45_000));
+        assert!(lifecycle.tx_pool_accepted);
+        assert!(lifecycle.submitted);
+
+        let json = serde_json::to_value(&lifecycle).unwrap();
+        assert_eq!(json["schema"], "cellscript-ckb-tx-lifecycle-v0.19");
+        assert!(json["signing"]["signed"].as_bool().unwrap());
     }
 }
