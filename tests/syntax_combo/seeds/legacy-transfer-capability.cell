@@ -1,5 +1,5 @@
-// audit: phase=reject_compile
-// audit: contains=error
+// audit: phase=reject_parse
+// audit: contains=transfer
 // audit: description="legacy 'has transfer' and 'transfer X to Y' are no longer valid grammar (0.19 cleanup)"
 module cellscript::audit::seed_legacy_transfer_capability
 

@@ -1035,7 +1035,7 @@ action bad(coin: Coin, to: Address) {
     transfer coin to to
 }
 """,
-            expected=Expected("reject_compile", ("CS0150", "legacy capability 'transfer'", "replace + relock")),
+            expected=Expected("reject_parse", ("transfer",)),
         ),
     ]
     return cases
@@ -1425,7 +1425,13 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
 
 
 def audit_case(case: AuditCase, run_dir: Path, cellc: str) -> tuple[str, list[dict[str, Any]]]:
-    case_path = run_dir / "cases" / f"{case.case_id}.cell"
+    # Parse-reject cases are isolated in a separate directory so that their
+    # intentionally-invalid syntax does not contaminate compile runs of other
+    # cases that share the cases/ directory (cellc resolves sibling modules).
+    if case.expected.phase == "reject_parse":
+        case_path = run_dir / "parse_reject" / f"{case.case_id}.cell"
+    else:
+        case_path = run_dir / "cases" / f"{case.case_id}.cell"
     fmt_path = run_dir / "fmt" / f"{case.case_id}.cell"
     asm_path = run_dir / "asm" / f"{case.case_id}.s"
     meta_path = run_dir / "meta" / f"{case.case_id}.json"
@@ -1437,6 +1443,17 @@ def audit_case(case: AuditCase, run_dir: Path, cellc: str) -> tuple[str, list[di
     if case.expected.phase == "reject_parse":
         if parse.returncode == 0:
             return "failed", [failure(case, "parse", "SCA-PARSE-ACCEPTED", "expected parse rejection, got success", run_dir, parse.stdout)]
+        if not output_matches(parse.stdout, case.expected.contains):
+            return "failed", [
+                failure(
+                    case,
+                    "parse",
+                    "SCA-PARSE-DIAGNOSTIC",
+                    f"parse diagnostic missing expected tokens {case.expected.contains!r}",
+                    run_dir,
+                    parse.stdout,
+                )
+            ]
         return "rejected", []
     if parse.returncode != 0:
         return "failed", [failure(case, "parse", "SCA-PARSE-FAILED", "unexpected parse failure", run_dir, parse.stdout)]
