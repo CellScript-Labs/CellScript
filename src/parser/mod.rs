@@ -92,7 +92,6 @@ impl<'a> Parser<'a> {
             TokenKind::Verification => Some("verification".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
-            TokenKind::Transfer => Some("transfer".to_string()),
             TokenKind::Destroy | TokenKind::DestroyKw => Some("destroy".to_string()),
             TokenKind::Launch => Some("launch".to_string()),
             TokenKind::Assert => Some("assert".to_string()),
@@ -202,10 +201,6 @@ impl<'a> Parser<'a> {
                         match &self.current().kind {
                             TokenKind::Store => {
                                 caps.push(Capability::Store);
-                                self.advance();
-                            }
-                            TokenKind::Transfer => {
-                                caps.push(Capability::Transfer);
                                 self.advance();
                             }
                             TokenKind::Destroy | TokenKind::DestroyKw => {
@@ -878,10 +873,6 @@ impl<'a> Parser<'a> {
                 match &self.current().kind {
                     TokenKind::Store => {
                         caps.push(Capability::Store);
-                        self.advance();
-                    }
-                    TokenKind::Transfer => {
-                        caps.push(Capability::Transfer);
                         self.advance();
                     }
                     TokenKind::Destroy | TokenKind::DestroyKw => {
@@ -2227,7 +2218,6 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Create => self.parse_create(),
             TokenKind::Consume => self.parse_consume(),
-            TokenKind::Transfer => self.parse_transfer_expr(),
             TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
             TokenKind::Launch => Err(CompileError::new(
@@ -2406,26 +2396,6 @@ impl<'a> Parser<'a> {
         let end_span = self.current().span;
         Ok(Expr::Consume(ConsumeExpr {
             expr: Box::new(expr),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
-    fn parse_transfer_expr(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Transfer)?;
-
-        let expr = self.parse_postfix()?;
-        let to_span = self.current().span;
-        let keyword = self.parse_name()?;
-        if keyword != "to" {
-            return Err(CompileError::new("expected 'to' in transfer expression", to_span));
-        }
-        let to = self.parse_expr()?;
-
-        let end_span = self.current().span;
-        Ok(Expr::Transfer(TransferExpr {
-            expr: Box::new(expr),
-            to: Box::new(to),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -3022,7 +2992,7 @@ mod tests {
         let input = r#"
 module test
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
     symbol: [u8; 8]
 }
@@ -3039,7 +3009,7 @@ resource Token has store, transfer, destroy {
 module test
 
 #[capability(store)]
-resource Token has transfer, destroy {
+resource Token has replace, relock, destroy {
     amount: u64
 }
 "#;
@@ -3051,7 +3021,8 @@ resource Token has transfer, destroy {
         };
 
         assert!(resource.capabilities.contains(&Capability::Store));
-        assert!(resource.capabilities.contains(&Capability::Transfer));
+        assert!(resource.capabilities.contains(&Capability::Replace));
+        assert!(resource.capabilities.contains(&Capability::Relock));
         assert!(resource.capabilities.contains(&Capability::Destroy));
     }
 
@@ -3120,7 +3091,7 @@ invariant token_conservation {
     trigger: type_group
     scope: group
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert true
+    assert_invariant(true, "token conserved")
 }
 "#;
         let tokens = lex(input).unwrap();

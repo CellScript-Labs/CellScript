@@ -484,7 +484,6 @@ impl Formatter {
                 rendered
             }
             Expr::Consume(consume) => format!("consume {}", self.format_expr(&consume.expr)),
-            Expr::Transfer(transfer) => format!("transfer {} to {}", self.format_expr(&transfer.expr), self.format_expr(&transfer.to)),
             Expr::Destroy(destroy) => match &destroy.policy {
                 DestructionPolicy::Default => format!("destroy {}", self.format_expr(&destroy.expr)),
                 DestructionPolicy::SingletonType => format!("destroy_singleton_type({})", self.format_expr(&destroy.expr)),
@@ -625,7 +624,6 @@ impl Formatter {
 fn format_capability(capability: &Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
-        Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
         Capability::Create => "create",
         Capability::Consume => "consume",
@@ -1027,13 +1025,12 @@ action check(x: u64) -> u64 {
         let source = r#"
 module demo
 
-resource Coin has store, transfer {
+resource Coin has store, replace, relock, consume {
     amount: u64
     nonce: u64
 }
 
 action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
-    transition coin -> next_coin
     verification
         std::lifecycle::transfer(coin, next_coin, to) {
             amount

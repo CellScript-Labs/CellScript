@@ -955,7 +955,6 @@ fn format_capability_clause(capabilities: &[Capability]) -> String {
 fn format_capability(capability: &Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
-        Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
         Capability::Create => "create",
         Capability::Consume => "consume",

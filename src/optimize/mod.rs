@@ -227,11 +227,6 @@ impl Optimizer {
             Expr::Consume(consume) => {
                 Ok(Expr::Consume(ConsumeExpr { expr: Box::new(self.optimize_expr(&consume.expr)?), span: consume.span }))
             }
-            Expr::Transfer(transfer) => Ok(Expr::Transfer(TransferExpr {
-                expr: Box::new(self.optimize_expr(&transfer.expr)?),
-                to: Box::new(self.optimize_expr(&transfer.to)?),
-                span: transfer.span,
-            })),
             Expr::Destroy(destroy) => Ok(Expr::Destroy(DestroyExpr {
                 expr: Box::new(self.optimize_expr(&destroy.expr)?),
                 policy: destroy.policy.clone(),
@@ -591,10 +586,6 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
             }
         }
         Expr::Consume(consume) => collect_call_names_from_expr(&consume.expr, names),
-        Expr::Transfer(transfer) => {
-            collect_call_names_from_expr(&transfer.expr, names);
-            collect_call_names_from_expr(&transfer.to, names);
-        }
         Expr::Destroy(destroy) => collect_call_names_from_expr(&destroy.expr, names),
         Expr::ReadRef(_) => {}
         Expr::Claim(claim) => collect_call_names_from_expr(&claim.receipt, names),
@@ -726,10 +717,6 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Consume(consume) => collect_names_by_walking_expr(&consume.expr, names),
-        Expr::Transfer(transfer) => {
-            collect_names_by_walking_expr(&transfer.expr, names);
-            collect_names_by_walking_expr(&transfer.to, names);
-        }
         Expr::Destroy(destroy) => collect_names_by_walking_expr(&destroy.expr, names),
         Expr::ReadRef(_) => {}
         Expr::Claim(claim) => collect_names_by_walking_expr(&claim.receipt, names),
@@ -810,7 +797,6 @@ fn expr_is_pure_inlineable(expr: &Expr) -> bool {
         Expr::Assign(_)
         | Expr::Create(_)
         | Expr::Consume(_)
-        | Expr::Transfer(_)
         | Expr::Destroy(_)
         | Expr::ReadRef(_)
         | Expr::Claim(_)
@@ -922,7 +908,6 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
         }),
         Expr::Create(_)
         | Expr::Consume(_)
-        | Expr::Transfer(_)
         | Expr::Destroy(_)
         | Expr::ReadRef(_)
         | Expr::Claim(_)

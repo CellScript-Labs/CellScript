@@ -192,7 +192,7 @@ fn strict_017_runtime_helper_gap_is_discharged(
         })
 }
 
-/// In `--primitive-strict=0.15` or newer strict mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
+/// In `--primitive-strict=0.15` or newer strict mode, reject v0.14 protocol verbs (`destroy`)
 /// in capability declarations. They must be replaced by their kernel-effect equivalents.
 fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
     use crate::error::MigrationDiagnostic;
@@ -205,7 +205,7 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
         };
         for cap in capabilities {
             if cap.is_protocol_verb() {
-                let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
+                let diag = MigrationDiagnostic::Cs0151;
                 return Err(CompileError::new(
                     format!(
                         "{}: type '{}' declares legacy capability '{}', which is not allowed in primitive strict mode; use kernel effects '{}'",
@@ -225,7 +225,6 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
 fn strict_capability_name(capability: ast::Capability) -> &'static str {
     match capability {
         ast::Capability::Store => "store",
-        ast::Capability::Transfer => "transfer",
         ast::Capability::Destroy => "destroy",
         ast::Capability::Create => "create",
         ast::Capability::Consume => "consume",
@@ -13146,7 +13145,6 @@ fn molecule_identifier(input: &str) -> String {
 fn metadata_capability_name(capability: &crate::ast::Capability) -> String {
     match capability {
         crate::ast::Capability::Store => "store",
-        crate::ast::Capability::Transfer => "transfer",
         crate::ast::Capability::Destroy => "destroy",
         crate::ast::Capability::Create => "create",
         crate::ast::Capability::Consume => "consume",
@@ -17522,7 +17520,7 @@ shared Config {
     threshold: u64,
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
@@ -18317,6 +18315,45 @@ action activate(ticket: Ticket) -> Ticket {
     fn compile_rejects_unknown_functions() {
         let err = compile(UNKNOWN_FUNCTION_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("unknown function 'missing'"));
+    }
+
+    #[test]
+    fn compile_rejects_legacy_transfer_capability_syntax() {
+        // 'has transfer' is no longer valid grammar after 0.19 cleanup.
+        let err = compile(
+            r#"
+module test
+
+resource Coin has store, transfer {
+    amount: u64
+}
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap_err();
+        assert!(err.message.contains("transfer") || err.message.contains("error"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_legacy_transfer_expression_syntax() {
+        // 'transfer X to Y' is no longer valid grammar after 0.19 cleanup.
+        let err = compile(
+            r#"
+module test
+
+resource Coin has store, replace, relock, consume {
+    amount: u64
+}
+
+action send(coin: Coin, to: Address) {
+    verification
+        transfer coin to to
+}
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap_err();
+        assert!(err.message.contains("transfer") || err.message.contains("undefined"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -21804,7 +21841,7 @@ action add(a: u64, b: u64) -> u64 {
             r#"
 module hash_type_dsl
 
-resource Token has store, transfer
+resource Token has store, replace, relock
 with_default_hash_type(Data1)
 {
     amount: u64,
@@ -23734,35 +23771,47 @@ source_roots = ["src", "shared"]
         let source = r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     verification
-        return transfer token to to
+        std::lifecycle::transfer(token, next_token, to) {
+            amount
+        }
 }
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
-        let plan = result
+        // std::lifecycle::transfer decomposes into consume + create, not a combined transfer record.
+        let consume_plan = result
             .metadata
             .runtime
             .proof_plan
             .iter()
-            .find(|plan| plan.feature.starts_with("transfer-output:Token"))
-            .expect("transfer output ProofPlan record");
+            .find(|plan| plan.feature.starts_with("consume-input:Token"))
+            .expect("consume-input ProofPlan record");
+        let create_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature.starts_with("create-output:Token"))
+            .expect("create-output ProofPlan record");
 
-        assert_eq!(plan.trigger, "explicit_entry");
-        assert_eq!(plan.scope, "transaction");
-        assert!(plan.reads.contains(&"input".to_string()), "{:?}", plan.reads);
-        assert!(plan.reads.contains(&"output".to_string()), "{:?}", plan.reads);
-        assert!(plan.coverage.iter().any(|coverage| coverage.contains("transaction-scoped relation")), "{:?}", plan.coverage);
+        assert_eq!(consume_plan.trigger, "explicit_entry");
+        assert_eq!(consume_plan.scope, "transaction");
+        assert_eq!(create_plan.trigger, "explicit_entry");
+        assert_eq!(create_plan.scope, "transaction");
+        assert!(consume_plan.reads.contains(&"input".to_string()), "{:?}", consume_plan.reads);
+        assert!(create_plan.reads.contains(&"output".to_string()), "{:?}", create_plan.reads);
         assert!(
-            plan.coverage.iter().any(|coverage| coverage == "macro_expansion:transfer=consume-input+create-output"),
+            consume_plan.coverage.iter().any(|coverage| coverage.contains("transaction-scoped relation")),
             "{:?}",
-            plan.coverage
+            consume_plan.coverage
         );
+        // Verify the action-level proof plan has both consume and create records.
         assert_eq!(
             result
                 .metadata
@@ -23772,9 +23821,9 @@ action transfer_token(token: Token, to: Address) -> Token {
                 .expect("action metadata")
                 .proof_plan
                 .iter()
-                .filter(|plan| plan.feature.starts_with("transfer-output:Token"))
+                .filter(|plan| plan.feature.starts_with("consume-input:Token") || plan.feature.starts_with("create-output:Token"))
                 .count(),
-            1
+            2
         );
     }
 
@@ -24292,13 +24341,15 @@ action burn(token: Token) {
         let source = r#"
 module test
 
-resource Token has store, replace, relock {
+resource Token has store, replace, relock, consume {
     amount: u64,
 }
 
-action transfer_token(token: Token, to: Address) -> Token {
+action transfer_token(token: Token, to: Address) -> next_token: Token {
     verification
-        return transfer token to to
+        std::lifecycle::transfer(token, next_token, to) {
+            amount
+        }
 }
 "#;
 
@@ -25984,7 +26035,7 @@ version = "0.1.0"
             r#"
 module dep::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
 }
 "#,
@@ -26411,7 +26462,7 @@ entry = "contracts/main.cell"
             r#"
 module demo::helper
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
 }
 "#,
@@ -26524,7 +26575,7 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
 }
 "#,
@@ -26620,7 +26671,7 @@ action ping() -> u64 {
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
 }
 "#,
@@ -26631,7 +26682,7 @@ resource Token has store, transfer, destroy {
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
 }
 "#,

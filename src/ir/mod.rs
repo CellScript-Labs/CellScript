@@ -1938,7 +1938,6 @@ impl IrGenerator {
             Expr::ReadRef(read_ref) => self.lower_read_ref_expr(read_ref, current, blocks),
             Expr::Create(create) => self.lower_create_expr(create, current, blocks, vars),
             Expr::Consume(consume) => self.lower_consume_expr(consume, current, blocks, vars),
-            Expr::Transfer(transfer) => self.lower_transfer_expr(transfer, current, blocks, vars),
             Expr::Destroy(destroy) => self.lower_destroy_expr(destroy, current, blocks, vars),
             Expr::Claim(claim) => self.lower_claim_expr(claim, current, blocks, vars),
             Expr::Settle(settle) => self.lower_settle_expr(settle, current, blocks, vars),
@@ -3169,36 +3168,6 @@ impl IrGenerator {
             identity,
         });
         self.aggregate_fields.insert(dest.id, field_vars);
-        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
-    }
-
-    fn lower_transfer_expr(
-        &mut self,
-        transfer: &TransferExpr,
-        current: BlockId,
-        blocks: &mut Vec<IrBlock>,
-        vars: &mut HashMap<String, IrVar>,
-    ) -> LoweredExpr {
-        let lowered_expr = self.lower_expr(&transfer.expr, current, blocks, vars);
-        let Some(active) = lowered_expr.current else {
-            return lowered_expr;
-        };
-        let lowered_to = self.lower_expr(&transfer.to, active, blocks, vars);
-        let Some(active) = lowered_to.current else {
-            return lowered_to;
-        };
-
-        let dest_ty = self.operand_type(&lowered_expr.operand);
-        let dest = self.new_var("transfer_tmp", dest_ty);
-        let transfer_output_fields = self.materialize_matching_output_fields(&lowered_expr.operand, &dest.ty, active, blocks);
-        self.block_mut(blocks, active).instructions.push(IrInstruction::Transfer {
-            dest: dest.clone(),
-            operand: lowered_expr.operand,
-            to: lowered_to.operand,
-        });
-        if !transfer_output_fields.is_empty() {
-            self.aggregate_fields.insert(dest.id, transfer_output_fields);
-        }
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
@@ -5855,10 +5824,6 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Consume(consume) => collect_call_names_from_expr(&consume.expr, names),
-        Expr::Transfer(transfer) => {
-            collect_call_names_from_expr(&transfer.expr, names);
-            collect_call_names_from_expr(&transfer.to, names);
-        }
         Expr::Destroy(destroy) => collect_call_names_from_expr(&destroy.expr, names),
         Expr::Claim(claim) => collect_call_names_from_expr(&claim.receipt, names),
         Expr::Settle(settle) => collect_call_names_from_expr(&settle.expr, names),
@@ -6431,13 +6396,6 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
         }
-        Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
-            collect_consumed_bindings_from_expr(&transfer.to, bindings);
-        }
         Expr::Claim(claim) => {
             if let Expr::Identifier(name) = claim.receipt.as_ref() {
                 bindings.insert(name.clone());
@@ -6692,7 +6650,7 @@ action check(x: u64, y: u64) -> u64 {
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6728,7 +6686,7 @@ action transfer_only(coin: Coin, to: Address) -> next_coin: Coin {
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6769,7 +6727,7 @@ action claim_only(voucher: Voucher) -> coin: Coin {
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
     owner: Address
 }

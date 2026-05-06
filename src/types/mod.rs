@@ -1274,10 +1274,6 @@ impl<'a> TypeChecker<'a> {
                 Ok(guaranteed)
             }
             Expr::Consume(consume) => self.validate_branch_obligations_in_expr(&consume.expr, outputs, guaranteed),
-            Expr::Transfer(transfer) => {
-                self.validate_branch_obligations_in_expr(&transfer.expr, outputs, guaranteed.clone())?;
-                self.validate_branch_obligations_in_expr(&transfer.to, outputs, guaranteed)
-            }
             Expr::Destroy(destroy) => self.validate_branch_obligations_in_expr(&destroy.expr, outputs, guaranteed),
             Expr::Claim(claim) => self.validate_branch_obligations_in_expr(&claim.receipt, outputs, guaranteed),
             Expr::Settle(settle) => self.validate_branch_obligations_in_expr(&settle.expr, outputs, guaranteed),
@@ -1447,10 +1443,6 @@ impl<'a> TypeChecker<'a> {
                 self.validate_create_targets_in_expr(&index.index, outputs)?;
             }
             Expr::Consume(consume) => self.validate_create_targets_in_expr(&consume.expr, outputs)?,
-            Expr::Transfer(transfer) => {
-                self.validate_create_targets_in_expr(&transfer.expr, outputs)?;
-                self.validate_create_targets_in_expr(&transfer.to, outputs)?;
-            }
             Expr::Destroy(destroy) => self.validate_create_targets_in_expr(&destroy.expr, outputs)?,
             Expr::Claim(claim) => self.validate_create_targets_in_expr(&claim.receipt, outputs)?,
             Expr::Settle(settle) => self.validate_create_targets_in_expr(&settle.expr, outputs)?,
@@ -2260,10 +2252,6 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Consume(consume) => self.validate_spawn_ipc_fd_usage_expr(&consume.expr, state)?,
-            Expr::Transfer(transfer) => {
-                self.validate_spawn_ipc_fd_usage_expr(&transfer.expr, state)?;
-                self.validate_spawn_ipc_fd_usage_expr(&transfer.to, state)?;
-            }
             Expr::Destroy(destroy) => self.validate_spawn_ipc_fd_usage_expr(&destroy.expr, state)?,
             Expr::Claim(claim) => self.validate_spawn_ipc_fd_usage_expr(&claim.receipt, state)?,
             Expr::Settle(settle) => self.validate_spawn_ipc_fd_usage_expr(&settle.expr, state)?,
@@ -2809,22 +2797,6 @@ impl<'a> TypeChecker<'a> {
                 env.consume(&name)?;
                 Ok(Type::U64)
             }
-            Expr::Transfer(transfer) => {
-                let (expr_ty, name) = self.require_named_linear_cell_operand(env, &transfer.expr, "transfer", transfer.span)?;
-                let to_ty = self.infer_expr(env, &transfer.to)?;
-                if !Self::is_address_like_type(&to_ty) {
-                    return Err(CompileError::new("transfer destination must be address-like", transfer.span));
-                }
-                self.require_capability_or_kernel_effects(
-                    &expr_ty,
-                    Capability::Transfer,
-                    &[Capability::Replace, Capability::Relock],
-                    "transfer",
-                    transfer.span,
-                )?;
-                env.transfer(&name)?;
-                Ok(expr_ty)
-            }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
                 self.require_capability_or_kernel_effects(
@@ -3033,7 +3005,6 @@ impl<'a> TypeChecker<'a> {
         match expr {
             Expr::Create(_)
             | Expr::Consume(_)
-            | Expr::Transfer(_)
             | Expr::Destroy(_)
             | Expr::ReadRef(_)
             | Expr::Claim(_)
@@ -3653,7 +3624,6 @@ impl<'a> TypeChecker<'a> {
         let operation = match expr {
             Expr::Create(_) => Some("create"),
             Expr::Consume(_) => Some("consume"),
-            Expr::Transfer(_) => Some("transfer"),
             Expr::Destroy(_) => Some("destroy"),
             Expr::ReadRef(_) => Some("read_ref"),
             Expr::StdlibCall(call) => {
@@ -3939,7 +3909,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Cast(cast) => self.mark_expr_as_moved(env, &cast.expr),
             Expr::Assign(assign) => self.mark_expr_as_moved(env, &assign.value),
             Expr::Preserve(_) => Ok(()),
-            Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
+            Expr::Claim(_) | Expr::Settle(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) => Ok(()),
             Expr::Assert(assert_expr) => self.mark_expr_as_moved(env, &assert_expr.condition),
             Expr::Require(require_expr) => {
                 self.mark_expr_as_moved(env, &require_expr.condition)?;
@@ -5600,7 +5570,6 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Index(index) => index.span,
         Expr::Create(create) => create.span,
         Expr::Consume(consume) => consume.span,
-        Expr::Transfer(transfer) => transfer.span,
         Expr::Destroy(destroy) => destroy.span,
         Expr::ReadRef(read_ref) => read_ref.span,
         Expr::Claim(claim) => claim.span,
@@ -5656,10 +5625,6 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
             }
         }
         Expr::Consume(consume) => collect_required_output_fields(&consume.expr, outputs, fields),
-        Expr::Transfer(transfer) => {
-            collect_required_output_fields(&transfer.expr, outputs, fields);
-            collect_required_output_fields(&transfer.to, outputs, fields);
-        }
         Expr::Destroy(destroy) => collect_required_output_fields(&destroy.expr, outputs, fields),
         Expr::Claim(claim) => collect_required_output_fields(&claim.receipt, outputs, fields),
         Expr::Settle(settle) => collect_required_output_fields(&settle.expr, outputs, fields),
@@ -6000,13 +5965,6 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
             collect_consumed_bindings_from_expr(&consume.expr, bindings);
         }
-        Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
-                bindings.insert(name.clone());
-            }
-            collect_consumed_bindings_from_expr(&transfer.expr, bindings);
-            collect_consumed_bindings_from_expr(&transfer.to, bindings);
-        }
         Expr::Assign(assign) => {
             collect_consumed_bindings_from_expr(&assign.target, bindings);
             collect_consumed_bindings_from_expr(&assign.value, bindings);
@@ -6199,7 +6157,6 @@ fn push_unique_root<'a>(roots: &mut Vec<&'a str>, root: &'a str) {
 fn capability_name(capability: Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
-        Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
         Capability::Create => "create",
         Capability::Consume => "consume",
@@ -6363,11 +6320,11 @@ action main(a: TokenA) -> u64 {
             r#"
 module test
 
-resource A has store, transfer, destroy {
+resource A has store, replace, relock, consume, burn {
     amount: u64
 }
 
-resource B has store, transfer, destroy {
+resource B has store, replace, relock, consume, burn {
     amount: bool
 }
 
@@ -6390,7 +6347,7 @@ action bad_preserve(a: A) -> b: B {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6454,7 +6411,7 @@ action hidden_mutation(flag: bool) {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6475,11 +6432,11 @@ action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
-resource Badge has store, transfer, destroy {
+resource Badge has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6504,7 +6461,7 @@ action bad_claim(voucher: Voucher, to: Address) -> badge: Badge {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6529,7 +6486,7 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6559,7 +6516,7 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6584,7 +6541,7 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 
@@ -6605,7 +6562,7 @@ action bad_settle(coin: Coin) -> next_coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
     owner: Address
 }
@@ -6631,7 +6588,7 @@ action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
     owner: Address
 }
@@ -6662,7 +6619,7 @@ action bad_claim(voucher: Voucher) -> coin: Coin {
             r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, replace, relock, consume, burn {
     amount: u64
 }
 

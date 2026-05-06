@@ -117,11 +117,11 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "SCA-BUG-LEGACY-TRANSFER-REJECTED",
-        "name": "removed legacy transfer capability and expression syntax stay rejected",
+        "name": "removed legacy transfer capability and expression syntax stay rejected (parse-time rejection, 0.19 cleanup)",
         "min_mode": "quick",
-        "required_cases": ("reject-legacy-transfer-capability-strict", "seed-legacy-transfer-capability"),
-        "required_origins": ("generated", "tests/syntax_combo/seeds/legacy-transfer-capability.cell"),
-        "release_boundary": "old protocol-name surface cannot re-enter the canonical grammar",
+        "required_cases": ("seed-legacy-transfer-capability",),
+        "required_origins": ("tests/syntax_combo/seeds/legacy-transfer-capability.cell",),
+        "release_boundary": "old 'has transfer' / 'transfer X to Y' surface cannot re-enter the grammar; parse rejection, not CS0150",
     },
     {
         "id": "SCA-BUG-RECEIPT-CLAIM-CONTRACT",

@@ -135,9 +135,8 @@ pub struct FlowDef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
-    // v0.14 compat capabilities
+    // v0.14 compat capability (Destroy is a protocol verb, prefer consume+burn kernel effects)
     Store,
-    Transfer,
     Destroy,
     // v0.15 kernel effect capabilities
     Create,
@@ -153,13 +152,12 @@ impl Capability {
     /// Returns true if this capability is a v0.14-era protocol verb
     /// that is not allowed in `--primitive-strict=0.15` mode.
     pub fn is_protocol_verb(self) -> bool {
-        matches!(self, Self::Transfer | Self::Destroy)
+        matches!(self, Self::Destroy)
     }
 
     /// Map a protocol capability to its kernel effect equivalents.
     pub fn kernel_effects(self) -> Vec<Capability> {
         match self {
-            Self::Transfer => vec![Self::Replace, Self::Relock],
             Self::Destroy => vec![Self::Consume, Self::Burn],
             other => vec![other],
         }
@@ -380,7 +378,6 @@ pub enum Expr {
     Index(IndexExpr),
     Create(CreateExpr),
     Consume(ConsumeExpr),
-    Transfer(TransferExpr),
     Destroy(DestroyExpr),
     ReadRef(ReadRefExpr),
     Claim(ClaimExpr),
@@ -419,7 +416,6 @@ impl Expr {
             Expr::Index(e) => e.span,
             Expr::Create(e) => e.span,
             Expr::Consume(e) => e.span,
-            Expr::Transfer(e) => e.span,
             Expr::Destroy(e) => e.span,
             Expr::ReadRef(e) => e.span,
             Expr::Claim(e) => e.span,
@@ -530,13 +526,6 @@ pub struct CreateExpr {
 #[derive(Debug, Clone)]
 pub struct ConsumeExpr {
     pub expr: Box<Expr>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct TransferExpr {
-    pub expr: Box<Expr>,
-    pub to: Box<Expr>,
     pub span: Span,
 }
 

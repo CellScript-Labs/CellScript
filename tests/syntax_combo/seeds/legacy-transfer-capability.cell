@@ -1,7 +1,6 @@
 // audit: phase=reject_compile
-// audit: contains=CS0150
-// audit: contains=legacy capability 'transfer'
-// audit: contains=replace + relock
+// audit: contains=error
+// audit: description="legacy 'has transfer' and 'transfer X to Y' are no longer valid grammar (0.19 cleanup)"
 module cellscript::audit::seed_legacy_transfer_capability
 
 resource Coin has store, transfer {

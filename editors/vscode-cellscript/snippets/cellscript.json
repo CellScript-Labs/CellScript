@@ -9,17 +9,6 @@
     ],
     "description": "Create a CellScript action with a verification section"
   },
-  "State Transition Action": {
-    "prefix": "action-transition",
-    "body": [
-      "action ${1:name}(${2:input}: ${3:CellType}) -> ${4:output}: ${3:CellType} {",
-      "    transition ${2} -> ${4}",
-      "    verification",
-      "        require ${8:${4}.owner == ${2}.owner}",
-      "}"
-    ],
-    "description": "Create an action with an explicit input-output transition"
-  },
   "Lock": {
     "prefix": "lock",
     "body": [

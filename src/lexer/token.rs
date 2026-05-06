@@ -19,7 +19,6 @@ pub enum TokenKind {
     Verification, // verification
     Has,          // has
     Store,        // store
-    Transfer,     // transfer (capability context)
     Destroy,      // destroy (capability context)
     If,           // if
     Else,         // else
@@ -36,7 +35,7 @@ pub enum TokenKind {
     ReadRef,      // read_ref
     DestroyKw,    // destroy (keyword)
     Launch,       // launch
-    Assert,       // assert / assert_invariant
+    Assert,       // assert_invariant
     Require,      // require
     Preserve,     // preserve
     True,         // true
@@ -122,7 +121,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Verification => write!(f, "'verification'"),
             TokenKind::Has => write!(f, "'has'"),
             TokenKind::Store => write!(f, "'store'"),
-            TokenKind::Transfer => write!(f, "'transfer'"),
             TokenKind::Destroy => write!(f, "'destroy'"),
             TokenKind::If => write!(f, "'if'"),
             TokenKind::Else => write!(f, "'else'"),
@@ -139,7 +137,7 @@ impl fmt::Display for TokenKind {
             TokenKind::ReadRef => write!(f, "'read_ref'"),
             TokenKind::DestroyKw => write!(f, "'destroy'"),
             TokenKind::Launch => write!(f, "'launch'"),
-            TokenKind::Assert => write!(f, "'assert'"),
+            TokenKind::Assert => write!(f, "'assert_invariant'"),
             TokenKind::Require => write!(f, "'require'"),
             TokenKind::Preserve => write!(f, "'preserve'"),
             TokenKind::True => write!(f, "'true'"),
@@ -239,7 +237,6 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "verification" => TokenKind::Verification,
         "has" => TokenKind::Has,
         "store" => TokenKind::Store,
-        "transfer" => TokenKind::Transfer,
         "destroy" => TokenKind::DestroyKw,
         "if" => TokenKind::If,
         "else" => TokenKind::Else,
@@ -255,7 +252,7 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "create" => TokenKind::Create,
         "read_ref" => TokenKind::ReadRef,
         "launch" => TokenKind::Launch,
-        "assert" | "assert_invariant" => TokenKind::Assert,
+        "assert_invariant" => TokenKind::Assert,
         "require" => TokenKind::Require,
         "preserve" => TokenKind::Preserve,
         "true" => TokenKind::True,

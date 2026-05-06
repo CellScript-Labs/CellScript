@@ -126,15 +126,6 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
             }
             collect_state_context_from_expr(specs, context, &consume.expr);
         }
-        Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
-                if let Some(ty) = context.variable_flow_types.get(name) {
-                    context.consumed_flow_types.insert(ty.clone());
-                }
-            }
-            collect_state_context_from_expr(specs, context, &transfer.expr);
-            collect_state_context_from_expr(specs, context, &transfer.to);
-        }
         Expr::Create(create) => {
             for (_, value) in &create.fields {
                 collect_state_context_from_expr(specs, context, value);
@@ -308,10 +299,6 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             validate_state_transition_expr(specs, context, &index.index)
         }
         Expr::Consume(consume) => validate_state_transition_expr(specs, context, &consume.expr),
-        Expr::Transfer(transfer) => {
-            validate_state_transition_expr(specs, context, &transfer.expr)?;
-            validate_state_transition_expr(specs, context, &transfer.to)
-        }
         Expr::Destroy(destroy) => validate_state_transition_expr(specs, context, &destroy.expr),
         Expr::Claim(claim) => validate_state_transition_expr(specs, context, &claim.receipt),
         Expr::Settle(settle) => validate_state_transition_expr(specs, context, &settle.expr),

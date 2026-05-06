@@ -146,6 +146,57 @@ check_ckb_acceptance_boundaries() {
     done
 }
 
+check_grammar_governance_regression() {
+    # Active source, examples, wiki, and editor files must not contain
+    # legacy transfer surface syntax (0.19 grammar cleanup).
+    # Exception: docs/archive/** and old release notes are historical.
+    local active_files=(
+        "examples/token.cell"
+        "examples/nft.cell"
+        "examples/multisig.cell"
+        "examples/vesting.cell"
+        "examples/timelock.cell"
+        "examples/amm-pool.cell"
+        "examples/registry.cell"
+        "examples/launch.cell"
+        "examples/language/canonical_style.cell"
+        "examples/language/stdlib.cell"
+        "examples/language/order_book.cell"
+        "examples/language/registry.cell"
+        "editors/vscode-cellscript/snippets/cellscript.json"
+        "editors/vscode-cellscript/syntaxes/cellscript.tmLanguage.json"
+        "docs/wiki/Tutorial-01-Getting-Started.md"
+        "docs/wiki/Tutorial-02-Language-Basics.md"
+        "docs/wiki/Tutorial-03-Resources-and-Cell-Effects.md"
+        "docs/wiki/Tutorial-04-Packages-and-CLI-Workflow.md"
+        "docs/wiki/Tutorial-05-CKB-Target-Profiles.md"
+        "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md"
+        "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md"
+        "docs/wiki/Tutorial-09-Action-Model-and-0-13-Syntax.md"
+        "docs/wiki/Tutorial-10-Standard-Library.md"
+    )
+
+    # Check 1: 'has transfer' must not appear in active examples/wiki.
+    local f
+    for f in "${active_files[@]}"; do
+        if [ -f "$f" ] && rg --quiet -n 'has transfer' "$f"; then
+            printf 'Grammar governance regression: %s contains legacy "has transfer"\n' "$f" >&2
+            exit 1
+        fi
+    done
+
+    # Check 2: 'transfer X to Y' expression must not appear in active examples.
+    for f in "examples/"*.cell "examples/language/"*.cell; do
+        if [ -f "$f" ] && rg --quiet -n 'transfer [a-z]\+ to ' "$f"; then
+            printf 'Grammar governance regression: %s contains legacy "transfer X to Y" expression\n' "$f" >&2
+            exit 1
+        fi
+    done
+
+    printf 'Grammar governance regression check passed.\n'
+}
+
 run_common_gate() {
     require_cmd cargo
     require_cmd python3
@@ -169,6 +220,7 @@ run_common_gate() {
     check_release_roadmap_docs
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
+    check_grammar_governance_regression
 }
 
 run_quick_gate() {

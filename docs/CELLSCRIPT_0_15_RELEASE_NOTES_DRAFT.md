@@ -184,16 +184,21 @@ destroy   -> consume + burn (or consume + assert_absence)
 
 ### Capability Vocabulary Reset and Compat/Strict Modes
 
-0.15 provides a migration path from the v0.14 capability vocabulary:
+0.15 provided a migration path from the v0.14 capability vocabulary:
 
 **Compatibility mode** (`--primitive-compat=0.14`):
-- accepts `has transfer` and `has destroy` without errors
-- existing examples compile unchanged
+- accepted `has transfer` and `has destroy` without errors
+- existing examples compiled unchanged
 
 **Strict mode** (`--primitive-strict=0.15`):
-- rejects `has transfer` with diagnostic CS0150
-- rejects `has destroy` with diagnostic CS0151
-- requires kernel-effect capabilities and explicit destruction policies
+- rejected `has transfer` with diagnostic CS0150
+- rejected `has destroy` with diagnostic CS0151
+- required kernel-effect capabilities and explicit destruction policies
+
+> **Note (0.19 update):** As of 0.19, `transfer` is removed from the public
+> grammar entirely. `has transfer` and `transfer X to Y` now fail at parse time,
+> not via CS0150. Use `std::lifecycle::transfer(...)` and `has replace, relock`
+> instead.
 
 Top-level single-file compilation accepts the same primitive migration flags as
 package subcommands, so this works for direct example inspection:

@@ -48,7 +48,6 @@ pub enum TraceEvent {
     Bind { name: String, value: SimValue },
     Create { ty: String, fields: Vec<(String, String)> },
     Consume { description: String },
-    Transfer { description: String, to: String },
     Destroy { description: String },
     ReadRef { ty: String },
     Claim { description: String },
@@ -70,7 +69,6 @@ impl std::fmt::Display for TraceEvent {
                 write!(f, " }}")
             }
             TraceEvent::Consume { description } => write!(f, "  consume {}", description),
-            TraceEvent::Transfer { description, to } => write!(f, "  transfer {} to {}", description, to),
             TraceEvent::Destroy { description } => write!(f, "  destroy {}", description),
             TraceEvent::ReadRef { ty } => write!(f, "  read_ref<{}>()", ty),
             TraceEvent::Claim { description } => write!(f, "  claim {}", description),
@@ -335,13 +333,6 @@ impl SimulateInterpreter {
                 let desc = value.to_string();
                 self.trace.push(TraceEvent::Consume { description: desc.clone() });
                 Ok(SimValue::Simulated { ty: "consumed".to_string(), description: desc })
-            }
-            Expr::Transfer(transfer) => {
-                self.has_cell_ops = true;
-                let value = self.eval_expr(&transfer.expr)?;
-                let to = self.eval_expr(&transfer.to)?;
-                self.trace.push(TraceEvent::Transfer { description: value.to_string(), to: to.to_string() });
-                Ok(SimValue::Simulated { ty: "transferred".to_string(), description: "transfer".to_string() })
             }
             Expr::Destroy(destroy) => {
                 self.has_cell_ops = true;
@@ -615,7 +606,7 @@ action add(a: u64, b: u64) -> u64 {
         let source = r#"
 module cell_test
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64,
 }
 
