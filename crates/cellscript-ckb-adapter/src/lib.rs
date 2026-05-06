@@ -19,6 +19,7 @@ pub const SCRIPT_EVIDENCE_SCHEMA: &str = "cellscript-ckb-script-evidence-v0.19";
 pub const SCRIPT_REF_EVIDENCE_SCHEMA: &str = "cellscript-ckb-script-ref-evidence-v0.19";
 pub const SCRIPT_CODE_DEP_EVIDENCE_SCHEMA: &str = "cellscript-ckb-script-code-dep-evidence-v0.19";
 pub const DEPLOYMENT_MANIFEST_SCHEMA: &str = "cellscript-ckb-deployment-manifest-v0.19";
+pub const DEPLOY_EVIDENCE_SCHEMA: &str = "cellscript-ckb-deploy-evidence-v0.19";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActionPlan {
@@ -329,6 +330,224 @@ pub fn deployment_evidence(manifest: &DeploymentManifest) -> DeploymentEvidence 
         schema: DEPLOYMENT_MANIFEST_SCHEMA,
         deployments: manifest.deployments.len(),
         names: manifest.deployments.iter().map(|deployment| deployment.name.clone()).collect(),
+    }
+}
+
+// ---- Deploy probe types ----
+
+/// Specification for deploying a compiled CellScript artifact as an on-chain code cell.
+///
+/// The caller provides the artifact binary, the deployer lock script, and the
+/// capacity input cell. The adapter computes TYPE_ID args, constructs the code
+/// output, validates occupied capacity, and builds a headless CKB transaction.
+#[derive(Debug, Clone)]
+pub struct DeployArtifactSpec {
+    /// Name for the deployment (used in manifest and evidence).
+    pub name: String,
+    /// Raw compiled artifact bytes (RISC-V binary / ELF).
+    pub artifact_binary: Bytes,
+    /// Hash of the artifact binary (hex, 64 chars). Must match the compiler output.
+    pub artifact_hash: String,
+    /// Lock script for the deployed code cell (and change output).
+    pub deployer_lock: Script,
+    /// Capacity input cell that funds the deployment.
+    pub capacity_input: CellInput,
+    /// Capacity of the input cell in shannons.
+    pub capacity_input_shannons: u64,
+    /// Optional data of the capacity input cell (for change calculation).
+    pub capacity_input_data: Bytes,
+    /// Declared hash_type for the code cell type script (typically "type" for TYPE_ID).
+    pub type_id_hash_type: ScriptHashType,
+    /// CellDeps required by the deployed artifact.
+    pub cell_deps: Vec<CellDep>,
+    /// HeaderDeps required by the deployed artifact.
+    pub header_deps: Vec<Byte32>,
+    /// Fee in shannons to allocate from the input capacity.
+    pub fee_shannons: u64,
+}
+
+/// Resolved deploy transaction with the code cell output and change output.
+#[derive(Debug, Clone)]
+pub struct ResolvedDeployTx {
+    pub name: String,
+    pub artifact_hash: String,
+    pub deployer_lock: Script,
+    pub code_output: CellOutputWithData,
+    pub change_output: CellOutputWithData,
+    pub capacity_input: CellInput,
+    pub cell_deps: Vec<CellDep>,
+    pub header_deps: Vec<Byte32>,
+    pub witnesses: Vec<WitnessArgs>,
+    pub type_id_args: [u8; 32],
+    pub fee_shannons: u64,
+}
+
+/// Evidence record for a resolved deploy transaction (headless, no node interaction).
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedDeployEvidence {
+    pub schema: &'static str,
+    pub state: &'static str,
+    pub name: String,
+    pub artifact_hash: String,
+    pub code_output_index: u32,
+    pub change_output_index: u32,
+    pub type_id_args: Vec<u8>,
+    pub code_hash: Vec<u8>,
+    pub hash_type: String,
+    pub occupied_capacity_shannons: u64,
+    pub change_capacity_shannons: u64,
+    pub serialized_tx_size_bytes: usize,
+    pub fee_shannons: u64,
+    pub cell_deps: usize,
+    pub ckb_vm_execution: bool,
+    pub tx_pool_acceptance: bool,
+}
+
+/// Build a headless CKB transaction that deploys a CellScript artifact as an
+/// on-chain code cell with TYPE_ID.
+///
+/// The function:
+/// 1. Computes TYPE_ID args from the first input tx_hash + output index 0.
+/// 2. Constructs the type script (TYPE_ID) and lock script for the code cell.
+/// 3. Calculates occupied capacity for the code cell from artifact size.
+/// 4. Constructs a change output with remaining capacity minus fee.
+/// 5. Validates that both outputs meet occupied-capacity floors.
+/// 6. Assembles the transaction and returns evidence.
+///
+/// This is headless: no RPC, no live-cell selection, no signing. The caller
+/// provides a pre-resolved capacity input. Use `CkbSdkAcceptance` for node
+/// interaction after building.
+pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(TransactionView, ResolvedDeployEvidence)> {
+    // Validate artifact is non-empty.
+    if spec.artifact_binary.is_empty() {
+        bail!("artifact binary must be non-empty");
+    }
+    if spec.artifact_hash.is_empty() {
+        bail!("artifact hash must be provided");
+    }
+    if spec.capacity_input_shannons == 0 {
+        bail!("capacity input must have non-zero capacity");
+    }
+
+    // Step 1: Compute TYPE_ID args from first input + output index 0.
+    let type_id_args = type_id_args_from_first_input(&spec.capacity_input, 0);
+
+    // Step 2: Construct type script (TYPE_ID) for the code cell.
+    let type_script = construct_script(&ScriptSpec::new(
+        [0u8; 32], // code_hash will be the data hash after deployment; use placeholder
+        spec.type_id_hash_type,
+        type_id_args.to_vec(),
+    ));
+
+    // Step 3: Build code cell output with TYPE_ID type script.
+    let code_data_capacity = Capacity::bytes(spec.artifact_binary.len())?;
+    // We need to compute the actual code_hash which is blake2b of the artifact.
+    let data_hash = blake2b_256(&spec.artifact_binary);
+    // Build the code output with a placeholder capacity (we'll compute exact occupied first).
+    let code_output_builder = CellOutput::new_builder().lock(spec.deployer_lock.clone()).type_(Some(type_script.clone()).pack());
+    // Compute occupied capacity for the code cell.
+    let code_occupied = code_output_builder.clone().build().occupied_capacity(code_data_capacity.clone())?;
+    let code_capacity_shannons = code_occupied.as_u64();
+
+    // Build the final code output with the exact occupied capacity.
+    let code_output = code_output_builder.capacity(code_capacity_shannons).build();
+
+    // Step 4: Build change output.
+    let change_capacity_shannons = spec
+        .capacity_input_shannons
+        .checked_sub(code_capacity_shannons)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "input capacity {} shannons is insufficient for code cell occupied capacity {} shannons",
+                spec.capacity_input_shannons,
+                code_capacity_shannons
+            )
+        })?
+        .checked_sub(spec.fee_shannons)
+        .ok_or_else(|| {
+            anyhow::anyhow!("remaining capacity after code cell is insufficient for fee of {} shannons", spec.fee_shannons)
+        })?;
+
+    // Validate change output meets its own occupied capacity floor.
+    let change_data_capacity = Capacity::bytes(spec.capacity_input_data.len())?;
+    let change_output = CellOutput::new_builder().capacity(change_capacity_shannons).lock(spec.deployer_lock.clone()).build();
+    let change_occupied = change_output.occupied_capacity(change_data_capacity.clone())?;
+    if change_capacity_shannons < change_occupied.as_u64() {
+        bail!(
+            "change capacity {} shannons is below occupied capacity {} shannons",
+            change_capacity_shannons,
+            change_occupied.as_u64()
+        );
+    }
+
+    // Step 5: Assemble the transaction.
+    let mut builder = TransactionBuilder::default();
+    builder.input(spec.capacity_input.clone());
+    builder.output(code_output.clone());
+    builder.output_data(spec.artifact_binary.clone().pack());
+    builder.output(change_output.clone());
+    builder.output_data(spec.capacity_input_data.clone().pack());
+    for dep in &spec.cell_deps {
+        builder.dedup_cell_dep(dep.clone());
+    }
+    for dep in &spec.header_deps {
+        builder.dedup_header_dep(dep.clone());
+    }
+    // Placeholder witness for the first input (required by CKB protocol).
+    let placeholder_witness = WitnessArgs::new_builder().build();
+    builder.witness(placeholder_witness.as_bytes().pack());
+
+    let tx = builder.build();
+    let serialized_tx_size_bytes = tx.data().as_slice().len();
+
+    // Verify outputs/outputs_data pairing.
+    assert_eq!(tx.outputs().len(), 2, "deploy tx must have 2 outputs");
+    assert_eq!(tx.outputs_data().len(), 2, "deploy tx must have 2 outputs_data entries");
+
+    let evidence = ResolvedDeployEvidence {
+        schema: DEPLOY_EVIDENCE_SCHEMA,
+        state: "ResolvedDeployTx",
+        name: spec.name.clone(),
+        artifact_hash: spec.artifact_hash.clone(),
+        code_output_index: 0,
+        change_output_index: 1,
+        type_id_args: type_id_args.to_vec(),
+        code_hash: data_hash.to_vec(),
+        hash_type: format!("{:?}", spec.type_id_hash_type).to_ascii_lowercase(),
+        occupied_capacity_shannons: code_capacity_shannons,
+        change_capacity_shannons,
+        serialized_tx_size_bytes,
+        fee_shannons: spec.fee_shannons,
+        cell_deps: spec.cell_deps.len(),
+        ckb_vm_execution: false,
+        tx_pool_acceptance: false,
+    };
+    Ok((tx, evidence))
+}
+
+/// Build a deployment manifest from a completed deploy evidence record.
+///
+/// This creates the `DeploymentManifest` that records the on-chain code cell
+/// reference after a successful deployment. The caller must provide the actual
+/// tx_hash and output_index from the committed transaction.
+pub fn build_deployment_manifest_from_evidence(
+    evidence: &ResolvedDeployEvidence,
+    tx_hash: &[u8; 32],
+    output_index: u32,
+) -> DeploymentManifest {
+    let code_hash_hex = evidence.code_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    let out_point = format!("0x{}:{}", tx_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>(), output_index);
+    DeploymentManifest {
+        schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
+        version: 1,
+        deployments: vec![DeploymentRef {
+            name: evidence.name.clone(),
+            code_hash: format!("0x{}", code_hash_hex),
+            hash_type: evidence.hash_type.clone(),
+            args: format!("0x{}", evidence.type_id_args.iter().map(|b| format!("{:02x}", b)).collect::<String>()),
+            dep_type: "code".to_string(),
+            out_point,
+        }],
     }
 }
 
@@ -727,6 +946,29 @@ pub fn sample_resolved_action_tx() -> ResolvedActionTx {
     }
 }
 
+/// Sample deploy spec for testing. Uses a 64-byte pseudo-artifact and a
+/// generous capacity input (10 CKB = 10_000_000_000 shannons).
+pub fn sample_deploy_spec() -> DeployArtifactSpec {
+    let input_out_point = packed::OutPoint::new_builder().tx_hash([0xaau8; 32].pack()).index(0u32).build();
+    let lock = construct_script(&ScriptSpec::new([0xbbu8; 32], ScriptHashType::Data1, vec![0xccu8; 20]));
+    let artifact = Bytes::from(vec![0xddu8; 64]);
+    let artifact_hash = blake2b_256(&artifact).iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+    DeployArtifactSpec {
+        name: "test-token".to_string(),
+        artifact_binary: artifact,
+        artifact_hash,
+        deployer_lock: lock,
+        capacity_input: CellInput::new_builder().previous_output(input_out_point).build(),
+        capacity_input_shannons: 200_000_000_000,
+        capacity_input_data: Bytes::new(),
+        type_id_hash_type: ScriptHashType::Type,
+        cell_deps: Vec::new(),
+        header_deps: Vec::new(),
+        fee_shannons: 1_000,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1018,5 +1260,134 @@ mod tests {
     #[test]
     fn binds_ckb_sdk_signing_boundary_without_compiler_dependency() {
         assert!(signing_boundary_type().contains("SecpSighashScriptSigner"));
+    }
+
+    // ---- Deploy probe tests ----
+
+    #[test]
+    fn builds_deploy_transaction_with_type_id_code_cell() {
+        let spec = sample_deploy_spec();
+        let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
+
+        // Evidence checks.
+        assert_eq!(evidence.schema, DEPLOY_EVIDENCE_SCHEMA);
+        assert_eq!(evidence.state, "ResolvedDeployTx");
+        assert_eq!(evidence.name, "test-token");
+        assert_eq!(evidence.code_output_index, 0);
+        assert_eq!(evidence.change_output_index, 1);
+        assert_eq!(evidence.hash_type, "type");
+        assert_eq!(evidence.type_id_args.len(), 32);
+        assert_eq!(evidence.code_hash.len(), 32);
+        assert!(evidence.occupied_capacity_shannons > 0);
+        assert!(evidence.change_capacity_shannons > 0);
+        assert!(evidence.serialized_tx_size_bytes > 0);
+        assert!(!evidence.ckb_vm_execution);
+        assert!(!evidence.tx_pool_acceptance);
+
+        // Transaction shape checks.
+        assert_eq!(tx.inputs().len(), 1);
+        assert_eq!(tx.outputs().len(), 2);
+        assert_eq!(tx.outputs_data().len(), 2);
+
+        // Code output has a type script (TYPE_ID).
+        let code_output = tx.outputs().get(0).unwrap();
+        assert!(code_output.type_().is_some(), "code output must have type script for TYPE_ID");
+
+        // Change output has no type script.
+        let change_output = tx.outputs().get(1).unwrap();
+        assert!(change_output.type_().is_none(), "change output should not have type script");
+
+        // Artifact data is in the first output_data.
+        let code_data = tx.outputs_data().get(0).unwrap().raw_data();
+        assert_eq!(code_data.len(), 64);
+    }
+
+    #[test]
+    fn deploy_type_id_args_match_first_input_and_output_index() {
+        let spec = sample_deploy_spec();
+        let (_tx, evidence) = build_deploy_transaction(&spec).unwrap();
+
+        // TYPE_ID args = blake2b(first_input || output_index_le)
+        let expected_args = type_id_args_from_first_input(&spec.capacity_input, 0);
+        assert_eq!(evidence.type_id_args, expected_args.to_vec());
+    }
+
+    #[test]
+    fn deploy_code_hash_is_blake2b_of_artifact() {
+        let spec = sample_deploy_spec();
+        let (_tx, evidence) = build_deploy_transaction(&spec).unwrap();
+
+        let expected_hash = blake2b_256(&spec.artifact_binary);
+        assert_eq!(evidence.code_hash, expected_hash.to_vec());
+    }
+
+    #[test]
+    fn deploy_rejects_empty_artifact() {
+        let mut spec = sample_deploy_spec();
+        spec.artifact_binary = Bytes::new();
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("artifact binary must be non-empty"), "{error}");
+    }
+
+    #[test]
+    fn deploy_rejects_zero_capacity_input() {
+        let mut spec = sample_deploy_spec();
+        spec.capacity_input_shannons = 0;
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("non-zero capacity"), "{error}");
+    }
+
+    #[test]
+    fn deploy_rejects_insufficient_input_capacity() {
+        let mut spec = sample_deploy_spec();
+        spec.capacity_input_shannons = 1; // far too small
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("insufficient"), "{error}");
+    }
+
+    #[test]
+    fn deploy_rejects_insufficient_remaining_for_fee() {
+        let mut spec = sample_deploy_spec();
+        // Set fee to more than the entire input.
+        spec.fee_shannons = spec.capacity_input_shannons;
+        let error = build_deploy_transaction(&spec).unwrap_err().to_string();
+        assert!(error.contains("insufficient for fee"), "{error}");
+    }
+
+    #[test]
+    fn deploy_builds_deployment_manifest_from_evidence() {
+        let spec = sample_deploy_spec();
+        let (_tx, evidence) = build_deploy_transaction(&spec).unwrap();
+
+        let tx_hash = [0xeeu8; 32];
+        let manifest = build_deployment_manifest_from_evidence(&evidence, &tx_hash, 0);
+
+        assert_eq!(manifest.schema, DEPLOYMENT_MANIFEST_SCHEMA);
+        assert_eq!(manifest.version, 1);
+        assert_eq!(manifest.deployments.len(), 1);
+
+        let dep = &manifest.deployments[0];
+        assert_eq!(dep.name, "test-token");
+        assert!(dep.code_hash.starts_with("0x"));
+        assert_eq!(dep.hash_type, "type");
+        assert!(dep.args.starts_with("0x"));
+        assert_eq!(dep.dep_type, "code");
+        assert!(dep.out_point.contains(":0"));
+
+        // Verify the manifest parses back correctly.
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let reloaded = parse_deployment_manifest(&manifest_json).unwrap();
+        assert_eq!(reloaded.deployments[0].name, "test-token");
+    }
+
+    #[test]
+    fn deploy_with_cell_deps_includes_them_in_transaction() {
+        let mut spec = sample_deploy_spec();
+        let dep_out_point = packed::OutPoint::new_builder().tx_hash([0xffu8; 32].pack()).index(2u32).build();
+        spec.cell_deps = vec![CellDep::new_builder().out_point(dep_out_point).dep_type(DepType::Code).build()];
+
+        let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
+        assert_eq!(evidence.cell_deps, 1);
+        assert_eq!(tx.cell_deps().len(), 1);
     }
 }

@@ -86,10 +86,13 @@ crates/cellscript-ckb-adapter/
 It parses compiler `ActionPlan` JSON, materializes `ResolvedActionTx` values
 with `ckb-sdk-rust` / CKB packed types, rejects under-capacity outputs before
 RPC, and exposes signer, `estimate_cycles`, `test_tx_pool_accept`, and optional
-submission as adapter-owned node calls. It also tests that CellScript entry
-witness bytes are placed into an explicit `WitnessArgs` field without
-overwriting lock signatures, and that TYPE_ID args are computed from the packed
-first input plus output index before adapter submission.
+submission as adapter-owned node calls. It also builds headless deploy
+transactions that create TYPE_ID code cells from a `DeployArtifactSpec`, and
+generates `DeploymentManifest` records from the resulting evidence. It also
+tests that CellScript entry witness bytes are placed into an explicit
+`WitnessArgs` field without overwriting lock signatures, and that TYPE_ID
+args are computed from the packed first input plus output index before
+adapter submission.
 
 The cookbook wrapper lives at:
 
@@ -114,6 +117,13 @@ The first useful adapter flow is code-cell deployment:
 CellScript artifact binary
 + deploy-plan
 + constraints.ckb
++ capacity input cell
+      |
+      v
+build_deploy_transaction(spec)
+      |
+      v
+ResolvedDeployTx + ResolvedDeployEvidence
       |
       v
 CKB code cell deployment transaction
@@ -121,6 +131,24 @@ CKB code cell deployment transaction
       v
 deployment manifest + evidence
 ```
+
+`build_deploy_transaction()` constructs a headless CKB transaction that
+deploys a CellScript artifact as an on-chain code cell with TYPE_ID. It:
+
+- computes TYPE_ID args from the first input tx_hash + output index;
+- constructs the type script (TYPE_ID) and lock script for the code cell;
+- calculates occupied capacity for the code cell from artifact size;
+- constructs a change output with remaining capacity minus fee;
+- validates that both outputs meet occupied-capacity floors;
+- assembles the transaction and returns `ResolvedDeployEvidence`.
+
+`build_deployment_manifest_from_evidence()` produces a `DeploymentManifest`
+from the evidence after a successful commit, recording the on-chain code cell
+reference.
+
+This is headless: no RPC, no live-cell selection, no signing. The caller
+provides a pre-resolved capacity input. Use `CkbSdkAcceptance` for node
+interaction after building.
 
 The output manifest should bind the CellScript artifact to the on-chain code
 cell:

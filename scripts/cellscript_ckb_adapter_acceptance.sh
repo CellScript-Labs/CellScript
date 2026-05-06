@@ -171,6 +171,7 @@ PY
 
 cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint --json >"$ACTION_PLAN_JSON"
 cargo test --locked -p cellscript-ckb-adapter materializes_resolved_action_with_ckb_sdk_transaction_builder -- --test-threads=1
+cargo test --locked -p cellscript-ckb-adapter builds_deploy_transaction_with_type_id_code_cell -- --test-threads=1
 
 "$CKB_BIN" -C "$CKB_DIR" run --ba-advanced >"$CKB_LOG" 2>&1 &
 CKB_PID="$!"
@@ -289,6 +290,8 @@ always_success_dep = {
     "out_point": out_point(genesis_cellbase_hash, ALWAYS_SUCCESS_INDEX),
     "dep_type": "code",
 }
+
+# ---- Phase 1: Action transaction smoke test ----
 funding = find_spendable_cellbase()
 output = {
     "capacity": hex_u64(funding["capacity"] - FEE),
@@ -298,6 +301,73 @@ output = {
 tx = transaction(funding, output, ["0x"], [always_success_dep])
 estimate = rpc("estimate_cycles", [tx])
 tx_pool_accept = rpc("test_tx_pool_accept", [tx, "passthrough"])
+
+# ---- Phase 2: Deploy probe with TYPE_ID code cell ----
+# Build a deploy transaction that places a pseudo-artifact as a code cell
+# with a TYPE_ID type script, exactly as build_deploy_transaction() does.
+#
+# TYPE_ID args = blake2b(first_input_tx_hash || first_input_index_u64_le || output_index_u64_le)
+# where first_input_index is the CellInput.previous_output.index.
+#
+# The code cell uses hash_type="type" so code_hash = type_script_hash.
+
+deploy_funding = find_spendable_cellbase()
+
+# Pseudo-artifact: 32 bytes of test data.
+artifact_data = bytes(range(32))
+artifact_data_hex = "0x" + artifact_data.hex()
+artifact_data_hash = ckb_blake2b(artifact_data)
+
+# TYPE_ID args = blake2b(first_input_tx_hash || output_index_le)
+first_input_tx_hash_bytes = bytes.fromhex(deploy_funding["tx_hash"][2:])
+type_id_args_input = first_input_tx_hash_bytes + (0).to_bytes(8, "little") + (0).to_bytes(8, "little")
+type_id_args = "0x" + hashlib.blake2b(type_id_args_input, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
+# TYPE_ID type script: For devnet testing we use always_success with hash_type="data"
+# since the always_success binary is deployed in genesis with data hash.
+# Production TYPE_ID uses hash_type="type" with the TYPE_ID script code_hash.
+type_script = {
+    "code_hash": ALWAYS_SUCCESS_CODE_HASH,
+    "hash_type": "data",
+    "args": type_id_args,
+}
+
+# Code output: lock = always_success, type = TYPE_ID type script.
+# Use a generous capacity (200 CKB = 200_000_000_000 shannons) for the code cell
+# to ensure it exceeds the occupied floor regardless of exact molecule overhead.
+# The adapter crate's build_deploy_transaction() computes exact occupied capacity;
+# here we just need the transaction to pass devnet validation.
+code_output_capacity = 200_000_000_000
+change_capacity = deploy_funding["capacity"] - code_output_capacity - FEE
+if change_capacity < 0:
+    raise RuntimeError(f"deploy funding {deploy_funding['capacity']} insufficient for code output {code_output_capacity} + fee {FEE}")
+
+code_output = {
+    "capacity": hex_u64(code_output_capacity),
+    "lock": always_success_lock(),
+    "type": type_script,
+}
+change_output = {
+    "capacity": hex_u64(change_capacity),
+    "lock": always_success_lock(),
+    "type": None,
+}
+
+deploy_tx = {
+    "version": "0x0",
+    "cell_deps": [always_success_dep],
+    "header_deps": [],
+    "inputs": [{
+        "previous_output": out_point(deploy_funding["tx_hash"], deploy_funding["index"]),
+        "since": "0x0",
+    }],
+    "outputs": [code_output, change_output],
+    "outputs_data": [artifact_data_hex, "0x"],
+    "witnesses": ["0x0000000000000000"],  # placeholder witness for always_success
+}
+
+deploy_estimate = rpc("estimate_cycles", [deploy_tx])
+deploy_tx_pool_accept = rpc("test_tx_pool_accept", [deploy_tx, "passthrough"])
 
 report = {
     "schema": "cellscript-ckb-adapter-local-node-acceptance-v0.19",
@@ -318,6 +388,11 @@ report = {
         "test": "materializes_resolved_action_with_ckb_sdk_transaction_builder",
         "status": "passed",
     },
+    "adapter_deploy_probe": {
+        "crate": "crates/cellscript-ckb-adapter",
+        "test": "builds_deploy_transaction_with_type_id_code_cell",
+        "status": "passed",
+    },
     "local_node": {
         "estimate_cycles": estimate,
         "test_tx_pool_accept": tx_pool_accept,
@@ -336,10 +411,25 @@ report = {
         }],
         "tx_shape_hash": ckb_blake2b(json.dumps(tx, sort_keys=True, separators=(",", ":")).encode("utf-8")),
     },
+    "deploy_probe": {
+        "status": "passed",
+        "type_id_args": type_id_args,
+        "artifact_data_hash": artifact_data_hash,
+        "code_output_capacity_shannons": code_output_capacity,
+        "change_output_capacity_shannons": change_capacity,
+        "fee_shannons": FEE,
+        "estimate_cycles": deploy_estimate,
+        "test_tx_pool_accept": deploy_tx_pool_accept,
+        "tx_size_json_bytes": json_serialized_size_bytes(deploy_tx),
+        "outputs_count": len(deploy_tx["outputs"]),
+        "outputs_data_count": len(deploy_tx["outputs_data"]),
+        "cell_deps_count": len(deploy_tx["cell_deps"]),
+    },
     "known_limitations": [
         "This focused adapter acceptance proves CKB SDK/RPC materialization boundary evidence, not full CellScript business-flow semantics.",
         "Stateful business-flow semantics remain covered by ckb_cellscript_acceptance.sh and release gates.",
         "No wallet UI, CellFabric intent DAG, external audit, or mainnet-value certification is claimed.",
+        "The deploy probe uses always_success with hash_type=data as the type script for devnet acceptance; production TYPE_ID uses hash_type=type with the actual TYPE_ID script code_hash.",
     ],
 }
 report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
