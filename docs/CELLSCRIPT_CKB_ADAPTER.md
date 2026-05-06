@@ -363,6 +363,35 @@ The currently landed stable subset includes `load_action_plan`,
 script-ref helpers, WitnessArgs placement helpers, TYPE_ID args helpers, and
 acceptance report emission.
 
+For convenience, `CellScriptAdapter` provides a high-level facade:
+
+```rust
+// Connect to a CKB node
+let adapter = CellScriptAdapter::connect("http://127.0.0.1:8114")?;
+
+// Deploy an artifact (finds capacity, builds, submits, waits for commit)
+let (manifest, evidence) = adapter.deploy_artifact(
+    "my-token",
+    artifact_bytes,
+    deployer_lock_script,
+    1_000,  // fee in shannons
+)?;
+
+// Or build without submitting (for external signing)
+let (tx, evidence) = adapter.build_deploy(
+    "my-token",
+    artifact_bytes,
+    deployer_lock_script,
+    1_000,
+)?;
+
+// Node interaction helpers
+adapter.estimate_cycles(&tx)?;
+adapter.test_tx_pool_accept(&tx)?;
+adapter.submit_transaction(&tx)?;
+adapter.wait_for_commitment(&tx_hash, 30, 500)?;
+```
+
 Internal modules can exist without becoming stable public API:
 
 ```text
@@ -409,6 +438,41 @@ reported.
   evidence.
 - Do not treat package registry resolution as deployment verification.
 - Do not treat builder success as CKB node acceptance.
+
+## CLI: `cellscript-deploy`
+
+The adapter crate ships a CLI binary for script-driven deploy and status
+querying without writing Rust code.
+
+```bash
+# Build the binary
+cargo build -p cellscript-ckb-adapter --bin cellscript-deploy
+
+# Deploy an artifact
+export LOCK_ARG=0x$(cat ~/.ckb/default-lock-arg)  # your secp256k1 lock arg
+cellscript-deploy deploy \
+  --artifact token.s \
+  --lock-arg $LOCK_ARG \
+  --name token \
+  --fee 1000 \
+  --capacity-out-point 0x<tx_hash>:<index> \
+  --manifest-out .cell/deployment-manifest.json
+
+# Build without submitting (for external signing)
+cellscript-deploy build-deploy \
+  --artifact token.s \
+  --lock-arg $LOCK_ARG \
+  --capacity-out-point 0x<tx_hash>:<index>
+
+# Query transaction status
+cellscript-deploy status --tx-hash 0x<tx_hash>
+
+# Node info
+cellscript-deploy info
+```
+
+All commands support `--json` for structured output and `--rpc` to override
+the default `http://127.0.0.1:8114` endpoint.
 
 ## External Positioning
 

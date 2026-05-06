@@ -343,6 +343,7 @@ dependencies = [
  "ckb-jsonrpc-types",
  "ckb-sdk",
  "ckb-types",
+ "clap",
  "hex",
  "serde",
  "serde_json",

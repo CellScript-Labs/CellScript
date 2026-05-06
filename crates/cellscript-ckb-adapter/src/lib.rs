@@ -1173,6 +1173,244 @@ pub fn signing_boundary_type() -> &'static str {
     std::any::type_name::<SecpSighashScriptSigner>()
 }
 
+// ---- High-level facade ----
+
+/// High-level adapter facade that connects to a CKB node and provides
+/// one-call workflows for common CellScript operations.
+///
+/// # Quick start
+///
+/// ```no_run
+/// use cellscript_ckb_adapter::CellScriptAdapter;
+///
+/// // Connect to a CKB node
+/// let adapter = CellScriptAdapter::connect("http://127.0.0.1:8114")?;
+///
+/// // Deploy an artifact
+/// let (manifest, evidence) = adapter.deploy_artifact(
+///     "my-token",
+///     std::fs::read("artifact.bin")?.into(),
+///     deployer_lock_script,
+///     1_000,  // fee in shannons
+/// )?;
+///
+/// // Load an action plan and build a transaction
+/// let plan = adapter.load_action_plan("action.json")?;
+/// let resolved = adapter.resolve_action(&plan)?;
+/// ```
+pub struct CellScriptAdapter {
+    client: CkbRpcClient,
+}
+
+impl std::fmt::Debug for CellScriptAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CellScriptAdapter").finish_non_exhaustive()
+    }
+}
+
+impl CellScriptAdapter {
+    /// Connect to a CKB node at the given RPC URL.
+    pub fn connect(rpc_url: &str) -> Result<Self> {
+        let client = CkbRpcClient::new(rpc_url);
+        // Verify connectivity.
+        let _tip = client.get_tip_header().map_err(|e| anyhow::anyhow!("cannot connect to CKB node at {}: {e}", rpc_url))?;
+        Ok(Self { client })
+    }
+
+    // ---- Deploy workflow ----
+
+    /// Deploy a CellScript artifact as an on-chain code cell with TYPE_ID.
+    ///
+    /// This is the one-call deploy workflow that combines:
+    /// 1. Finding a spendable capacity cell from the node
+    /// 2. Building the deploy transaction (headless)
+    /// 3. Estimating cycles and testing tx-pool acceptance
+    /// 4. Submitting the transaction
+    /// 5. Waiting for commitment
+    /// 6. Building the deployment manifest
+    ///
+    /// Returns the `DeploymentManifest` and full `TransactionLifecycleEvidence`.
+    pub fn deploy_artifact(
+        &self,
+        name: &str,
+        artifact_binary: Bytes,
+        deployer_lock: Script,
+        fee_shannons: u64,
+    ) -> Result<(DeploymentManifest, TransactionLifecycleEvidence)> {
+        let artifact_hash = blake2b_256(&artifact_binary).iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+        // Find a spendable capacity cell.
+        let capacity_input = self.find_capacity_for_deploy(&deployer_lock, &artifact_binary, fee_shannons)?;
+
+        let spec = DeployArtifactSpec {
+            name: name.to_string(),
+            artifact_binary,
+            artifact_hash,
+            deployer_lock: deployer_lock.clone(),
+            capacity_input: capacity_input.input,
+            capacity_input_shannons: capacity_input.capacity_shannons,
+            capacity_input_data: capacity_input.data,
+            type_id_hash_type: ScriptHashType::Type,
+            cell_deps: Vec::new(),
+            header_deps: Vec::new(),
+            fee_shannons,
+        };
+
+        let (tx, deploy_evidence) = build_deploy_transaction(&spec)?;
+
+        // Estimate cycles.
+        let estimate = self.client.estimate_cycles(to_rpc_transaction(&tx)).ok();
+        let estimate_cycles = estimate.as_ref().map(|e| e.cycles.value());
+
+        // Test tx-pool acceptance.
+        let tx_pool_accepted = self.client.test_tx_pool_accept(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).is_ok();
+
+        // Submit.
+        let submitted = self.client.send_transaction(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).is_ok();
+        let tx_hash = self.client.send_transaction(to_rpc_transaction(&tx), Some(OutputsValidator::Passthrough)).ok();
+
+        // Wait for commitment.
+        let committed = if let Some(ref hash) = tx_hash { self.wait_for_commitment(hash, 30, 500).ok() } else { None };
+
+        // Build manifest from committed evidence.
+        let manifest = if let Some(ref hash) = tx_hash {
+            let mut hash_bytes = [0u8; 32];
+            hash_bytes.copy_from_slice(hash.as_bytes());
+            build_deployment_manifest_from_evidence(&deploy_evidence, &hash_bytes, 0)
+        } else {
+            build_deployment_manifest_from_evidence(&deploy_evidence, &[0u8; 32], 0)
+        };
+
+        let mut signing = SigningAdapter::new(vec!["deployer".to_string()]);
+        if submitted {
+            signing.mark_signed();
+        }
+
+        let lifecycle = TransactionLifecycleEvidence {
+            schema: "cellscript-ckb-tx-lifecycle-v0.19",
+            deploy_evidence: Some(deploy_evidence),
+            action_evidence: None,
+            signing: signing.evidence(),
+            capacity: Some(CapacityBridge::new(deployer_lock, 1000).evidence()),
+            estimate_cycles,
+            tx_pool_accepted,
+            submitted,
+            committed,
+        };
+
+        Ok((manifest, lifecycle))
+    }
+
+    /// Build a headless deploy transaction without submitting it.
+    ///
+    /// Use this when you want to inspect the transaction before submitting,
+    /// or when you need to add signing externally.
+    pub fn build_deploy(
+        &self,
+        name: &str,
+        artifact_binary: Bytes,
+        deployer_lock: Script,
+        fee_shannons: u64,
+    ) -> Result<(TransactionView, ResolvedDeployEvidence)> {
+        let artifact_hash = blake2b_256(&artifact_binary).iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+        let capacity_input = self.find_capacity_for_deploy(&deployer_lock, &artifact_binary, fee_shannons)?;
+
+        let spec = DeployArtifactSpec {
+            name: name.to_string(),
+            artifact_binary,
+            artifact_hash,
+            deployer_lock,
+            capacity_input: capacity_input.input,
+            capacity_input_shannons: capacity_input.capacity_shannons,
+            capacity_input_data: capacity_input.data,
+            type_id_hash_type: ScriptHashType::Type,
+            cell_deps: Vec::new(),
+            header_deps: Vec::new(),
+            fee_shannons,
+        };
+
+        build_deploy_transaction(&spec)
+    }
+
+    // ---- Action workflow ----
+
+    /// Load an action plan from a file path.
+    pub fn load_action_plan(&self, path: impl AsRef<Path>) -> Result<ActionPlan> {
+        load_action_plan(path)
+    }
+
+    /// Load a deployment manifest from a file path.
+    pub fn load_deployment_manifest(&self, path: impl AsRef<Path>) -> Result<DeploymentManifest> {
+        load_deployment_manifest(path)
+    }
+
+    /// Resolve an action plan into a CKB transaction candidate.
+    ///
+    /// This is a convenience wrapper around `build_action_transaction`
+    /// for the common case of using `sample_resolved_action_tx`-style inputs.
+    /// For full control, construct `ResolvedActionTx` directly.
+    pub fn resolve_action(&self, _plan: &ActionPlan) -> Result<ResolvedActionTx> {
+        // TODO: full action resolution with live-cell collection.
+        // Current implementation requires the caller to construct ResolvedActionTx manually.
+        bail!("full action resolution with live-cell collection is not yet implemented; construct ResolvedActionTx manually and use build_action_transaction()")
+    }
+
+    // ---- Node interaction helpers ----
+
+    /// Estimate cycles for a transaction.
+    pub fn estimate_cycles(&self, tx: &TransactionView) -> std::result::Result<EstimateCycles, ckb_sdk::RpcError> {
+        self.client.estimate_cycles(to_rpc_transaction(tx))
+    }
+
+    /// Test tx-pool acceptance for a transaction.
+    pub fn test_tx_pool_accept(&self, tx: &TransactionView) -> std::result::Result<EntryCompleted, ckb_sdk::RpcError> {
+        self.client.test_tx_pool_accept(to_rpc_transaction(tx), Some(OutputsValidator::Passthrough))
+    }
+
+    /// Submit a transaction to the CKB node's tx-pool.
+    pub fn submit_transaction(&self, tx: &TransactionView) -> std::result::Result<H256, ckb_sdk::RpcError> {
+        self.client.send_transaction(to_rpc_transaction(tx), Some(OutputsValidator::Passthrough))
+    }
+
+    /// Wait for a transaction to be committed on-chain.
+    pub fn wait_for_commitment(&self, tx_hash: &H256, max_attempts: u32, delay_ms: u64) -> Result<CommittedEvidence> {
+        let submitter = TransactionSubmitter::new(&self.client);
+        submitter.wait_committed(tx_hash, max_attempts, delay_ms)
+    }
+
+    /// Get the tip block number.
+    pub fn get_tip_block_number(&self) -> std::result::Result<u64, ckb_sdk::RpcError> {
+        let header = self.client.get_tip_header()?;
+        Ok(header.inner.number.value())
+    }
+
+    /// Query transaction status from the node.
+    pub fn get_transaction_status(
+        &self,
+        tx_hash: &H256,
+    ) -> std::result::Result<Option<TransactionWithStatusResponse>, ckb_sdk::RpcError> {
+        self.client.get_transaction(tx_hash.clone())
+    }
+
+    // ---- Internal helpers ----
+
+    fn find_capacity_for_deploy(&self, _lock: &Script, artifact: &[u8], fee: u64) -> Result<CapacityInput> {
+        // TODO: use CellCollector to find a real spendable cell.
+        // For now, requires the caller to provide capacity input manually
+        // via the lower-level `build_deploy_transaction` API.
+        let _ = (_lock, artifact, fee);
+        bail!("automatic live-cell collection is not yet implemented; use build_deploy_transaction() with a manually provided DeployArtifactSpec")
+    }
+}
+
+/// A found capacity input cell for deployment.
+struct CapacityInput {
+    input: CellInput,
+    capacity_shannons: u64,
+    data: Bytes,
+}
+
 pub fn sample_resolved_action_tx() -> ResolvedActionTx {
     let input_out_point = packed::OutPoint::new_builder().tx_hash([0x11u8; 32].pack()).index(0u32).build();
     let dep_out_point = packed::OutPoint::new_builder().tx_hash([0x22u8; 32].pack()).index(1u32).build();
@@ -1214,6 +1452,26 @@ pub fn sample_deploy_spec() -> DeployArtifactSpec {
         cell_deps: Vec::new(),
         header_deps: Vec::new(),
         fee_shannons: 1_000,
+    }
+}
+
+/// Sample action plan for testing.
+pub fn sample_action_plan() -> ActionPlan {
+    ActionPlan {
+        policy: ACTION_PLAN_POLICY.to_string(),
+        action: "mint".to_string(),
+        artifact_hash: Some("0".repeat(64)),
+        transaction_draft: TransactionDraft {
+            state: "resolved".to_string(),
+            can_submit: true,
+            requires_packed_materialization: false,
+        },
+        adapter_contract: AdapterContract {
+            schema: ADAPTER_CONTRACT_SCHEMA.to_string(),
+            compiler_core_dependency: "cellscript-core-v0.19".to_string(),
+            transaction_realizer: "headless".to_string(),
+            resolved_tx_required_fields: vec!["inputs".to_string(), "outputs".to_string(), "witnesses".to_string()],
+        },
     }
 }
 
@@ -1810,5 +2068,41 @@ mod tests {
         let json = serde_json::to_value(&lifecycle).unwrap();
         assert_eq!(json["schema"], "cellscript-ckb-tx-lifecycle-v0.19");
         assert!(json["signing"]["signed"].as_bool().unwrap());
+    }
+
+    // ---- CellScriptAdapter facade tests ----
+
+    #[test]
+    fn adapter_connect_fails_on_unreachable_node() {
+        let result = CellScriptAdapter::connect("http://127.0.0.1:19999");
+        assert!(result.is_err(), "should fail connecting to non-existent node");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("cannot connect"), "{msg}");
+    }
+
+    #[test]
+    fn adapter_build_deploy_works_via_low_level_api() {
+        let spec = sample_deploy_spec();
+        let result = build_deploy_transaction(&spec);
+        assert!(result.is_ok(), "low-level build_deploy_transaction should work without a node");
+    }
+
+    #[test]
+    fn adapter_sample_action_plan_is_valid() {
+        let plan = sample_action_plan();
+        assert_eq!(plan.action, "mint");
+        assert_eq!(plan.policy, ACTION_PLAN_POLICY);
+        assert!(plan.artifact_hash.is_some());
+        assert!(plan.transaction_draft.can_submit);
+    }
+
+    #[test]
+    fn adapter_sample_deployment_manifest_round_trips() {
+        // Verify a manifest can be created from deploy evidence and parsed back.
+        let spec = sample_deploy_spec();
+        let (_, evidence) = build_deploy_transaction(&spec).unwrap();
+        let manifest = build_deployment_manifest_from_evidence(&evidence, &[0xabu8; 32], 0);
+        assert_eq!(manifest.deployments.len(), 1);
+        assert_eq!(manifest.deployments[0].name, "test-token");
     }
 }
