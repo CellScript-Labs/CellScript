@@ -40,7 +40,7 @@ The split is:
 | `cellc` compiler | Parse, type-check, lower, emit artifact, metadata, ABI, constraints, action build plan, entry witness bytes, deploy plan. |
 | `ckb-std` | Provide the contract-side Rust reference for CKB syscalls, sources, witnesses, TYPE_ID, since, and exec/spawn semantics. |
 | `cellscript-ckb-adapter` | Load compiler outputs, verify hashes and schemas, resolve deployments, materialise CKB transaction shape, attach evidence. |
-| `ckb-sdk-rust` | Provide CKB data structures, RPC/indexer access, cell collection, CellDep resolution, signing, fee/capacity helpers, tx-pool acceptance, submission. |
+| `ckb-sdk-rust` (5.x) | Provide CKB data structures, sync and async RPC / indexer clients, `CellCollector` (Default / Offchain / LightClient), `CellDepResolver`, `HeaderDepResolver`, `Signer` and lock-specific `ScriptUnlocker` implementations (SecpSighash, SecpMultisig Legacy/V2, ACP, Cheque, OmniLock), `CapacityBalancer` / `CapacityProvider`, protocol-specific `tx_builder` modules (acp, cheque, dao, omni_lock, transfer, udt), `unlock_tx` / `unlock_tx_async`, tx-pool acceptance, and submission. |
 | CKB node | Estimate cycles, accept or reject the transaction, and provide the chain-facing evidence boundary. |
 
 This avoids making CellScript a wallet, indexer, signer, or submission layer.

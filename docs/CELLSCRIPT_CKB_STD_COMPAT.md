@@ -33,7 +33,7 @@ The three components sit on different sides of the same production workflow:
 | `cellc` compiler | Parse, type-check, lower, emit CKB verifier artifacts, metadata, ABI, constraints, deploy plans, action plans, and witness bytes. |
 | `ckb-std` | Define the contract-side Rust vocabulary for CKB syscalls, sources, fields, entry points, witnesses, TYPE_ID, since, exec/spawn, debug, allocation, and native simulation. |
 | `cellscript-ckb-adapter` | Consume compiler outputs and use `ckb-sdk-rust` to materialise deployments and action transactions. |
-| `ckb-sdk-rust` | Provide off-chain CKB data structures, RPC, indexer access, cell collection, signing, acceptance, and submission. |
+| `ckb-sdk-rust` (5.x) | Provide off-chain CKB data structures (`ckb-types` 1.0.0), sync and async RPC / indexer clients, `CellCollector` (Default / Offchain / LightClient), `CellDepResolver`, `HeaderDepResolver`, `Signer` and lock-specific `ScriptUnlocker` (SecpSighash, SecpMultisig Legacy/V2, ACP, Cheque, OmniLock), `CapacityBalancer` / `CapacityProvider`, protocol `tx_builder` modules, acceptance, and submission. |
 | CKB node | Execute the script, measure cycles, and accept or reject the concrete transaction. |
 
 ## Boundary

@@ -50,12 +50,14 @@ cellscript-ckb-adapter
   -> materialises CKB transactions through ckb-sdk-rust
   -> records capacity, CellDep, cycle, tx-pool, and submission evidence
 
-ckb-sdk-rust
-  -> CKB data structures
-  -> RPC / indexer interaction
-  -> transaction construction
-  -> common lock signing
-  -> tx-pool acceptance and submission
+ckb-sdk-rust (5.x)
+  -> CKB data structures (ckb-types 1.0.0)
+  -> sync + async RPC / indexer clients
+  -> CellCollector (Default / Offchain / LightClient)
+  -> CellDepResolver, HeaderDepResolver
+  -> Signer + lock-specific ScriptUnlocker (SecpSighash, SecpMultisig Legacy/V2, ACP, Cheque, OmniLock)
+  -> CapacityBalancer / CapacityProvider, protocol tx_builder modules
+  -> transaction construction, signing, tx-pool acceptance, submission
 ```
 
 The adapter boundary is documented in

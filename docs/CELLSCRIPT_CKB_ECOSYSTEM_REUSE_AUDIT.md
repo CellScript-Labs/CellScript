@@ -345,10 +345,14 @@ Keep it if:
   wrappers;
 - machine-readable preview and acceptance reports.
 
-Those are already available in `ckb-sdk-rust` through RPC clients, transaction
-builders, input iterators, cell collectors, dep resolvers, signers, and packed
-capacity APIs. CellScript should integrate with those APIs rather than grow
-parallel infrastructure.
+Those are already available in `ckb-sdk-rust` (5.x) through sync and async
+RPC / indexer clients, `TransactionBuilder`, protocol-specific `tx_builder`
+modules (acp, cheque, dao, omni_lock, transfer, udt), `CellCollector`
+(Default / Offchain / LightClient), `CellDepResolver`, `HeaderDepResolver`,
+`Signer` and lock-specific `ScriptUnlocker` implementations (SecpSighash,
+SecpMultisig Legacy/V2, ACP, Cheque, OmniLock), `CapacityBalancer` /
+`CapacityProvider`, `unlock_tx`, and packed capacity APIs. CellScript should
+integrate with those APIs rather than grow parallel infrastructure.
 
 The checked-in cookbook lives at `examples/ckb-sdk-builder`, but it is now only
 a wrapper around the formal crate. It must not become a second implementation.
