@@ -80,6 +80,9 @@ pub enum Command {
     Run(RunArgs),
     Publish(PublishArgs),
     Install(InstallArgs),
+    RegistryVerify(RegistryVerifyArgs),
+    PackageVerify(PackageVerifyArgs),
+    RegistryAdd(RegistryAddArgs),
     Update,
     Info(InfoArgs),
     Login(LoginArgs),
@@ -103,6 +106,10 @@ pub struct BuildArgs {
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
     pub primitive_compat: Option<String>,
+    /// Build a specific workspace member by package name.
+    pub package: Option<String>,
+    /// Build all workspace members.
+    pub workspace: bool,
 }
 
 #[derive(Debug, Default)]
@@ -171,6 +178,8 @@ pub struct RemoveArgs {
 #[derive(Debug, Default)]
 pub struct CleanArgs {
     pub json: bool,
+    /// Also clean incremental compilation cache (.cell/build/cache)
+    pub cache: bool,
 }
 
 #[derive(Debug, Default)]
@@ -189,6 +198,10 @@ pub struct CheckArgs {
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
     pub primitive_compat: Option<String>,
+    /// Check a specific workspace member by package name.
+    pub package: Option<String>,
+    /// Check all workspace members.
+    pub workspace: bool,
 }
 
 #[derive(Debug, Default)]
@@ -426,6 +439,7 @@ pub struct PublishArgs {
 pub struct InstallArgs {
     pub crate_name: Option<String>,
     pub version: Option<String>,
+    pub namespace: Option<String>,
     pub git: Option<String>,
     pub path: Option<PathBuf>,
 }
@@ -433,6 +447,23 @@ pub struct InstallArgs {
 #[derive(Debug, Default)]
 pub struct LoginArgs {
     pub registry: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryVerifyArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct PackageVerifyArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryAddArgs {
+    pub namespace: String,
+    pub name: String,
+    pub source: String,
 }
 
 pub struct CommandExecutor;
@@ -487,10 +518,29 @@ impl CommandExecutor {
             Command::Update => Self::update(),
             Command::Info(args) => Self::info(args),
             Command::Login(args) => Self::login(args),
+            Command::RegistryVerify(args) => Self::registry_verify(args),
+            Command::PackageVerify(args) => Self::package_verify(args),
+            Command::RegistryAdd(args) => Self::registry_add(args),
         }
     }
 
     fn build(args: BuildArgs) -> Result<()> {
+        // Workspace mode: build all members or a specific member.
+        if args.workspace || args.package.is_some() {
+            return Self::build_workspace(args);
+        }
+        // Also check if the current directory is a workspace root without explicit flags.
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?;
+        if let Some(ws_root) = ws_root {
+            let members = crate::resolve_workspace_members(&ws_root)?;
+            if !members.is_empty() {
+                // Current dir is a workspace root; build all members.
+                let mut ws_args = args;
+                ws_args.workspace = true;
+                return Self::build_workspace(ws_args);
+            }
+        }
+
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
@@ -517,6 +567,24 @@ impl CommandExecutor {
         result.write_to_path(&output_path)?;
         let metadata_path = default_metadata_path_for_artifact(&output_path);
         result.write_metadata_to_path(&metadata_path)?;
+
+        // Update Cell.lock with build hashes (artifact_hash, abi_hash, schema_hash, constraints_hash)
+        let constraints_bytes = serde_json::to_vec(&result.metadata.constraints)
+            .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", e)))?;
+        let constraints_hash = crate::hex_encode(&crate::ckb_blake2b256(&constraints_bytes));
+        if let Some(mut lockfile) = Lockfile::read_from_root(std::path::Path::new("."))?.or_else(|| {
+            let l = Lockfile::new();
+            Some(l)
+        }) {
+            lockfile.package_build = Some(crate::package::LockedBuildInfo {
+                compiler_version: Some(result.metadata.compiler_version.clone()),
+                target_profile: Some(result.metadata.target_profile.name.clone()),
+                artifact_hash: result.metadata.artifact_hash.clone(),
+                constraints_hash: Some(constraints_hash),
+                ..Default::default()
+            });
+            lockfile.write_to_root(std::path::Path::new("."))?;
+        };
 
         let policy_verified = policy_args.production
             || policy_args.deny_fail_closed
@@ -561,6 +629,7 @@ impl CommandExecutor {
                 "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
                 "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
                 "policy_verified": policy_verified,
+                "cache_hit": result.cache_hit,
                 "constraints": &result.metadata.constraints,
             });
             let json = serde_json::to_string_pretty(&summary)
@@ -574,6 +643,169 @@ impl CommandExecutor {
         println!("  Target profile: {}", result.metadata.target_profile.name);
         println!("  Output: {}", output_path);
         println!("  Metadata: {}", metadata_path);
+        if result.cache_hit {
+            println!("  {}", "(incremental cache hit)".yellow());
+        }
+        Ok(())
+    }
+
+    fn build_workspace(args: BuildArgs) -> Result<()> {
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "no workspace root found; run from a directory containing a [workspace] Cell.toml",
+            )
+        })?;
+        let all_members = crate::resolve_workspace_members(&ws_root)?;
+        let members: Vec<_> = if let Some(ref pkg_name) = args.package {
+            // Find the specific member by reading its manifest for the package name.
+            let mut found = Vec::new();
+            for member_dir in &all_members {
+                let pm = crate::package::PackageManager::new(member_dir.as_std_path());
+                let manifest = pm.read_manifest()?;
+                if manifest.package.name == *pkg_name {
+                    found.push(member_dir.clone());
+                }
+            }
+            if found.is_empty() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "workspace member '{}' not found; available members: {}",
+                    pkg_name,
+                    all_members.iter().map(|m| m.as_str().to_string()).collect::<Vec<_>>().join(", ")
+                )));
+            }
+            found
+        } else {
+            all_members
+        };
+
+        let opt_level = if args.release { 3 } else { 1 };
+        let mut member_results = Vec::new();
+        let mut failed = 0;
+
+        for member_dir in &members {
+            let options = CompileOptions {
+                opt_level,
+                output: None,
+                debug: false,
+                target: args.target.clone(),
+                target_profile: args.target_profile.clone(),
+                primitive_compat: args.primitive_compat.clone(),
+            };
+
+            let compile_result = match (args.entry_action.as_deref(), args.entry_lock.as_deref()) {
+                (Some(action), None) => compile_path_with_entry_action(member_dir, options, action),
+                (None, Some(lock)) => compile_path_with_entry_lock(member_dir, options, lock),
+                _ => compile_path(member_dir, options),
+            };
+
+            match compile_result {
+                Ok(result) => {
+                    let policy_args = effective_build_check_args(&args)?;
+                    if let Err(e) = validate_check_policy(&result.metadata, &policy_args) {
+                        if args.json {
+                            member_results.push(serde_json::json!({
+                                "member": member_dir.as_str(),
+                                "status": "policy_failed",
+                                "error": e.message,
+                            }));
+                        } else {
+                            eprintln!("{}: policy check failed: {}", member_dir, e.message);
+                        }
+                        failed += 1;
+                        continue;
+                    }
+
+                    let resolved = resolve_input_path(member_dir)?;
+                    let output_path = default_output_path_for_input(member_dir, &resolved, result.artifact_format)?;
+                    result.write_to_path(&output_path)?;
+                    let metadata_path = default_metadata_path_for_artifact(&output_path);
+                    result.write_metadata_to_path(&metadata_path)?;
+
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "ok",
+                        "artifact": output_path.to_string(),
+                        "metadata": metadata_path.to_string(),
+                        "artifact_format": result.artifact_format.display_name(),
+                        "target_profile": result.metadata.target_profile.name,
+                        "artifact_hash": result.metadata.artifact_hash,
+                        "artifact_size_bytes": result.artifact_bytes.len(),
+                        "cache_hit": result.cache_hit,
+                    }));
+
+                    if !args.json {
+                        println!("{} {}", "Built".green(), member_dir);
+                    }
+                }
+                Err(e) => {
+                    if args.json {
+                        member_results.push(serde_json::json!({
+                            "member": member_dir.as_str(),
+                            "status": "failed",
+                            "error": e.message,
+                        }));
+                    } else {
+                        eprintln!("{}: {}", member_dir, e.message);
+                    }
+                    failed += 1;
+                }
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if failed == 0 { "ok" } else { "failed" },
+                "mode": "workspace",
+                "members": members.len(),
+                "succeeded": members.len() - failed,
+                "failed": failed,
+                "results": member_results,
+            });
+            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize workspace build summary: {}", error))
+            })?;
+            println!("{}", json);
+            if failed > 0 {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "{} of {} workspace members failed to build",
+                    failed,
+                    members.len()
+                )));
+            }
+            return Ok(());
+        }
+
+        if failed > 0 {
+            return Err(crate::error::CompileError::without_span(format!(
+                "{} of {} workspace members failed to build",
+                failed,
+                members.len()
+            )));
+        }
+
+        // Write workspace-level Cell.lock at the workspace root.
+        let mut lockfile = Lockfile::read_from_root(ws_root.as_std_path())?.unwrap_or_else(Lockfile::new);
+        // Merge build hashes from each successfully built member.
+        for res in &member_results {
+            if res["status"].as_str() == Some("ok") {
+                let member_name = res["member"].as_str().unwrap_or("unknown");
+                let artifact_hash = res.get("artifact_hash").and_then(|v| v.as_str()).unwrap_or("");
+                if !artifact_hash.is_empty() {
+                    lockfile.dependencies.insert(
+                        member_name.to_string(),
+                        crate::package::LockedDependency {
+                            version: String::new(),
+                            source: crate::package::LockedSource::Path { path: member_name.to_string() },
+                            source_hash: Some(artifact_hash.to_string()),
+                            build: None,
+                        },
+                    );
+                }
+            }
+        }
+        lockfile.write_to_root(ws_root.as_std_path())?;
+
+        println!("{}", format!("Workspace build complete: {} members", members.len()).green());
         Ok(())
     }
 
@@ -1044,7 +1276,10 @@ impl CommandExecutor {
             println!("{}", "Cleaning...".cyan());
         }
 
-        let paths = vec!["target", ".cell/cache"];
+        let mut paths = vec!["target", ".cell/cache"];
+        if args.cache {
+            paths.push(".cell/build/cache");
+        }
         let mut removed_paths = Vec::new();
 
         for path in paths {
@@ -1078,6 +1313,20 @@ impl CommandExecutor {
     }
 
     fn check(args: CheckArgs) -> Result<()> {
+        // Workspace mode: check all members or a specific member.
+        if args.workspace || args.package.is_some() {
+            return Self::check_workspace(args);
+        }
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?;
+        if let Some(ws_root) = ws_root {
+            let members = crate::resolve_workspace_members(&ws_root)?;
+            if !members.is_empty() {
+                let mut ws_args = args;
+                ws_args.workspace = true;
+                return Self::check_workspace(ws_args);
+            }
+        }
+
         let args = effective_check_args(args)?;
         let requested_profile = effective_check_target_profile(&args)?;
         let compile_target_profile = compile_target_profile_for_check(requested_profile);
@@ -1177,6 +1426,102 @@ impl CommandExecutor {
         for target in checked_targets {
             println!("  Checked: {}", target);
         }
+        Ok(())
+    }
+
+    fn check_workspace(args: CheckArgs) -> Result<()> {
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "no workspace root found; run from a directory containing a [workspace] Cell.toml",
+            )
+        })?;
+        let all_members = crate::resolve_workspace_members(&ws_root)?;
+        let members: Vec<_> = if let Some(ref pkg_name) = args.package {
+            let mut found = Vec::new();
+            for member_dir in &all_members {
+                let pm = crate::package::PackageManager::new(member_dir.as_std_path());
+                let manifest = pm.read_manifest()?;
+                if manifest.package.name == *pkg_name {
+                    found.push(member_dir.clone());
+                }
+            }
+            if found.is_empty() {
+                return Err(crate::error::CompileError::without_span(format!("workspace member '{}' not found", pkg_name)));
+            }
+            found
+        } else {
+            all_members
+        };
+
+        let mut member_results = Vec::new();
+        let mut failed = 0;
+
+        for member_dir in &members {
+            let compile_result = compile_path(
+                member_dir,
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: args.target_profile.clone(),
+                    primitive_compat: args.primitive_compat.clone(),
+                },
+            );
+
+            match compile_result {
+                Ok(result) => {
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "ok",
+                        "artifact_format": result.artifact_format.display_name(),
+                        "target_profile": result.metadata.target_profile.name,
+                    }));
+                    if !args.json {
+                        println!("{} {}", "Checked".green(), member_dir);
+                    }
+                }
+                Err(e) => {
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "failed",
+                        "error": e.message,
+                    }));
+                    if !args.json {
+                        eprintln!("{}: {}", member_dir, e.message);
+                    }
+                    failed += 1;
+                }
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if failed == 0 { "ok" } else { "failed" },
+                "mode": "workspace",
+                "members": members.len(),
+                "succeeded": members.len() - failed,
+                "failed": failed,
+                "results": member_results,
+            });
+            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize workspace check summary: {}", error))
+            })?;
+            println!("{}", json);
+            if failed > 0 {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "{} of {} workspace members failed",
+                    failed,
+                    members.len()
+                )));
+            }
+            return Ok(());
+        }
+
+        if failed > 0 {
+            return Err(crate::error::CompileError::without_span(format!("{} of {} workspace members failed", failed, members.len())));
+        }
+        println!("{}", format!("Workspace check complete: {} members", members.len()).green());
         Ok(())
     }
 
@@ -2688,6 +3033,9 @@ impl CommandExecutor {
             if manifest.package.repository.is_empty() {
                 issues.push("package repository is missing".to_string());
             }
+            if manifest.package.namespace.is_none() {
+                issues.push("package namespace is missing (required for publishing)".to_string());
+            }
 
             let entry_path = std::path::Path::new(".").join(&manifest.package.entry);
             if !entry_path.exists() {
@@ -2716,14 +3064,88 @@ impl CommandExecutor {
 
             Ok(())
         } else {
-            let dirty = if args.allow_dirty { "allow-dirty" } else { "clean-tree-only" };
-            Self::experimental_command(
-                "publish",
-                &format!(
-                    "registry publication is not implemented yet (package {} v{}, {})",
-                    manifest.package.name, manifest.package.version, dirty
-                ),
-            )
+            // Real publish: compute source_hash, update registry.json
+            let namespace = manifest.package.namespace.clone().ok_or_else(|| {
+                crate::error::CompileError::without_span(
+                    "package namespace is required for publishing; add namespace = \"<your-namespace>\" to [package] in Cell.toml",
+                )
+            })?;
+
+            if manifest.package.name.is_empty() {
+                return Err(crate::error::CompileError::without_span("package name is empty"));
+            }
+            if manifest.package.version.is_empty() {
+                return Err(crate::error::CompileError::without_span("package version is empty"));
+            }
+
+            // Compute source_hash
+            let source_hash = crate::package::registry::compute_source_hash(std::path::Path::new("."))?;
+
+            // Compile to get build artifact hashes
+            let result = compile_path(".", CompileOptions::default())?;
+
+            let constraints_bytes = serde_json::to_vec(&result.metadata.constraints)
+                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", e)))?;
+            let _constraints_hash = crate::hex_encode(&crate::ckb_blake2b256(&constraints_bytes));
+
+            // Build registry version entry
+            let version_entry = crate::package::registry::RegistryVersion {
+                version: manifest.package.version.clone(),
+                tag: format!("v{}", manifest.package.version),
+                source_hash: source_hash.clone(),
+                cellscript_version: result.metadata.compiler_version.clone(),
+                dependencies: {
+                    let mut deps = std::collections::BTreeMap::new();
+                    for (dep_name, dep) in &manifest.dependencies {
+                        let (ns, ver) = match dep {
+                            crate::package::Dependency::Simple(v) => {
+                                (manifest.package.namespace.clone().unwrap_or_default(), v.clone())
+                            }
+                            crate::package::Dependency::Detailed(d) => {
+                                let ns = d.namespace.clone().unwrap_or_else(|| manifest.package.namespace.clone().unwrap_or_default());
+                                (ns, d.version.clone())
+                            }
+                        };
+                        deps.insert(dep_name.clone(), crate::package::registry::RegistryDependencyRef { namespace: ns, version: ver });
+                    }
+                    deps
+                },
+                abi_index: None,
+                schema_hash: None,
+                license: if manifest.package.license.is_empty() { None } else { Some(manifest.package.license.clone()) },
+                released_at: Some({
+                    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                    // Lightweight ISO 8601 formatting without chrono dependency
+                    let days_since_epoch = secs / 86400;
+                    let time_of_day = secs % 86400;
+                    let (year, month, day) = civil_date_from_days(days_since_epoch as i32);
+                    let hour = (time_of_day / 3600) as u8;
+                    let minute = ((time_of_day % 3600) / 60) as u8;
+                    let second = (time_of_day % 60) as u8;
+                    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, minute, second)
+                }),
+                yanked: false,
+                audit: None,
+            };
+
+            // Write to registry.json
+            crate::package::registry::RegistryIndex::append_version(
+                std::path::Path::new("."),
+                &manifest.package.name,
+                &namespace,
+                version_entry,
+            )?;
+
+            println!("{}", "Published".green());
+            println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
+            println!("  Source hash: {}", source_hash);
+            println!();
+            println!("  Next steps:");
+            println!("    git add registry.json");
+            println!("    git commit -m \"publish v{}\"", manifest.package.version);
+            println!("    git tag v{}", manifest.package.version);
+            println!("    git push --tags");
+            Ok(())
         }
     }
 
@@ -2739,6 +3161,7 @@ impl CommandExecutor {
 
             let dep = DetailedDependency {
                 version: args.version.clone().unwrap_or_else(|| "*".to_string()),
+                namespace: None,
                 git: Some(git_url.clone()),
                 branch: None,
                 tag: None,
@@ -2765,6 +3188,7 @@ impl CommandExecutor {
 
             let dep = DetailedDependency {
                 version: args.version.clone().unwrap_or_else(|| "*".to_string()),
+                namespace: None,
                 git: None,
                 branch: None,
                 tag: None,
@@ -2786,13 +3210,56 @@ impl CommandExecutor {
             println!("{}", format!("Installed {} from path {}", crate_name, path.display()).green());
             Ok(())
         } else if let Some(crate_name) = &args.crate_name {
-            Self::experimental_command(
-                "install",
-                &format!(
-                    "registry package installation is not implemented yet; use --git URL or --path PATH to install {}",
-                    crate_name
-                ),
-            )
+            // Support both:
+            //   cellc install cellscript/amm@1.2.0   (Go-style combined format)
+            //   cellc install amm --namespace cellscript --version 1.2.0
+            let (resolved_name, resolved_namespace, resolved_version) = if args.namespace.is_none() && args.version.is_none() {
+                // Try parsing namespace/name@version format
+                if let Some((ns, rest)) = crate_name.split_once('/') {
+                    if let Some((name, ver)) = rest.split_once('@') {
+                        (name.to_string(), Some(ns.to_string()), Some(ver.to_string()))
+                    } else {
+                        (rest.to_string(), Some(ns.to_string()), None)
+                    }
+                } else if let Some((name, ver)) = crate_name.split_once('@') {
+                    (name.to_string(), None, Some(ver.to_string()))
+                } else {
+                    (crate_name.clone(), None, None)
+                }
+            } else {
+                (crate_name.clone(), args.namespace.clone(), args.version.clone())
+            };
+
+            let version = resolved_version.unwrap_or_else(|| "*".to_string());
+
+            let _resolved = pm.resolve_from_registry_with_namespace(&resolved_name, &version, resolved_namespace.as_deref())?;
+
+            let dep = if resolved_namespace.is_some() {
+                Dependency::Detailed(DetailedDependency {
+                    version,
+                    namespace: resolved_namespace.clone(),
+                    git: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    path: None,
+                    optional: false,
+                    features: Vec::new(),
+                    default_features: true,
+                })
+            } else {
+                Dependency::Simple(version)
+            };
+
+            let mut manifest = pm.read_manifest()?;
+            manifest.dependencies.insert(resolved_name.clone(), dep);
+            pm.write_manifest(&manifest)?;
+
+            refresh_lockfile_from_manifest(std::path::Path::new("."))?;
+
+            let ns_display = resolved_namespace.as_deref().unwrap_or("<default>");
+            println!("{}", format!("Installed {}/{} from registry", ns_display, resolved_name).green());
+            Ok(())
         } else {
             let mut pm = PackageManager::new(".");
             pm.resolve_dependencies()?;
@@ -2826,7 +3293,9 @@ impl CommandExecutor {
                 let source = match &package.source {
                     crate::package::PackageSource::Local(path) => format!("path: {}", path.display()),
                     crate::package::PackageSource::Git { url, revision } => format!("git: {}#{}", url, revision),
-                    crate::package::PackageSource::Registry { name, version } => format!("registry: {}@{}", name, version),
+                    crate::package::PackageSource::Registry { registry, namespace, version, .. } => {
+                        format!("registry: {}/{}@{}", registry, namespace, version)
+                    }
                 };
                 println!("  {} v{} ({})", name, package.version, source);
             }
@@ -2923,6 +3392,143 @@ impl CommandExecutor {
         println!("  Config directory: {}", config_dir.display());
         Ok(())
     }
+
+    fn registry_verify(args: RegistryVerifyArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+
+        // Read Cell.lock
+        let lockfile = Lockfile::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Cell.lock not found; run 'cellc build' first"))?;
+
+        // Read Deployed.toml
+        let deployed = crate::package::DeployedManifest::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Deployed.toml not found; deploy the contract first"))?;
+
+        let mut violations = Vec::new();
+
+        // Check build hashes consistency
+        if let Some(build) = &lockfile.package_build {
+            if let Some(deployed_build) = &deployed.build {
+                if let (Some(lk), Some(dp)) = (&build.artifact_hash, &deployed_build.artifact_hash) {
+                    if lk != dp {
+                        violations.push(format!("artifact_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lk, dp));
+                    }
+                }
+                if let (Some(lk), Some(dp)) = (&build.schema_hash, &deployed_build.schema_hash) {
+                    if lk != dp {
+                        violations.push(format!("schema_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lk, dp));
+                    }
+                }
+            }
+        }
+
+        // Check deployment records
+        for deployment in &deployed.deployments {
+            if let Some(deployment_ref) = lockfile.deployment.get(&deployment.network) {
+                if let Some(ref code_hash) = deployment_ref.code_hash {
+                    if code_hash != &deployment.code_hash {
+                        violations.push(format!(
+                            "code_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                            deployment.network, code_hash, deployment.code_hash
+                        ));
+                    }
+                }
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if violations.is_empty() { "ok" } else { "failed" },
+                "violations": violations,
+            });
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
+            println!("{}", json);
+        } else if violations.is_empty() {
+            println!("{}", "Registry verification passed".green());
+        } else {
+            println!("{}", "Registry verification failed".red());
+            for v in &violations {
+                println!("  - {}", v);
+            }
+            return Err(crate::error::CompileError::without_span("registry verification failed"));
+        }
+
+        Ok(())
+    }
+
+    fn package_verify(args: PackageVerifyArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+        let pm = PackageManager::new(root);
+        let manifest = pm.read_manifest()?;
+
+        // Read Cell.lock
+        let lockfile = Lockfile::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Cell.lock not found; run 'cellc build' first"))?;
+
+        let mut violations = Vec::new();
+
+        // Check lockfile consistency with manifest
+        let issues = lockfile.consistency_issues(&manifest);
+        for issue in &issues {
+            violations.push(issue.clone());
+        }
+
+        // Check source_hash if present
+        if let Some(source_hash) = &lockfile.package.source_hash {
+            let computed = crate::package::registry::compute_source_hash(root)?;
+            if &computed != source_hash {
+                violations.push(format!("source_hash mismatch: Cell.lock has '{}', computed '{}'", source_hash, computed));
+            }
+        }
+
+        // Check build hashes if present
+        if let Some(build) = &lockfile.package_build {
+            if build.artifact_hash.is_none() {
+                violations.push("Cell.lock [package.build] has no artifact_hash; run 'cellc build' to populate".to_string());
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if violations.is_empty() { "ok" } else { "failed" },
+                "violations": violations,
+            });
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
+            println!("{}", json);
+        } else if violations.is_empty() {
+            println!("{}", "Package verification passed".green());
+        } else {
+            println!("{}", "Package verification failed".red());
+            for v in &violations {
+                println!("  - {}", v);
+            }
+            return Err(crate::error::CompileError::without_span("package verification failed"));
+        }
+
+        Ok(())
+    }
+
+    fn registry_add(args: RegistryAddArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+        let cache_dir = root.join(".cell/registry-cache");
+        let discovery = crate::package::registry::DiscoveryIndex::new(crate::package::registry::DEFAULT_REGISTRY_URL, &cache_dir);
+
+        discovery.add_entry(&args.namespace, &args.name, &args.source)?;
+
+        println!("{}", "Registry entry added".green());
+        println!("  Namespace: {}", args.namespace);
+        println!("  Name: {}", args.name);
+        println!("  Source: {}", args.source);
+        println!();
+        println!("  Next steps:");
+        println!("    cd {} && git add {}/{}.json", cache_dir.display(), args.namespace, args.name);
+        println!("    git commit -m \"add {}/{}\"", args.namespace, args.name);
+        println!("    Open a PR to the cellscript-registry repository");
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "vm-runner")]
@@ -2932,6 +3538,22 @@ type CliVmMachine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemor
 struct RegistryCredential {
     registry: String,
     token: String,
+}
+
+/// Convert days since Unix epoch (1970-01-01) to (year, month, day).
+/// Implements the civil date algorithm from Howard Hinnant.
+fn civil_date_from_days(z: i32) -> (i32, u32, u32) {
+    let z = z + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let y = y + if m <= 2 { 1 } else { 0 };
+    (y, m as u32, d as u32)
 }
 
 fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result<crate::CompileResult> {
@@ -4462,7 +5084,8 @@ fn dirs_config_dir() -> PathBuf {
 }
 
 fn effective_check_args(mut args: CheckArgs) -> Result<CheckArgs> {
-    let policy = PackageManager::new(".").read_manifest()?.policy;
+    // In a workspace root (virtual manifest without [package]), fall back to default policy.
+    let policy = PackageManager::new(".").read_manifest().map(|m| m.policy).unwrap_or_default();
     merge_check_policy(&mut args, &policy);
     Ok(args)
 }
@@ -4581,6 +5204,7 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
     match (&args.git, &args.path) {
         (Some(git), _) => Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
+            namespace: None,
             git: Some(git.clone()),
             branch: None,
             tag: None,
@@ -4592,6 +5216,7 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
         }),
         (_, Some(path)) => Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
+            namespace: None,
             git: None,
             branch: None,
             tag: None,
@@ -4626,6 +5251,8 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         deny_ckb_runtime: args.deny_ckb_runtime,
         deny_runtime_obligations: args.deny_runtime_obligations,
         primitive_compat: args.primitive_compat.clone(),
+        package: None,
+        workspace: false,
     })
 }
 
@@ -5063,6 +5690,8 @@ impl CompileTestExpectation {
             deny_ckb_runtime: self.deny_ckb_runtime,
             deny_runtime_obligations: self.deny_runtime_obligations,
             primitive_compat: None,
+            package: None,
+            workspace: false,
         }
     }
 }
@@ -5760,6 +6389,19 @@ impl CliParser {
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
+                    )
+                    .arg(
+                        Arg::new("package")
+                            .long("package")
+                            .short('p')
+                            .value_name("NAME")
+                            .help("Build a specific workspace member"),
+                    )
+                    .arg(
+                        Arg::new("workspace")
+                            .long("workspace")
+                            .action(ArgAction::SetTrue)
+                            .help("Build all workspace members"),
                     ),
             )
             .subcommand(
@@ -5834,7 +6476,8 @@ impl CliParser {
             .subcommand(
                 ClapCommand::new("clean")
                     .about("Remove build artifacts")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON clean summary")),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON clean summary"))
+                    .arg(Arg::new("cache").long("cache").action(ArgAction::SetTrue).help("Also remove incremental compilation cache (.cell/build/cache)")),
             )
             .subcommand(
                 ClapCommand::new("remove")
@@ -5893,6 +6536,19 @@ impl CliParser {
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
+                    )
+                    .arg(
+                        Arg::new("package")
+                            .long("package")
+                            .short('p')
+                            .value_name("NAME")
+                            .help("Check a specific workspace member"),
+                    )
+                    .arg(
+                        Arg::new("workspace")
+                            .long("workspace")
+                            .action(ArgAction::SetTrue)
+                            .help("Check all workspace members"),
                     ),
             )
             .subcommand(
@@ -6224,9 +6880,10 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("install")
-                    .about("Experimental: install a package")
+                    .about("Install a package from registry, git, or path")
                     .arg(Arg::new("crate").value_name("CRATE"))
                     .arg(Arg::new("version").long("version").value_name("VERSION"))
+                    .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry install"))
                     .arg(Arg::new("git").long("git").value_name("URL"))
                     .arg(Arg::new("path").long("path").value_name("PATH")),
             )
@@ -6240,6 +6897,23 @@ impl CliParser {
                 ClapCommand::new("login")
                     .about("Experimental: authenticate against a registry")
                     .arg(Arg::new("registry").long("registry").value_name("URL")),
+            )
+            .subcommand(
+                ClapCommand::new("registry-verify")
+                    .about("Verify deployment registry records against Cell.lock and chain facts")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+            )
+            .subcommand(
+                ClapCommand::new("package-verify")
+                    .about("Verify package integrity against Cell.lock and source tree")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+            )
+            .subcommand(
+                ClapCommand::new("registry-add")
+                    .about("Register a new package in the discovery index")
+                    .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
+                    .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
+                    .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
             )
             .get_matches();
 
@@ -6260,6 +6934,8 @@ impl CliParser {
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
+                package: m.get_one::<String>("package").cloned(),
+                workspace: m.get_flag("workspace"),
                 ..Default::default()
             }),
             Some(("test", m)) => Command::Test(TestArgs {
@@ -6313,7 +6989,7 @@ impl CliParser {
                 build: m.get_flag("build"),
                 json: m.get_flag("json"),
             }),
-            Some(("clean", m)) => Command::Clean(CleanArgs { json: m.get_flag("json") }),
+            Some(("clean", m)) => Command::Clean(CleanArgs { json: m.get_flag("json"), cache: m.get_flag("cache") }),
             Some(("repl", _)) => Command::Repl,
             Some(("check", m)) => Command::Check(CheckArgs {
                 all_targets: m.get_flag("all-targets"),
@@ -6328,6 +7004,8 @@ impl CliParser {
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
                 features: Vec::new(),
+                package: m.get_one::<String>("package").cloned(),
+                workspace: m.get_flag("workspace"),
             }),
             Some(("metadata", m)) => Command::Metadata(MetadataArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -6509,12 +7187,20 @@ impl CliParser {
             Some(("install", m)) => Command::Install(InstallArgs {
                 crate_name: m.get_one::<String>("crate").cloned(),
                 version: m.get_one::<String>("version").cloned(),
+                namespace: m.get_one::<String>("namespace").cloned(),
                 git: m.get_one::<String>("git").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
             }),
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
+            Some(("registry-verify", m)) => Command::RegistryVerify(RegistryVerifyArgs { json: m.get_flag("json") }),
+            Some(("package-verify", m)) => Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") }),
+            Some(("registry-add", m)) => Command::RegistryAdd(RegistryAddArgs {
+                namespace: m.get_one::<String>("namespace").cloned().unwrap_or_default(),
+                name: m.get_one::<String>("name").cloned().unwrap_or_default(),
+                source: m.get_one::<String>("source").cloned().unwrap_or_default(),
+            }),
             _ => unreachable!(),
         }
     }

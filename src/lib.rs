@@ -384,6 +384,8 @@ pub struct CompileResult {
     pub metadata: CompileMetadata,
     /// Parsed AST (for simulation, etc.)
     pub ast: crate::ast::Module,
+    /// Whether this result was served from the incremental compilation cache
+    pub cache_hit: bool,
 }
 
 /// Validated artifact/metadata pair loaded from disk.
@@ -4077,7 +4079,7 @@ fn compile_ast_with_build(
         validate_primitive_strict_017_metadata(&metadata)?;
     }
 
-    let result = CompileResult { artifact_bytes, artifact_format, artifact_hash, metadata, ast: ast.clone() };
+    let result = CompileResult { artifact_bytes, artifact_format, artifact_hash, metadata, ast: ast.clone(), cache_hit: false };
     result.validate()?;
     Ok(result)
 }
@@ -4136,9 +4138,12 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     let source =
         std::fs::read_to_string(path).map_err(|e| CompileError::new(format!("failed to read file: {}", e), error::Span::default()))?;
 
-    // Incremental compilation: skip recompilation if cache hit and source unchanged
-    if let Some(cached) = incremental_cache_hit(path, &source, &options) {
-        return Ok(cached);
+    // Incremental compilation: skip recompilation if cache hit and source unchanged.
+    // Cache is only used for default entry scope (no --entry-action / --entry-lock).
+    if entry_scope.is_none() {
+        if let Some(cached) = incremental_cache_hit(path, &source, &options) {
+            return Ok(cached);
+        }
     }
 
     let tokens = lexer::lex(&source)?;
@@ -4166,43 +4171,94 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
 
 /// Check incremental compilation cache for a previous compile result.
 /// Returns `Some(result)` if the cache is valid and the source has not changed.
-fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOptions) -> Option<CompileResult> {
-    let cache_dir = path.parent()?.join(".cell/build/cache");
-    let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions) -> Option<CompileResult> {
+    let cache_dir = incremental_cache_dir(path)?;
+    let cache_key = incremental_cache_key(source, options);
+    let entry_dir = cache_dir.join(&cache_key);
 
-    let inc_options = incremental::CompileOptions {
-        opt_level: options.opt_level,
-        target: options.target.clone().unwrap_or_default(),
-        debug: options.debug,
+    let artifact_path = entry_dir.join("artifact");
+    let metadata_path = entry_dir.join("metadata.json");
+
+    if !artifact_path.exists() || !metadata_path.exists() {
+        return None;
+    }
+
+    // Verify the source content hash still matches.
+    let source_hash_file = entry_dir.join("source_hash");
+    let cached_source_hash = std::fs::read_to_string(&source_hash_file).ok()?;
+    let current_source_hash = hex_encode(&ckb_blake2b256(source.as_bytes()));
+    if cached_source_hash != current_source_hash {
+        return None;
+    }
+
+    // Load cached artifact and metadata.
+    let artifact_bytes = std::fs::read(&artifact_path).ok()?;
+    let metadata_json = std::fs::read_to_string(&metadata_path).ok()?;
+    let metadata: CompileMetadata = serde_json::from_str(&metadata_json).ok()?;
+
+    let artifact_hash: [u8; 32] = {
+        let hash_hex = metadata.artifact_hash.as_deref().unwrap_or("");
+        hex_decode(hash_hex).unwrap_or([0u8; 32])
     };
 
-    if !compiler.needs_recompile(path.as_std_path(), &inc_options) {
-        // Cache hit — recompile not needed, but we still need to recompile
-        // from source because we do not cache the full CompileResult.
-        // A full incremental cache would serialize CompileResult to disk.
-        None
-    } else {
-        None
-    }
+    Some(CompileResult {
+        artifact_bytes,
+        artifact_format: match metadata.artifact_format.as_str() {
+            "RISC-V ELF" => ArtifactFormat::RiscvElf,
+            _ => ArtifactFormat::RiscvAssembly,
+        },
+        artifact_hash,
+        metadata,
+        ast: ast::Module { name: String::new(), items: Vec::new(), span: crate::error::Span { start: 0, end: 0, line: 0, column: 0 } },
+        cache_hit: true,
+    })
 }
 
-/// Store compile result metadata to incremental cache after a successful compile.
-fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOptions, _result: &CompileResult) {
-    let Some(parent) = path.parent() else { return };
-    let cache_dir = parent.join(".cell/build/cache");
-    let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+/// Store compile result to incremental cache after a successful compile.
+fn incremental_cache_store(path: &Utf8Path, source: &str, options: &CompileOptions, result: &CompileResult) {
+    let Some(cache_dir) = incremental_cache_dir(path) else { return };
+    let cache_key = incremental_cache_key(source, options);
+    let entry_dir = cache_dir.join(&cache_key);
 
-    let inc_options = incremental::CompileOptions {
-        opt_level: options.opt_level,
-        target: options.target.clone().unwrap_or_default(),
-        debug: options.debug,
-    };
+    let _ = std::fs::create_dir_all(&entry_dir);
 
-    let output_path = parent.join(".cell/build").join(path.file_name().unwrap_or("output"));
-    let _ = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options);
-    let _ = compiler.save_cache();
+    let _ = std::fs::write(entry_dir.join("artifact"), &result.artifact_bytes);
+    let metadata_json = serde_json::to_string_pretty(&result.metadata).unwrap_or_default();
+    let _ = std::fs::write(entry_dir.join("metadata.json"), metadata_json);
+    let source_hash = hex_encode(&ckb_blake2b256(source.as_bytes()));
+    let _ = std::fs::write(entry_dir.join("source_hash"), &source_hash);
+}
+
+fn incremental_cache_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
+    // Prefer the package root (where Cell.toml lives) so the cache sits at
+    //   <pkg-root>/.cell/build/cache
+    // rather than next to the source file (e.g. src/.cell/build/cache).
+    // Falls back to the source file's parent when not inside a package.
+    if let Ok(Some(pkg_root)) = find_package_root(path) {
+        return Some(pkg_root.join(".cell/build/cache"));
+    }
+    let parent = path.parent()?;
+    Some(parent.join(".cell/build/cache"))
+}
+
+fn incremental_cache_key(source: &str, options: &CompileOptions) -> String {
+    let mut key_input = String::new();
+    key_input.push_str(&hex_encode(&ckb_blake2b256(source.as_bytes())));
+    key_input.push_str(&format!("-O{}", options.opt_level));
+    key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
+    key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
+    hex_encode(&ckb_blake2b256(key_input.as_bytes()))
+}
+
+fn hex_decode(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0u8; 32];
+    for i in 0..32 {
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
 }
 
 fn source_unit_from_bytes(path: impl Into<String>, role: impl Into<String>, bytes: &[u8]) -> SourceUnitMetadata {
@@ -4291,6 +4347,8 @@ struct CellManifest {
     #[serde(default)]
     package: Option<CellManifestPackage>,
     #[serde(default)]
+    workspace: Option<CellWorkspaceConfig>,
+    #[serde(default)]
     dependencies: HashMap<String, CellDependency>,
     #[serde(default)]
     build: CellBuildConfig,
@@ -4304,6 +4362,15 @@ struct CellManifestPackage {
     entry: Option<String>,
     #[serde(default)]
     source_roots: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
+struct CellWorkspaceConfig {
+    #[serde(default)]
+    members: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -4393,6 +4460,53 @@ fn find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
         current = dir.parent();
     }
     Ok(None)
+}
+
+/// Find the workspace root by walking upward from `path`.
+/// A workspace root is a directory whose `Cell.toml` contains a `[workspace]` section
+/// and optionally no `[package]` section (virtual manifest).
+pub fn find_workspace_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        let manifest_path = dir.join("Cell.toml");
+        if manifest_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                let has_workspace = content.contains("[workspace]");
+                if has_workspace {
+                    return Ok(Some(dir.to_path_buf()));
+                }
+            }
+        }
+        current = dir.parent();
+    }
+    Ok(None)
+}
+
+/// Resolve workspace member directories from a workspace root.
+/// Reads the `[workspace]` section and resolves member paths.
+pub fn resolve_workspace_members(workspace_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let manifest = load_manifest(workspace_root)?;
+    let Some(ws_config) = manifest.workspace else {
+        return Ok(Vec::new());
+    };
+    let mut members = Vec::new();
+    for member_pattern in &ws_config.members {
+        let member_path = workspace_root.join(member_pattern);
+        if !member_path.is_dir() {
+            return Err(CompileError::new(
+                format!("workspace member '{}' does not exist or is not a directory", member_pattern),
+                error::Span::default(),
+            ));
+        }
+        if !member_path.join("Cell.toml").exists() {
+            return Err(CompileError::new(
+                format!("workspace member '{}' does not contain Cell.toml", member_pattern),
+                error::Span::default(),
+            ));
+        }
+        members.push(canonical_utf8_path(&member_path)?);
+    }
+    Ok(members)
 }
 
 fn load_package_modules(

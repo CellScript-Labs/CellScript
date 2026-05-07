@@ -3,9 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+pub mod registry;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
     pub package: PackageInfo,
+    #[serde(default)]
+    pub workspace: Option<WorkspaceConfig>,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default)]
@@ -24,6 +28,8 @@ pub struct PackageManifest {
 pub struct PackageInfo {
     pub name: String,
     pub version: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub authors: Vec<String>,
     #[serde(default)]
@@ -56,6 +62,70 @@ fn default_entry() -> String {
     "src/main.cell".to_string()
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    #[serde(default)]
+    pub members: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+/// A virtual manifest that contains only a `[workspace]` section with no `[package]`.
+/// This represents a workspace root that is not itself a package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceManifest {
+    pub workspace: WorkspaceConfig,
+}
+
+impl WorkspaceManifest {
+    pub fn read_from_dir(dir: &Path) -> Result<Option<Self>> {
+        let manifest_path = dir.join("Cell.toml");
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| CompileError::without_span(format!("failed to read '{}': {}", manifest_path.display(), e)))?;
+        // Try parsing as a workspace-only manifest first.
+        let ws: std::result::Result<WorkspaceManifest, _> = toml::from_str(&content);
+        if let Ok(manifest) = ws {
+            // Make sure it really has no [package] section — if it does,
+            // the caller should use PackageManifest instead.
+            if !content.contains("[package]") {
+                return Ok(Some(manifest));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn write_to_dir(&self, dir: &Path) -> Result<()> {
+        let manifest_path = dir.join("Cell.toml");
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(&manifest_path, content)?;
+        Ok(())
+    }
+
+    /// Resolve member paths relative to the workspace root directory.
+    pub fn resolve_member_paths(&self, root: &Path) -> Result<Vec<PathBuf>> {
+        let mut members = Vec::new();
+        for member_pattern in &self.workspace.members {
+            let member_path = root.join(member_pattern);
+            if member_path.is_dir() && member_path.join("Cell.toml").exists() {
+                members.push(canonical_path(&member_path)?);
+            } else {
+                return Err(CompileError::without_span(format!(
+                    "workspace member '{}' does not exist or is not a valid package directory",
+                    member_pattern
+                )));
+            }
+        }
+        Ok(members)
+    }
+}
+
+fn canonical_path(path: &Path) -> Result<PathBuf> {
+    std::fs::canonicalize(path).map_err(|e| CompileError::without_span(format!("failed to canonicalize '{}': {}", path.display(), e)))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Dependency {
@@ -67,6 +137,8 @@ pub enum Dependency {
 pub struct DetailedDependency {
     #[serde(default = "default_any_version")]
     pub version: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub git: Option<String>,
     #[serde(default)]
@@ -175,13 +247,15 @@ pub struct ResolvedPackage {
     pub path: PathBuf,
     pub source: PackageSource,
     pub dependencies: Vec<String>,
+    pub namespace: Option<String>,
+    pub source_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum PackageSource {
     Local(PathBuf),
     Git { url: String, revision: String },
-    Registry { name: String, version: String },
+    Registry { registry: String, url: String, revision: String, namespace: String, version: String },
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +320,7 @@ impl PackageManager {
             package: PackageInfo {
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
+                namespace: None,
                 authors: vec![],
                 description: String::new(),
                 license: String::new(),
@@ -260,6 +335,7 @@ impl PackageManager {
                 include: vec![],
                 exclude: vec![],
             },
+            workspace: None,
             dependencies: HashMap::new(),
             dev_dependencies: HashMap::new(),
             build: BuildConfig::default(),
@@ -323,7 +399,10 @@ dist/
         stack.push(name.to_string());
 
         let (resolved, child_dependencies) = match dep {
-            Dependency::Simple(version) => (self.resolve_from_registry(name, version)?, HashMap::new()),
+            Dependency::Simple(version) => {
+                let (resolved, manifest) = self.resolve_from_registry_with_manifest(name, version, None)?;
+                (resolved, manifest.dependencies)
+            }
             Dependency::Detailed(detailed) => {
                 if let Some(path) = &detailed.path {
                     let (resolved, manifest) = self.resolve_from_path_at(name, path, base_root)?;
@@ -332,7 +411,9 @@ dist/
                     let (resolved, manifest) = self.resolve_from_git_with_manifest(name, git, detailed)?;
                     (resolved, manifest.dependencies)
                 } else {
-                    (self.resolve_from_registry(name, &detailed.version)?, HashMap::new())
+                    let ns = detailed.namespace.as_deref();
+                    let (resolved, manifest) = self.resolve_from_registry_with_manifest(name, &detailed.version, ns)?;
+                    (resolved, manifest.dependencies)
                 }
             }
         };
@@ -349,10 +430,129 @@ dist/
     }
 
     pub fn resolve_from_registry(&self, name: &str, version: &str) -> Result<ResolvedPackage> {
-        Err(CompileError::without_span(format!(
-            "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
-            name, version
-        )))
+        self.resolve_from_registry_with_namespace(name, version, None)
+    }
+
+    pub fn resolve_from_registry_with_namespace(&self, name: &str, version: &str, namespace: Option<&str>) -> Result<ResolvedPackage> {
+        let (resolved, _) = self.resolve_from_registry_with_manifest(name, version, namespace)?;
+        Ok(resolved)
+    }
+
+    fn resolve_from_registry_with_manifest(
+        &self,
+        name: &str,
+        version: &str,
+        namespace: Option<&str>,
+    ) -> Result<(ResolvedPackage, PackageManifest)> {
+        // 1. Determine namespace: explicit > consuming package namespace > error
+        let resolved_namespace = namespace
+            .map(str::to_string)
+            .or_else(|| {
+                // Try to use consuming package's namespace
+                self.read_manifest().ok().and_then(|m| m.package.namespace)
+            })
+            .ok_or_else(|| {
+                CompileError::without_span(format!(
+                    "registry dependency '{}' requires a namespace; specify namespace in dependency or set namespace in [package]",
+                    name
+                ))
+            })?;
+
+        // 2. Clone/update discovery index → find source repo URL
+        let cache_dir = self.registry_cache_dir();
+        let discovery = registry::DiscoveryIndex::new(registry::DEFAULT_REGISTRY_URL, &cache_dir);
+        let entry = discovery.lookup(&resolved_namespace, name).map_err(|e| {
+            CompileError::without_span(format!("failed to find package '{}/{}' in registry: {}", resolved_namespace, name, e))
+        })?;
+
+        // 3. Clone source repo
+        let source_url = &entry.source;
+        let source_cache = self.git_cache_dir();
+        std::fs::create_dir_all(&source_cache)
+            .map_err(|e| CompileError::without_span(format!("failed to create source cache directory: {}", e)))?;
+
+        let cache_key = format!("{}#{}", source_url, version);
+        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
+        let clone_dir = source_cache.join(&cache_name);
+
+        if clone_dir.exists() && clone_dir.join(".git").exists() {
+            registry::git_update(&clone_dir).map_err(CompileError::without_span)?;
+        } else {
+            let _ = std::fs::remove_dir_all(&clone_dir);
+            registry::git_clone(source_url, &clone_dir).map_err(CompileError::without_span)?;
+        }
+
+        // 4. Find matching version tag
+        let tags = registry::git_list_tags(&clone_dir).map_err(CompileError::without_span)?;
+        let target_tag = format!("v{}", version);
+
+        // Try exact tag match first
+        let matching_tag = tags.iter().find(|(tag, _)| tag == &target_tag);
+
+        if let Some((tag, _)) = matching_tag {
+            registry::git_checkout(&clone_dir, tag).map_err(CompileError::without_span)?;
+        } else {
+            // Try semver-compatible match via registry.json
+            let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+            let found_version = reg_index.find_matching_version(version).ok_or_else(|| {
+                CompileError::without_span(format!("no matching version found for '{}/{}@{}'", resolved_namespace, name, version))
+            })?;
+            registry::git_checkout(&clone_dir, &found_version.tag).map_err(CompileError::without_span)?;
+        }
+
+        let revision = registry::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
+
+        // 5. Verify registry.json source_hash if present
+        if clone_dir.join("registry.json").exists() {
+            let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+            if let Some(ver) = reg_index.versions.iter().find(|v| v.version == version) {
+                if !ver.source_hash.is_empty() {
+                    let computed = registry::compute_source_hash(&clone_dir)?;
+                    let expected = &ver.source_hash;
+                    if computed != *expected {
+                        return Err(CompileError::without_span(format!(
+                            "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
+                            resolved_namespace, name, version, expected, computed
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 6. Read Cell.toml and resolve transitive dependencies
+        let manifest_path = clone_dir.join("Cell.toml");
+        if !manifest_path.exists() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' does not contain Cell.toml",
+                resolved_namespace, name
+            )));
+        }
+
+        let content = std::fs::read_to_string(&manifest_path)?;
+        let manifest: PackageManifest = toml::from_str(&content)?;
+
+        Ok((
+            ResolvedPackage {
+                name: name.to_string(),
+                version: manifest.package.version.clone(),
+                path: clone_dir.clone(),
+                source: PackageSource::Registry {
+                    registry: registry::DEFAULT_REGISTRY_URL.to_string(),
+                    url: source_url.clone(),
+                    revision,
+                    namespace: resolved_namespace.clone(),
+                    version: manifest.package.version.clone(),
+                },
+                dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: Some(resolved_namespace),
+                source_hash: None,
+            },
+            manifest,
+        ))
+    }
+
+    fn registry_cache_dir(&self) -> PathBuf {
+        self.root.join(".cell/registry-cache")
     }
 
     pub fn resolve_from_path(&self, name: &str, path: &str) -> Result<ResolvedPackage> {
@@ -384,6 +584,8 @@ dist/
                 path: package_path,
                 source: PackageSource::Local(source_path),
                 dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: manifest.package.namespace.clone(),
+                source_hash: None,
             },
             manifest,
         ))
@@ -445,6 +647,8 @@ dist/
                 path: clone_dir.clone(),
                 source: PackageSource::Git { url: url.to_string(), revision },
                 dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: manifest.package.namespace.clone(),
+                source_hash: None,
             },
             manifest,
         ))
@@ -477,7 +681,7 @@ dist/
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("Warning: git pull failed for {}: {}", clone_dir.display(), stderr.trim());
+            return Err(format!("git fetch failed for {}: {}", clone_dir.display(), stderr.trim()));
         }
 
         Ok(())
@@ -627,14 +831,52 @@ fn simple_hash(s: &str) -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lockfile {
     pub version: u32,
+    #[serde(default)]
+    pub package: LockfilePackageInfo,
     pub dependencies: BTreeMap<String, LockedDependency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_build: Option<LockedBuildInfo>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub deployment: BTreeMap<String, LockfileDeploymentRef>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LockfilePackageInfo {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
+
+/// A reference from Cell.lock [deployment.<network>] to a Deployed.toml entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockfileDeploymentRef {
+    pub record: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_hash: Option<String>,
 }
 
 impl Lockfile {
     pub const CURRENT_VERSION: u32 = 1;
 
     pub fn new() -> Self {
-        Self { version: Self::CURRENT_VERSION, dependencies: BTreeMap::new() }
+        Self {
+            version: Self::CURRENT_VERSION,
+            package: LockfilePackageInfo::default(),
+            dependencies: BTreeMap::new(),
+            package_build: None,
+            deployment: BTreeMap::new(),
+        }
     }
 
     pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
@@ -663,10 +905,16 @@ impl Lockfile {
                 source: match &package.source {
                     PackageSource::Local(path) => LockedSource::Path { path: path.to_string_lossy().to_string() },
                     PackageSource::Git { url, revision } => LockedSource::Git { url: url.clone(), revision: revision.clone() },
-                    PackageSource::Registry { name: reg_name, version } => {
-                        LockedSource::Registry { name: reg_name.clone(), version: version.clone() }
-                    }
+                    PackageSource::Registry { registry, url, revision, namespace, version } => LockedSource::Registry {
+                        registry: registry.clone(),
+                        url: url.clone(),
+                        revision: revision.clone(),
+                        namespace: namespace.clone(),
+                        version: version.clone(),
+                    },
                 },
+                source_hash: package.source_hash.clone(),
+                build: None,
             };
             self.dependencies.insert(name.clone(), locked);
         }
@@ -709,7 +957,7 @@ impl Lockfile {
                 continue;
             };
             if let Some(dep) = manifest.dependencies.get(name) {
-                issues.extend(lock_dependency_consistency_issues(name, dep, locked));
+                issues.extend(lock_dependency_consistency_issues(name, dep, locked, manifest.package.namespace.as_deref()));
             }
         }
 
@@ -750,9 +998,19 @@ fn resolved_dependency_consistency_issues(name: &str, package: &ResolvedPackage,
         (PackageSource::Git { url, revision }, LockedSource::Git { url: locked_url, revision: locked_revision })
             if locked_url == url && locked_revision == revision => {}
         (
-            PackageSource::Registry { name: package_name, version: package_version },
-            LockedSource::Registry { name: locked_name, version: locked_version },
-        ) if locked_name == package_name && locked_version == package_version => {}
+            PackageSource::Registry { registry, url, revision, namespace, version },
+            LockedSource::Registry {
+                registry: locked_registry,
+                url: locked_url,
+                revision: locked_revision,
+                namespace: locked_namespace,
+                version: locked_version,
+            },
+        ) if locked_registry == registry
+            && locked_url == url
+            && locked_revision == revision
+            && locked_namespace == namespace
+            && locked_version == version => {}
         (_, source) => issues.push(format!(
             "resolved dependency '{}' expects {} but Cell.lock records {}",
             name,
@@ -764,13 +1022,18 @@ fn resolved_dependency_consistency_issues(name: &str, package: &ResolvedPackage,
     issues
 }
 
-fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &LockedDependency) -> Vec<String> {
+fn lock_dependency_consistency_issues(
+    name: &str,
+    dep: &Dependency,
+    locked: &LockedDependency,
+    consuming_namespace: Option<&str>,
+) -> Vec<String> {
     let mut issues = Vec::new();
 
     match dep {
         Dependency::Simple(version) => match &locked.source {
-            LockedSource::Registry { name: locked_name, version: locked_version }
-                if locked_name == name && locked_version == version => {}
+            LockedSource::Registry { namespace: locked_namespace, version: locked_version, .. }
+                if Some(locked_namespace.as_str()) == consuming_namespace && locked_version == version => {}
             source => issues.push(format!(
                 "dependency '{}' expects registry source {}@{} but Cell.lock records {}",
                 name,
@@ -814,8 +1077,9 @@ fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &Loc
                 push_locked_version_issue(name, &detail.version, &locked.version, &mut issues);
             } else {
                 match &locked.source {
-                    LockedSource::Registry { name: locked_name, version: locked_version }
-                        if locked_name == name && locked_version == &detail.version => {}
+                    LockedSource::Registry { namespace: locked_namespace, version: locked_version, .. }
+                        if Some(locked_namespace.as_str()) == detail.namespace.as_deref().or(consuming_namespace)
+                            && locked_version == &detail.version => {}
                     source => issues.push(format!(
                         "dependency '{}' expects registry source {}@{} but Cell.lock records {}",
                         name,
@@ -841,7 +1105,7 @@ fn locked_source_display(source: &LockedSource) -> String {
     match source {
         LockedSource::Path { path } => format!("path '{}'", path),
         LockedSource::Git { url, revision } => format!("git '{}#{}'", url, revision),
-        LockedSource::Registry { name, version } => format!("registry {}@{}", name, version),
+        LockedSource::Registry { registry, namespace, version, .. } => format!("registry {}/{}@{}", registry, namespace, version),
     }
 }
 
@@ -849,7 +1113,7 @@ fn package_source_display(source: &PackageSource) -> String {
     match source {
         PackageSource::Local(path) => format!("path '{}'", path.display()),
         PackageSource::Git { url, revision } => format!("git '{}#{}'", url, revision),
-        PackageSource::Registry { name, version } => format!("registry {}@{}", name, version),
+        PackageSource::Registry { registry, namespace, version, .. } => format!("registry {}/{}@{}", registry, namespace, version),
     }
 }
 
@@ -859,17 +1123,39 @@ impl Default for Lockfile {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LockedBuildInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockedDependency {
     pub version: String,
     pub source: LockedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<LockedBuildInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LockedSource {
     Path { path: String },
     Git { url: String, revision: String },
-    Registry { name: String, version: String },
+    Registry { registry: String, url: String, revision: String, namespace: String, version: String },
 }
 
 pub mod version {
@@ -987,6 +1273,154 @@ pub mod version {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Deployed.toml — Deployment Fact Record
+// ---------------------------------------------------------------------------
+
+/// The schema identifier for Deployed.toml files produced by CellScript v0.19+.
+pub const DEPLOYED_MANIFEST_SCHEMA: &str = "cellscript-deployed-v0.19";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployedManifest {
+    pub version: u32,
+    pub schema: Option<String>,
+    pub package: DeployedPackageInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<DeployedBuildInfo>,
+    #[serde(default)]
+    pub deployments: Vec<DeploymentRecord>,
+}
+
+impl DeployedManifest {
+    pub const CURRENT_VERSION: u32 = 1;
+
+    pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
+        let path = root.join("Deployed.toml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| CompileError::without_span(format!("failed to read Deployed.toml '{}': {}", path.display(), e)))?;
+        let manifest: Self = toml::from_str(&content)
+            .map_err(|e| CompileError::without_span(format!("failed to parse Deployed.toml '{}': {}", path.display(), e)))?;
+        Ok(Some(manifest))
+    }
+
+    pub fn write_to_root(&self, root: &Path) -> Result<()> {
+        let path = root.join("Deployed.toml");
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployedPackageInfo {
+    pub name: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeployedBuildInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+}
+
+/// Deployment status lifecycle:
+/// candidate -> active -> deprecated -> revoked
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeploymentStatus {
+    #[default]
+    Candidate,
+    Active,
+    Deprecated,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScriptRole {
+    #[default]
+    Type,
+    Lock,
+    DualRole,
+    Helper,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentRecord {
+    // Required fields (Phase 1)
+    pub network: String,
+    pub chain_id: String,
+    pub tx_hash: String,
+    pub output_index: u32,
+    pub code_hash: String,
+    pub hash_type: String,
+    pub dep_type: String,
+    pub data_hash: String,
+    pub out_point: String,
+
+    // Recommended fields (Phase 1 — build provenance binding)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+
+    // Optional fields (Phase 2 — governance and upgrade)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_role: Option<ScriptRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<DeploymentStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_lineage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_report_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher_signature: Option<String>,
+
+    // Cell deps
+    #[serde(default)]
+    pub cell_deps: Vec<DeploymentCellDep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentCellDep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub tx_hash: String,
+    pub output_index: u32,
+    pub dep_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -998,6 +1432,7 @@ mod tests {
             package: PackageInfo {
                 name: "test".to_string(),
                 version: "0.1.0".to_string(),
+                namespace: None,
                 authors: vec!["Test Author".to_string()],
                 description: "Test package".to_string(),
                 license: "MIT".to_string(),
@@ -1012,6 +1447,7 @@ mod tests {
                 include: vec![],
                 exclude: vec![],
             },
+            workspace: None,
             dependencies: HashMap::new(),
             dev_dependencies: HashMap::new(),
             build: BuildConfig::default(),
@@ -1244,13 +1680,26 @@ path = "deps/math"
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
             "math".to_string(),
-            LockedDependency { version: "0.2.0".to_string(), source: LockedSource::Path { path: "deps/old-math".to_string() } },
+            LockedDependency {
+                version: "0.2.0".to_string(),
+                source: LockedSource::Path { path: "deps/old-math".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         lockfile.dependencies.insert(
             "stale".to_string(),
             LockedDependency {
                 version: "1.0.0".to_string(),
-                source: LockedSource::Registry { name: "stale".to_string(), version: "1.0.0".to_string() },
+                source: LockedSource::Registry {
+                    registry: "cellscript-registry".to_string(),
+                    url: "https://github.com/example/stale".to_string(),
+                    revision: "abc123".to_string(),
+                    namespace: "stale".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                source_hash: None,
+                build: None,
             },
         );
 
@@ -1279,11 +1728,21 @@ path = "deps/math"
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
             "math".to_string(),
-            LockedDependency { version: "0.1.0".to_string(), source: LockedSource::Path { path: "deps/math".to_string() } },
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Path { path: "deps/math".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         lockfile.dependencies.insert(
             "util".to_string(),
-            LockedDependency { version: "0.1.0".to_string(), source: LockedSource::Path { path: "deps/math/../util".to_string() } },
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Path { path: "deps/math/../util".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         let mut resolved = HashMap::new();
         resolved.insert(
@@ -1294,6 +1753,8 @@ path = "deps/math"
                 path: PathBuf::from("deps/math"),
                 source: PackageSource::Local(PathBuf::from("deps/math")),
                 dependencies: vec!["util".to_string()],
+                namespace: None,
+                source_hash: None,
             },
         );
         resolved.insert(
@@ -1304,6 +1765,8 @@ path = "deps/math"
                 path: PathBuf::from("deps/util"),
                 source: PackageSource::Local(PathBuf::from("deps/math/../util")),
                 dependencies: Vec::new(),
+                namespace: None,
+                source_hash: None,
             },
         );
 
@@ -1319,7 +1782,15 @@ path = "deps/math"
             "old".to_string(),
             LockedDependency {
                 version: "1.0.0".to_string(),
-                source: LockedSource::Registry { name: "old".to_string(), version: "1.0.0".to_string() },
+                source: LockedSource::Registry {
+                    registry: "cellscript-registry".to_string(),
+                    url: "https://github.com/example/old".to_string(),
+                    revision: "def456".to_string(),
+                    namespace: "old".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                source_hash: None,
+                build: None,
             },
         );
 
@@ -1332,6 +1803,8 @@ path = "deps/math"
                 path: PathBuf::from("deps/math"),
                 source: PackageSource::Local(PathBuf::from("deps/math")),
                 dependencies: Vec::new(),
+                namespace: None,
+                source_hash: None,
             },
         );
 
@@ -1370,9 +1843,8 @@ remote = "1.2.3"
         let mut manager = PackageManager::new(temp.path());
         let error = manager.resolve_dependencies().unwrap_err();
 
-        assert!(error.message.contains("registry dependency 'remote'"));
-        assert!(error.message.contains("not supported yet"));
-        assert!(error.message.contains("local path dependency"));
+        // Registry dependencies require a namespace — without one, fail closed
+        assert!(error.message.contains("namespace") || error.message.contains("registry"), "{}", error.message);
         assert!(manager.get_resolved().is_empty());
     }
 
@@ -1400,5 +1872,98 @@ rev = "abc123"
         assert!(error.message.contains("remote"));
         assert!(error.message.contains("https://example.invalid/remote.git"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn deployed_manifest_round_trip() {
+        let manifest = DeployedManifest {
+            version: 1,
+            schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+            package: DeployedPackageInfo {
+                name: "amm_pool".to_string(),
+                version: "1.2.0".to_string(),
+                source_hash: Some("blake2b:0xabcd".to_string()),
+            },
+            build: Some(DeployedBuildInfo {
+                compiler_version: Some("0.19.0".to_string()),
+                artifact_hash: Some("blake2b:0x1234".to_string()),
+                metadata_hash: None,
+                schema_hash: None,
+                abi_hash: None,
+                constraints_hash: None,
+            }),
+            deployments: vec![DeploymentRecord {
+                network: "aggron4".to_string(),
+                chain_id: "ckb-testnet".to_string(),
+                tx_hash: "0xaaaa".to_string(),
+                output_index: 0,
+                code_hash: "0xbbbb".to_string(),
+                hash_type: "data1".to_string(),
+                dep_type: "code".to_string(),
+                data_hash: "0xcccc".to_string(),
+                out_point: "0xaaaa:0".to_string(),
+                artifact_hash: None,
+                metadata_hash: None,
+                schema_hash: None,
+                abi_hash: None,
+                constraints_hash: None,
+                compiler_version: None,
+                type_id: Some("0xdddd".to_string()),
+                script_role: Some(ScriptRole::Type),
+                status: Some(DeploymentStatus::Candidate),
+                upgrade_lineage: None,
+                audit_report_hash: None,
+                publisher_signature: None,
+                cell_deps: vec![DeploymentCellDep {
+                    name: Some("secp256k1".to_string()),
+                    tx_hash: "0xeeee".to_string(),
+                    output_index: 1,
+                    dep_type: "dep_group".to_string(),
+                    hash_type: Some("type".to_string()),
+                    data_hash: None,
+                    type_id: None,
+                }],
+            }],
+        };
+
+        let toml_str = toml::to_string_pretty(&manifest).unwrap();
+        assert!(toml_str.contains("network = \"aggron4\""));
+        assert!(toml_str.contains("code_hash = \"0xbbbb\""));
+
+        let parsed: DeployedManifest = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.package.name, "amm_pool");
+        assert_eq!(parsed.deployments.len(), 1);
+        assert_eq!(parsed.deployments[0].network, "aggron4");
+        assert_eq!(parsed.deployments[0].cell_deps.len(), 1);
+    }
+
+    #[test]
+    fn deployed_manifest_backward_compatible() {
+        // Old format without new optional fields should parse successfully
+        let toml_str = r#"
+version = 1
+
+[package]
+name = "token"
+version = "0.3.0"
+
+[[deployments]]
+network = "ckb-mainnet"
+chain_id = "ckb-mainnet"
+tx_hash = "0x1111"
+output_index = 0
+code_hash = "0x2222"
+hash_type = "type"
+dep_type = "code"
+data_hash = "0x3333"
+out_point = "0x1111:0"
+"#;
+        let parsed: DeployedManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(parsed.package.name, "token");
+        assert_eq!(parsed.deployments.len(), 1);
+        assert!(parsed.deployments[0].type_id.is_none());
+        assert!(parsed.deployments[0].status.is_none());
+        assert!(parsed.build.is_none());
     }
 }

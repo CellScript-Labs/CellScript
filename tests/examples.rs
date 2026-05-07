@@ -176,7 +176,9 @@ struct MoleculeSchemaManifestReportRow {
 }
 
 fn example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(name)
+    // Workspace packages: each example lives in examples/<name>/src/main.cell
+    let trimmed = name.strip_suffix(".cell").unwrap_or(name);
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(trimmed).join("src/main.cell")
 }
 
 fn language_example_path(name: &str) -> Utf8PathBuf {

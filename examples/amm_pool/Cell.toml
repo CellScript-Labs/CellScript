@@ -1,0 +1,6 @@
+[package]
+name = "amm_pool"
+version = "0.1.0"
+
+[dependencies]
+token = { path = "../token" }

@@ -4317,3 +4317,355 @@ action main() -> u64 {
     assert!(stderr.contains("cannot provide CKB transaction/syscall context"), "stderr: {}", stderr);
     assert!(stderr.contains("read-cell-dep"), "stderr: {}", stderr);
 }
+
+// ── Workspace e2e tests ──────────────────────────────────────────────────────
+
+#[test]
+fn cellc_workspace_build_compiles_all_members() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Workspace root Cell.toml
+    let workspace_toml = r#"[workspace]
+members = ["pkg_a", "pkg_b"]
+"#;
+    std::fs::write(root.join("Cell.toml"), workspace_toml).unwrap();
+
+    // Member pkg_a
+    let pkg_a = root.join("pkg_a");
+    std::fs::create_dir_all(pkg_a.join("src")).unwrap();
+    std::fs::write(
+        pkg_a.join("Cell.toml"),
+        r#"[package]
+name = "pkg_a"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg_a.join("src").join("main.cell"),
+        r#"module pkg_a
+action hello() -> u64 {
+    verification
+        let x: u64 = 42
+        return x
+}
+"#,
+    )
+    .unwrap();
+
+    // Member pkg_b
+    let pkg_b = root.join("pkg_b");
+    std::fs::create_dir_all(pkg_b.join("src")).unwrap();
+    std::fs::write(
+        pkg_b.join("Cell.toml"),
+        r#"[package]
+name = "pkg_b"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg_b.join("src").join("main.cell"),
+        r#"module pkg_b
+action world() -> u64 {
+    verification
+        let y: u64 = 99
+        return y
+}
+"#,
+    )
+    .unwrap();
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--workspace").arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    let members = summary["results"].as_array().unwrap();
+    assert_eq!(members.len(), 2);
+}
+
+#[test]
+fn cellc_workspace_build_specific_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let workspace_toml = r#"[workspace]
+members = ["alpha", "beta"]
+"#;
+    std::fs::write(root.join("Cell.toml"), workspace_toml).unwrap();
+
+    // Member alpha
+    let alpha = root.join("alpha");
+    std::fs::create_dir_all(alpha.join("src")).unwrap();
+    std::fs::write(
+        alpha.join("Cell.toml"),
+        r#"[package]
+name = "alpha"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        alpha.join("src").join("main.cell"),
+        r#"module alpha
+action run() -> u64 { verification let x: u64 = 1 return x }
+"#,
+    )
+    .unwrap();
+
+    // Member beta
+    let beta = root.join("beta");
+    std::fs::create_dir_all(beta.join("src")).unwrap();
+    std::fs::write(
+        beta.join("Cell.toml"),
+        r#"[package]
+name = "beta"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        beta.join("src").join("main.cell"),
+        r#"module beta
+action run() -> u64 { verification let y: u64 = 2 return y }
+"#,
+    )
+    .unwrap();
+
+    // Build only the "alpha" member
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("build")
+        .arg("-p")
+        .arg("alpha")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    let members = summary["results"].as_array().unwrap();
+    assert_eq!(members.len(), 1);
+    assert!(members[0]["member"].as_str().unwrap().contains("alpha"));
+}
+
+#[test]
+fn cellc_workspace_check_all_members() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let workspace_toml = r#"[workspace]
+members = ["lib_a"]
+"#;
+    std::fs::write(root.join("Cell.toml"), workspace_toml).unwrap();
+
+    let lib_a = root.join("lib_a");
+    std::fs::create_dir_all(lib_a.join("src")).unwrap();
+    std::fs::write(
+        lib_a.join("Cell.toml"),
+        r#"[package]
+name = "lib_a"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        lib_a.join("src").join("main.cell"),
+        r#"module lib_a
+action compute() -> u64 { verification let v: u64 = 7 return v }
+"#,
+    )
+    .unwrap();
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--workspace").arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+}
+
+// ── Incremental compilation e2e tests ────────────────────────────────────────
+
+#[test]
+fn cellc_incremental_cache_hit_on_second_build() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Set up a minimal package
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[package]
+name = "cache_test"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let source = r#"module cache_test
+action compute() -> u64 {
+    verification
+        let x: u64 = 123
+        return x
+}
+"#;
+    std::fs::write(root.join("src").join("main.cell"), source).unwrap();
+
+    // First build
+    let output1 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output1.status.success(), "stderr: {}", String::from_utf8_lossy(&output1.stderr));
+    let summary1: serde_json::Value = serde_json::from_slice(&output1.stdout).unwrap();
+    assert_eq!(summary1["status"], "ok");
+    // First build should not be a cache hit
+    assert_eq!(summary1["cache_hit"], false);
+
+    // Second build (same source, same options)
+    let output2 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output2.status.success(), "stderr: {}", String::from_utf8_lossy(&output2.stderr));
+    let summary2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+    assert_eq!(summary2["status"], "ok");
+    // Second build should be a cache hit
+    assert_eq!(summary2["cache_hit"], true);
+}
+
+#[test]
+fn cellc_incremental_cache_invalidated_on_source_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Set up a minimal package
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[package]
+name = "inval_test"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let source_v1 = r#"module inval_test
+action compute() -> u64 {
+    verification
+        let x: u64 = 1
+        return x
+}
+"#;
+    std::fs::write(root.join("src").join("main.cell"), source_v1).unwrap();
+
+    // Build v1
+    let output1 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output1.status.success(), "stderr: {}", String::from_utf8_lossy(&output1.stderr));
+
+    // Modify source
+    let source_v2 = r#"module inval_test
+action compute() -> u64 {
+    verification
+        let x: u64 = 2
+        return x
+}
+"#;
+    std::fs::write(root.join("src").join("main.cell"), source_v2).unwrap();
+
+    // Build v2 - should NOT be a cache hit since source changed
+    let output2 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output2.status.success(), "stderr: {}", String::from_utf8_lossy(&output2.stderr));
+    let summary2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+    assert_eq!(summary2["cache_hit"], false);
+}
+
+#[test]
+fn cellc_clean_cache_flag_removes_incremental_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Set up a minimal package
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[package]
+name = "clean_test"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let source = r#"module clean_test
+action compute() -> u64 {
+    verification
+        let x: u64 = 55
+        return x
+}
+"#;
+    std::fs::write(root.join("src").join("main.cell"), source).unwrap();
+
+    // Build to populate incremental cache
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    // Verify cache directory was created
+    let cache_dir = root.join(".cell").join("build").join("cache");
+    assert!(cache_dir.exists(), "incremental cache directory should exist after build");
+
+    // Clean with --cache flag
+    let clean_output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("clean").arg("--cache").arg("--json").output().unwrap();
+    assert!(clean_output.status.success(), "stderr: {}", String::from_utf8_lossy(&clean_output.stderr));
+
+    // Verify cache directory was removed
+    assert!(!cache_dir.exists(), "incremental cache directory should be removed after clean --cache");
+
+    // Verify next build is NOT a cache hit
+    let output2 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output2.status.success(), "stderr: {}", String::from_utf8_lossy(&output2.stderr));
+    let summary2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+    assert_eq!(summary2["cache_hit"], false, "build after clean --cache should not be a cache hit");
+}
+
+#[test]
+fn cellc_entry_action_bypasses_incremental_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Set up a minimal package
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[package]
+name = "entry_bypass"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let source = r#"module entry_bypass
+action compute() -> u64 {
+    verification
+        let x: u64 = 10
+        return x
+}
+"#;
+    std::fs::write(root.join("src").join("main.cell"), source).unwrap();
+
+    // First build (default entry scope)
+    let output1 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    assert!(output1.status.success(), "stderr: {}", String::from_utf8_lossy(&output1.stderr));
+
+    // Build with --entry-action: should bypass cache and produce a fresh compile
+    let output2 = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("build")
+        .arg("--entry-action")
+        .arg("compute")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output2.status.success(), "stderr: {}", String::from_utf8_lossy(&output2.stderr));
+    let summary2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+    assert_eq!(summary2["cache_hit"], false, "--entry-action should bypass incremental cache");
+}
