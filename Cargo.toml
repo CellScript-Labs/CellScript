@@ -74,3 +74,6 @@ tempfile = "3.10"
 ckb-testtool = "1.1"
 ckb-std = { version = "1.1.0", default-features = false, features = ["type-id"] }
 sha2 = "0.10"
+regex = "1"
+cellscript-ckb-adapter = { path = "crates/cellscript-ckb-adapter" }
+ckb-types = "1.0.0"

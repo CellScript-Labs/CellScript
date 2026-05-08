@@ -100,6 +100,20 @@ placement, CellDeps, or signer authority.
 
 Completed 0.19 implementation slices:
 
+- `scripts/install.sh` is a one-line curl installer for CellScript toolchain
+  distribution. It supports platform detection (macOS/Linux, x86_64/ARM64),
+  automatic latest-version resolution, multi-mirror binary download with
+  SHA256 verification, PATH configuration for bash/zsh/fish, and dry-run
+  mode. Mirror sources include GitHub direct, ghgo.xyz, gh-proxy.com, and
+  ghfast.top for China mainland users who cannot reach
+  `raw.githubusercontent.com` or `api.github.com`.
+- `.github/workflows/release.yml` is the cross-platform release CI. It
+  builds `cellc` for four targets (macOS Intel/ARM, Linux x86_64/ARM64),
+  packages tarballs, computes SHA256SUMS, and creates GitHub Releases with
+  install instructions covering both global and China mainland users.
+  `install.sh` is also uploaded as a Release asset for direct download
+  from `github.com` domain.
+
 - `src/ckb_abi.rs` centralizes the inline CKB ABI constants used by CellScript.
 - `tests/ckb_std_compat.rs` adds parity tests against `ckb-std` and
   `ckb-types`.
@@ -150,6 +164,7 @@ Current 0.19 status:
 | Deployment registry | Headless deploy probe landed; registry open | `build_deploy_transaction()` and `build_deployment_manifest_from_evidence()` implement the headless deploy probe. Network-specific deployment verification, CellDep solving, and stale-deployment rejection fixtures remain planned. |
 | Generated TypeScript Action Builder | Still open | `cellc gen-builder --target typescript`, CCC integration, and generated-builder tests remain planned. |
 | Stateful flow runner | Still open | Committed local CKB multi-step flows and live-output lineage evidence remain planned. |
+| Toolchain one-line installer | Done for this slice | `scripts/install.sh` with multi-mirror fallback (GitHub, ghgo.xyz, gh-proxy.com, ghfast.top), SHA256 verification, PATH setup, and dry-run. `.github/workflows/release.yml` builds 4-platform tarballs and publishes GitHub Releases with install instructions. |
 | CellFabric core | Later exploration | Cross-protocol intent-DAG planning remains explicitly outside the landed 0.19 first slice. |
 
 ## P0: Grammar And Syntax Governance

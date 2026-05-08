@@ -359,7 +359,13 @@ pub struct DeployArtifactSpec {
     /// Optional data of the capacity input cell (for change calculation).
     pub capacity_input_data: Bytes,
     /// Declared hash_type for the code cell type script (typically "type" for TYPE_ID).
+    /// Ignored when `type_script` is explicitly provided.
     pub type_id_hash_type: ScriptHashType,
+    /// Optional explicit type script for the code cell.
+    /// When set, overrides the default TYPE_ID construction from `type_id_hash_type`.
+    /// When None, a TYPE_ID type script is auto-constructed from the first input.
+    /// Set to `None` with `type_id_hash_type = ScriptHashType::Data` for a data-only deployment.
+    pub type_script: Option<Script>,
     /// CellDeps required by the deployed artifact.
     pub cell_deps: Vec<CellDep>,
     /// HeaderDeps required by the deployed artifact.
@@ -431,15 +437,18 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
         bail!("capacity input must have non-zero capacity");
     }
 
-    // Step 1: Compute TYPE_ID args from first input + output index 0.
+    // Step 1+2: Construct type script for the code cell.
     let type_id_args = type_id_args_from_first_input(&spec.capacity_input, 0);
-
-    // Step 2: Construct type script (TYPE_ID) for the code cell.
-    let type_script = construct_script(&ScriptSpec::new(
-        [0u8; 32], // code_hash will be the data hash after deployment; use placeholder
-        spec.type_id_hash_type,
-        type_id_args.to_vec(),
-    ));
+    let type_script = if let Some(ref ts) = spec.type_script {
+        ts.clone()
+    } else {
+        // Auto-construct TYPE_ID type script from first input
+        construct_script(&ScriptSpec::new(
+            [0u8; 32], // code_hash placeholder; will be the data hash after deployment
+            spec.type_id_hash_type,
+            type_id_args.to_vec(),
+        ))
+    };
 
     // Step 3: Build code cell output with TYPE_ID type script.
     let code_data_capacity = Capacity::bytes(spec.artifact_binary.len())?;
@@ -448,7 +457,7 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
     // Build the code output with a placeholder capacity (we'll compute exact occupied first).
     let code_output_builder = CellOutput::new_builder().lock(spec.deployer_lock.clone()).type_(Some(type_script.clone()).pack());
     // Compute occupied capacity for the code cell.
-    let code_occupied = code_output_builder.clone().build().occupied_capacity(code_data_capacity.clone())?;
+    let code_occupied = code_output_builder.clone().build().occupied_capacity(code_data_capacity)?;
     let code_capacity_shannons = code_occupied.as_u64();
 
     // Build the final code output with the exact occupied capacity.
@@ -473,7 +482,7 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
     // Validate change output meets its own occupied capacity floor.
     let change_data_capacity = Capacity::bytes(spec.capacity_input_data.len())?;
     let change_output = CellOutput::new_builder().capacity(change_capacity_shannons).lock(spec.deployer_lock.clone()).build();
-    let change_occupied = change_output.occupied_capacity(change_data_capacity.clone())?;
+    let change_occupied = change_output.occupied_capacity(change_data_capacity)?;
     if change_capacity_shannons < change_occupied.as_u64() {
         bail!(
             "change capacity {} shannons is below occupied capacity {} shannons",
@@ -1251,6 +1260,7 @@ impl CellScriptAdapter {
             capacity_input_shannons: capacity_input.capacity_shannons,
             capacity_input_data: capacity_input.data,
             type_id_hash_type: ScriptHashType::Type,
+            type_script: None,
             cell_deps: Vec::new(),
             header_deps: Vec::new(),
             fee_shannons,
@@ -1325,6 +1335,7 @@ impl CellScriptAdapter {
             capacity_input_shannons: capacity_input.capacity_shannons,
             capacity_input_data: capacity_input.data,
             type_id_hash_type: ScriptHashType::Type,
+            type_script: None,
             cell_deps: Vec::new(),
             header_deps: Vec::new(),
             fee_shannons,
@@ -1449,6 +1460,7 @@ pub fn sample_deploy_spec() -> DeployArtifactSpec {
         capacity_input_shannons: 200_000_000_000,
         capacity_input_data: Bytes::new(),
         type_id_hash_type: ScriptHashType::Type,
+        type_script: None,
         cell_deps: Vec::new(),
         header_deps: Vec::new(),
         fee_shannons: 1_000,

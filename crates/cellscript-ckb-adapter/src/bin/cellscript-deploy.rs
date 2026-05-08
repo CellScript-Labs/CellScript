@@ -207,6 +207,7 @@ fn build_deploy_spec(
         capacity_input_shannons: capacity_shannons,
         capacity_input_data: Bytes::new(),
         type_id_hash_type: ScriptHashType::Type,
+        type_script: None,
         cell_deps: Vec::new(),
         header_deps: Vec::new(),
         fee_shannons: fee,
