@@ -116,7 +116,7 @@ Not every input is a transition. A receipt can be destroyed while another Cell
 continues:
 
 ```cellscript
-receipt Listing has destroy {
+receipt Listing has consume, burn {
     nft_hash: Hash
     seller: Address
     price: u64

@@ -139,8 +139,8 @@ also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
 
 Bare `destroy token` remains available. In `--primitive-strict=0.15` mode, it
-must be authorized by the `consume + burn` kernel effects instead of legacy
-`has destroy`. Choose a policy-specific destruction form when reviewers need to
+must be authorized by the `consume + burn` kernel effects instead of the legacy
+`destroy` attribute. Choose a policy-specific destruction form when reviewers need to
 see whether the contract proves singleton absence, TYPE_ID consumption,
 field-identified instance consumption, or amount burn.
 

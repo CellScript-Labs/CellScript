@@ -347,11 +347,25 @@ language_examples_dir = examples_dir / "language"
 def production_example_path(name):
     return examples_dir / name
 
+def production_example_build_path(name):
+    """Return the path to pass to cellc for building. Uses the workspace package directory when available."""
+    pkg_dir = examples_dir / name.replace(".cell", "")
+    if (pkg_dir / "Cell.toml").is_file():
+        return pkg_dir
+    return examples_dir / name
+
 def language_example_path(name):
     source = language_examples_dir / name
     if source.is_file():
         return source
     return examples_dir / name
+
+def language_example_build_path(name):
+    """Return the path to pass to cellc for building. Uses the workspace package directory when available."""
+    pkg_dir = examples_dir / "language"
+    if (pkg_dir / "Cell.toml").is_file():
+        return pkg_dir
+    return language_example_path(name)
 
 actual_flat_examples = sorted(
     path.name
@@ -1673,7 +1687,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
 validate_source_coverage_matrix()
 
 def strict_original_compile(name):
-    source = production_example_path(name)
+    source = production_example_build_path(name)
     artifact = strict_root / f"{name}.strict.elf"
     result = run(
         [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", "-o", artifact],
@@ -1824,7 +1838,7 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
         record = compile_artifact(
             f"{example_name}:{action}",
             "original-scoped-action-strict",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
             entry_args=["--primitive-strict", "0.15", "--entry-action", action],
         )
@@ -1918,7 +1932,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
         record = compile_artifact(
             f"{example_name}:{lock}",
             "original-scoped-lock-strict",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
             entry_args=["--primitive-strict", "0.15", "--entry-lock", lock],
         )
@@ -1932,7 +1946,7 @@ for example_name, actions in ORIGINAL_SCOPED_ACTION_FAIL_CLOSED.items():
     for action in actions:
         record = strict_scoped_compile(
             f"{example_name}:{action}",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             "--entry-action",
             action,
         )
@@ -1946,7 +1960,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCK_FAIL_CLOSED.items():
     for lock in locks:
         record = strict_scoped_compile(
             f"{example_name}:{lock}",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             "--entry-lock",
             lock,
         )

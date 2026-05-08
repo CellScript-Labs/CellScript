@@ -124,7 +124,7 @@ burn_amount(token, field = amount)
 ```
 
 In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
-burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
+burn` kernel effects instead of the legacy `destroy` attribute. Keep the policy explicit
 when reviewers must distinguish output absence, identity consumption, instance
 consumption, and quantity burn.
 

@@ -461,8 +461,11 @@ dist/
         // 2. Clone/update discovery index → find source repo URL
         let cache_dir = self.registry_cache_dir();
         let discovery = registry::DiscoveryIndex::new(registry::DEFAULT_REGISTRY_URL, &cache_dir);
-        let entry = discovery.lookup(&resolved_namespace, name).map_err(|e| {
-            CompileError::without_span(format!("failed to find package '{}/{}' in registry: {}", resolved_namespace, name, e))
+        let entry = discovery.lookup(&resolved_namespace, name).map_err(|_e| {
+            CompileError::without_span(format!(
+                "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
+                name, version
+            ))
         })?;
 
         // 3. Clone source repo
