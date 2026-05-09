@@ -14,10 +14,39 @@ use cellscript::package::registry::{
 };
 use cellscript::package::{
     DeployedBuildInfo, DeployedManifest, DeployedPackageInfo, DeploymentCellDep, DeploymentRecord, DeploymentStatus, LockedBuildInfo,
-    LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, ScriptRole, DEPLOYED_MANIFEST_SCHEMA,
+    LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, PackageManager, ScriptRole,
+    DEPLOYED_MANIFEST_SCHEMA,
 };
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
+
+static REGISTRY_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct RegistryEnvGuard {
+    previous: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl RegistryEnvGuard {
+    fn new(url: &Path) -> Self {
+        let guard = REGISTRY_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
+        std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url);
+        Self { previous, _guard: guard }
+    }
+}
+
+impl Drop for RegistryEnvGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous);
+        } else {
+            std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,6 +142,30 @@ fn compute_source_hash_includes_cell_toml() {
 
     let hash2 = compute_source_hash(temp.path()).unwrap();
     assert_ne!(hash1, hash2, "source hash must change when Cell.toml changes");
+}
+
+#[test]
+fn compute_source_hash_includes_configured_source_roots() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("contracts")).unwrap();
+    std::fs::write(
+        temp.path().join("Cell.toml"),
+        r#"
+[package]
+name = "hash-test"
+version = "0.1.0"
+entry = "contracts/main.cell"
+source_roots = ["contracts"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(temp.path().join("contracts/main.cell"), "module hash_test;\n").unwrap();
+
+    let hash1 = compute_source_hash(temp.path()).unwrap();
+    std::fs::write(temp.path().join("contracts/main.cell"), "module hash_test_updated;\n").unwrap();
+    let hash2 = compute_source_hash(temp.path()).unwrap();
+
+    assert_ne!(hash1, hash2, "source hash must cover configured package source_roots");
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +736,150 @@ fn full_publish_install_verify_flow_with_local_git() {
     // 4. Verify source hash is consistent
     let recomputed = compute_source_hash(&source_repo).unwrap();
     assert_eq!(source_hash, recomputed);
+}
+
+#[test]
+fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let source_repo = temp.path().join("source-repo");
+    std::fs::create_dir_all(&source_repo).unwrap();
+    create_minimal_package(&source_repo, "token", "0.3.0", Some("cellscript"));
+    let source_hash = compute_source_hash(&source_repo).unwrap();
+    RegistryIndex::append_version(
+        &source_repo,
+        "token",
+        "cellscript",
+        RegistryVersion {
+            version: "0.3.0".to_string(),
+            tag: "v0.3.0".to_string(),
+            source_hash: source_hash.clone(),
+            cellscript_version: "0.19.0".to_string(),
+            dependencies: BTreeMap::new(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            yanked: false,
+            audit: None,
+        },
+    )
+    .unwrap();
+    git_init(&source_repo);
+    git_add_all(&source_repo);
+    git_commit(&source_repo, "publish token");
+    git_tag(&source_repo, "v0.3.0");
+
+    let registry_repo = temp.path().join("registry-repo");
+    std::fs::create_dir_all(registry_repo.join("cellscript")).unwrap();
+    git_init(&registry_repo);
+    let entry = DiscoveryEntry {
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        source: source_repo.to_string_lossy().to_string(),
+    };
+    std::fs::write(registry_repo.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+    git_add_all(&registry_repo);
+    git_commit(&registry_repo, "add token");
+
+    let consumer = temp.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("Cell.toml"),
+        r#"
+[package]
+name = "consumer"
+version = "0.1.0"
+namespace = "app"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+    std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
+
+    let _env = RegistryEnvGuard::new(&registry_repo);
+    let mut manager = PackageManager::new(&consumer);
+    manager.resolve_dependencies().unwrap();
+    let resolved = manager.get_resolved().get("token").unwrap();
+    assert_eq!(resolved.source_hash.as_deref(), Some(source_hash.as_str()));
+
+    let mut lockfile = Lockfile::new();
+    lockfile.update_from_resolved(manager.get_resolved());
+    let token = lockfile.dependencies.get("token").unwrap();
+    assert_eq!(token.source_hash.as_deref(), Some(source_hash.as_str()));
+    assert!(
+        matches!(token.source, LockedSource::Registry { ref namespace, ref version, .. } if namespace == "cellscript" && version == "0.3.0")
+    );
+}
+
+#[test]
+fn package_manager_rejects_registry_source_hash_mismatch() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let source_repo = temp.path().join("source-repo");
+    std::fs::create_dir_all(&source_repo).unwrap();
+    create_minimal_package(&source_repo, "token", "0.3.0", Some("cellscript"));
+    RegistryIndex::append_version(
+        &source_repo,
+        "token",
+        "cellscript",
+        RegistryVersion {
+            version: "0.3.0".to_string(),
+            tag: "v0.3.0".to_string(),
+            source_hash: "deliberately_wrong_hash".to_string(),
+            cellscript_version: "0.19.0".to_string(),
+            dependencies: BTreeMap::new(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            yanked: false,
+            audit: None,
+        },
+    )
+    .unwrap();
+    git_init(&source_repo);
+    git_add_all(&source_repo);
+    git_commit(&source_repo, "publish token");
+    git_tag(&source_repo, "v0.3.0");
+
+    let registry_repo = temp.path().join("registry-repo");
+    std::fs::create_dir_all(registry_repo.join("cellscript")).unwrap();
+    git_init(&registry_repo);
+    let entry = DiscoveryEntry {
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        source: source_repo.to_string_lossy().to_string(),
+    };
+    std::fs::write(registry_repo.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+    git_add_all(&registry_repo);
+    git_commit(&registry_repo, "add token");
+
+    let consumer = temp.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("Cell.toml"),
+        r#"
+[package]
+name = "consumer"
+version = "0.1.0"
+namespace = "app"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+    std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
+
+    let _env = RegistryEnvGuard::new(&registry_repo);
+    let mut manager = PackageManager::new(&consumer);
+    let err = manager.resolve_dependencies().unwrap_err();
+    assert!(err.message.contains("source_hash mismatch"), "unexpected error: {}", err.message);
 }
 
 // ---------------------------------------------------------------------------

@@ -4349,8 +4349,6 @@ struct CellManifest {
     #[serde(default)]
     workspace: Option<CellWorkspaceConfig>,
     #[serde(default)]
-    dependencies: HashMap<String, CellDependency>,
-    #[serde(default)]
     build: CellBuildConfig,
     #[serde(default)]
     deploy: CellDeployConfig,
@@ -4425,29 +4423,6 @@ struct CellCkbCellDepConfig {
     hash_type: Option<String>,
     #[serde(default)]
     type_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum CellDependency {
-    Simple(String),
-    Detailed(CellDependencyDetail),
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellDependencyDetail {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    version: Option<String>,
-    #[serde(default)]
-    git: Option<String>,
-    #[serde(default)]
-    branch: Option<String>,
-    #[serde(default)]
-    tag: Option<String>,
-    #[serde(default)]
-    rev: Option<String>,
 }
 
 fn find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
@@ -4545,44 +4520,17 @@ fn load_package_modules(
 }
 
 fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(package_root)?;
-
+    let mut manager = crate::package::PackageManager::new(package_root.as_std_path());
+    manager.resolve_dependencies()?;
     let mut roots = Vec::new();
-    for (name, dependency) in manifest.dependencies {
-        match dependency {
-            CellDependency::Simple(version) => {
-                return Err(CompileError::new(
-                    format!(
-                        "dependency '{}' uses version requirement '{}' but only local path dependencies are supported",
-                        name, version
-                    ),
-                    error::Span::default(),
-                ));
-            }
-            CellDependency::Detailed(detail) => {
-                let Some(path) = detail.path.as_deref() else {
-                    return Err(CompileError::new(
-                        format!(
-                            "dependency '{}' does not specify a local path; only path dependencies are supported{}",
-                            name,
-                            dependency_hint(&detail)
-                        ),
-                        error::Span::default(),
-                    ));
-                };
-
-                let dep_root = package_root.join(path);
-                let dep_manifest = dep_root.join("Cell.toml");
-                if !dep_manifest.exists() {
-                    return Err(CompileError::new(
-                        format!("dependency '{}' expected manifest at '{}'", name, dep_manifest),
-                        error::Span::default(),
-                    ));
-                }
-
-                roots.push(canonical_utf8_path(&dep_root)?);
-            }
-        }
+    for package in manager.get_resolved().values() {
+        let dep_root = Utf8PathBuf::from_path_buf(package.path.clone()).map_err(|path| {
+            CompileError::new(
+                format!("dependency '{}' resolved to non-UTF-8 path '{}'", package.name, path.display()),
+                error::Span::default(),
+            )
+        })?;
+        roots.push(canonical_utf8_path(&dep_root)?);
     }
 
     Ok(roots)
@@ -14118,19 +14066,6 @@ fn load_manifest(package_root: &Utf8Path) -> Result<CellManifest> {
         .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
     toml::from_str(&manifest_source)
         .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))
-}
-
-fn dependency_hint(detail: &CellDependencyDetail) -> String {
-    if let Some(git) = &detail.git {
-        return format!(" (git dependency '{}')", git);
-    }
-    if let Some(version) = &detail.version {
-        return format!(" (version '{}')", version);
-    }
-    if detail.branch.is_some() || detail.tag.is_some() || detail.rev.is_some() {
-        return " (non-path source metadata present)".to_string();
-    }
-    String::new()
 }
 
 fn resolve_target<'a>(options: &'a CompileOptions, build: Option<&'a CellBuildConfig>) -> &'a str {
@@ -26441,7 +26376,7 @@ action ping() -> u64 {
         .unwrap();
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("only local path dependencies are supported"));
+        assert!(err.message.contains("requires a namespace"));
         assert!(err.message.contains("token_std"));
     }
 
@@ -26477,7 +26412,7 @@ action ping() -> u64 {
         .unwrap();
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("expected manifest"));
+        assert!(err.message.contains("not found at path"));
         assert!(err.message.contains("token_std"));
     }
 
@@ -26624,7 +26559,7 @@ action app_ping() -> u64 {
         .unwrap();
 
         let err = compile_path(app_root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("path dependency cycle detected"));
+        assert!(err.message.contains("Circular dependency detected"));
     }
 
     #[test]

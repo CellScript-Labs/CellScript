@@ -116,6 +116,11 @@ fn main() {
                     | "update"
                     | "info"
                     | "login"
+                    | "package"
+                    | "registry"
+                    | "registry-verify"
+                    | "package-verify"
+                    | "registry-add"
             )
         })
         .unwrap_or(false)

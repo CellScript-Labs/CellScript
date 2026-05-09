@@ -460,7 +460,8 @@ dist/
 
         // 2. Clone/update discovery index → find source repo URL
         let cache_dir = self.registry_cache_dir();
-        let discovery = registry::DiscoveryIndex::new(registry::DEFAULT_REGISTRY_URL, &cache_dir);
+        let registry_url = registry::default_registry_url();
+        let discovery = registry::DiscoveryIndex::new(&registry_url, &cache_dir);
         let entry = discovery.lookup(&resolved_namespace, name).map_err(|_e| {
             CompileError::without_span(format!(
                 "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
@@ -485,41 +486,72 @@ dist/
             registry::git_clone(source_url, &clone_dir).map_err(CompileError::without_span)?;
         }
 
-        // 4. Find matching version tag
-        let tags = registry::git_list_tags(&clone_dir).map_err(CompileError::without_span)?;
-        let target_tag = format!("v{}", version);
-
-        // Try exact tag match first
-        let matching_tag = tags.iter().find(|(tag, _)| tag == &target_tag);
-
-        if let Some((tag, _)) = matching_tag {
-            registry::git_checkout(&clone_dir, tag).map_err(CompileError::without_span)?;
-        } else {
-            // Try semver-compatible match via registry.json
-            let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
-            let found_version = reg_index.find_matching_version(version).ok_or_else(|| {
-                CompileError::without_span(format!("no matching version found for '{}/{}@{}'", resolved_namespace, name, version))
-            })?;
-            registry::git_checkout(&clone_dir, &found_version.tag).map_err(CompileError::without_span)?;
+        // 4. Resolve version from registry.json and check out its declared tag.
+        let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+        if reg_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' uses unsupported registry.json schema_version {}; expected {}",
+                resolved_namespace,
+                name,
+                reg_index.schema_version,
+                registry::RegistryIndex::CURRENT_SCHEMA_VERSION
+            )));
         }
+        if reg_index.name != name || reg_index.namespace != resolved_namespace {
+            return Err(CompileError::without_span(format!(
+                "registry.json identity mismatch for '{}/{}': found '{}/{}'",
+                resolved_namespace, name, reg_index.namespace, reg_index.name
+            )));
+        }
+        let selected_version = reg_index.find_matching_version(version).cloned().ok_or_else(|| {
+            CompileError::without_span(format!("no matching version found for '{}/{}@{}'", resolved_namespace, name, version))
+        })?;
+        if selected_version.source_hash.is_empty() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' has no source_hash in registry.json",
+                resolved_namespace, name, selected_version.version
+            )));
+        }
+        registry::git_checkout(&clone_dir, &selected_version.tag).map_err(CompileError::without_span)?;
 
         let revision = registry::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
 
-        // 5. Verify registry.json source_hash if present
-        if clone_dir.join("registry.json").exists() {
-            let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
-            if let Some(ver) = reg_index.versions.iter().find(|v| v.version == version) {
-                if !ver.source_hash.is_empty() {
-                    let computed = registry::compute_source_hash(&clone_dir)?;
-                    let expected = &ver.source_hash;
-                    if computed != *expected {
-                        return Err(CompileError::without_span(format!(
-                            "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
-                            resolved_namespace, name, version, expected, computed
-                        )));
-                    }
-                }
-            }
+        // 5. Re-read registry.json at the checked-out tag and verify source_hash.
+        let tagged_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+        if tagged_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' uses unsupported registry.json schema_version {}; expected {}",
+                resolved_namespace,
+                name,
+                selected_version.version,
+                tagged_index.schema_version,
+                registry::RegistryIndex::CURRENT_SCHEMA_VERSION
+            )));
+        }
+        if tagged_index.name != name || tagged_index.namespace != resolved_namespace {
+            return Err(CompileError::without_span(format!(
+                "registry.json identity mismatch for checked-out '{}/{}@{}': found '{}/{}'",
+                resolved_namespace, name, selected_version.version, tagged_index.namespace, tagged_index.name
+            )));
+        }
+        let tagged_version = tagged_index.versions.iter().find(|v| v.version == selected_version.version).ok_or_else(|| {
+            CompileError::without_span(format!(
+                "registry package '{}/{}@{}' tag '{}' does not contain a matching registry.json version entry",
+                resolved_namespace, name, selected_version.version, selected_version.tag
+            ))
+        })?;
+        if tagged_version.source_hash.is_empty() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' has no source_hash in registry.json",
+                resolved_namespace, name, tagged_version.version
+            )));
+        }
+        let computed_source_hash = registry::compute_source_hash(&clone_dir)?;
+        if computed_source_hash != tagged_version.source_hash {
+            return Err(CompileError::without_span(format!(
+                "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
+                resolved_namespace, name, tagged_version.version, tagged_version.source_hash, computed_source_hash
+            )));
         }
 
         // 6. Read Cell.toml and resolve transitive dependencies
@@ -533,6 +565,24 @@ dist/
 
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest: PackageManifest = toml::from_str(&content)?;
+        if manifest.package.name != name {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' Cell.toml declares package name '{}'",
+                resolved_namespace, name, tagged_version.version, manifest.package.name
+            )));
+        }
+        if manifest.package.version != tagged_version.version {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' registry.json version '{}' does not match Cell.toml version '{}'",
+                resolved_namespace, name, tagged_version.version, manifest.package.version
+            )));
+        }
+        if manifest.package.namespace.as_deref() != Some(resolved_namespace.as_str()) {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' Cell.toml must declare namespace '{}'",
+                resolved_namespace, name, tagged_version.version, resolved_namespace
+            )));
+        }
 
         Ok((
             ResolvedPackage {
@@ -540,7 +590,7 @@ dist/
                 version: manifest.package.version.clone(),
                 path: clone_dir.clone(),
                 source: PackageSource::Registry {
-                    registry: registry::DEFAULT_REGISTRY_URL.to_string(),
+                    registry: registry_url,
                     url: source_url.clone(),
                     revision,
                     namespace: resolved_namespace.clone(),
@@ -548,7 +598,7 @@ dist/
                 },
                 dependencies: manifest.dependencies.keys().cloned().collect(),
                 namespace: Some(resolved_namespace),
-                source_hash: None,
+                source_hash: Some(computed_source_hash),
             },
             manifest,
         ))
@@ -1020,6 +1070,19 @@ fn resolved_dependency_consistency_issues(name: &str, package: &ResolvedPackage,
             package_source_display(&package.source),
             locked_source_display(source)
         )),
+    }
+
+    if let Some(expected_hash) = &package.source_hash {
+        match &locked.source_hash {
+            Some(locked_hash) if locked_hash == expected_hash => {}
+            Some(locked_hash) => issues.push(format!(
+                "resolved dependency '{}' source_hash '{}' does not match Cell.lock '{}'",
+                name, expected_hash, locked_hash
+            )),
+            None => issues.push(format!("resolved dependency '{}' is missing source_hash in Cell.lock", name)),
+        }
+    } else if matches!(package.source, PackageSource::Registry { .. }) {
+        issues.push(format!("resolved registry dependency '{}' did not produce a source_hash", name));
     }
 
     issues

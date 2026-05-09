@@ -145,6 +145,7 @@ pub struct InitArgs {
     pub name: Option<String>,
     pub path: Option<PathBuf>,
     pub lib: bool,
+    pub namespace: Option<String>,
     pub json: bool,
 }
 
@@ -568,23 +569,7 @@ impl CommandExecutor {
         let metadata_path = default_metadata_path_for_artifact(&output_path);
         result.write_metadata_to_path(&metadata_path)?;
 
-        // Update Cell.lock with build hashes (artifact_hash, abi_hash, schema_hash, constraints_hash)
-        let constraints_bytes = serde_json::to_vec(&result.metadata.constraints)
-            .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", e)))?;
-        let constraints_hash = crate::hex_encode(&crate::ckb_blake2b256(&constraints_bytes));
-        if let Some(mut lockfile) = Lockfile::read_from_root(std::path::Path::new("."))?.or_else(|| {
-            let l = Lockfile::new();
-            Some(l)
-        }) {
-            lockfile.package_build = Some(crate::package::LockedBuildInfo {
-                compiler_version: Some(result.metadata.compiler_version.clone()),
-                target_profile: Some(result.metadata.target_profile.name.clone()),
-                artifact_hash: result.metadata.artifact_hash.clone(),
-                constraints_hash: Some(constraints_hash),
-                ..Default::default()
-            });
-            lockfile.write_to_root(std::path::Path::new("."))?;
-        };
+        refresh_lockfile_from_build(std::path::Path::new("."), &result.metadata)?;
 
         let policy_verified = policy_args.production
             || policy_args.deny_fail_closed
@@ -1107,6 +1092,11 @@ impl CommandExecutor {
         } else {
             pm.init(&name)?;
         }
+        if let Some(namespace) = &args.namespace {
+            let mut manifest = pm.read_manifest()?;
+            manifest.package.namespace = Some(namespace.clone());
+            pm.write_manifest(&manifest)?;
+        }
 
         if args.json {
             let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
@@ -1117,6 +1107,7 @@ impl CommandExecutor {
                 "path": path.display().to_string(),
                 "manifest": path.join("Cell.toml").display().to_string(),
                 "entry": entry,
+                "namespace": args.namespace,
                 "created_files": [
                     path.join("Cell.toml").display().to_string(),
                     path.join(entry).display().to_string(),
@@ -3084,10 +3075,6 @@ impl CommandExecutor {
             // Compile to get build artifact hashes
             let result = compile_path(".", CompileOptions::default())?;
 
-            let constraints_bytes = serde_json::to_vec(&result.metadata.constraints)
-                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", e)))?;
-            let _constraints_hash = crate::hex_encode(&crate::ckb_blake2b256(&constraints_bytes));
-
             // Build registry version entry
             let version_entry = crate::package::registry::RegistryVersion {
                 version: manifest.package.version.clone(),
@@ -3110,8 +3097,8 @@ impl CommandExecutor {
                     }
                     deps
                 },
-                abi_index: None,
-                schema_hash: None,
+                abi_index: Some(metadata_abi_hash(&result.metadata)?),
+                schema_hash: Some(result.metadata.molecule_schema_manifest.manifest_hash.clone()),
                 license: if manifest.package.license.is_empty() { None } else { Some(manifest.package.license.clone()) },
                 released_at: Some({
                     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
@@ -3406,33 +3393,122 @@ impl CommandExecutor {
 
         let mut violations = Vec::new();
 
-        // Check build hashes consistency
-        if let Some(build) = &lockfile.package_build {
-            if let Some(deployed_build) = &deployed.build {
-                if let (Some(lk), Some(dp)) = (&build.artifact_hash, &deployed_build.artifact_hash) {
-                    if lk != dp {
-                        violations.push(format!("artifact_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lk, dp));
-                    }
-                }
-                if let (Some(lk), Some(dp)) = (&build.schema_hash, &deployed_build.schema_hash) {
-                    if lk != dp {
-                        violations.push(format!("schema_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lk, dp));
-                    }
-                }
+        if lockfile.package.name != deployed.package.name {
+            violations.push(format!(
+                "package name mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                lockfile.package.name, deployed.package.name
+            ));
+        }
+        if lockfile.package.version != deployed.package.version {
+            violations.push(format!(
+                "package version mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                lockfile.package.version, deployed.package.version
+            ));
+        }
+        if let (Some(lock_hash), Some(deployed_hash)) = (&lockfile.package.source_hash, &deployed.package.source_hash) {
+            if lock_hash != deployed_hash {
+                violations.push(format!("source_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lock_hash, deployed_hash));
             }
+        } else {
+            violations.push("source_hash must be present in both Cell.lock and Deployed.toml".to_string());
+        }
+
+        match &lockfile.package_build {
+            Some(build) => push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations),
+            None => violations.push("Cell.lock has no [package.build]".to_string()),
+        }
+        match &deployed.build {
+            Some(build) => push_missing_deployed_build_identity("Deployed.toml [build]", build, &mut violations),
+            None => violations.push("Deployed.toml has no [build]".to_string()),
+        }
+
+        if let (Some(build), Some(deployed_build)) = (&lockfile.package_build, &deployed.build) {
+            compare_optional_build_field(
+                "compiler_version",
+                &build.compiler_version,
+                &deployed_build.compiler_version,
+                &mut violations,
+            );
+            compare_optional_build_field("artifact_hash", &build.artifact_hash, &deployed_build.artifact_hash, &mut violations);
+            compare_optional_build_field("metadata_hash", &build.metadata_hash, &deployed_build.metadata_hash, &mut violations);
+            compare_optional_build_field("schema_hash", &build.schema_hash, &deployed_build.schema_hash, &mut violations);
+            compare_optional_build_field("abi_hash", &build.abi_hash, &deployed_build.abi_hash, &mut violations);
+            compare_optional_build_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &deployed_build.constraints_hash,
+                &mut violations,
+            );
         }
 
         // Check deployment records
+        let mut seen_networks = BTreeSet::new();
         for deployment in &deployed.deployments {
-            if let Some(deployment_ref) = lockfile.deployment.get(&deployment.network) {
-                if let Some(ref code_hash) = deployment_ref.code_hash {
-                    if code_hash != &deployment.code_hash {
-                        violations.push(format!(
-                            "code_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
-                            deployment.network, code_hash, deployment.code_hash
-                        ));
-                    }
+            seen_networks.insert(deployment.network.clone());
+            if let Some(status) = &deployment.status {
+                if status != &crate::package::DeploymentStatus::Active {
+                    violations.push(format!("deployment for network '{}' is not active: {:?}", deployment.network, status));
                 }
+            }
+
+            let Some(deployment_ref) = lockfile.deployment.get(&deployment.network) else {
+                violations.push(format!("deployment for network '{}' is missing from Cell.lock", deployment.network));
+                continue;
+            };
+
+            if deployment_ref.record.is_empty() {
+                violations.push(format!("deployment ref for network '{}' has empty record", deployment.network));
+            } else {
+                let chain_record = format!("{}:{}", deployment.chain_id, deployment.out_point);
+                let network_record = format!("{}:{}", deployment.network, deployment.out_point);
+                if deployment_ref.record != deployment.out_point
+                    && deployment_ref.record != chain_record
+                    && deployment_ref.record != network_record
+                {
+                    violations.push(format!(
+                        "deployment record mismatch for network '{}': Cell.lock has '{}', Deployed.toml out_point is '{}'",
+                        deployment.network, deployment_ref.record, deployment.out_point
+                    ));
+                }
+            }
+
+            match &deployment_ref.code_hash {
+                Some(code_hash) if code_hash == &deployment.code_hash => {}
+                Some(code_hash) => violations.push(format!(
+                    "code_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, code_hash, deployment.code_hash
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no code_hash", deployment.network)),
+            }
+            match &deployment_ref.out_point {
+                Some(out_point) if out_point == &deployment.out_point => {}
+                Some(out_point) => violations.push(format!(
+                    "out_point mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, out_point, deployment.out_point
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no out_point", deployment.network)),
+            }
+            match &deployment_ref.data_hash {
+                Some(data_hash) if data_hash == &deployment.data_hash => {}
+                Some(data_hash) => violations.push(format!(
+                    "data_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, data_hash, deployment.data_hash
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no data_hash", deployment.network)),
+            }
+            if let Some(record_hash) = &deployment_ref.record_hash {
+                let computed = hash_json_value("deployment record", deployment)?;
+                if record_hash != &computed {
+                    violations.push(format!(
+                        "record_hash mismatch for network '{}': Cell.lock has '{}', computed '{}'",
+                        deployment.network, record_hash, computed
+                    ));
+                }
+            }
+        }
+        for network in lockfile.deployment.keys() {
+            if !seen_networks.contains(network) {
+                violations.push(format!("Cell.lock has stale deployment ref for network '{}'", network));
             }
         }
 
@@ -3444,6 +3520,9 @@ impl CommandExecutor {
             let json = serde_json::to_string_pretty(&summary)
                 .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
             println!("{}", json);
+            if !violations.is_empty() {
+                return Err(crate::error::CompileError::without_span("registry verification failed"));
+            }
         } else if violations.is_empty() {
             println!("{}", "Registry verification passed".green());
         } else {
@@ -3459,7 +3538,7 @@ impl CommandExecutor {
 
     fn package_verify(args: PackageVerifyArgs) -> Result<()> {
         let root = std::path::Path::new(".");
-        let pm = PackageManager::new(root);
+        let mut pm = PackageManager::new(root);
         let manifest = pm.read_manifest()?;
 
         // Read Cell.lock
@@ -3468,24 +3547,47 @@ impl CommandExecutor {
 
         let mut violations = Vec::new();
 
-        // Check lockfile consistency with manifest
-        let issues = lockfile.consistency_issues(&manifest);
-        for issue in &issues {
-            violations.push(issue.clone());
+        if lockfile.package.name != manifest.package.name {
+            violations.push(format!(
+                "package name mismatch: Cell.toml has '{}', Cell.lock has '{}'",
+                manifest.package.name, lockfile.package.name
+            ));
+        }
+        if lockfile.package.version != manifest.package.version {
+            violations.push(format!(
+                "package version mismatch: Cell.toml has '{}', Cell.lock has '{}'",
+                manifest.package.version, lockfile.package.version
+            ));
+        }
+        if lockfile.package.namespace != manifest.package.namespace {
+            violations.push(format!(
+                "package namespace mismatch: Cell.toml has '{:?}', Cell.lock has '{:?}'",
+                manifest.package.namespace, lockfile.package.namespace
+            ));
         }
 
-        // Check source_hash if present
-        if let Some(source_hash) = &lockfile.package.source_hash {
-            let computed = crate::package::registry::compute_source_hash(root)?;
-            if &computed != source_hash {
-                violations.push(format!("source_hash mismatch: Cell.lock has '{}', computed '{}'", source_hash, computed));
+        match &lockfile.package.source_hash {
+            Some(source_hash) => {
+                let computed = crate::package::registry::compute_source_hash(root)?;
+                if &computed != source_hash {
+                    violations.push(format!("source_hash mismatch: Cell.lock has '{}', computed '{}'", source_hash, computed));
+                }
             }
+            None => violations.push("Cell.lock [package] has no source_hash; run 'cellc build' to populate".to_string()),
         }
 
-        // Check build hashes if present
-        if let Some(build) = &lockfile.package_build {
-            if build.artifact_hash.is_none() {
-                violations.push("Cell.lock [package.build] has no artifact_hash; run 'cellc build' to populate".to_string());
+        match &lockfile.package_build {
+            Some(build) => push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations),
+            None => violations.push("Cell.lock has no [package.build]; run 'cellc build' to populate build identity".to_string()),
+        }
+
+        pm.resolve_dependencies()?;
+        for issue in lockfile.consistency_issues_with_resolved(&manifest, pm.get_resolved()) {
+            violations.push(issue);
+        }
+        for (name, locked) in &lockfile.dependencies {
+            if matches!(locked.source, crate::package::LockedSource::Registry { .. }) && locked.source_hash.is_none() {
+                violations.push(format!("registry dependency '{}' has no source_hash in Cell.lock", name));
             }
         }
 
@@ -3497,6 +3599,9 @@ impl CommandExecutor {
             let json = serde_json::to_string_pretty(&summary)
                 .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
             println!("{}", json);
+            if !violations.is_empty() {
+                return Err(crate::error::CompileError::without_span("package verification failed"));
+            }
         } else if violations.is_empty() {
             println!("{}", "Package verification passed".green());
         } else {
@@ -3513,7 +3618,8 @@ impl CommandExecutor {
     fn registry_add(args: RegistryAddArgs) -> Result<()> {
         let root = std::path::Path::new(".");
         let cache_dir = root.join(".cell/registry-cache");
-        let discovery = crate::package::registry::DiscoveryIndex::new(crate::package::registry::DEFAULT_REGISTRY_URL, &cache_dir);
+        let registry_url = crate::package::registry::default_registry_url();
+        let discovery = crate::package::registry::DiscoveryIndex::new(&registry_url, &cache_dir);
 
         discovery.add_entry(&args.namespace, &args.name, &args.source)?;
 
@@ -5240,6 +5346,120 @@ fn refresh_lockfile_from_manifest(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn refresh_lockfile_from_build(root: &Path, metadata: &CompileMetadata) -> Result<()> {
+    let mut manager = PackageManager::new(root);
+    let manifest = manager.read_manifest()?;
+    manager.resolve_dependencies()?;
+
+    let mut lockfile = Lockfile::read_from_root(root)?.unwrap_or_default();
+    lockfile.package = lockfile_package_info(root, &manifest)?;
+    lockfile.replace_with_resolved(manager.get_resolved());
+    lockfile.package_build = Some(locked_build_info_from_metadata(metadata)?);
+    lockfile.write_to_root(root)?;
+    Ok(())
+}
+
+fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest) -> Result<crate::package::LockfilePackageInfo> {
+    Ok(crate::package::LockfilePackageInfo {
+        name: manifest.package.name.clone(),
+        version: manifest.package.version.clone(),
+        namespace: manifest.package.namespace.clone(),
+        source_hash: Some(crate::package::registry::compute_source_hash(root)?),
+    })
+}
+
+fn locked_build_info_from_metadata(metadata: &CompileMetadata) -> Result<crate::package::LockedBuildInfo> {
+    Ok(crate::package::LockedBuildInfo {
+        compiler_version: Some(metadata.compiler_version.clone()),
+        target_profile: Some(metadata.target_profile.name.clone()),
+        artifact_hash: metadata.artifact_hash.clone(),
+        metadata_hash: Some(hash_json_value("metadata", metadata)?),
+        schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
+        abi_hash: Some(metadata_abi_hash(metadata)?),
+        constraints_hash: Some(hash_json_value("constraints", &metadata.constraints)?),
+    })
+}
+
+fn metadata_abi_hash(metadata: &CompileMetadata) -> Result<String> {
+    let abi = serde_json::json!({
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "target_profile": metadata.target_profile.name.as_str(),
+        "types": &metadata.types,
+        "actions": &metadata.actions,
+        "functions": &metadata.functions,
+        "locks": &metadata.locks,
+        "molecule_schema_manifest": &metadata.molecule_schema_manifest,
+    });
+    hash_json_value("abi", &abi)
+}
+
+fn hash_json_value<T: serde::Serialize>(label: &str, value: &T) -> Result<String> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize {} for digest: {}", label, e)))?;
+    Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
+}
+
+fn push_missing_locked_build_identity(label: &str, build: &crate::package::LockedBuildInfo, violations: &mut Vec<String>) {
+    if build.compiler_version.is_none() {
+        violations.push(format!("{} has no compiler_version", label));
+    }
+    if build.target_profile.is_none() {
+        violations.push(format!("{} has no target_profile", label));
+    }
+    if build.artifact_hash.is_none() {
+        violations.push(format!("{} has no artifact_hash", label));
+    }
+    if build.metadata_hash.is_none() {
+        violations.push(format!("{} has no metadata_hash", label));
+    }
+    if build.schema_hash.is_none() {
+        violations.push(format!("{} has no schema_hash", label));
+    }
+    if build.abi_hash.is_none() {
+        violations.push(format!("{} has no abi_hash", label));
+    }
+    if build.constraints_hash.is_none() {
+        violations.push(format!("{} has no constraints_hash", label));
+    }
+}
+
+fn push_missing_deployed_build_identity(label: &str, build: &crate::package::DeployedBuildInfo, violations: &mut Vec<String>) {
+    if build.compiler_version.is_none() {
+        violations.push(format!("{} has no compiler_version", label));
+    }
+    if build.artifact_hash.is_none() {
+        violations.push(format!("{} has no artifact_hash", label));
+    }
+    if build.metadata_hash.is_none() {
+        violations.push(format!("{} has no metadata_hash", label));
+    }
+    if build.schema_hash.is_none() {
+        violations.push(format!("{} has no schema_hash", label));
+    }
+    if build.abi_hash.is_none() {
+        violations.push(format!("{} has no abi_hash", label));
+    }
+    if build.constraints_hash.is_none() {
+        violations.push(format!("{} has no constraints_hash", label));
+    }
+}
+
+fn compare_optional_build_field(
+    field: &str,
+    lock_value: &Option<String>,
+    deployed_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (lock_value, deployed_value) {
+        (Some(lock_value), Some(deployed_value)) if lock_value == deployed_value => {}
+        (Some(lock_value), Some(deployed_value)) => {
+            violations.push(format!("{} mismatch: Cell.lock has '{}', Deployed.toml has '{}'", field, lock_value, deployed_value))
+        }
+        (None, _) => violations.push(format!("Cell.lock [package.build] has no {}", field)),
+        (_, None) => violations.push(format!("Deployed.toml [build] has no {}", field)),
+    }
+}
+
 fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
     effective_check_args(CheckArgs {
         all_targets: false,
@@ -6445,6 +6665,7 @@ impl CliParser {
                     .arg(Arg::new("name").value_name("NAME").help("Package name"))
                     .arg(Arg::new("path").value_name("PATH").help("Path to create package"))
                     .arg(Arg::new("lib").long("lib").action(ArgAction::SetTrue).help("Create a library package"))
+                    .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry publishing"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON init summary")),
             )
             .subcommand(
@@ -6899,6 +7120,30 @@ impl CliParser {
                     .arg(Arg::new("registry").long("registry").value_name("URL")),
             )
             .subcommand(
+                ClapCommand::new("package").about("Package integrity commands").subcommand_required(true).subcommand(
+                    ClapCommand::new("verify")
+                        .about("Verify package integrity against Cell.lock and source tree")
+                        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+                ),
+            )
+            .subcommand(
+                ClapCommand::new("registry")
+                    .about("Registry integrity commands")
+                    .subcommand_required(true)
+                    .subcommand(
+                        ClapCommand::new("verify")
+                            .about("Verify deployment registry records against Cell.lock and chain facts")
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("add")
+                            .about("Register a new package in the discovery index")
+                            .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
+                            .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
+                            .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
+                    ),
+            )
+            .subcommand(
                 ClapCommand::new("registry-verify")
                     .about("Verify deployment registry records against Cell.lock and chain facts")
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
@@ -6966,6 +7211,7 @@ impl CliParser {
                 name: m.get_one::<String>("name").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
+                namespace: m.get_one::<String>("namespace").cloned(),
                 json: m.get_flag("json"),
             }),
             Some(("new", m)) => Command::New(NewArgs {
@@ -7194,6 +7440,19 @@ impl CliParser {
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
+            Some(("package", m)) => match m.subcommand() {
+                Some(("verify", verify)) => Command::PackageVerify(PackageVerifyArgs { json: verify.get_flag("json") }),
+                _ => unreachable!(),
+            },
+            Some(("registry", m)) => match m.subcommand() {
+                Some(("verify", verify)) => Command::RegistryVerify(RegistryVerifyArgs { json: verify.get_flag("json") }),
+                Some(("add", add)) => Command::RegistryAdd(RegistryAddArgs {
+                    namespace: add.get_one::<String>("namespace").cloned().unwrap_or_default(),
+                    name: add.get_one::<String>("name").cloned().unwrap_or_default(),
+                    source: add.get_one::<String>("source").cloned().unwrap_or_default(),
+                }),
+                _ => unreachable!(),
+            },
             Some(("registry-verify", m)) => Command::RegistryVerify(RegistryVerifyArgs { json: m.get_flag("json") }),
             Some(("package-verify", m)) => Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") }),
             Some(("registry-add", m)) => Command::RegistryAdd(RegistryAddArgs {

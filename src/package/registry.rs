@@ -17,6 +17,20 @@ use std::path::{Path, PathBuf};
 
 /// Default discovery index repository URL.
 pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/cellscript/cellscript-registry";
+pub const REGISTRY_URL_ENV: &str = "CELLSCRIPT_REGISTRY_URL";
+
+/// Effective discovery index URL.
+///
+/// The environment override is intentionally small: it lets tests and private
+/// registries use the same Git-based resolver without adding a separate config
+/// file or service dependency.
+pub fn default_registry_url() -> String {
+    std::env::var(REGISTRY_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string())
+}
 
 /// A single entry in the discovery index: maps `namespace/name` to a source repo URL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +82,14 @@ impl DiscoveryIndex {
     ///    `github.com/<namespace>/<name>`. This makes the discovery index
     ///    an optional override mechanism, not a mandatory gate.
     pub fn lookup(&self, namespace: &str, name: &str) -> Result<DiscoveryEntry> {
-        let clone_dir = self.clone_or_update()?;
+        let fallback_source = format!("https://github.com/{}/{}", namespace, name);
+        let fallback = || DiscoveryEntry { name: name.to_string(), namespace: namespace.to_string(), source: fallback_source.clone() };
+
+        let clone_dir = match self.clone_or_update() {
+            Ok(clone_dir) => clone_dir,
+            Err(_) if self.registry_url == DEFAULT_REGISTRY_URL => return Ok(fallback()),
+            Err(error) => return Err(error),
+        };
         let entry_path = clone_dir.join(namespace).join(format!("{}.json", name));
 
         if entry_path.exists() {
@@ -83,8 +104,7 @@ impl DiscoveryIndex {
         }
 
         // Fall back to Go-style convention: github.com/<namespace>/<name>
-        let fallback_source = format!("https://github.com/{}/{}", namespace, name);
-        Ok(DiscoveryEntry { name: name.to_string(), namespace: namespace.to_string(), source: fallback_source })
+        Ok(fallback())
     }
 
     /// Add a new package entry to the discovery index.
@@ -231,31 +251,102 @@ pub fn compute_source_hash(root: &Path) -> Result<String> {
     let mut hasher = ckb_blake2b256_stream::Hasher::new();
 
     let manifest_path = root.join("Cell.toml");
+    let mut manifest = SourceHashManifest::default();
     if manifest_path.exists() {
         let content = std::fs::read_to_string(&manifest_path)?;
+        manifest = toml::from_str(&content)
+            .map_err(|e| CompileError::without_span(format!("failed to parse Cell.toml for source hashing: {}", e)))?;
         hasher.update(b"Cell.toml:");
         hasher.update(content.as_bytes());
         hasher.update(b"\n");
     }
 
-    // Hash all .cell source files
-    let src_dir = root.join("src");
-    if src_dir.exists() {
-        let mut files = collect_cell_files(&src_dir)?;
-        files.sort();
-        for file_path in &files {
-            let rel = file_path.strip_prefix(root).unwrap_or(file_path);
-            let content = std::fs::read_to_string(file_path)
-                .map_err(|e| CompileError::without_span(format!("failed to read '{}': {}", file_path.display(), e)))?;
-            hasher.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
-            hasher.update(b":");
-            hasher.update(content.as_bytes());
-            hasher.update(b"\n");
-        }
+    let mut files = collect_hash_source_files(root, &manifest)?;
+    files.sort();
+    files.dedup();
+    for file_path in &files {
+        let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+        let content = std::fs::read_to_string(file_path)
+            .map_err(|e| CompileError::without_span(format!("failed to read '{}': {}", file_path.display(), e)))?;
+        hasher.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
+        hasher.update(b":");
+        hasher.update(content.as_bytes());
+        hasher.update(b"\n");
     }
 
     let hash = hasher.finalize();
     Ok(crate::hex_encode(&hash))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SourceHashManifest {
+    #[serde(default)]
+    package: Option<SourceHashPackage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SourceHashPackage {
+    #[serde(default)]
+    entry: Option<String>,
+    #[serde(default)]
+    source_roots: Vec<String>,
+}
+
+fn collect_hash_source_files(root: &Path, manifest: &SourceHashManifest) -> Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    let mut seen_roots = std::collections::BTreeSet::new();
+
+    if let Some(package) = &manifest.package {
+        for source_root in &package.source_roots {
+            let source_root_path = root.join(source_root);
+            if !source_root_path.exists() {
+                return Err(CompileError::without_span(format!(
+                    "configured source root '{}' does not exist",
+                    source_root_path.display()
+                )));
+            }
+            if !source_root_path.is_dir() {
+                return Err(CompileError::without_span(format!(
+                    "configured source root '{}' is not a directory",
+                    source_root_path.display()
+                )));
+            }
+            if seen_roots.insert(source_root_path.clone()) {
+                roots.push(source_root_path);
+            }
+        }
+    }
+
+    if roots.is_empty() {
+        let src_dir = root.join("src");
+        if src_dir.exists() && src_dir.is_dir() && seen_roots.insert(src_dir.clone()) {
+            roots.push(src_dir);
+        }
+    }
+
+    let mut explicit_entry = None;
+    if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.as_deref()) {
+        let entry_path = root.join(entry);
+        if !entry_path.exists() {
+            return Err(CompileError::without_span(format!("package entry '{}' does not exist", entry_path.display())));
+        }
+        if let Some(parent) = entry_path.parent() {
+            let parent = parent.to_path_buf();
+            if seen_roots.insert(parent.clone()) {
+                roots.push(parent);
+            }
+        }
+        explicit_entry = Some(entry_path);
+    }
+
+    let mut files = Vec::new();
+    for source_root in roots {
+        files.extend(collect_cell_files(&source_root)?);
+    }
+    if let Some(entry_path) = explicit_entry {
+        files.push(entry_path);
+    }
+    Ok(files)
 }
 
 fn collect_cell_files(dir: &Path) -> Result<Vec<PathBuf>> {

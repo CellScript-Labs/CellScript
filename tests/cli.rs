@@ -1,5 +1,32 @@
 use std::process::Command;
 
+fn git_init(repo_dir: &std::path::Path) {
+    let status = Command::new("git").args(["init"]).current_dir(repo_dir).status().expect("git init");
+    assert!(status.success());
+}
+
+fn git_add_all(repo_dir: &std::path::Path) {
+    let status = Command::new("git").args(["add", "."]).current_dir(repo_dir).status().expect("git add");
+    assert!(status.success());
+}
+
+fn git_commit(repo_dir: &std::path::Path, msg: &str) {
+    git_add_all(repo_dir);
+    let status = Command::new("git")
+        .args(["commit", "-m", msg, "--author=test <test@test.com>"])
+        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
+        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
+        .current_dir(repo_dir)
+        .status()
+        .expect("git commit");
+    assert!(status.success());
+}
+
+fn git_tag(repo_dir: &std::path::Path, tag: &str) {
+    let status = Command::new("git").args(["tag", tag]).current_dir(repo_dir).status().expect("git tag");
+    assert!(status.success());
+}
+
 #[test]
 fn cellc_writes_requested_output_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -686,10 +713,233 @@ action ping() -> u64 {
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("dependency 'remote' uses version requirement '1.2.3'"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("only local path dependencies are supported"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("registry dependency 'remote' requires a namespace"), "unexpected stderr: {}", stderr);
     assert!(!root.join("build").join("main.s").exists());
     assert!(!root.join("build").join("main.s.meta.json").exists());
+}
+
+#[test]
+fn cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dep_root = root.join("token");
+    let app_root = root.join("app");
+    let registry_root = root.join("registry");
+
+    std::fs::create_dir_all(dep_root.join("src")).unwrap();
+    std::fs::write(
+        dep_root.join("Cell.toml"),
+        r#"
+[package]
+name = "token"
+version = "0.3.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dep_root.join("src/token.cell"),
+        r#"
+module dep::token
+
+resource Token has store, replace, relock, consume, burn {
+    amount: u64
+}
+"#,
+    )
+    .unwrap();
+    let source_hash = cellscript::package::registry::compute_source_hash(&dep_root).unwrap();
+    cellscript::package::registry::RegistryIndex::append_version(
+        &dep_root,
+        "token",
+        "cellscript",
+        cellscript::package::registry::RegistryVersion {
+            version: "0.3.0".to_string(),
+            tag: "v0.3.0".to_string(),
+            source_hash: source_hash.clone(),
+            cellscript_version: "0.19.0".to_string(),
+            dependencies: Default::default(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            yanked: false,
+            audit: None,
+        },
+    )
+    .unwrap();
+    git_init(&dep_root);
+    git_add_all(&dep_root);
+    git_commit(&dep_root, "publish token");
+    git_tag(&dep_root, "v0.3.0");
+
+    std::fs::create_dir_all(registry_root.join("cellscript")).unwrap();
+    git_init(&registry_root);
+    let entry = cellscript::package::registry::DiscoveryEntry {
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        source: dep_root.to_string_lossy().to_string(),
+    };
+    std::fs::write(registry_root.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+    git_add_all(&registry_root);
+    git_commit(&registry_root, "add token");
+
+    std::fs::create_dir_all(app_root.join("src")).unwrap();
+    std::fs::write(
+        app_root.join("Cell.toml"),
+        r#"
+[package]
+name = "app"
+version = "0.1.0"
+namespace = "cellscript"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app_root.join("src/main.cell"),
+        r#"
+module app::main
+
+use dep::token::Token
+
+action pass_through(token: Token) -> Token {
+    verification
+        token
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("build")
+        .env(cellscript::package::registry::REGISTRY_URL_ENV, &registry_root)
+        .current_dir(&app_root)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let lockfile: cellscript::package::Lockfile =
+        toml::from_str(&std::fs::read_to_string(app_root.join("Cell.lock")).unwrap()).unwrap();
+    assert!(lockfile.package.source_hash.is_some());
+    let build = lockfile.package_build.as_ref().expect("build identity");
+    assert!(build.compiler_version.is_some());
+    assert!(build.target_profile.is_some());
+    assert!(build.artifact_hash.is_some());
+    assert!(build.metadata_hash.is_some());
+    assert!(build.schema_hash.is_some());
+    assert!(build.abi_hash.is_some());
+    assert!(build.constraints_hash.is_some());
+    let token = lockfile.dependencies.get("token").expect("locked registry dependency");
+    assert_eq!(token.source_hash.as_deref(), Some(source_hash.as_str()));
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("package")
+        .arg("verify")
+        .env(cellscript::package::registry::REGISTRY_URL_ENV, &registry_root)
+        .current_dir(&app_root)
+        .output()
+        .unwrap();
+    assert!(verify.status.success(), "stderr: {}", String::from_utf8_lossy(&verify.stderr));
+}
+
+#[test]
+fn cellc_init_accepts_phase1_namespace_flag() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("init")
+        .arg("amm_pool")
+        .arg("--namespace")
+        .arg("cellscript")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let manifest = std::fs::read_to_string(temp.path().join("Cell.toml")).unwrap();
+    assert!(manifest.contains("namespace = \"cellscript\""), "manifest: {}", manifest);
+}
+
+#[test]
+fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    let mut lockfile = cellscript::package::Lockfile::new();
+    lockfile.package = cellscript::package::LockfilePackageInfo {
+        name: "token".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: Some("cellscript".to_string()),
+        source_hash: Some("source_hash".to_string()),
+    };
+    lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
+        compiler_version: Some("0.19.0".to_string()),
+        target_profile: Some("ckb".to_string()),
+        artifact_hash: Some("artifact_hash".to_string()),
+        metadata_hash: Some("metadata_hash".to_string()),
+        schema_hash: Some("schema_hash".to_string()),
+        abi_hash: Some("abi_hash".to_string()),
+        constraints_hash: Some("constraints_hash".to_string()),
+    });
+    lockfile.write_to_root(root).unwrap();
+
+    let deployed = cellscript::package::DeployedManifest {
+        version: 1,
+        schema: None,
+        package: cellscript::package::DeployedPackageInfo {
+            name: "token".to_string(),
+            version: "1.0.0".to_string(),
+            source_hash: Some("source_hash".to_string()),
+        },
+        build: Some(cellscript::package::DeployedBuildInfo {
+            compiler_version: Some("0.19.0".to_string()),
+            artifact_hash: Some("artifact_hash".to_string()),
+            metadata_hash: Some("metadata_hash".to_string()),
+            schema_hash: Some("schema_hash".to_string()),
+            abi_hash: Some("abi_hash".to_string()),
+            constraints_hash: Some("constraints_hash".to_string()),
+        }),
+        deployments: vec![cellscript::package::DeploymentRecord {
+            network: "aggron4".to_string(),
+            chain_id: "ckb-testnet".to_string(),
+            tx_hash: "0xaaaa".to_string(),
+            output_index: 0,
+            code_hash: "0xbbbb".to_string(),
+            hash_type: "data1".to_string(),
+            dep_type: "code".to_string(),
+            data_hash: "0xcccc".to_string(),
+            out_point: "0xaaaa:0".to_string(),
+            artifact_hash: None,
+            metadata_hash: None,
+            schema_hash: None,
+            abi_hash: None,
+            constraints_hash: None,
+            compiler_version: None,
+            type_id: None,
+            script_role: None,
+            status: None,
+            upgrade_lineage: None,
+            audit_report_hash: None,
+            publisher_signature: None,
+            cell_deps: vec![],
+        }],
+    };
+    deployed.write_to_root(root).unwrap();
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("registry").arg("verify").arg("--json").current_dir(root).output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert!(report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation.as_str().unwrap_or_default().contains("missing from Cell.lock")));
 }
 
 #[test]
