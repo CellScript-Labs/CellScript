@@ -12,6 +12,7 @@ where
     // pretend to emulate CKB epoch or block-number behavior.
     require_maturity(100)
     require_time(1714000000)
+    require_epoch_after(10, 0, 1)
     require_epoch_relative(10, 0, 1)
 
     let floor = occupied_capacity("TimedToken")

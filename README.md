@@ -126,7 +126,7 @@ CellScript now supports CKB as its only target profile:
 
 | Profile | When to use | What you get |
 |---|---|---|
-| `ckb` | CKB mainnet artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
+| `ckb` | CKB ckb-vm RISC-V artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
 
 > The `ckb` profile is production-gated for the bundled CellScript suite. It
 > emits raw CKB ckb-vm artifacts, uses CKB syscall
@@ -412,6 +412,7 @@ CellScript includes production-style local language tooling for early users:
 - [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
 - [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.14 community update](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
 - [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
 
 ---
