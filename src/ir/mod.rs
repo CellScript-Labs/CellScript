@@ -210,6 +210,7 @@ pub struct CellPattern {
     pub type_hash: Option<[u8; 32]>,
     pub binding: String,
     pub fields: Vec<(String, IrOperand)>,
+    pub destruction_policy: Option<IrDestructionPolicy>,
 }
 
 #[derive(Debug, Clone)]
@@ -1302,8 +1303,10 @@ impl IrGenerator {
                     if let Some(pattern) = self.cell_pattern_from_operand(operand, "transfer") {
                         patterns.push(pattern);
                     }
-                } else if let IrInstruction::Destroy { operand, .. } = instruction {
+                } else if let IrInstruction::Destroy { operand, policy } = instruction {
                     if let Some(pattern) = self.cell_pattern_from_operand(operand, "destroy") {
+                        let mut pattern = pattern;
+                        pattern.destruction_policy = Some(policy.clone());
                         patterns.push(pattern);
                     }
                 } else if let IrInstruction::ReplaceUnique { operand, .. } = instruction {
@@ -1334,6 +1337,7 @@ impl IrGenerator {
                         type_hash: Some(type_hash_for_name(ty)),
                         binding: dest.name.clone(),
                         fields: Vec::new(),
+                        destruction_policy: None,
                     });
                 }
             }
@@ -1351,6 +1355,7 @@ impl IrGenerator {
                     type_hash: Some(type_hash_for_name(type_name)),
                     binding: param.name.clone(),
                     fields: Vec::new(),
+                    destruction_policy: None,
                 })
             })
             .collect()
@@ -1472,6 +1477,7 @@ impl IrGenerator {
             type_hash: Some(type_hash_for_name(type_name)),
             binding: var.name.clone(),
             fields: Vec::new(),
+            destruction_policy: None,
         })
     }
 

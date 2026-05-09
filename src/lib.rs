@@ -3474,6 +3474,8 @@ pub struct CellPatternMetadata {
     pub type_hash: Option<String>,
     pub binding: String,
     pub fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destruction_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6137,26 +6139,13 @@ fn body_transaction_resource_obligations(
                         checks.push(check);
                     }
                 }
-                ir::IrInstruction::Destroy { operand, .. } => {
+                ir::IrInstruction::Destroy { operand, policy } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
                         checks.push(check);
                     }
                     if let Some(type_name) = operand_named_type_name(operand) {
                         let binding = operand_var_name(operand).unwrap_or(&type_name);
-                        let scan_detail = if destroy_group_output_absence_scan_is_checked(body, &type_name, binding) {
-                            "; destroy-output-absence=checked-runtime; destroy-output-scan=checked-runtime"
-                        } else {
-                            ""
-                        };
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("destroy-output-scan:{}", type_name),
-                            status: if scan_detail.is_empty() { "runtime-required" } else { "checked-runtime" },
-                            detail: format!(
-                                "Runtime verifier must scan transaction outputs to prove the destroyed '{}' instance is not recreated by the same state transition{}",
-                                type_name, scan_detail
-                            ),
-                        });
+                        checks.push(destroy_policy_obligation(body, &type_name, binding, policy));
                     }
                 }
                 _ => {}
@@ -6308,22 +6297,108 @@ fn unique_identity_obligation(
     }
     let identity_policy = metadata_identity_policy(identity).unwrap_or_else(|| "none".to_string());
     let operation_feature = operation.replace('_', "-");
-    let local_boundary = match (operation, identity) {
-        ("create_unique", ir::IrIdentityPolicy::Field(_)) => {
-            "; global field uniqueness remains a builder/indexer obligation outside CKB-VM"
-        }
-        ("create_unique", ir::IrIdentityPolicy::CkbTypeId) => "; TYPE_ID uniqueness remains bound to the CKB TYPE_ID builder plan",
-        _ => "",
+    let create_unique = operation == "create_unique";
+    let status = if create_unique { "runtime-required" } else { "checked-runtime" };
+    let detail = if create_unique {
+        let boundary = match identity {
+            ir::IrIdentityPolicy::CkbTypeId => "TYPE_ID uniqueness remains bound to the CKB TYPE_ID builder plan",
+            ir::IrIdentityPolicy::Field(_) => "global field uniqueness remains a builder/indexer obligation outside CKB-VM",
+            ir::IrIdentityPolicy::ScriptArgs => "script-args uniqueness remains a builder/indexer obligation outside CKB-VM",
+            ir::IrIdentityPolicy::SingletonType => {
+                "singleton creation exclusivity remains a builder/indexer obligation outside CKB-VM"
+            }
+            ir::IrIdentityPolicy::None => "no identity policy is declared",
+        };
+        format!(
+            "Compiler-emitted runtime verifier anchors create_unique identity policy '{}' for '{}' bound to '{}', but {}; {}-identity=runtime-required; {}-local-anchor=checked-runtime",
+            identity_policy, type_name, binding, boundary, operation_feature, operation_feature
+        )
+    } else {
+        format!(
+            "Compiler-emitted runtime verifier checks {} identity policy '{}' for '{}' bound to '{}'; {}-identity=checked-runtime",
+            operation, identity_policy, type_name, binding, operation_feature
+        )
     };
     Some(TransactionResourceObligation {
         category: "transaction-invariant",
         feature: format!("{}-identity:{}:{}", operation_feature, type_name, identity_policy),
-        status: "checked-runtime",
-        detail: format!(
-            "Compiler-emitted runtime verifier checks {} identity policy '{}' for '{}' bound to '{}'; {}-identity=checked-runtime{}",
-            operation, identity_policy, type_name, binding, operation_feature, local_boundary
-        ),
+        status,
+        detail,
     })
+}
+
+fn destruction_policy_metadata(policy: &ir::IrDestructionPolicy) -> String {
+    match policy {
+        ir::IrDestructionPolicy::Default => "default".to_string(),
+        ir::IrDestructionPolicy::SingletonType => "singleton_type".to_string(),
+        ir::IrDestructionPolicy::Unique { identity } => format!("unique({})", identity),
+        ir::IrDestructionPolicy::Instance { identity_field } => format!("instance({})", identity_field),
+        ir::IrDestructionPolicy::BurnAmount { field } => format!("burn_amount({})", field),
+    }
+}
+
+fn destroy_policy_uses_output_absence_scan(policy: &ir::IrDestructionPolicy) -> bool {
+    match policy {
+        ir::IrDestructionPolicy::Default | ir::IrDestructionPolicy::SingletonType => true,
+        ir::IrDestructionPolicy::Unique { identity } => matches!(identity.as_str(), "type_id" | "ckb_type_id"),
+        ir::IrDestructionPolicy::Instance { .. } | ir::IrDestructionPolicy::BurnAmount { .. } => false,
+    }
+}
+
+fn destroy_policy_obligation(
+    body: &ir::IrBody,
+    type_name: &str,
+    binding: &str,
+    policy: &ir::IrDestructionPolicy,
+) -> TransactionResourceObligation {
+    match policy {
+        ir::IrDestructionPolicy::Default | ir::IrDestructionPolicy::SingletonType => {
+            let scan_checked = destroy_group_output_absence_scan_is_checked(body, type_name, binding);
+            let scan_detail = if scan_checked { "; destroy-output-absence=checked-runtime; destroy-output-scan=checked-runtime" } else { "" };
+            TransactionResourceObligation {
+                category: "transaction-invariant",
+                feature: format!("destroy-output-scan:{}", type_name),
+                status: if scan_checked { "checked-runtime" } else { "runtime-required" },
+                detail: format!(
+                    "Runtime verifier must scan transaction outputs to prove the destroyed '{}' singleton/type cell is not recreated by the same state transition; destroy-policy={}{}",
+                    type_name,
+                    destruction_policy_metadata(policy),
+                    scan_detail
+                ),
+            }
+        }
+        ir::IrDestructionPolicy::Unique { identity } => {
+            let scan_checked = destroy_group_output_absence_scan_is_checked(body, type_name, binding);
+            let scan_detail = if scan_checked { "; destroy-unique-type-id=checked-runtime; destroy-output-scan=checked-runtime" } else { "" };
+            TransactionResourceObligation {
+                category: "transaction-invariant",
+                feature: format!("destroy-unique:{}:{}", type_name, identity),
+                status: if scan_checked { "checked-runtime" } else { "runtime-required" },
+                detail: format!(
+                    "Runtime verifier must prove destroyed TYPE_ID-backed '{}' bound to '{}' has no continuation output for identity '{}'{}",
+                    type_name, binding, identity, scan_detail
+                ),
+            }
+        }
+        ir::IrDestructionPolicy::Instance { identity_field } => TransactionResourceObligation {
+            category: "transaction-invariant",
+            feature: format!("destroy-instance:{}:{}", type_name, identity_field),
+            status: "runtime-required",
+            detail: format!(
+                "Runtime verifier must prove destroyed '{}' instance bound to '{}' has no output with the same identity field '{}'; destroy-instance=runtime-required",
+                type_name, binding, identity_field
+            ),
+        },
+        ir::IrDestructionPolicy::BurnAmount { field } => TransactionResourceObligation {
+            category: "transaction-invariant",
+            feature: format!("burn-amount:{}:{}", type_name, field),
+            status: "runtime-required",
+            detail: format!(
+                "Runtime verifier must prove burn amount delta for '{}' bound to '{}' using numeric field '{}'; burn-amount=runtime-required",
+                type_name, binding, field
+            ),
+        },
+    }
 }
 
 fn body_linear_collection_obligations(
@@ -6938,6 +7013,8 @@ fn transaction_runtime_input_requirements_from_obligations(
 
         let include_checked_destroy_scan =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-output-scan:");
+        let include_checked_destroy_unique =
+            obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-unique:");
         let include_checked_operation_input =
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
@@ -6954,6 +7031,7 @@ fn transaction_runtime_input_requirements_from_obligations(
         if obligation.category != "transaction-invariant"
             || (obligation.status != "runtime-required"
                 && !include_checked_destroy_scan
+                && !include_checked_destroy_unique
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
@@ -6998,6 +7076,74 @@ fn transaction_runtime_input_requirements_from_obligations(
                 binding,
                 Some("outputs"),
                 "destroy-output-scan-transaction-boundary",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("destroy-unique:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let identity_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-unique-type-id") {
+                "checked-runtime"
+            } else {
+                "runtime-required"
+            };
+            let output_scan_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-output-scan") {
+                "checked-runtime"
+            } else {
+                "runtime-required"
+            };
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-unique-type-id",
+                identity_status,
+                (identity_status == "runtime-required")
+                    .then_some("destroy_unique lowering has no executable TYPE_ID continuation scan"),
+                (identity_status == "runtime-required").then_some("destroy-unique-type-id-gap"),
+                "Output",
+                binding,
+                Some("ckb_type_script_hash-absence"),
+                "destroy-unique-type-id-output-scan",
+                None,
+            ));
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-output-scan",
+                output_scan_status,
+                (output_scan_status == "runtime-required")
+                    .then_some("destroy_unique lowering does not bind transaction output scan boundaries"),
+                (output_scan_status == "runtime-required").then_some("output-scan-boundary-gap"),
+                "Transaction",
+                binding,
+                Some("outputs"),
+                "destroy-output-scan-transaction-boundary",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("destroy-instance:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let field = rest.rsplit_once(':').map(|(_, field)| field).unwrap_or("identity");
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-instance-identity",
+                "runtime-required",
+                Some("destroy_instance identity-field output scan is not yet executable"),
+                Some("destroy-instance-identity-gap"),
+                "Output",
+                binding,
+                Some(field),
+                "destroy-instance-identity-output-scan",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("burn-amount:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let field = rest.rsplit_once(':').map(|(_, field)| field).unwrap_or("amount");
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "burn-amount-delta",
+                "runtime-required",
+                Some("burn_amount delta proof is not yet executable"),
+                Some("burn-amount-delta-gap"),
+                "Transaction",
+                binding,
+                Some(field),
+                "burn-amount-delta-proof",
                 None,
             ));
         } else if let Some((operation, binding)) = operation_input_feature(obligation.feature.as_str()) {
@@ -7133,9 +7279,9 @@ fn transaction_runtime_input_requirements_from_obligations(
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
                 &format!("{operation}-identity"),
-                "checked-runtime",
-                None,
-                None,
+                obligation.status.as_str(),
+                (obligation.status == "runtime-required").then_some("create_unique global identity proof is outside this verifier"),
+                (obligation.status == "runtime-required").then_some("unique-identity-global-proof-gap"),
                 "Output",
                 output_binding,
                 Some("identity"),
@@ -7222,7 +7368,12 @@ fn transaction_runtime_input_requirement(
 }
 
 fn destroy_group_output_absence_scan_is_checked(body: &ir::IrBody, _type_name: &str, binding: &str) -> bool {
-    body.consume_set.iter().any(|pattern| pattern.operation == "destroy" && pattern.binding == binding && pattern.type_hash.is_some())
+    body.consume_set.iter().any(|pattern| {
+        pattern.operation == "destroy"
+            && pattern.binding == binding
+            && pattern.type_hash.is_some()
+            && pattern.destruction_policy.as_ref().is_none_or(destroy_policy_uses_output_absence_scan)
+    })
 }
 
 fn body_mutable_cell_state_obligations(
@@ -10100,7 +10251,7 @@ fn body_fail_closed_runtime_features(
                 ir::IrInstruction::Create { .. } => {}
                 ir::IrInstruction::CreateUnique { dest, pattern, identity } => {
                     if !metadata_output_operation_is_verifier_covered(body, "create_unique", dest, type_layouts, &prelude_availability)
-                        || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                        || !metadata_unique_identity_policy_has_local_runtime_anchor(pattern, identity, type_layouts)
                     {
                         features.insert("create-unique-expression".to_string());
                     }
@@ -10112,7 +10263,7 @@ fn body_fail_closed_runtime_features(
                         dest,
                         type_layouts,
                         &prelude_availability,
-                    ) || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                    ) || !metadata_unique_identity_policy_has_local_runtime_anchor(pattern, identity, type_layouts)
                     {
                         features.insert("replace-unique-expression".to_string());
                     }
@@ -10168,7 +10319,7 @@ fn metadata_output_operation_is_verifier_covered(
     })
 }
 
-fn metadata_unique_identity_policy_is_executable(
+fn metadata_unique_identity_policy_has_local_runtime_anchor(
     pattern: &ir::CreatePattern,
     identity: &ir::IrIdentityPolicy,
     type_layouts: &MetadataTypeLayouts,
@@ -12832,6 +12983,7 @@ fn cell_pattern_metadata(pattern: &ir::CellPattern) -> CellPatternMetadata {
         type_hash: pattern.type_hash.as_ref().map(hex_hash),
         binding: pattern.binding.clone(),
         fields: pattern.fields.iter().map(|(field, _)| field.clone()).collect(),
+        destruction_policy: pattern.destruction_policy.as_ref().map(destruction_policy_metadata),
     }
 }
 
@@ -24474,11 +24626,136 @@ where
                 .verifier_obligations
                 .iter()
                 .any(|obligation| obligation.feature == "create-unique-identity:NFT:field(token_id)"
+                    && obligation.status == "runtime-required"
                     && obligation.detail.contains("global field uniqueness remains")),
             "missing create_unique field identity proof obligation"
         );
+        assert!(result.metadata.actions[0].transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-unique-identity:NFT:field(token_id)"
+                && requirement.status == "runtime-required"
+                && requirement.component == "create-unique-identity"
+        }));
         assert!(asm.contains("create_unique identity policy field(token_id)"), "missing identity policy runtime marker:\n{}", asm);
         assert!(asm.contains("create_unique field identity anchored"), "missing field identity output anchor:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_destroy_policies_are_policy_aware() {
+        let program = r#"
+module audit::destroy_policy_runtime
+
+resource Token has store, consume, burn
+{
+    amount: u64
+}
+
+resource NFT has store, consume, burn
+{
+    token_id: u64,
+    owner: Address
+}
+
+action burn_token(token: Token) -> u64
+where
+    burn_amount(token, field = amount)
+
+action destroy_nft(nft_instance: NFT) -> u64
+where
+    destroy_instance(nft_instance, identity_field = token_id)
+
+action destroy_unique_nft(unique_nft: NFT) -> u64
+where
+    destroy_unique(unique_nft, identity = type_id)
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        let burn = result.metadata.actions.iter().find(|action| action.name == "burn_token").expect("burn action");
+        assert!(burn.consume_set.iter().any(|pattern| {
+            pattern.operation == "destroy"
+                && pattern.binding == "token"
+                && pattern.destruction_policy.as_deref() == Some("burn_amount(amount)")
+        }));
+        assert!(burn
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "burn-amount:Token:amount" && obligation.status == "runtime-required" }));
+        assert!(burn.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "burn-amount:Token:amount"
+                && requirement.component == "burn-amount-delta"
+                && requirement.status == "runtime-required"
+        }));
+        assert!(
+            !asm.contains("destroy output type-hash absence scan binding=token"),
+            "burn_amount must not emit singleton TypeHash absence scan:\n{}",
+            asm
+        );
+
+        let instance = result.metadata.actions.iter().find(|action| action.name == "destroy_nft").expect("instance action");
+        assert!(instance.consume_set.iter().any(|pattern| {
+            pattern.operation == "destroy"
+                && pattern.binding == "nft_instance"
+                && pattern.destruction_policy.as_deref() == Some("instance(token_id)")
+        }));
+        assert!(instance
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "destroy-instance:NFT:token_id" && obligation.status == "runtime-required" }));
+        assert!(
+            !asm.contains("destroy output type-hash absence scan binding=nft_instance"),
+            "destroy_instance must not reject every same-TypeHash output:\n{}",
+            asm
+        );
+
+        let unique = result.metadata.actions.iter().find(|action| action.name == "destroy_unique_nft").expect("unique action");
+        assert!(unique
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "destroy-unique:NFT:type_id" && obligation.status == "checked-runtime" }));
+        assert!(
+            asm.contains("destroy output type-hash absence scan binding=unique_nft"),
+            "destroy_unique(type_id) should keep executable output absence scan:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_rejects_invalid_destroy_policy_shapes() {
+        let bad_unique = r#"
+module audit::bad_destroy_unique
+
+resource Token has store, consume, burn
+{
+    amount: u64
+}
+
+action burn(token: Token) -> u64
+where
+    destroy_unique(token, identity = serial)
+"#;
+
+        let err =
+            compile(bad_unique, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("expected type_id or ckb_type_id"), "unexpected error: {}", err.message);
+
+        let bad_burn = r#"
+module audit::bad_burn_amount
+
+resource Flag has store, consume, burn
+{
+    active: bool
+}
+
+action burn(flag: Flag) -> u64
+where
+    burn_amount(flag, field = active)
+"#;
+
+        let err =
+            compile(bad_burn, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("must be a fixed-width numeric scalar"), "unexpected error: {}", err.message);
     }
 
     #[test]

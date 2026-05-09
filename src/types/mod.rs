@@ -2825,6 +2825,8 @@ impl<'a> TypeChecker<'a> {
                     "destroy",
                     destroy.span,
                 )?;
+                let type_name = Self::base_type_name(&destroy_ty).unwrap_or_default();
+                self.validate_destroy_policy(type_name, &destroy.policy, destroy.span)?;
                 env.destroy(&name)?;
                 Ok(Type::U64)
             }
@@ -3545,6 +3547,50 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
         }
+    }
+
+    fn validate_destroy_policy(&self, type_name: &str, policy: &DestructionPolicy, span: Span) -> Result<()> {
+        match policy {
+            DestructionPolicy::Default | DestructionPolicy::SingletonType => Ok(()),
+            DestructionPolicy::Unique { identity } if matches!(identity.as_str(), "type_id" | "ckb_type_id") => Ok(()),
+            DestructionPolicy::Unique { identity } => Err(CompileError::new(
+                format!("destroy_unique identity '{}' is not supported; expected type_id or ckb_type_id", identity),
+                span,
+            )),
+            DestructionPolicy::Instance { identity_field } => {
+                let field_ty = self.destroy_policy_field_type(type_name, identity_field, span, "destroy_instance identity field")?;
+                if Self::identity_static_width(&field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "destroy_instance identity field '{}.{}' must be fixed-width so CKB runtime can compare it",
+                            type_name, identity_field
+                        ),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+            DestructionPolicy::BurnAmount { field } => {
+                let field_ty = self.destroy_policy_field_type(type_name, field, span, "burn_amount field")?;
+                if !self.is_numeric_type(&field_ty) || Self::identity_static_width(&field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!("burn_amount field '{}.{}' must be a fixed-width numeric scalar", type_name, field),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn destroy_policy_field_type(&self, type_name: &str, field: &str, span: Span, label: &str) -> Result<Type> {
+        let Some(expected_fields) = self.resolve_named_type_fields(type_name) else {
+            return Err(CompileError::new(format!("{} target type '{}' has no declared fields", label, type_name), span));
+        };
+        expected_fields
+            .get(field)
+            .cloned()
+            .ok_or_else(|| CompileError::new(format!("{} '{}' does not exist on '{}'", label, field, type_name), span))
     }
 
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {

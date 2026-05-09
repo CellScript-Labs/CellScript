@@ -104,10 +104,10 @@ Supported identity policies:
 | Policy | Meaning | 0.15 executable boundary |
 |--------|---------|--------------------------|
 | `identity none` | No identity tracking (default, backward compatible) | No identity verifier is emitted |
-| `identity ckb_type_id` | CKB TYPE_ID: derived from first input + output index | `create_unique` requires a TYPE_ID output plan; `replace_unique` preserves TypeHash |
-| `identity field(path)` | Fixed-width field identity within the data payload | `create_unique` anchors the output field bytes; `replace_unique` compares input/output field bytes |
-| `identity script_args` | Identity derived from the executing script args | `create_unique` anchors the output LockHash; `replace_unique` preserves LockHash |
-| `identity singleton_type` | Singleton type identity | `create_unique` anchors the output TypeHash; `replace_unique` preserves TypeHash |
+| `identity ckb_type_id` | CKB TYPE_ID: derived from first input + output index | `create_unique` requires a TYPE_ID output plan and reports global creation uniqueness as runtime-required; `replace_unique` preserves TypeHash |
+| `identity field(path)` | Fixed-width field identity within the data payload | `create_unique` anchors the output field bytes and reports global uniqueness as runtime-required; `replace_unique` compares input/output field bytes |
+| `identity script_args` | Identity derived from the executing script args | `create_unique` anchors the output LockHash and reports global uniqueness as runtime-required; `replace_unique` preserves LockHash |
+| `identity singleton_type` | Singleton type identity | `create_unique` anchors the output TypeHash and reports singleton creation exclusivity as runtime-required; `replace_unique` preserves TypeHash |
 
 Identity-aware lifecycle forms:
 
@@ -132,10 +132,11 @@ exposes the policy in compiled JSON metadata (hidden when `none`).
 required because the verifier compares the consumed Cell with the replacement
 output. It does not take a `with_lock(...)` clause.
 
-For non-TYPE_ID `create_unique` policies, 0.15 emits local runtime anchors for
-the created output. Global uniqueness for field-, script-args-, and
-singleton-type creation is still a builder/indexer responsibility outside the
-CKB-VM execution scope.
+For `create_unique` policies, 0.15 emits local runtime anchors for the created
+output and records the full global uniqueness proof as `runtime-required`.
+For `ckb_type_id`, the remaining boundary is the TYPE_ID builder plan. For
+field-, script-args-, and singleton-type creation, global uniqueness remains a
+builder/indexer responsibility outside the CKB-VM execution scope.
 
 ### Explicit Destruction Policies
 
@@ -145,9 +146,9 @@ CKB-VM execution scope.
 | Form | What it proves |
 |------|---------------|
 | `destroy_singleton_type(cell)` | No output with the same TypeHash exists |
-| `destroy_unique(cell, identity = type_id)` | TYPE_ID continuation — identity is consumed, not replaced |
-| `destroy_instance(cell, identity_field = id)` | A specific instance is consumed; unrelated same-type outputs are allowed |
-| `burn_amount(cell, field = amount)` | Quantity delta, not output absence |
+| `destroy_unique(cell, identity = type_id)` | TYPE_ID continuation absence, lowered through the same output TypeHash scan |
+| `destroy_instance(cell, identity_field = id)` | A field-identified instance destruction intent; full same-field output scan is runtime-required |
+| `burn_amount(cell, field = amount)` | Quantity-delta burn intent; executable delta proof is runtime-required |
 
 Bare `destroy cell` still compiles as `DestructionPolicy::Default`. In strict
 mode it must be authorized by the 0.15 kernel effects `consume + burn` instead
@@ -156,7 +157,10 @@ audit needs to distinguish singleton absence, TYPE_ID consumption,
 field-identified instance consumption, or amount burn.
 
 `IrInstruction::Destroy` now carries `policy: IrDestructionPolicy` through
-IR and codegen.
+IR and codegen. Codegen only emits the legacy same-TypeHash absence scan for
+singleton/type-id destruction policies; instance and amount policies are
+reported as runtime-required instead of being over-constrained as singleton
+absence.
 
 ### Kernel/Protocol Primitive Split
 
@@ -338,10 +342,8 @@ invariant no_duplicate_nft {
 - removal of claim/receipt name heuristics;
 - explicit mutation cardinality forms;
 - `shared` as a scheduler policy library;
-- non-TYPE_ID global uniqueness proof for `create_unique(field(...))`,
-  `create_unique(script_args)`, and `create_unique(singleton_type)`; 0.15
-  emits local runtime anchors and requires builders/indexers to enforce global
-  uniqueness;
+- global uniqueness proof for `create_unique(...)`; 0.15 emits local runtime
+  anchors and reports the full uniqueness proof as runtime-required;
 - full ProofPlan soundness checks (v0.16 scope).
 
 ## Verification

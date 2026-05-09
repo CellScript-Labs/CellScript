@@ -337,6 +337,9 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
         || obligation.feature.contains("claim-output")
         || obligation.feature.contains("settle-output")
         || obligation.feature.contains("destroy-output-scan")
+        || obligation.feature.contains("destroy-unique")
+        || obligation.feature.contains("destroy-instance")
+        || obligation.feature.contains("burn-amount")
         || obligation.feature.contains("resource-conservation")
     {
         "transaction"
@@ -569,6 +572,12 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
         vec!["macro_expansion:consume=consume-input".to_string()]
     } else if obligation.feature.starts_with("destroy-input:") {
         vec!["macro_expansion:destroy=consume-input+no-output".to_string()]
+    } else if obligation.feature.starts_with("destroy-output-scan:")
+        || obligation.feature.starts_with("destroy-unique:")
+        || obligation.feature.starts_with("destroy-instance:")
+        || obligation.feature.starts_with("burn-amount:")
+    {
+        vec!["macro_expansion:destroy=consume-input+destruction-policy".to_string()]
     } else if obligation.feature.starts_with("pool-create:") {
         vec!["macro_expansion:pool-create=shared-cell-create+pool-protocol-metadata".to_string()]
     } else if obligation.feature.starts_with("pool-mutation-invariants:") {
@@ -675,6 +684,12 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
         "identity singleton_type"
     } else if text.contains("type_id") || text.contains("type-id") {
         "identity ckb_type_id"
+    } else if text.contains("burn-amount") {
+        "burn_amount policy"
+    } else if text.contains("destroy-instance") {
+        "destroy_instance policy"
+    } else if text.contains("destroy-unique") {
+        "destroy_unique policy"
     } else if text.contains("destroy-output-scan") || text.contains("same type") || text.contains("typehash absence") {
         "destroy_singleton_type compatibility policy"
     } else if text.contains("destroy") {

@@ -206,6 +206,24 @@ fn identity_policy_label(identity: &IrIdentityPolicy) -> String {
     }
 }
 
+fn destruction_policy_label(policy: &IrDestructionPolicy) -> String {
+    match policy {
+        IrDestructionPolicy::Default => "default".to_string(),
+        IrDestructionPolicy::SingletonType => "singleton_type".to_string(),
+        IrDestructionPolicy::Unique { identity } => format!("unique({})", identity),
+        IrDestructionPolicy::Instance { identity_field } => format!("instance({})", identity_field),
+        IrDestructionPolicy::BurnAmount { field } => format!("burn_amount({})", field),
+    }
+}
+
+fn destroy_policy_uses_output_absence_scan(policy: &IrDestructionPolicy) -> bool {
+    match policy {
+        IrDestructionPolicy::Default | IrDestructionPolicy::SingletonType => true,
+        IrDestructionPolicy::Unique { identity } => matches!(identity.as_str(), "type_id" | "ckb_type_id"),
+        IrDestructionPolicy::Instance { .. } | IrDestructionPolicy::BurnAmount { .. } => false,
+    }
+}
+
 /// Fixed-width types that fit in a single RISC-V 64-bit register (≤8 bytes).
 /// Used by transition formula verification which needs scalar add/sub.
 fn fixed_register_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
@@ -2489,18 +2507,14 @@ impl CodeGenerator {
                 self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
                 self.emit_sp_addi("t0", buffer_offset);
                 self.emit_stack_store("t0", var_id * 8);
-                if pattern.operation == "destroy" {
-                    self.emit_destroy_group_output_absence_scan(pattern, input_index);
-                }
+                self.emit_destroy_policy_scan(pattern, input_index);
                 return Ok(());
             }
         }
 
         self.emit_load_cell_data_syscall(&pattern.operation, CKB_SOURCE_INPUT, index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        if pattern.operation == "destroy" {
-            self.emit_destroy_group_output_absence_scan(pattern, index);
-        }
+        self.emit_destroy_policy_scan(pattern, index);
         Ok(())
     }
 
@@ -2773,8 +2787,8 @@ impl CodeGenerator {
             IrInstruction::Transfer { dest, operand, to } => {
                 self.emit_transfer(dest, operand, to)?;
             }
-            IrInstruction::Destroy { operand, policy: _ } => {
-                self.emit_destroy(operand)?;
+            IrInstruction::Destroy { operand, policy } => {
+                self.emit_destroy(operand, policy)?;
             }
             IrInstruction::Claim { dest, receipt } => {
                 self.emit_claim(dest, receipt)?;
@@ -3815,6 +3829,37 @@ impl CodeGenerator {
             Some((CKB_SOURCE_INPUT, input_index))
         } else {
             self.read_ref_param_dep_indices.get(&var.id).copied().map(|dep_index| (CKB_SOURCE_CELL_DEP, dep_index))
+        }
+    }
+
+    fn emit_destroy_policy_scan(&mut self, pattern: &CellPattern, input_index: usize) {
+        if pattern.operation != "destroy" {
+            return;
+        }
+        let policy = pattern.destruction_policy.as_ref().unwrap_or(&IrDestructionPolicy::Default);
+        self.emit(format!("# cellscript abi: destroy policy {} for {}", destruction_policy_label(policy), pattern.binding));
+        if destroy_policy_uses_output_absence_scan(policy) {
+            self.emit_destroy_group_output_absence_scan(pattern, input_index);
+            return;
+        }
+        match policy {
+            IrDestructionPolicy::Instance { identity_field } => {
+                self.emit(format!(
+                    "# cellscript abi: destroy_instance {}.{} is metadata-visible and runtime-required; no same-TypeHash absence scan emitted",
+                    pattern.binding, identity_field
+                ));
+            }
+            IrDestructionPolicy::BurnAmount { field } => {
+                self.emit(format!(
+                    "# cellscript abi: burn_amount {}.{} is metadata-visible and runtime-required; no same-TypeHash absence scan emitted",
+                    pattern.binding, field
+                ));
+            }
+            IrDestructionPolicy::Unique { identity } => {
+                self.emit(format!("# cellscript abi: fail closed because destroy_unique identity '{}' is not executable", identity));
+                self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+            }
+            IrDestructionPolicy::Default | IrDestructionPolicy::SingletonType => {}
         }
     }
 
@@ -9252,11 +9297,15 @@ impl CodeGenerator {
     }
 
     /// destroy
-    fn emit_destroy(&mut self, operand: &IrOperand) -> Result<()> {
-        self.emit("# destroy");
+    fn emit_destroy(&mut self, operand: &IrOperand, policy: &IrDestructionPolicy) -> Result<()> {
+        self.emit(format!("# destroy policy={}", destruction_policy_label(policy)));
         if let IrOperand::Var(_) = operand {
             self.emit_operand_comment("destroyed input retained for verifier field checks", operand);
-            self.emit("# cellscript abi: destroy consumed input is checked by Output absence scan");
+            if destroy_policy_uses_output_absence_scan(policy) {
+                self.emit("# cellscript abi: destroy consumed input is checked by policy-specific Output absence scan");
+            } else {
+                self.emit("# cellscript abi: destroy policy is recorded as runtime-required verifier metadata");
+            }
             self.emit("# cellscript abi: retain consumed input pointer for post-destroy output verification");
             return Ok(());
         }
@@ -12062,6 +12111,7 @@ mod tests {
                 type_hash: None,
                 binding: "auth".to_string(),
                 fields: Vec::new(),
+                destruction_policy: None,
             }],
             read_refs: Vec::new(),
             create_set: Vec::new(),

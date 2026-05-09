@@ -84,8 +84,9 @@ where
 
 `replace_unique` consumes the named input before the field initializer block.
 For `field(...)`, the generated verifier compares the fixed-width identity field
-between input and output. Global uniqueness of field identities still needs
-builder or indexer evidence.
+between input and output. `create_unique` emits a local output anchor and
+records full create-time uniqueness as runtime-required; field identity
+uniqueness still needs builder or indexer evidence.
 
 ## Recipe: Update State Without Updating In Place
 
@@ -117,7 +118,9 @@ burn_amount(token, field = amount)
 In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
 burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
 when reviewers must distinguish output absence, identity consumption, instance
-consumption, and quantity burn.
+consumption, and quantity burn. Singleton/type-id destruction has an executable
+absence scan, while field-instance and amount-burn policies are reported as
+runtime-required until their dedicated scans are lowered.
 
 ## Recipe: Write An Honest Lock Predicate
 
