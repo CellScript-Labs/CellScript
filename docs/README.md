@@ -66,6 +66,7 @@ to branch-specific evidence or forward design:
 - `0.17/CELLSCRIPT_0_17_ROADMAP.md`
 - `CELLSCRIPT_0_18_ROADMAP.md`
 - `CELLSCRIPT_0_19_ROADMAP.md`
+- `releases/CELLSCRIPT_0_19_CLOSURE_NOTES.md`
 - `CELLSCRIPT_0_20_ROADMAP.md`
 - `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope

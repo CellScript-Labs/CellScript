@@ -27,7 +27,7 @@ The current project direction is simple:
 | 0.16 release scope | `feat/assurance-tooling` implements the scoped metadata-assurance release: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | 0.17 release scope | `research/protocol-equivalence` closes the scoped iCKB protocol-semantics milestone with partial CKB VM differential evidence and an explicit `NOT_PROVEN` production-equivalence gate. | [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/0.17/ickb_final_report.md) |
 | 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
+| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.19 closure notes](../docs/releases/CELLSCRIPT_0_19_CLOSURE_NOTES.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
 | 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
@@ -196,6 +196,7 @@ are moved to 0.20.
 Detailed status:
 
 - [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [0.19 closure notes](../docs/releases/CELLSCRIPT_0_19_CLOSURE_NOTES.md)
 - [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
 
 ### 0.20: Generated Builder And Live Registry Proof
