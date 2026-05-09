@@ -1,7 +1,7 @@
-# CellScript Roadmap: v0.12 -> v0.19
+# CellScript Roadmap: v0.12 -> v0.20
 > From Production Foundation to Protocol Builders
 
-**Updated**: 2026-05-04
+**Updated**: 2026-05-09
 **Status**: Living Document
 **Audience**: CKB Smart Contract Developers
 **Canonical folder**: `roadmap/`
@@ -51,9 +51,12 @@ Each release answers a specific question:
 - **v0.18** — *Can protocol equivalence be closed honestly?* Add the
   first-class read-only ScriptRef / ScriptArgs surface and remaining iCKB
   equivalence prerequisites.
-- **v0.19** — *Can compiler artifacts build real transactions?* Deepen package
-  and deployment registry support, then ship the CellScript Action Builder as
-  the per-action transaction-construction layer above CCC.
+- **v0.19** — *Can compiler artifacts be resolved and verified reproducibly?*
+  Close CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and
+  Phase 1 package/deployment identity registry support.
+- **v0.20** — *Can verified artifacts build real transactions?* Ship generated
+  Action Builder support, live-chain deployment verification, stateful flows,
+  and registry trust hardening.
 
 ---
 
@@ -68,7 +71,8 @@ Each release answers a specific question:
 | v0.16 release scope | Implemented for the scoped `cellscript-0.16` metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | v0.17 release scope | Scoped protocol-equivalence milestone complete: partial CKB VM differential evidence exists, while production equivalence remains deliberately `NOT_PROVEN`. | [v0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [iCKB final report](../docs/0.17/ickb_final_report.md) |
 | v0.18 planning scope | First-class read-only ScriptRef / ScriptArgs API and iCKB equivalence-closure prerequisites. | [v0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| v0.19 in-progress scope | CKB ecosystem reuse and `ckb-std` compatibility first slice is implemented; package/deployment registry and generated Action Builder remain open. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
+| v0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md) |
+| v0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [v0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -88,7 +92,8 @@ Each release answers a specific question:
 | v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Implemented for scoped `cellscript-0.16` release |
 | v0.17 | iCKB-Grade Protocol Semantics | "Turn protocol-equivalence gaps into executable evidence gates." | Scoped milestone complete; equivalence not proven |
 | v0.18 | First-Class Script API and Equivalence Closure | "Make ScriptRef/ScriptArgs and remaining iCKB proof prerequisites first-class." | Planning |
-| v0.19 | Package Registry and Action Builder | "Turn one action into one valid transaction through registry-bound metadata." | In progress; CKB compatibility / adapter-boundary first slice landed |
+| v0.19 | Package Registry Phase 1 and Adapter Boundary | "Resolve and verify package/build/deployment identity before builders consume it." | Scope complete |
+| v0.20 | Generated Builder and Live Registry Proof | "Turn verified artifacts into valid transactions through registry-bound builders." | Planned |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or

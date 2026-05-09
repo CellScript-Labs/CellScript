@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-05-05
+**Updated**: 2026-05-09
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -27,7 +27,8 @@ The current project direction is simple:
 | 0.16 release scope | `feat/assurance-tooling` implements the scoped metadata-assurance release: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | 0.17 release scope | `research/protocol-equivalence` closes the scoped iCKB protocol-semantics milestone with partial CKB VM differential evidence and an explicit `NOT_PROVEN` production-equivalence gate. | [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/0.17/ickb_final_report.md) |
 | 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| 0.19 in-progress scope | CKB ecosystem reuse and `ckb-std` compatibility first slice is implemented; package/deployment registry, lockfile-bound provenance, and generated Action Builder remain open. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md) |
+| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
+| 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -167,10 +168,10 @@ Detailed status:
 
 - [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md)
 
-### 0.19: Package Registry And Action Builder
+### 0.19: Package Registry Phase 1 And Adapter Boundary
 
-0.19 is now in progress. The first implemented slice turns the CKB ecosystem
-reuse boundary into executable compatibility evidence:
+0.19 scope is complete. It turns the CKB ecosystem reuse boundary and Phase 1
+package/deployment identity registry into executable evidence:
 
 - centralized inline CKB ABI constants in `src/ckb_abi.rs`;
 - parity tests against `ckb-std` / `ckb-types` for constants, SourceView,
@@ -179,31 +180,44 @@ reuse boundary into executable compatibility evidence:
   requirements;
 - `cellc ckb-std-compat --json` compatibility reports;
 - an offline `examples/ckb-sdk-builder` adapter-shape crate using
-  `ckb-sdk-rust` packed types and adapter-owned evidence boundaries.
+  `ckb-sdk-rust` packed types and adapter-owned evidence boundaries;
+- namespace-aware package manifests and `cellc init --namespace`;
+- Git-backed source registry records with tag-pinned source hash verification;
+- path, git, and registry dependency resolution in the compile pipeline;
+- `Cell.lock` build identity for compiler version, target profile, artifact,
+  metadata, schema, ABI, and constraints hashes;
+- `cellc package verify` and `cellc registry verify` fail-closed text and JSON
+  verification.
 
-The remaining 0.19 work is still package, deployment, and transaction-building
-infrastructure:
-
-- source/package registry for package identity, source hashes, build recipes,
-  ABI metadata, audit artifacts, and dependency resolution;
-- deployment registry for chain-specific script cells, CellDeps,
-  code_hash/hash_type, artifact hashes, metadata hashes, and package
-  provenance;
-- lockfile-bound provenance across source package, compiler, artifact,
-  metadata, and deployment;
-- CellScript Action Builder as the per-action transaction builder that reads
-  compiler metadata, selects live cells, constructs expected outputs, fills
-  witness data, delegates low-level build/sign/submit work to CCC, and records
-  old output -> new output lineage;
-- stateful flow runner evidence for canonical examples.
-
-Action Builder is the smallest useful kernel of CellFabric. It builds one
-action-shaped transaction; CellFabric remains the later cross-protocol
-intent-DAG composition layer.
+Generated TypeScript builders, live-chain deployment proof, stateful flow
+runner evidence, publisher signatures, and on-chain registry/index/proxy design
+are moved to 0.20.
 
 Detailed status:
 
 - [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
+
+### 0.20: Generated Builder And Live Registry Proof
+
+0.20 should consume the 0.19 package/build/deployment identity from generated
+builders and live-chain verification:
+
+- `cellc gen-builder --target typescript` with typed action APIs and CCC
+  integration;
+- generated-builder package tests, dry-run/submit modes, and negative
+  builder-shape rejection;
+- `cellc registry verify --live` / equivalent live-cell verification for
+  network-specific deployment facts;
+- stale/wrong-network/wrong-code-hash/missing-CellDep/deprecated deployment
+  rejection fixtures;
+- stateful flow runner evidence for canonical examples;
+- registry trust hardening for publisher signatures, trust anchors, mutable
+  channels, revocation, and possible on-chain registry/index/proxy design.
+
+Detailed status:
+
+- [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md)
 
 ### Next Authorization Hardening Track
 

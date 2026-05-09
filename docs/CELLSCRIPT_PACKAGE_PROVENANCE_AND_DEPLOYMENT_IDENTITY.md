@@ -384,16 +384,18 @@ blake2b(artifact_binary)` locally (line 447 of `lib.rs`). The
 by `send_transaction`. The full node RPC is used for submission and commitment
 waiting, not for re-deriving fields that the tool already knows.
 
-**Verification path** (not generation) is where on-chain reads happen:
-`cellc registry verify` calls `get_live_cell` to confirm that the on-chain code
-cell's data matches `data_hash` in `Deployed.toml`. This separation of
-generation and verification keeps the trust model clean: generation is
-self-contained, verification is independently reproducible.
+**Verification path**: 0.19 Phase 1 verification is off-chain and checks that
+`Deployed.toml` matches the package/build identity recorded in `Cell.lock`.
+0.20 adds live-chain verification where `cellc registry verify --live` (or an
+equivalent mode) calls `get_live_cell` to confirm that the on-chain code cell's
+data matches `data_hash` in `Deployed.toml`. This separation keeps the trust
+model clean: Phase 1 generation/verification is self-contained, while live
+chain proof is independently reproducible when RPC is available.
 
-**Data source requirement**: Phase 1 requires a CKB full node RPC endpoint
-for transaction submission and commitment waiting (already required by
-`CellScriptAdapter::connect()`). Verification additionally uses `get_live_cell`.
-Light client support is a possible Phase 3 enhancement.
+**Data source requirement**: 0.19 Phase 1 registry acceptance does not require
+a CKB full node RPC endpoint. Transaction submission, commitment waiting, and
+`get_live_cell` verification are 0.20 live-chain concerns. Light client support
+is a possible later enhancement.
 
 **Immutability**: Once generated, `Deployed.toml` must not be modified. Any
 re-deployment or upgrade produces a new `[[deployments]]` entry with a distinct
@@ -1007,8 +1009,8 @@ cellc registry verify
 
 ### Action Builder Integration
 
-The CellScript Action Builder (the v0.19 P0 target) consumes deployment
-registry records through the `registry-client` module:
+The CellScript Action Builder is now the v0.20 target. It consumes the 0.19
+package/build/deployment identity through the `registry-client` module:
 
 ```
 ┌──────────────┐     ┌──────────────────┐     ┌───────────────┐
@@ -1021,7 +1023,7 @@ registry records through the `registry-client` module:
 └──────────────┘     └──────────────────┘     └───────────────┘
 ```
 
-The `registry-client` module is responsible for:
+For 0.20 builder work, the `registry-client` module is responsible for:
 
 1. Resolving package records from the source registry index.
 2. Resolving deployment records from `Deployed.toml`.
@@ -1030,8 +1032,9 @@ The `registry-client` module is responsible for:
    schema versions.
 
 The Action Builder must not accept a package by name alone. It must verify that
-the resolved source package, build artifact, constraints report, and CKB
-deployment identity all match.
+the resolved source package, build artifact, constraints report, and deployment
+identity all match the 0.19 lockfile/provenance records before it constructs a
+transaction.
 
 ## Integration With Existing Code
 
@@ -1144,7 +1147,8 @@ The implementation should follow this ordering:
 5. Implement `resolve_from_registry` without changing existing path/git
    resolution.
 6. Add `cellc package verify` and `cellc registry verify` as new subcommands.
-7. Wire the `registry-client` module into the Action Builder pipeline.
+7. Defer wiring the `registry-client` module into the generated Action Builder
+   pipeline to 0.20; 0.19 consumes it from package/build verification.
 
 ## Version Control Audit
 
@@ -1385,7 +1389,7 @@ The v0.12 release ships without registry support. The existing
 `resolve_from_registry` stub remains. `Cell.lock` version 1 continues to work.
 No deployment registry records are generated.
 
-### Phase 1 — v0.19 P0
+### Phase 1 — v0.19 Scope
 
 This phase makes the registry usable for local development and verification.
 Items are ordered by dependency; each item includes its version-control
@@ -1410,9 +1414,9 @@ implications from the audit above.
 | 15 | `cellc package verify` | Validates package metadata against source and build artifacts | — |
 | 16 | `cellc registry verify` | Validates build artifacts against deployment facts; checks `record_hash` if present | — |
 | 17 | Registry fixture acceptance | Local registry fixture can publish, resolve, and verify a package | — |
-| 18 | Hash mismatch rejection | Resolver rejects hash mismatches, missing ABI records, and incompatible metadata schema versions | — |
+| 18 | Hash mismatch rejection | Resolver rejects registry schema/name/namespace/version/tag/source-hash mismatches and package/build/deployment identity mismatches | — |
 
-### Phase 2 — v0.19 P1 or Later
+### Phase 2 — v0.20 Or Later
 
 | Work | Evidence |
 |---|---|
@@ -1525,6 +1529,8 @@ governance process is deferred to ecosystem discussion.
 - Do not claim full CellFabric intent composition in the registry release.
 - Do not force on-chain deployment records when off-chain verification is
   sufficient.
+- Do not claim generated Action Builder or live-chain registry certification as
+  part of the 0.19 Phase 1 registry closure.
 
 ## Acceptance Gate
 
@@ -1535,14 +1541,13 @@ cellc package verify                        # source ↔ build hash binding
 cellc registry verify                       # build ↔ deployment hash binding
 local registry fixture: publish / resolve / verify
 hash mismatch rejection fixtures
-missing ABI record rejection fixtures
-incompatible schema version rejection fixtures
 README and docs distinguish package discovery from deployment discovery
 ```
 
-Full v0.19 acceptance adds:
+0.20 acceptance adds:
 
 ```
+cellc registry verify --live
 cellc gen-builder --target typescript
 npm test for generated builders
 local CKB dry-run for generated action transactions

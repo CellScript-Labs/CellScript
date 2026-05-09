@@ -1,40 +1,36 @@
 # CellScript 0.19 Roadmap
 
-**Status**: In progress
-**Scope**: Package registry, deployment registry, CellScript Action Builder,
-CKB ecosystem reuse, ckb-std compatibility, and grammar / syntax governance
+**Status**: Scope complete
+**Scope**: CKB ecosystem reuse, ckb-std compatibility, grammar / syntax
+governance, and Phase 1 package / deployment identity registry closure
 **Depends on**: v0.17 CKB protocol semantics and v0.18 first-class ScriptRef /
 ScriptArgs work
 
 ## Goal
 
-CellScript 0.19 should turn compiler artifacts into a reproducible package,
-deployment, and transaction-building layer.
+CellScript 0.19 turns compiler artifacts into a reproducible package and
+deployment-identity layer.
 
 The compiler already emits metadata, ABI records, ProofPlan records, CKB target
-profile data, and production evidence reports. 0.19 should make those artifacts
-usable by wallets, dapps, indexers, deployment tools, and protocol SDKs without
-forcing each protocol team to hand-write ad hoc transaction builders.
+profile data, and production evidence reports. 0.19 closes the first registry
+layer that lets source packages, build artifacts, metadata, and deployment facts
+be resolved and verified fail-closed before later transaction builders consume
+them.
 
 The target stack is:
 
 ```text
 CellScript compiler
-  -> action metadata / ABI / transaction recipe
+  -> source package metadata / ABI / target profile / build identity
 
-CellScript Action Builder
-  -> reads metadata
-  -> selects live cells
-  -> constructs expected outputs
-  -> fills witness selector / args
-  -> tracks old live output -> new live output
-  -> asks CCC to build/sign/submit transaction
+Git-backed source registry
+  -> immutable package-version record / tag / source hash
 
-CCC
-  -> low-level transaction composition
-  -> wallet connector
-  -> signing
-  -> RPC / indexer interaction
+Cell.lock
+  -> resolved package graph / artifact hashes / metadata hashes / deployment facts
+
+cellc package verify / cellc registry verify
+  -> fail-closed source, artifact, metadata, and off-chain deployment checks
 ```
 
 Rust-side production workflows use the same compiler outputs through the CKB
@@ -76,7 +72,7 @@ evidence.
   tests, and future Rust-shim/native-simulation workflows.
 
 These two documents are part of 0.19 scope because they govern how the
-registry/deployment/builder layer reuses existing CKB ecosystem libraries.
+registry/deployment/adapter layer reuses existing CKB ecosystem libraries.
 They are not 0.18 protocol-equivalence evidence.
 
 0.19 also owns the active grammar and syntax-governance pass:
@@ -92,11 +88,11 @@ They are not 0.18 protocol-equivalence evidence.
   they have parser, typechecker, lowering, metadata, formatter, LSP, examples,
   and regression coverage.
 
-This governance work is in scope because the Action Builder and registry layers
-depend on stable action recipes and source-level audit shape. It must not
-reopen the v0.13 action model casually, and it must not promote sugar that
-hides `consume`, `create`, `destroy`, `transition`, `preserve`, witness
-placement, CellDeps, or signer authority.
+This governance work is in scope because registry-bound compiler metadata must
+stay stable and source-level audit shape must remain visible. It must not reopen
+the v0.13 action model casually, and it must not promote sugar that hides
+`consume`, `create`, `destroy`, `transition`, `preserve`, witness placement,
+CellDeps, or signer authority.
 
 Completed 0.19 implementation slices:
 
@@ -147,6 +143,22 @@ Completed 0.19 implementation slices:
   coverage for high-risk syntax regressions.
 - `tests/syntax_combo/matrix.toml` records the mode floors, required origins,
   and required grammar-governance bug classes used by the reusable audit gate.
+- `cellc init --namespace` writes namespace-aware package manifests.
+- `cellc publish` creates registry records with source roots, explicit entry
+  parent handling, and a source hash that includes `Cell.toml`.
+- package resolution supports path, git, and registry dependencies; registry
+  resolution is pinned by tag and verified against the recorded source hash.
+- `CELLSCRIPT_REGISTRY_URL` configures a Git-backed registry, while the default
+  registry path remains fail-closed and only falls back to discovery when the
+  configured default cannot be cloned.
+- `cellc build` records lockfile-bound identity for compiler version, target
+  profile, artifact hash, metadata hash, schema hash, ABI hash, and constraints
+  hash.
+- `cellc package verify` and `cellc registry verify` validate package and
+  off-chain deployment identity fail-closed, including JSON mode.
+- `tests/registry.rs` and `tests/cli.rs` cover local registry publish/resolve,
+  source-hash mismatch rejection, source-root hashing, namespace initialization,
+  build lockfile identity, and JSON fail-closed verification.
 
 Current 0.19 status:
 
@@ -159,17 +171,17 @@ Current 0.19 status:
 | Focused local-node adapter acceptance | Done for this slice | `scripts/cellscript_ckb_adapter_acceptance.sh` records local CKB `estimate_cycles` and `test_tx_pool_accept` evidence for both action transactions and deploy probe (TYPE_ID code-cell deployment with always_success on devnet). Phase 3 submits the deploy transaction, generates blocks until committed, and verifies the code cell is live with a type script. |
 | Focused ecosystem reuse gate | Done for this slice | `./scripts/cellscript_ckb_ecosystem_reuse_gate.sh quick` / `full` cover compatibility, adapter crate, cookbook, and focused node acceptance. |
 | Grammar and syntax governance | Done for this slice | Governance docs now include a 0.19 release status matrix; syntax-combo quick/ci/deep emit machine-readable governance and known-bug-class coverage; VS Code grammar/snippets are aligned with `verification`. `assert` keyword removed from action/lock context; only `assert_invariant` retained for invariant declarations. |
-| Package manifest and lockfile | Still open | No completed package lockfile verification gate is claimed by this slice. |
-| Source package registry | Still open | Registry publish/resolve/hash-rejection fixtures remain planned. |
-| Deployment registry | Headless deploy probe landed; registry open | `build_deploy_transaction()` and `build_deployment_manifest_from_evidence()` implement the headless deploy probe. Network-specific deployment verification, CellDep solving, and stale-deployment rejection fixtures remain planned. |
-| Generated TypeScript Action Builder | Still open | `cellc gen-builder --target typescript`, CCC integration, and generated-builder tests remain planned. |
-| Stateful flow runner | Still open | Committed local CKB multi-step flows and live-output lineage evidence remain planned. |
+| Package manifest and lockfile | Done for Phase 1 | `Cell.toml` source identity, namespace-aware init, registry dependency resolution, and `Cell.lock` build identity are implemented. `cellc package verify` fails closed on mismatched source/build identity. |
+| Source package registry | Done for Phase 1 | Git-backed registry records resolve by namespace/name/version/tag/source hash. Local registry fixtures cover publish/resolve, source-root hashing, and mismatch rejection. |
+| Deployment identity registry | Done for Phase 1 | `cellc registry verify` validates off-chain deployment facts against build/package identity and fails closed in text and JSON modes. Live-chain `get_live_cell` proof and generated-builder consumption move to 0.20. |
+| Generated TypeScript Action Builder | Moved to 0.20 | `cellc gen-builder --target typescript`, CCC integration, and generated-builder tests are now the 0.20 transaction-builder milestone. |
+| Stateful flow runner | Moved to 0.20 | Committed local CKB multi-step flows and live-output lineage evidence are now the 0.20 builder evidence milestone. |
 | Toolchain one-line installer | Done for this slice | `scripts/install.sh` with multi-mirror fallback (GitHub, ghgo.xyz, gh-proxy.com, ghfast.top), SHA256 verification, PATH setup, and dry-run. `.github/workflows/release.yml` builds 4-platform tarballs and publishes GitHub Releases with install instructions. |
-| CellFabric core | Later exploration | Cross-protocol intent-DAG planning remains explicitly outside the landed 0.19 first slice. |
+| CellFabric core | 0.20+ exploration | Cross-protocol intent-DAG planning remains outside the 0.19 registry closure and should only become release scope after the per-action builder is proven. |
 
 ## P0: Grammar And Syntax Governance
 
-0.19 should turn grammar governance from a loose RFC into an executable release
+0.19 turns grammar governance from a loose RFC into an executable release
 discipline.
 
 The goal is not to add another syntax-cleanup release. The goal is to make sure
@@ -228,8 +240,8 @@ The syntax-combination audit should become reusable release infrastructure:
 - Do not introduce reusable proof-block syntax.
 - Do not hide transaction semantics behind protocol names such as `claim`,
   `transfer`, `swap`, or `settle`.
-- Do not claim Action Builder support for syntax that is not represented in
-  metadata and acceptance evidence.
+- Do not claim 0.20 generated-builder support for syntax that is not
+  represented in metadata and acceptance evidence.
 - Do not treat formatter support as parser/typechecker/lowering support.
 
 0.19 also deepens the package and deployment registry design discussed in the
@@ -252,373 +264,212 @@ deployment registry
 deployment references so generated builders do not silently drift from the
 contract artifacts that were audited.
 
-## Relationship To CellFabric
-
-CellScript Action Builder and CellFabric are on the same product spectrum, but
-they are not the same release target.
-
-```text
-CellScript Action Builder
-  = per-protocol / per-action transaction builder
-
-CellFabric
-  = cross-protocol intent composition + UTXO generation layer
-```
-
-Layering:
-
-```text
-User intent
-   |
-CellFabric
-   | chooses actions and connects outputs to inputs
-CellScript Action Builders
-   | construct each action-shaped transaction or transaction node
-CCC
-   | build / sign / submit
-CKB
-```
-
-0.19 should ship the Action Builder layer first. It is the smallest useful
-kernel of CellFabric, not a full intent planner.
-
-## P0: Package And Deployment Registry
+## P0: Package And Deployment Registry Phase 1
 
 ### 1. Package Manifest And Lockfile
 
 **Problem**
 
 CellScript packages need stable identity across source, compiler version, build
-profile, generated artifact, metadata, and deployment. Without a lockfile,
-Action Builder output can depend on whatever package index, compiler build, or
-deployment registry entry happens to be resolved at build time.
+profile, generated artifact, metadata, and deployment facts. Without a lockfile,
+tools can silently consume whatever package index, compiler build, or deployment
+fact happens to be resolved at build time.
 
-**Change**
+**Completed Change**
 
-Define a package manifest and lockfile contract that records:
+0.19 defines and implements the Phase 1 manifest / lockfile contract:
 
-- package name, namespace, version, and semver channel;
-- package source hash and source archive digest;
-- compiler version and primitive compatibility mode;
-- target profile and build flags;
-- dependency graph with locked package versions;
-- generated artifact hashes;
-- generated metadata and ABI hashes;
-- action recipe schema version;
-- audit bundle or ProofPlan report hash when available;
-- deployment registry references per network;
-- publisher signatures or trust anchors where supported.
+- namespace, package name, version, explicit entry, and source roots in
+  `Cell.toml`;
+- source hash computed from `Cell.toml`, configured source roots, and the
+  explicit entry parent;
+- path, git, and registry dependency resolution through `PackageManager`;
+- Git-backed registry records pinned by namespace, name, version, tag, and
+  source hash;
+- `Cell.lock` build identity for compiler version, target profile, artifact
+  hash, metadata hash, schema hash, ABI hash, and constraints hash;
+- off-chain deployment facts checked against package/build identity by
+  `cellc registry verify`.
 
 **Acceptance**
 
-- `cellc package verify` can validate package metadata against source and build
-  artifacts.
-- `Cell.lock` records enough information to reproduce builder input metadata.
-- stale or mismatched artifact/metadata/deployment hashes fail closed.
+- `cellc package verify` validates package source/build identity.
+- `Cell.lock` records enough information to reproduce the Phase 1 package and
+  artifact identity consumed by downstream tools.
+- stale or mismatched source, artifact, metadata, or deployment facts fail
+  closed in text and JSON modes.
 
 ### 2. Source Package Registry
 
 **Problem**
 
-Protocol SDKs need to discover CellScript packages and action ABIs without
-depending on mutable repository branches or copied JSON snippets.
+Protocol SDKs need to discover CellScript packages without depending on mutable
+repository branches or copied JSON snippets.
 
-**Change**
+**Completed Change**
 
-Add a registry client and registry schema for off-chain source packages:
+0.19 adds a minimal off-chain Git registry:
 
-- immutable package-version records;
-- content-addressed source archives;
-- dependency metadata and compatibility constraints;
-- action ABI and metadata index entries;
-- release notes, license, and documentation pointers;
-- optional audit report and acceptance evidence pointers;
-- publisher identity and signature metadata.
+- immutable package-version records under namespace/name/version;
+- tag-pinned git source resolution;
+- source hash verification after checkout;
+- `CELLSCRIPT_REGISTRY_URL` override for local or private registries;
+- local fixture coverage for publish, resolve, hash mismatch, and source-root
+  hashing.
 
 **Acceptance**
 
 - a local registry fixture can publish, resolve, and verify a package;
-- the resolver rejects hash mismatches, missing ABI records, and incompatible
-  metadata schema versions;
-- README and docs distinguish package discovery from deployment discovery.
+- the resolver rejects schema/name/namespace/version/tag/source-hash mismatches;
+- source package discovery is documented separately from deployment discovery.
 
-### 3. Deployment Registry
+### 3. Deployment Identity Registry
 
 **Problem**
 
-A source package does not tell a builder which on-chain script cell to use on a
-specific network. Deployment truth must be indexed by chain-visible data, not by
-package names alone.
+A source package does not by itself prove which build output or deployment facts
+downstream tooling should trust.
 
-**Change**
+**Completed Change**
 
-Define deployment registry records for:
+0.19 closes the off-chain deployment-identity layer:
 
-- network and chain id;
-- script role: lock, type, dual-role, or helper dependency;
-- tx hash, output index, and CellDep shape;
-- code_hash and hash_type;
-- script reference or dep group metadata where applicable;
-- Type ID and upgrade lineage where applicable;
-- generated artifact hash and metadata hash;
-- package source hash and build manifest hash;
-- accepted/rejected fixture evidence pointers;
-- deployment status: local, testnet, mainnet candidate, deprecated, revoked.
+- `cellc build` writes package/build identity into `Cell.lock`;
+- `cellc registry verify` compares deployment facts with lockfile identity;
+- verification rejects missing lockfile/build facts, hash mismatches, and
+  malformed records;
+- JSON mode reports success and failure without downgrading errors.
 
 **Acceptance**
 
-- `cellc deploy-plan`, `cellc verify-deploy`, and `cellc lock-deps` can emit or
-  verify deployment registry records;
-- Action Builder refuses to build a transaction when the deployment record does
-  not match the package metadata it consumed;
-- registry fixtures cover wrong network, wrong code hash, stale metadata hash,
-  missing CellDep, and deprecated deployment rejection paths.
+- package identity, artifact identity, metadata identity, and deployment facts
+  are checked by CLI verification commands;
+- deployment identity mismatch fixtures fail closed;
+- live-chain proof remains explicitly outside 0.19 Phase 1.
 
-## P0: CellScript Action Builder Architecture
+## Deferred To 0.20
 
-### 1. Scope
+The following work was intentionally moved out of 0.19 to keep the release
+closed around the Phase 1 registry/provenance contract:
 
-CellScript Action Builder turns one CellScript action into one valid CKB
-transaction candidate.
-
-Example target API:
-
-```ts
-await amm.swapAForB({
-  pool: livePool,
-  inputToken: userTokenA,
-  minOutput,
-  to,
-});
-```
-
-Internally, the builder should:
-
-- read action metadata, ABI, transition declarations, ProofPlan records, and
-  builder assumptions;
-- resolve package and deployment records;
-- select live cells from CCC/indexer adapters;
-- bind action parameters to live inputs, reference inputs, witnesses, and
-  literal values;
-- construct expected output cells for `transition`, `preserve`, and `create`;
-- encode action selector, witness args, and typed parameters;
-- assemble CellDeps, HeaderDeps, outputs, outputs_data, and witnesses;
-- estimate occupied capacity, fees, and change outputs;
-- dry-run the transaction and map failures back to action metadata;
-- submit through CCC when the caller requests submission;
-- record old live output -> new live output lineage.
-
-### 2. Core Modules
-
-The first implementation should be split by responsibility:
-
-| Module | Responsibility |
-|---|---|
-| `metadata-loader` | Load and validate compiler metadata, ABI, ProofPlan, and action recipes. |
-| `registry-client` | Resolve package and deployment records, then verify hashes against `Cell.lock`. |
-| `cell-resolver` | Query live cells through CCC/indexer adapters and apply typed binding rules. |
-| `recipe-engine` | Turn one action recipe into required inputs, outputs, witnesses, deps, and assumptions. |
-| `output-builder` | Construct continuation and created outputs from transition, preserve, and create metadata. |
-| `witness-builder` | Encode action selector, witness ABI, signer slots, and WitnessArgs fields. |
-| `tx-planner` | Compute capacity floors, fee/change policy, HeaderDeps, CellDeps, and ordering. |
-| `preflight` | Run metadata validation, local shape checks, and CKB dry-run before signing. |
-| `ccc-adapter` | Delegate low-level transaction composition, signing, RPC, and indexer calls to CCC. |
-| `ckb-sdk-adapter` | Use `ckb-sdk-rust` for Rust-side deployment, transaction materialisation, signing, tx-pool acceptance, submission, and evidence reports. |
-| `state-tracker` | Track committed outpoints and make follow-up action calls consume the new live outputs. |
-
-### 3. Builder Contract Types
-
-The metadata schema should expose stable builder-facing records:
-
-```text
-ActionAbi
-ActionRecipe
-ActionSelector
-CellBinding
-ReadBinding
-WitnessBinding
-TransitionEdge
-ConsumedInput
-DestroyedInput
-CreatedOutput
-PreserveProof
-CapacityPolicy
-FeePolicy
-ChangePolicy
-DeploymentRef
-BuilderAssumption
-DryRunEvidence
-SubmittedTxEvidence
-LiveOutputLineage
-```
-
-The builder must not infer protocol semantics from names such as `claim`,
-`swap`, or `mint`. It should consume compiler-emitted recipes and fail closed
-when the recipe does not explain required cells, outputs, witness fields, or
-deployment references.
-
-### 4. Generated TypeScript Surface
-
-0.19 should add a TypeScript-first generator:
-
-```text
-cellc gen-builder --target typescript --metadata target/.../metadata.json
-```
-
-The generated package should provide:
-
-- typed action functions;
-- typed live-cell inputs;
-- typed literal/witness parameters;
-- explicit dry-run and submit modes;
-- returned tx plan, signed tx, submitted tx hash, and lineage records;
-- structured error mapping from compiler/runtime codes to action fields.
-
-The generated layer should remain thin. CCC stays responsible for low-level CKB
-transaction composition, wallet integration, signing, RPC, and indexer access.
-
-## P1: Stateful Flow Runner
-
-After single-action builders work, 0.19 should add a stateful flow runner for
-example and test workflows:
-
-```text
-tx1 output -> tx2 input -> tx3 input
-```
-
-Supported workflows:
-
-- select the live output produced by a previous action;
-- prove that the old output is dead and the new output is live;
-- run canonical business examples as committed local CKB flows;
-- preserve cycles, tx size, capacity, fee, witness, and outpoint-lineage
-  evidence per step;
-- reject malformed flows before signing when metadata already proves the shape
-  impossible.
-
-This is still not full CellFabric. It is action-builder evidence plus linear
-state tracking for representative protocol flows.
-
-## P2: CellFabric Core Exploration
-
-CellFabric should remain an explicit later target:
-
-```text
-intent -> action DAG -> UTXO graph -> CKB transactions
-```
-
-P2 exploration may define:
-
-- intent schemas;
-- cross-protocol action selection;
-- resource routing;
-- DAG dependency resolution;
-- multi-transaction batching and splitting;
-- live-cell conflict detection;
-- registry-backed protocol discovery;
-- planner evidence and failure explanations.
-
-0.19 should not claim this as shipped unless the builder can compose multiple
-protocols without hidden assumptions.
+- generated TypeScript Action Builder: `cellc gen-builder --target typescript`,
+  CCC integration, generated package tests, and typed action APIs;
+- live-chain deployment verification: `get_live_cell`, network-specific
+  CellDep solving, stale/deprecated deployment rejection, and builder refusal
+  when chain-visible facts disagree with `Cell.lock`;
+- stateful flow runner: committed local CKB multi-step flows, old-output to
+  new-output lineage, and canonical example evidence;
+- registry trust hardening: publisher signatures, trust anchors, mutable
+  channels, revocation policy, and optional on-chain registry/index/proxy
+  design;
+- CellFabric exploration: cross-protocol intent DAG planning only after the
+  per-action builder is proven.
 
 ## Integration With The Compiler
 
-Compiler work required by 0.19:
+Compiler work completed by 0.19:
 
-- stable action recipe schema;
-- stable ABI versioning for action selectors and witness args;
-- metadata for `transition`, `consume`, `destroy`, `create`, and `preserve`;
-- explicit builder assumptions for capacity, fees, change, witnesses, deps, and
-  HeaderDeps;
-- source spans for builder-facing diagnostics;
-- canonical metadata hashes for registry and lockfile validation;
-- compatibility checks between metadata schema version and generated builder
-  version.
+- package source hashing that includes `Cell.toml`, configured source roots,
+  and the explicit entry parent;
+- package resolution integrated into compile-time dependency loading;
+- lockfile-bound compiler version, target profile, artifact, metadata, schema,
+  ABI, and constraints hashes;
+- fail-closed registry dependency verification before dependency source is
+  loaded;
+- fail-closed package and deployment identity verification in CLI text and JSON
+  modes;
+- stable compiler-to-adapter JSON boundary for the Rust-side transaction
+  materialization crate.
 
-The compiler should emit enough metadata for a builder to construct the
-transaction shape, but it should not become a wallet, indexer, or chain
-submission layer.
+0.20 owns generator-specific action recipe contracts, TypeScript builder
+compatibility checks, and live-chain deployment proof. The compiler should emit
+enough metadata for builders to construct transaction shape, but it should not
+become a wallet, indexer, or chain submission layer.
 
 ## Non-Goals
 
 - Do not replace CCC.
 - Do not introduce hidden signer authority or hidden sighash defaults.
 - Do not infer transaction semantics from protocol/action names.
-- Do not claim full CellFabric intent composition in the Action Builder release.
-- Keep Action Builder core headless; higher-level SDK, wallet UI, and dapp-framework packages may grow as ecosystem work with community or foundation developer help.
+- Do not claim generated TypeScript Action Builder support in 0.19.
+- Do not claim live-chain deployment verification from off-chain registry
+  verification alone.
+- Do not claim full CellFabric intent composition in 0.19.
 - Do not treat package registry resolution as deployment verification.
 - Do not mark a deployment mainnet-certified without external audit and chain
   evidence.
-- Do not make builder success a substitute for CKB VM acceptance.
+- Do not make local package/build verification a substitute for CKB VM
+  acceptance.
 
 ## Acceptance Gate
 
-The full 0.19 release still needs a dedicated builder and registry gate:
+0.19 is accepted by the Phase 1 registry/provenance gate:
 
 ```text
+cellc init --namespace
+cellc publish
+cellc install
+cellc build
 cellc package verify
 cellc registry verify
-cellc gen-builder --target typescript
-npm test for generated builders
-local CKB dry-run for generated action transactions
-local CKB submitted stateful flows for canonical examples
-negative builder-shape rejection fixtures
-deployment registry mismatch rejection fixtures
 ```
 
-Current focused gate for the implemented CKB ecosystem reuse slice:
+Required validation for this release line:
 
 ```text
+cargo fmt --all
+cargo check --locked -p cellscript --all-targets
+cargo test --locked -p cellscript
+cargo clippy --locked -p cellscript --all-targets -- -D warnings
+git diff --check
 ./scripts/cellscript_ckb_ecosystem_reuse_gate.sh quick
 ./scripts/cellscript_ckb_ecosystem_reuse_gate.sh full
 ```
 
-This focused gate covers `ckb-std` ABI parity, machine-readable adapter
-contracts, the formal `crates/cellscript-ckb-adapter` crate, the
+The registry/provenance tests cover namespace initialization, local Git registry
+publish/resolve, registry source-hash mismatch rejection, configured
+source-root hashing, compile-time registry dependency loading, build lockfile
+identity, package verification, registry verification, and JSON fail-closed
+behavior.
+
+The CKB ecosystem reuse gate covers `ckb-std` ABI parity, machine-readable
+adapter contracts, the formal `crates/cellscript-ckb-adapter` crate, the
 `examples/ckb-sdk-builder` cookbook, witness placement policy, TYPE_ID args
-checks, focused local-node adapter acceptance, and formatter/diff hygiene. It
-does not claim that the package registry, deployment registry, generated
-TypeScript builders, wallet UI, CellFabric intent DAG, external audit, or
-exhaustive adversarial state-space verification is complete.
+checks, focused local-node adapter acceptance, and formatter/diff hygiene.
+
+0.19 does not claim generated TypeScript builders, wallet UI, CellFabric intent
+DAG, external audit, live-chain registry certification, or exhaustive
+adversarial state-space verification.
 
 Required report fields:
 
-- package hash;
+- package namespace / name / version;
+- source hash;
+- registry tag;
+- compiler version;
+- target profile;
 - metadata hash;
 - artifact hash;
-- deployment ref;
-- action selector;
-- input and output bindings;
-- witness layout;
-- CellDeps and HeaderDeps;
-- cycles;
-- serialized transaction size;
-- occupied capacity;
-- fee and change policy;
-- dry-run exit code;
-- submitted tx hash when run in submit mode;
-- old output -> new output lineage;
+- schema hash;
+- ABI hash;
+- constraints hash;
+- off-chain deployment ref / facts when present;
+- verification status and structured error details;
 - known limitations.
 
-Representative flows should include at least:
+Representative Phase 1 flows:
 
-- Token: mint -> transfer -> invalid overspend rejected;
-- Timelock: create -> early spend rejected -> valid spend accepted;
-- NFT: mint -> list -> buy -> invalid payment rejected;
-- AMM: create pool -> add liquidity -> swap -> remove liquidity;
-- Multisig: propose -> threshold approve -> execute -> insufficient approvals
-  rejected;
-- Vesting: grant -> claim/revoke -> early claim and invalid revoke rejected;
-- Registry: package resolve -> deployment resolve -> stale deployment rejected.
+- init namespace -> publish to local registry -> install by registry dep ->
+  build with locked package identity;
+- mutate registry source hash -> resolver rejects before dependency loading;
+- mutate source root contents -> package verification fails closed;
+- mutate artifact/metadata/deployment facts -> registry verification fails
+  closed;
+- request JSON verification -> errors remain failing process outcomes and are
+  machine-readable.
 
 ## Open Questions
 
-- Should the package registry be purely content-addressed, or should it also
-  support signed mutable channels such as `latest` and `stable`?
-- Should deployment registry records live only off-chain at first, or should
-  CellScript define a canonical on-chain registry script later?
-- How much output construction should be generated per action versus delegated
-  to handwritten protocol SDK code?
-- Which CCC APIs should be treated as stable enough for generated builders?
-- Should `cellc gen-builder` generate one protocol package or one builder
-  package per deployment network?
+Open questions about generated builders, live-chain registry proof, signed
+mutable channels, and on-chain registry/index/proxy design move to
+[`CELLSCRIPT_0_20_ROADMAP.md`](CELLSCRIPT_0_20_ROADMAP.md).

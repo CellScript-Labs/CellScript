@@ -14,8 +14,8 @@ CellScript should treat it as the contract-side ABI and runtime oracle, not as a
 transaction builder and not as a compiler-core dependency.
 
 This document belongs to the 0.19 registry/deployment/adapter scope. It defines
-the compatibility contract that the 0.19 Action Builder and
-`cellscript-ckb-adapter` must respect; it is not counted as 0.18
+the compatibility contract that the 0.19 adapter boundary and the 0.20
+generated Action Builder must respect; it is not counted as 0.18
 protocol-equivalence evidence.
 
 In practical terms:

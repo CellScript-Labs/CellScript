@@ -66,11 +66,14 @@ to branch-specific evidence or forward design:
 - `0.17/CELLSCRIPT_0_17_ROADMAP.md`
 - `CELLSCRIPT_0_18_ROADMAP.md`
 - `CELLSCRIPT_0_19_ROADMAP.md`
+- `CELLSCRIPT_0_20_ROADMAP.md`
 - `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
   `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md` for 0.19 grammar/syntax
   governance scope
+- `CELLSCRIPT_REGISTRY_PHASE1.md` for the 0.19 package/deployment identity
+  registry closure and 0.20 handoff boundary
 
 ## Archive
 

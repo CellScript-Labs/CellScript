@@ -11,8 +11,9 @@ where overlap is an acceptable compiler boundary, and where the project is at
 risk of maintaining duplicate infrastructure that should belong to `ckb-std`,
 `ckb-sdk-rust`, or `cellscript-ckb-adapter`.
 
-This is not 0.18 protocol-equivalence evidence. It is a 0.19 planning contract
-for the registry, deployment, adapter, and Action Builder layer.
+This is not 0.18 protocol-equivalence evidence. It is the 0.19 planning
+contract for the registry/deployment/adapter boundary and the handoff contract
+for the 0.20 generated Action Builder layer.
 
 ## Summary
 

@@ -234,36 +234,37 @@ git push --tags
 
 Notice what didn't happen: you didn't open a PR against any discovery index, you didn't call an API, and you didn't upload anything to a server. The version metadata lives in your source repo. And since `cellscript/amm_pool` automatically resolves to `github.com/cellscript/amm_pool` via convention, you didn't even need to register with the discovery index. The index is only for packages that break the convention — hosted on a different platform, or where the repo name doesn't match the package name.
 
-### Step 4: Deploy to CKB
+### Step 4: Build and Record Deployment Identity
 
-This is where the toolchain gets real. We don't just push data to the chain — we go through a verified pipeline.
+0.19 Phase 1 closes the local identity loop before live-chain verification. The
+build writes artifact and metadata identity into `Cell.lock`; deployment facts
+are recorded in `Deployed.toml`; `cellc registry verify` checks that the
+off-chain deployment record matches the locked build/package identity.
 
 ```mermaid
 graph TB
     B["cellc build<br/>→ RISC-V ELF artifact"] --> DP
-    DP["cellc deploy-plan<br/>→ deployment plan JSON"] --> VD
-    VD["cellc verify-deploy<br/>→ plan passes validation"] --> BT
-    BT["build_deploy_transaction()<br/>→ TYPE_ID deploy tx"] --> SUB
-    SUB["Submit to CKB node<br/>→ wait for commitment"] --> GEN
-    GEN["Generate Deployed.toml<br/>+ update Cell.lock"] --> VFY
-    VFY["cellc verify-artifact<br/>→ artifact hash confirmed"]
+    DP["Cell.lock<br/>→ build identity"] --> DEP
+    DEP["Deployed.toml<br/>→ off-chain deployment facts"] --> VFY
+    VFY["cellc package verify<br/>+ cellc registry verify"]
+    VFY -. "0.20 live gate" .-> LIVE["get_live_cell<br/>data_hash / CellDep proof"]
 ```
 
-The build step produces a real RISC-V ELF binary. `cellc ckb-hash` computes the CKB Blake2b hash of that binary. `cellc deploy-plan` generates a deployment plan. `cellc verify-deploy` validates the plan. Then `build_deploy_transaction()` from the `cellscript-ckb-adapter` crate constructs a proper CKB transaction with TYPE_ID, occupied capacity calculation, and change output — all computed headlessly, without needing an RPC connection for the construction itself.
-
-After the transaction is submitted and committed, `Deployed.toml` is generated from the locally-computed evidence plus the on-chain `tx_hash`. No on-chain re-derivation is needed for generation — the adapter already knows all the hash fields. Verification (a separate step) is where on-chain reads happen.
+Headless deploy planning and adapter transaction construction can exist as
+supporting evidence, but 0.19 does not require live RPC reads or committed
+chain cells for the registry acceptance gate. Live `get_live_cell` verification
+is the 0.20 handoff.
 
 ### Step 5: Cross-Verify All Three Layers
 
-After deployment, you can verify the full identity chain:
+After build/deployment recording, you can verify the Phase 1 identity chain:
 
 ```bash
 cellc package verify   # source_hash matches
-cellc verify-artifact  # artifact_hash matches the real binary
-cellc registry verify  # data_hash matches on-chain cell
+cellc registry verify  # build/deployment facts match Cell.lock
 ```
 
-Or programmatically, as our end-to-end tests do:
+Or programmatically:
 
 ```rust
 // Package Identity: source_hash
@@ -274,14 +275,12 @@ assert_eq!(computed, read_lock.package.source_hash.as_deref().unwrap());
 let lock_artifact = read_lock.package_build.as_ref().unwrap().artifact_hash.as_ref().unwrap();
 let deployed_artifact = read_deployed.build.as_ref().unwrap().artifact_hash.as_ref().unwrap();
 assert_eq!(lock_artifact, deployed_artifact);
-
-// Deployment Identity: on-chain data_hash
-let on_chain_data_hash = live_cell["cell"]["data"]["hash"].as_str().unwrap();
-let computed_data_hash = format!("0x{}", hex::encode(ckb_data_hash(&artifact_binary)));
-assert_eq!(on_chain_data_hash, computed_data_hash);
 ```
 
-The three assertions verify three different things: that the source hasn't changed since publishing, that the build artifact matches what was compiled, and that the on-chain cell contains the exact binary that was deployed. Any break in this chain means something is wrong, and the system fails closed rather than silently accepting a mismatch.
+These assertions verify that the source has not changed since publishing and
+that the deployment record still names the build artifact that was compiled.
+0.20 adds the live-chain assertion that the on-chain cell contains the exact
+binary named by the deployment record.
 
 ## Design Rationale: Why Git, Why GitHub, Why Now
 
@@ -297,29 +296,36 @@ A few design decisions deserve more explanation.
 
 **What about the proxy?** Phase 3 can add an optional caching layer like `proxy.golang.org`, but the Git-based path is the permanent canonical mechanism, not a temporary placeholder. A proxy would be a transparent cache for faster installs and availability guarantees, not a replacement. If the proxy is down, `cellc install` falls back to direct Git cloning.
 
-## The End-to-End Test Suite
+## The Test Suite
 
-We didn't just design this — we tested it thoroughly. The test suite in `tests/e2e_registry_devnet.rs` covers 13 scenarios across three layers:
+Phase 1 acceptance is covered by always-on CLI and registry tests:
 
-**Offline Git registry** (6 tests): Two-tier discovery, registry.json append/update idempotency, Go-style namespace isolation, version upgrade and yank, multi-package dependency chains, discovery index add/update flow.
+**Offline Git registry**: local publish/resolve, namespace isolation, tag-pinned
+source resolution, registry dependency loading, source-root hashing, and
+source-hash mismatch rejection.
 
-**Headless CKB deploy** (5 tests): Deploy transaction construction with TYPE_ID, Deployed.toml three-layer identity, cell deps and multi-network records, fail-closed hash mismatch rejection, source hash cross-platform determinism.
+**Package/build identity**: namespace initialization, build lockfile identity,
+package verification, artifact/metadata/schema/ABI/constraints hash recording,
+and fail-closed mismatch cases.
 
-**Live devnet deploy** (2 tests, `#[ignore]` by default): Real CKB devnet from `../ckb`, `cellc build` producing actual RISC-V ELF artifacts, `cellc deploy-plan` and `cellc verify-deploy`, `build_deploy_transaction()` from the adapter, transaction submission and on-chain commitment, `get_live_cell` verification of data_hash against the real binary, and full cross-verification of all three identity layers.
+**Off-chain deployment identity**: `cellc registry verify` compares deployment
+facts with `Cell.lock` and fails closed in both text and JSON modes.
 
-The live devnet tests are the real proof. They don't use fake artifacts or manual JSON construction. They go through the complete toolchain: `cellc build` → `cellc ckb-hash` → `cellc deploy-plan` → `cellc verify-deploy` → `build_deploy_transaction()` → submit to devnet → wait for commitment → verify on-chain → write `Deployed.toml` + `Cell.lock` → cross-verify source ↔ artifact ↔ deployment identities. Every hash is computed from real data, every verification is against real on-chain state.
+`tests/e2e_registry_devnet.rs` also contains broader headless and ignored live
+devnet scenarios. Those are valuable 0.20 candidates, but live RPC /
+`get_live_cell` proof is not required for the closed 0.19 Phase 1 gate.
 
 ## What Comes Next
 
 Phase 1 is deliberately minimal. We're shipping the two-tier Git registry, the three-file separation, and the three-layer identity model. Here's what we're not shipping yet, and why:
 
-**On-chain type script index** (Phase 2): An on-chain script that indexes deployments by code_hash or TYPE_ID. Useful for wallets and builders that want to discover deployments without reading off-chain files. But the CKB ecosystem hasn't demonstrated demand for this yet, and the capacity costs are real. We'll build it when it's needed.
+**On-chain type script index** (0.20+): An on-chain script that indexes deployments by code_hash or TYPE_ID. Useful for wallets and builders that want to discover deployments without reading off-chain files. But the CKB ecosystem hasn't demonstrated demand for this yet, and the capacity costs are real. We'll build it when it's needed.
 
-**Registry proxy** (Phase 3): A caching layer like `proxy.golang.org` for faster installs and guaranteed availability. The Git-based path always remains the primary resolution mechanism. The proxy is a transparent cache, not a replacement.
+**Registry proxy** (0.20+): A caching layer like `proxy.golang.org` for faster installs and guaranteed availability. The Git-based path always remains the primary resolution mechanism. The proxy is a transparent cache, not a replacement.
 
-**Audit signatures and publisher identity** (Phase 2): Packages can currently carry optional audit report hashes and acceptance gate status. Requiring cryptographic signatures from auditors before marking a deployment as production-ready is a natural extension, but it needs a key management story first.
+**Audit signatures and publisher identity** (0.20 trust hardening): Packages can currently carry optional audit report hashes and acceptance gate status. Requiring cryptographic signatures from auditors before marking a deployment as production-ready is a natural extension, but it needs a key management story first.
 
-**Yanking and supersession**: The `yanked` flag is already in the `registry.json` schema. Phase 1 records it; Phase 2 enforces it at the resolver level.
+**Yanking and supersession**: The `yanked` flag is already in the `registry.json` schema. Phase 1 records it; 0.20 can enforce it at the resolver level.
 
 The important thing is that none of these future additions require changing the fundamental architecture. Adding a proxy doesn't change the discovery index schema. Adding on-chain indexing doesn't change how `Deployed.toml` is generated. The two-tier Git model is the permanent canonical path, and everything else layers on top of it.
 
