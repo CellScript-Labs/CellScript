@@ -172,18 +172,18 @@ Candidates:
 Acceptance should remain fail-closed: missing or unsupported trust metadata must
 not silently downgrade into name-only package or deployment resolution.
 
-## P2: CellFabric Exploration
+## P2: CellFabric Exploration (Frozen)
 
-CellFabric remains a later target:
+CellFabric is frozen for the 0.20 acceptance pass and remains a later target:
 
 ```text
 intent -> action DAG -> UTXO graph -> CKB transactions
 ```
 
-0.20 may sketch interfaces for intent schemas, action-DAG planning,
-multi-transaction batching, live-cell conflict detection, and planner evidence,
-but it should not claim full CellFabric support until the per-action builder and
-stateful flow runner are proven.
+Do not add generated code, CLI flags, public interfaces, fixture requirements,
+or release claims for intent schemas, action-DAG planning, multi-transaction
+batching, live-cell conflict detection, or planner evidence in 0.20. Revisit
+only after the per-action builder and stateful flow runner are proven.
 
 ## Non-Goals
 
@@ -196,6 +196,7 @@ stateful flow runner are proven.
 - Do not make builder success a substitute for CKB VM / tx-pool acceptance.
 - Do not claim cross-protocol CellFabric intent composition in the per-action
   builder release.
+- Do not treat frozen CellFabric exploration as a 0.20 acceptance blocker.
 
 ## Acceptance Gate
 
