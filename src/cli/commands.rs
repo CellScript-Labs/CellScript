@@ -398,6 +398,7 @@ pub struct ActionBuildArgs {
 pub struct GenBuilderArgs {
     pub input: Option<PathBuf>,
     pub metadata: Option<PathBuf>,
+    pub lockfile: Option<PathBuf>,
     pub action: Option<String>,
     pub output: Option<PathBuf>,
     pub target: String,
@@ -2685,10 +2686,24 @@ impl CommandExecutor {
             .metadata
         };
 
+        let metadata_hash = hash_json_value("metadata", &metadata)?;
         let selected_actions = selected_builder_actions(&metadata, args.action.as_deref())?;
+        let locked_identity = if let Some(lockfile_path) = args.lockfile.as_deref() {
+            Some(verify_builder_lockfile_identity(lockfile_path, &metadata, &metadata_hash)?)
+        } else {
+            None
+        };
         let output_dir = args.output.unwrap_or_else(|| PathBuf::from("target").join("cellscript-builder").join("typescript"));
         let package_name = args.package_name.unwrap_or_else(|| default_builder_package_name(&metadata));
-        let summary = write_typescript_builder_package(&output_dir, &package_name, &metadata, &selected_actions)?;
+        let summary = write_typescript_builder_package(
+            &output_dir,
+            &package_name,
+            &metadata,
+            &metadata_hash,
+            &selected_actions,
+            locked_identity.as_ref(),
+            args.lockfile.as_deref(),
+        )?;
 
         if args.json {
             print_json(&summary)?;
@@ -3803,20 +3818,109 @@ fn selected_builder_actions<'a>(metadata: &'a CompileMetadata, action_name: Opti
     Ok(metadata.actions.iter().collect())
 }
 
+fn read_lockfile_path(path: &Path) -> Result<Lockfile> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read lockfile '{}': {}", path.display(), error))
+    })?;
+    toml::from_str(&content)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse lockfile '{}': {}", path.display(), error)))
+}
+
+fn verify_builder_lockfile_identity(
+    lockfile_path: &Path,
+    metadata: &CompileMetadata,
+    metadata_hash: &str,
+) -> Result<serde_json::Value> {
+    let lockfile = read_lockfile_path(lockfile_path)?;
+    let expected_build = locked_build_info_from_metadata(metadata)?;
+    let mut violations = Vec::new();
+
+    match (&lockfile.package.source_hash, &metadata.source_hash) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => {
+            violations.push(format!("source_hash mismatch: Cell.lock has '{}', metadata has '{}'", locked, actual))
+        }
+        (None, _) => violations.push("Cell.lock [package] has no source_hash".to_string()),
+        (_, None) => violations.push("metadata has no source_hash".to_string()),
+    }
+
+    match &lockfile.package_build {
+        Some(build) => {
+            push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations);
+            compare_builder_identity_field(
+                "compiler_version",
+                &build.compiler_version,
+                &expected_build.compiler_version,
+                &mut violations,
+            );
+            compare_builder_identity_field("target_profile", &build.target_profile, &expected_build.target_profile, &mut violations);
+            compare_builder_identity_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
+            compare_builder_identity_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
+            compare_builder_identity_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_identity_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
+            compare_builder_identity_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &expected_build.constraints_hash,
+                &mut violations,
+            );
+        }
+        None => violations.push("Cell.lock has no [package.build]".to_string()),
+    }
+
+    if !violations.is_empty() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "generated builder identity verification failed: {}",
+            violations.join("; ")
+        )));
+    }
+
+    Ok(serde_json::json!({
+        "schema": "cellscript-builder-locked-identity-v0.20",
+        "package": lockfile.package,
+        "build": lockfile.package_build,
+        "verified_fields": [
+            "source_hash",
+            "compiler_version",
+            "target_profile",
+            "artifact_hash",
+            "metadata_hash",
+            "schema_hash",
+            "abi_hash",
+            "constraints_hash"
+        ]
+    }))
+}
+
+fn compare_builder_identity_field(
+    field: &str,
+    locked_value: &Option<String>,
+    metadata_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (locked_value, metadata_value) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => {
+            violations.push(format!("{} mismatch: Cell.lock has '{}', metadata has '{}'", field, locked, actual))
+        }
+        (None, _) => {}
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
 fn write_typescript_builder_package(
     output_dir: &Path,
     package_name: &str,
     metadata: &CompileMetadata,
+    metadata_hash: &str,
     actions: &[&crate::ActionMetadata],
+    locked_identity: Option<&serde_json::Value>,
+    lockfile_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
     let src_dir = output_dir.join("src");
     std::fs::create_dir_all(&src_dir)?;
 
-    let metadata_bytes = serde_json::to_vec(metadata).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to serialize metadata for builder digest: {}", error))
-    })?;
-    let metadata_hash = crate::hex_encode(&crate::ckb_blake2b256(&metadata_bytes));
-    let manifest = typescript_builder_manifest(package_name, metadata, actions, &metadata_hash);
+    let manifest = typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity);
 
     let package_json_path = output_dir.join("package.json");
     let tsconfig_path = output_dir.join("tsconfig.json");
@@ -3828,7 +3932,7 @@ fn write_typescript_builder_package(
     std::fs::write(&tsconfig_path, json_bytes_pretty("tsconfig.json", &typescript_tsconfig_json())?)?;
     std::fs::write(&manifest_path, json_bytes_pretty("builder manifest", &manifest)?)?;
     std::fs::write(&metadata_path, json_bytes_pretty("metadata", metadata)?)?;
-    std::fs::write(&index_path, typescript_builder_index(package_name, metadata, actions, &metadata_hash)?)?;
+    std::fs::write(&index_path, typescript_builder_index(package_name, metadata, actions, metadata_hash, locked_identity)?)?;
 
     Ok(serde_json::json!({
         "status": "ok",
@@ -3838,6 +3942,8 @@ fn write_typescript_builder_package(
         "package_name": package_name,
         "metadata_hash": metadata_hash,
         "artifact_hash": metadata.artifact_hash,
+        "lockfile_verified": locked_identity.is_some(),
+        "lockfile": lockfile_path.map(|path| path.display().to_string()),
         "action_count": actions.len(),
         "actions": actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
         "files": [
@@ -3860,6 +3966,7 @@ fn typescript_builder_manifest(
     metadata: &CompileMetadata,
     actions: &[&crate::ActionMetadata],
     metadata_hash: &str,
+    locked_identity: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     serde_json::json!({
         "schema": "cellscript-generated-action-builder-v0.20",
@@ -3870,7 +3977,9 @@ fn typescript_builder_manifest(
         "metadata_schema_version": metadata.metadata_schema_version,
         "metadata_hash": metadata_hash,
         "artifact_hash": metadata.artifact_hash,
+        "source_hash": metadata.source_hash,
         "target_profile": metadata.target_profile.name,
+        "locked_identity": locked_identity,
         "actions": actions
             .iter()
             .map(|action| {
@@ -3935,6 +4044,7 @@ fn typescript_builder_index(
     metadata: &CompileMetadata,
     actions: &[&crate::ActionMetadata],
     metadata_hash: &str,
+    locked_identity: Option<&serde_json::Value>,
 ) -> Result<String> {
     let action_specs = actions
         .iter()
@@ -3952,8 +4062,10 @@ fn typescript_builder_index(
         })
         .collect::<Vec<_>>();
     let action_specs_json = json_string_pretty("action specs", &action_specs)?;
-    let manifest_json =
-        json_string_pretty("builder manifest", &typescript_builder_manifest(package_name, metadata, actions, metadata_hash))?;
+    let manifest_json = json_string_pretty(
+        "builder manifest",
+        &typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity),
+    )?;
     let metadata_json = json_string_pretty("metadata", metadata)?;
 
     let mut ts = String::new();
@@ -3965,7 +4077,28 @@ fn typescript_builder_index(
         "export type HexString = `0x${string}`;\n\
          export type CellScriptValue = string | number | bigint | boolean | Uint8Array | Record<string, unknown> | null;\n\
          export type CellScriptParams = object;\n\n\
+         export interface CellScriptLockfilePackage {\n\
+           name?: string;\n\
+           version?: string;\n\
+           namespace?: string | null;\n\
+           source_hash?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLockfileBuild {\n\
+           compiler_version?: string | null;\n\
+           target_profile?: string | null;\n\
+           artifact_hash?: string | null;\n\
+           metadata_hash?: string | null;\n\
+           schema_hash?: string | null;\n\
+           abi_hash?: string | null;\n\
+           constraints_hash?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLockfile {\n\
+           package?: CellScriptLockfilePackage;\n\
+           package_build?: CellScriptLockfileBuild | null;\n\
+           deployment?: Record<string, unknown>;\n\
+         }\n\n\
          export interface BuildOptions {\n\
+           lockfile?: CellScriptLockfile;\n\
            deploymentRef?: string;\n\
            dryRun?: boolean;\n\
            submit?: boolean;\n\
@@ -4006,6 +4139,63 @@ fn typescript_builder_index(
            submit?(transaction: unknown): Promise<unknown>;\n\
          }\n\n",
     );
+    ts.push_str(&format!(
+        "const GENERATED_METADATA_HASH = {};\n\
+         const GENERATED_ARTIFACT_HASH: string | null = {};\n\
+         const GENERATED_SOURCE_HASH: string | null = {};\n\
+         const GENERATED_COMPILER_VERSION = {};\n\
+         const GENERATED_TARGET_PROFILE = {};\n\n",
+        typescript_string_literal(metadata_hash),
+        metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        metadata.source_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        typescript_string_literal(&metadata.compiler_version),
+        typescript_string_literal(&metadata.target_profile.name),
+    ));
+    ts.push_str(
+        "export function validateCellScriptLockfile(lockfile: CellScriptLockfile): string[] {\n\
+           const violations: string[] = [];\n\
+           const pkg = lockfile.package;\n\
+           if (!pkg) {\n\
+             violations.push(\"Cell.lock has no [package]\");\n\
+           } else {\n\
+             compareRequiredIdentity(\"source_hash\", pkg.source_hash, GENERATED_SOURCE_HASH, violations);\n\
+           }\n\
+           const build = lockfile.package_build;\n\
+           if (!build) {\n\
+             violations.push(\"Cell.lock has no [package.build]\");\n\
+           } else {\n\
+             compareRequiredIdentity(\"compiler_version\", build.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
+             compareRequiredIdentity(\"target_profile\", build.target_profile, GENERATED_TARGET_PROFILE, violations);\n\
+             compareRequiredIdentity(\"artifact_hash\", build.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
+             compareRequiredIdentity(\"metadata_hash\", build.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function assertCellScriptLockfile(lockfile: CellScriptLockfile): void {\n\
+           const violations = validateCellScriptLockfile(lockfile);\n\
+           if (violations.length > 0) {\n\
+             throw new Error(\"CellScript builder identity mismatch: \" + violations.join(\"; \"));\n\
+           }\n\
+         }\n\n\
+         function compareRequiredIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === null || expected === \"\") {\n\
+             violations.push(\"generated metadata has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(\"Cell.lock has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual !== expected) {\n\
+             violations.push(field + \" mismatch: Cell.lock has '\" + actual + \"', metadata has '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n",
+    );
 
     for action in actions {
         let suffix = typescript_type_suffix(&action.name);
@@ -4026,6 +4216,7 @@ fn typescript_builder_index(
     }
 
     ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
+    ts.push_str("  if (options.lockfile) {\n    assertCellScriptLockfile(options.lockfile);\n  }\n");
     ts.push_str(&format!(
         "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
         typescript_string_literal(metadata_hash),
@@ -7453,6 +7644,12 @@ impl CliParser {
                             .help("Read compile metadata JSON instead of compiling INPUT"),
                     )
                     .arg(
+                        Arg::new("lockfile")
+                            .long("lockfile")
+                            .value_name("FILE")
+                            .help("Verify generated builder identity against Cell.lock before writing"),
+                    )
+                    .arg(
                         Arg::new("target")
                             .long("target")
                             .value_name("TARGET")
@@ -7888,6 +8085,7 @@ impl CliParser {
             Some(("gen-builder", m)) => Command::GenBuilder(GenBuilderArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
+                lockfile: m.get_one::<String>("lockfile").map(PathBuf::from),
                 action: m.get_one::<String>("action").cloned(),
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned().unwrap_or_else(|| "typescript".to_string()),

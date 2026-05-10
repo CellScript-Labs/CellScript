@@ -40,6 +40,11 @@ typed action parameters, action-plan functions, runtime adapter contracts,
 builder manifest, embedded metadata, and explicit non-claims for live-chain
 availability, signing, submission, and CKB VM acceptance.
 
+Second slice: `cellc gen-builder --lockfile Cell.lock` now verifies source hash
+and locked build identity before writing the package. Generated TypeScript also
+exports `validateCellScriptLockfile` / `assertCellScriptLockfile`, and action
+planning fails closed when callers provide a mismatched lockfile.
+
 Target CLI:
 
 ```text

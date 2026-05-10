@@ -27,6 +27,36 @@ fn git_tag(repo_dir: &std::path::Path, tag: &str) {
     assert!(status.success());
 }
 
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hash_json_for_test<T: serde::Serialize>(value: &T) -> String {
+    let bytes = serde_json::to_vec(value).unwrap();
+    hex_lower(&cellscript::ckb_blake2b256(&bytes))
+}
+
+fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -> cellscript::package::LockedBuildInfo {
+    let abi = serde_json::json!({
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "target_profile": metadata.target_profile.name.as_str(),
+        "types": &metadata.types,
+        "actions": &metadata.actions,
+        "functions": &metadata.functions,
+        "locks": &metadata.locks,
+        "molecule_schema_manifest": &metadata.molecule_schema_manifest,
+    });
+    cellscript::package::LockedBuildInfo {
+        compiler_version: Some(metadata.compiler_version.clone()),
+        target_profile: Some(metadata.target_profile.name.clone()),
+        artifact_hash: metadata.artifact_hash.clone(),
+        metadata_hash: Some(hash_json_for_test(metadata)),
+        schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
+        abi_hash: Some(hash_json_for_test(&abi)),
+        constraints_hash: Some(hash_json_for_test(&metadata.constraints)),
+    }
+}
+
 #[test]
 fn cellc_writes_requested_output_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -4135,6 +4165,127 @@ action mint(amount: u64, owner: Address) -> Token {
     let generated_metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("src").join("metadata.json")).unwrap()).unwrap();
     assert_eq!(generated_metadata["actions"][0]["name"], "mint");
+}
+
+#[test]
+fn cellc_gen_builder_lockfile_identity_fails_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64, owner: Address) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    let metadata_path = root.join("mint.meta.json");
+    let metadata_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("metadata")
+        .arg("--output")
+        .arg(&metadata_path)
+        .output()
+        .unwrap();
+    assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
+
+    let metadata: cellscript::CompileMetadata = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    let lockfile = cellscript::package::Lockfile {
+        version: 1,
+        package: cellscript::package::LockfilePackageInfo {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            namespace: None,
+            source_hash: metadata.source_hash.clone(),
+        },
+        dependencies: Default::default(),
+        package_build: Some(locked_build_from_metadata_for_test(&metadata)),
+        deployment: Default::default(),
+    };
+    let lockfile_path = root.join("Cell.lock");
+    std::fs::write(&lockfile_path, toml::to_string_pretty(&lockfile).unwrap()).unwrap();
+
+    let output_dir = root.join("locked-builder");
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&lockfile_path)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(&output_dir)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["lockfile_verified"], true);
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["locked_identity"]["schema"], "cellscript-builder-locked-identity-v0.20");
+    assert_eq!(
+        manifest["locked_identity"]["build"]["metadata_hash"],
+        locked_build_from_metadata_for_test(&metadata).metadata_hash.unwrap()
+    );
+
+    let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
+    assert!(index_ts.contains("validateCellScriptLockfile"), "{index_ts}");
+    assert!(index_ts.contains("assertCellScriptLockfile(options.lockfile)"), "{index_ts}");
+
+    let mut bad_lockfile = lockfile;
+    bad_lockfile.package_build.as_mut().unwrap().metadata_hash = Some("bad_metadata_hash".to_string());
+    let bad_lockfile_path = root.join("Bad.lock");
+    std::fs::write(&bad_lockfile_path, toml::to_string_pretty(&bad_lockfile).unwrap()).unwrap();
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&bad_lockfile_path)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(root.join("bad-builder"))
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("generated builder identity verification failed"), "{stderr}");
+    assert!(stderr.contains("metadata_hash mismatch"), "{stderr}");
 }
 
 #[test]
