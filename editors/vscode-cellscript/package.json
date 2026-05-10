@@ -22,6 +22,12 @@
     "onCommand:cellscript.compileCurrentFile",
     "onCommand:cellscript.showMetadata",
     "onCommand:cellscript.showConstraints",
+    "onCommand:cellscript.showAbi",
+    "onCommand:cellscript.showActionBuildPlan",
+    "onCommand:cellscript.generateTypescriptBuilder",
+    "onCommand:cellscript.verifyPackage",
+    "onCommand:cellscript.verifyRegistry",
+    "onCommand:cellscript.verifyLiveRegistry",
     "onCommand:cellscript.showProductionReport"
   ],
   "scripts": {
@@ -86,6 +92,30 @@
         "title": "CellScript: Show Constraints"
       },
       {
+        "command": "cellscript.showAbi",
+        "title": "CellScript: Show Entry Witness ABI"
+      },
+      {
+        "command": "cellscript.showActionBuildPlan",
+        "title": "CellScript: Show Action Build Plan"
+      },
+      {
+        "command": "cellscript.generateTypescriptBuilder",
+        "title": "CellScript: Generate TypeScript Action Builder"
+      },
+      {
+        "command": "cellscript.verifyPackage",
+        "title": "CellScript: Verify Package"
+      },
+      {
+        "command": "cellscript.verifyRegistry",
+        "title": "CellScript: Verify Registry"
+      },
+      {
+        "command": "cellscript.verifyLiveRegistry",
+        "title": "CellScript: Verify Live Registry"
+      },
+      {
         "command": "cellscript.showProductionReport",
         "title": "CellScript: Show Production Report"
       }
@@ -108,9 +138,39 @@
           "group": "cellscript@3"
         },
         {
-          "command": "cellscript.showProductionReport",
+          "command": "cellscript.showAbi",
           "when": "resourceLangId == cellscript",
           "group": "cellscript@4"
+        },
+        {
+          "command": "cellscript.showActionBuildPlan",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@5"
+        },
+        {
+          "command": "cellscript.generateTypescriptBuilder",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@6"
+        },
+        {
+          "command": "cellscript.verifyPackage",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@7"
+        },
+        {
+          "command": "cellscript.verifyRegistry",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@8"
+        },
+        {
+          "command": "cellscript.verifyLiveRegistry",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@9"
+        },
+        {
+          "command": "cellscript.showProductionReport",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@10"
         }
       ],
       "commandPalette": [
@@ -124,6 +184,30 @@
         },
         {
           "command": "cellscript.showConstraints",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showAbi",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showActionBuildPlan",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.generateTypescriptBuilder",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.verifyPackage",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.verifyRegistry",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.verifyLiveRegistry",
           "when": "editorLangId == cellscript"
         },
         {
@@ -165,6 +249,21 @@
           ],
           "default": "riscv64-asm",
           "description": "Compiler target used by compile, metadata, and constraints commands."
+        },
+        "cellscript.builderOutputDir": {
+          "type": "string",
+          "default": "target/cellscript-builder/typescript",
+          "description": "Directory for generated TypeScript action builder packages. Relative paths resolve from the Cell.toml package root."
+        },
+        "cellscript.ckbRpcUrl": {
+          "type": "string",
+          "default": "",
+          "description": "CKB RPC URL passed to live registry verification. If empty, cellc may use CELLSCRIPT_CKB_RPC_URL from the environment."
+        },
+        "cellscript.deploymentNetwork": {
+          "type": "string",
+          "default": "",
+          "description": "Optional deployment network filter for live registry verification and generated builder deployment identity binding."
         }
       }
     }

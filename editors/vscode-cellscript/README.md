@@ -1,7 +1,7 @@
 # CellScript VS Code Extension
 
 Production-grade VS Code tooling for `.cell` contracts, powered by a
-CellScript Language Server (`cellc lsp --stdio`).
+CellScript Language Server (`cellc --lsp` over stdio).
 
 The extension connects to a `cellc` binary running as a JSON-RPC language
 server over stdio. This provides real-time diagnostics, completion, hover,
@@ -10,13 +10,14 @@ highlighting, folding, formatting, code actions, and document symbols —
 all backed by the CellScript compiler's parser, type-checker, and
 lowering pipeline.
 
-CLI-backed commands (compile, metadata, constraints, production report)
-continue to spawn `cellc` directly for one-shot operations that are
+CLI-backed commands (compile, metadata, constraints, ABI, action build plans,
+builder generation, package verification, registry verification, and production
+report) continue to spawn `cellc` directly for one-shot operations that are
 outside the LSP scope.
 
 ## Features
 
-### LSP-powered (via `cellc lsp --stdio`)
+### LSP-powered (via `cellc --lsp`)
 
 - real-time diagnostics on open / edit / save with incremental sync
 - context-aware completion (keywords, types, user symbols, fields, locals)
@@ -37,6 +38,12 @@ outside the LSP scope.
 - compile to a scratch artifact for the configured RISC-V target
 - `cellc metadata` JSON report
 - `cellc constraints` JSON report
+- `cellc abi` entry witness ABI report
+- `cellc action build --json` action transaction-builder contract
+- `cellc gen-builder --target typescript` generated action-builder package
+- `cellc package verify --json` package/source/lockfile integrity report
+- `cellc registry verify --json` deployment identity report
+- `cellc registry verify --live --json` optional CKB RPC live-cell proof
 - production report (version + metadata + constraints)
 - CKB target-profile arguments for compiler-backed reports
 
@@ -97,7 +104,7 @@ should use `read name: T`.
 ## Architecture
 
 ```
-VS Code ──(LanguageClient)──> cellc lsp --stdio ──(JSON-RPC)──> CellScriptBackend
+VS Code ──(LanguageClient)──> cellc --lsp ──(JSON-RPC)──> CellScriptBackend
 ```
 
 The `CellScriptBackend` in `server.rs` wraps the in-process `LspServer` and
@@ -126,6 +133,12 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Compile Current File` | Compile the active file to a scratch RISC-V assembly artifact and print compiler output. |
 | `CellScript: Show Metadata` | Run `cellc metadata` for the active file and show JSON in the CellScript output channel. |
 | `CellScript: Show Constraints` | Run `cellc constraints` for the active file and show JSON in the CellScript output channel. |
+| `CellScript: Show Entry Witness ABI` | Select an action or lock, then run `cellc abi` for the active file or package and show the `_cellscript_entry` witness ABI. |
+| `CellScript: Show Action Build Plan` | Select an action, then run `cellc action build --json` for the active file or package and show the builder contract. |
+| `CellScript: Generate TypeScript Action Builder` | Run `cellc gen-builder --target typescript` and write the generated package to `cellscript.builderOutputDir`. |
+| `CellScript: Verify Package` | Run `cellc package verify --json` from the nearest `Cell.toml` package root. |
+| `CellScript: Verify Registry` | Run `cellc registry verify --json` from the nearest `Cell.toml` package root. |
+| `CellScript: Verify Live Registry` | Run `cellc registry verify --live --json`, passing `cellscript.ckbRpcUrl` and `cellscript.deploymentNetwork` when configured. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
 Diagnostics, completion, hover, go-to-definition, references, rename,
@@ -141,6 +154,9 @@ automatically by the language server — no explicit commands needed.
 | `cellscript.commandTimeoutMs` | `15000` | Timeout for compiler-backed CLI commands. |
 | `cellscript.maxOutputBytes` | `4194304` | Captured stdout/stderr limit. |
 | `cellscript.target` | `riscv64-asm` | Compiler target for compile/metadata/constraints commands. |
+| `cellscript.builderOutputDir` | `target/cellscript-builder/typescript` | Generated TypeScript action-builder package directory. Relative paths resolve from the nearest `Cell.toml` package root. |
+| `cellscript.ckbRpcUrl` | empty | CKB RPC URL for live registry verification. When empty, `cellc` may use `CELLSCRIPT_CKB_RPC_URL` from the environment. |
+| `cellscript.deploymentNetwork` | empty | Optional deployment network filter for live registry verification and generated builder deployment identity binding. |
 
 ## Local Validation
 
@@ -176,11 +192,16 @@ check the JSON/prose output for:
 - constraints hash or constraints JSON saved by the build;
 - build provenance and source hash fields;
 - target profile and entry-action/entry-lock scope;
+- package and deployment identity verification through `Cell.lock` and
+  `Deployed.toml`;
+- generated action-builder package identity, including optional lockfile and
+  deployment binding;
 - CKB capacity/cycle limits;
 - external audit signatures attached by the release process.
 
 The extension displays compiler evidence. It does not create audit signatures,
-publish packages, deploy code cells, or replace CKB acceptance gates.
+publish packages, deploy code cells, sign transactions, submit transactions, or
+replace CKB acceptance gates.
 
 ## Scope
 

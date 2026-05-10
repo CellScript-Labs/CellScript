@@ -59,6 +59,12 @@ for (const command of [
   "cellscript.compileCurrentFile",
   "cellscript.showMetadata",
   "cellscript.showConstraints",
+  "cellscript.showAbi",
+  "cellscript.showActionBuildPlan",
+  "cellscript.generateTypescriptBuilder",
+  "cellscript.verifyPackage",
+  "cellscript.verifyRegistry",
+  "cellscript.verifyLiveRegistry",
   "cellscript.showProductionReport"
 ]) {
   if (!commands.has(command)) {
@@ -72,7 +78,10 @@ for (const setting of [
   "cellscript.useCargoRunFallback",
   "cellscript.commandTimeoutMs",
   "cellscript.maxOutputBytes",
-  "cellscript.target"
+  "cellscript.target",
+  "cellscript.builderOutputDir",
+  "cellscript.ckbRpcUrl",
+  "cellscript.deploymentNetwork"
 ]) {
   if (!properties[setting]) {
     throw new Error(`missing configuration setting: ${setting}`);
@@ -104,8 +113,20 @@ for (const token of [
   "cellscript.compileCurrentFile",
   "cellscript.showMetadata",
   "cellscript.showConstraints",
+  "cellscript.showAbi",
+  "cellscript.showActionBuildPlan",
+  "cellscript.generateTypescriptBuilder",
+  "cellscript.verifyPackage",
+  "cellscript.verifyRegistry",
+  "cellscript.verifyLiveRegistry",
   "cellscript.showProductionReport",
   "cellc",
+  "Cell.toml",
+  "action",
+  "gen-builder",
+  "package",
+  "registry",
+  "typescript",
   "--lsp",
   "TransportKind.stdio"
 ]) {
