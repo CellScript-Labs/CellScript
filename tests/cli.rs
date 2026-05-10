@@ -4445,6 +4445,8 @@ action mint(amount: u64, owner: Address) -> Token {
     let package_json: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("package.json")).unwrap()).unwrap();
     assert_eq!(package_json["name"], "@demo/token-builder");
     assert_eq!(package_json["type"], "module");
+    assert_eq!(package_json["scripts"]["build"], "tsc -p tsconfig.json");
+    assert_eq!(package_json["scripts"]["test"], "npm run build && node --test test/*.test.mjs");
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
@@ -4464,6 +4466,13 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
     assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
     assert!(!index_ts.contains("import metadataJson"), "{index_ts}");
+
+    let builder_test = std::fs::read_to_string(output_dir.join("test").join("builder.test.mjs")).unwrap();
+    assert!(builder_test.contains("node:test"), "{builder_test}");
+    assert!(builder_test.contains("plans all generated actions without submitting"), "{builder_test}");
+    assert!(builder_test.contains("delegates live-cell resolution and transaction build to runtime"), "{builder_test}");
+    assert!(builder_test.contains("rejects mismatched lockfile identity"), "{builder_test}");
+    assert!(builder_test.contains("rejects mismatched deployment identity"), "{builder_test}");
 
     let generated_metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("src").join("metadata.json")).unwrap()).unwrap();

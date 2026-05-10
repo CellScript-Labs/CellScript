@@ -55,6 +55,10 @@ binds generated packages to deployment identity. Generated TypeScript now
 exports deployment/live-evidence validators and rejects action plans when
 provided deployment records, lockfile refs, or live evidence disagree.
 
+Fifth slice: generated TypeScript packages now ship `npm test` and
+`test/builder.test.mjs` self-tests covering plan generation, runtime adapter
+delegation, and fail-closed lockfile/deployment mismatch cases.
+
 Target CLI:
 
 ```text

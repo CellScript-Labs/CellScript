@@ -4198,7 +4198,9 @@ fn write_typescript_builder_package(
     deployed_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
     let src_dir = output_dir.join("src");
+    let test_dir = output_dir.join("test");
     std::fs::create_dir_all(&src_dir)?;
+    std::fs::create_dir_all(&test_dir)?;
 
     let manifest = typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity);
 
@@ -4207,6 +4209,7 @@ fn write_typescript_builder_package(
     let manifest_path = output_dir.join("cellscript-builder-manifest.json");
     let metadata_path = src_dir.join("metadata.json");
     let index_path = src_dir.join("index.ts");
+    let test_path = test_dir.join("builder.test.mjs");
 
     std::fs::write(&package_json_path, json_bytes_pretty("package.json", &typescript_package_json(package_name))?)?;
     std::fs::write(&tsconfig_path, json_bytes_pretty("tsconfig.json", &typescript_tsconfig_json())?)?;
@@ -4216,6 +4219,7 @@ fn write_typescript_builder_package(
         &index_path,
         typescript_builder_index(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity)?,
     )?;
+    std::fs::write(&test_path, typescript_builder_test(actions)?)?;
 
     Ok(serde_json::json!({
         "status": "ok",
@@ -4236,7 +4240,8 @@ fn write_typescript_builder_package(
             tsconfig_path.display().to_string(),
             manifest_path.display().to_string(),
             metadata_path.display().to_string(),
-            index_path.display().to_string()
+            index_path.display().to_string(),
+            test_path.display().to_string()
         ],
         "non_claims": [
             "generated package does not prove live-cell availability",
@@ -4300,7 +4305,8 @@ fn typescript_package_json(package_name: &str) -> serde_json::Value {
         "main": "dist/index.js",
         "types": "dist/index.d.ts",
         "scripts": {
-            "build": "tsc -p tsconfig.json"
+            "build": "tsc -p tsconfig.json",
+            "test": "npm run build && node --test test/*.test.mjs"
         },
         "devDependencies": {
             "typescript": "^5.0.0"
@@ -4696,6 +4702,132 @@ fn typescript_builder_index(
     ts.push_str("  };\n}\n");
 
     Ok(ts)
+}
+
+fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String> {
+    let cases = actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "name": action.name,
+                "plan": format!("plan{}", typescript_type_suffix(&action.name)),
+                "method": typescript_identifier(&action.name, "action"),
+                "params": javascript_sample_params(action),
+            })
+        })
+        .collect::<Vec<_>>();
+    let cases_json = json_string_pretty("builder test cases", &cases)?;
+
+    let mut js = String::new();
+    js.push_str("import assert from \"node:assert/strict\";\n");
+    js.push_str("import test from \"node:test\";\n");
+    js.push_str("import * as builder from \"../dist/index.js\";\n\n");
+    js.push_str(&format!("const actionCases = {cases_json};\n"));
+    js.push_str("const WRONG_HASH = \"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\";\n\n");
+    js.push_str(
+        "test(\"plans all generated actions without submitting\", () => {\n\
+           for (const actionCase of actionCases) {\n\
+             const plan = builder[actionCase.plan](actionCase.params);\n\
+             assert.equal(plan.schema, builder.CELLSCRIPT_BUILDER_SCHEMA);\n\
+             assert.equal(plan.state, \"GeneratedActionPlan\");\n\
+             assert.equal(plan.status, \"requires-runtime-resolution\");\n\
+             assert.equal(plan.action, actionCase.name);\n\
+             assert.equal(plan.canSubmit, false);\n\
+             assert.equal(plan.requiresLiveCellResolution, true);\n\
+             assert.equal(plan.requiresDeploymentResolution, true);\n\
+             assert.deepEqual(plan.params, actionCase.params);\n\
+           }\n\
+         });\n\n\
+         test(\"delegates live-cell resolution and transaction build to runtime\", async () => {\n\
+           const [first] = actionCases;\n\
+           const calls = [];\n\
+           const runtime = {\n\
+             async resolveLiveCells(request) {\n\
+               calls.push([\"resolveLiveCells\", request.plan.action]);\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+             },\n\
+             async buildTransaction(plan) {\n\
+               calls.push([\"buildTransaction\", plan.action]);\n\
+               return plan;\n\
+             },\n\
+           };\n\
+           const api = builder.createActionBuilder(runtime);\n\
+           const result = await api[first.method](first.params);\n\
+           assert.equal(result.action, first.name);\n\
+           assert.deepEqual(result.liveCellResolution.inputs, [\"input-0\"]);\n\
+           assert.deepEqual(calls, [[\"resolveLiveCells\", first.name], [\"buildTransaction\", first.name]]);\n\
+         });\n\n\
+         test(\"rejects mismatched lockfile identity\", () => {\n\
+           const [first] = actionCases;\n\
+           const badLockfile = {\n\
+             package: { source_hash: WRONG_HASH },\n\
+             package_build: {\n\
+               compiler_version: \"wrong-compiler\",\n\
+               target_profile: builder.builderManifest.target_profile,\n\
+               artifact_hash: builder.builderManifest.artifact_hash,\n\
+               metadata_hash: builder.builderManifest.metadata_hash,\n\
+             },\n\
+           };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { lockfile: badLockfile }),\n\
+             /CellScript builder identity mismatch/,\n\
+           );\n\
+         });\n\n\
+         test(\"rejects mismatched deployment identity when deployment binding is embedded\", () => {\n\
+           const [first] = actionCases;\n\
+           const deployment = builder.builderManifest.deployment_identity?.deployments?.[0];\n\
+           if (!deployment) {\n\
+             assert.deepEqual(builder.validateCellScriptDeployment(undefined, undefined), []);\n\
+             return;\n\
+           }\n\
+           const badDeployment = { ...deployment, code_hash: WRONG_HASH };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: badDeployment }),\n\
+             /CellScript deployment identity mismatch/,\n\
+           );\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, {\n\
+               deployment,\n\
+               liveDeploymentEvidence: {\n\
+                 status: \"failed\",\n\
+                 rpc_status: \"dead\",\n\
+                 out_point: deployment.out_point,\n\
+                 rpc_data_hash: deployment.data_hash,\n\
+                 rpc_code_hash: deployment.code_hash,\n\
+               },\n\
+             }),\n\
+             /CellScript deployment identity mismatch/,\n\
+           );\n\
+         });\n",
+    );
+    Ok(js)
+}
+
+fn javascript_sample_params(action: &crate::ActionMetadata) -> serde_json::Value {
+    let mut params = serde_json::Map::new();
+    for param in &action.params {
+        params.insert(param.name.clone(), javascript_sample_param_value(param));
+    }
+    serde_json::Value::Object(params)
+}
+
+fn javascript_sample_param_value(param: &ParamMetadata) -> serde_json::Value {
+    if param.schema_pointer_abi
+        || param.schema_length_abi
+        || param.ty == "Address"
+        || param.ty == "Hash"
+        || param.fixed_byte_len.is_some()
+    {
+        let bytes = param.fixed_byte_len.unwrap_or(if param.ty == "Address" || param.ty == "Hash" { 32 } else { 0 });
+        return serde_json::Value::String(format!("0x{}", "00".repeat(bytes)));
+    }
+
+    match param.ty.as_str() {
+        "bool" => serde_json::Value::Bool(false),
+        "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => serde_json::json!(0),
+        "()" => serde_json::Value::Null,
+        _ => serde_json::Value::String("0x".to_string()),
+    }
 }
 
 fn default_builder_package_name(metadata: &CompileMetadata) -> String {
