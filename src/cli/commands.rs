@@ -74,6 +74,7 @@ pub enum Command {
     DiffDeploy(DiffDeployArgs),
     LockDeps(LockDepsArgs),
     ActionBuild(ActionBuildArgs),
+    GenBuilder(GenBuilderArgs),
     /// Encode generated entry wrapper witness bytes
     EntryWitness(EntryWitnessArgs),
     VerifyArtifact(VerifyArtifactArgs),
@@ -393,6 +394,18 @@ pub struct ActionBuildArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Default)]
+pub struct GenBuilderArgs {
+    pub input: Option<PathBuf>,
+    pub metadata: Option<PathBuf>,
+    pub action: Option<String>,
+    pub output: Option<PathBuf>,
+    pub target: String,
+    pub target_profile: Option<String>,
+    pub package_name: Option<String>,
+    pub json: bool,
+}
+
 /// Entry witness encoding arguments
 #[derive(Debug, Default)]
 pub struct EntryWitnessArgs {
@@ -511,6 +524,7 @@ impl CommandExecutor {
             Command::DiffDeploy(args) => Self::diff_deploy(args),
             Command::LockDeps(args) => Self::lock_deps(args),
             Command::ActionBuild(args) => Self::action_build(args),
+            Command::GenBuilder(args) => Self::gen_builder(args),
             Command::EntryWitness(args) => Self::entry_witness(args),
             Command::VerifyArtifact(args) => Self::verify_artifact(args),
             Command::Run(args) => Self::run(args),
@@ -2642,6 +2656,52 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn gen_builder(args: GenBuilderArgs) -> Result<()> {
+        if args.target != "typescript" {
+            return Err(crate::error::CompileError::without_span(format!(
+                "unsupported builder target '{}'; supported targets: typescript",
+                args.target
+            )));
+        }
+
+        let metadata = if let Some(metadata_path) = args.metadata.as_deref() {
+            read_metadata_json(metadata_path)?
+        } else {
+            let input_path = args.input.clone().unwrap_or_else(|| PathBuf::from("."));
+            let input = Utf8Path::from_path(&input_path).ok_or_else(|| {
+                crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display()))
+            })?;
+            compile_path(
+                input,
+                CompileOptions {
+                    opt_level: 1,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: args.target_profile.or_else(|| Some("ckb".to_string())),
+                    primitive_compat: None,
+                },
+            )?
+            .metadata
+        };
+
+        let selected_actions = selected_builder_actions(&metadata, args.action.as_deref())?;
+        let output_dir = args.output.unwrap_or_else(|| PathBuf::from("target").join("cellscript-builder").join("typescript"));
+        let package_name = args.package_name.unwrap_or_else(|| default_builder_package_name(&metadata));
+        let summary = write_typescript_builder_package(&output_dir, &package_name, &metadata, &selected_actions)?;
+
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("{}", "TypeScript action builder generated".green());
+            println!("  Output: {}", output_dir.display());
+            println!("  Package: {}", package_name);
+            println!("  Actions: {}", selected_actions.len());
+        }
+
+        Ok(())
+    }
+
     /// Encode witness bytes for the generated `_cellscript_entry` wrapper.
     fn entry_witness(args: EntryWitnessArgs) -> Result<()> {
         if args.action.is_some() && args.lock.is_some() {
@@ -3726,6 +3786,413 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
         Ok(())
     }
 }
+
+fn selected_builder_actions<'a>(metadata: &'a CompileMetadata, action_name: Option<&str>) -> Result<Vec<&'a crate::ActionMetadata>> {
+    if let Some(action_name) = action_name {
+        let action =
+            metadata.actions.iter().find(|action| action.name == action_name).ok_or_else(|| {
+                crate::error::CompileError::without_span(format!("action '{}' was not found in metadata", action_name))
+            })?;
+        return Ok(vec![action]);
+    }
+
+    if metadata.actions.is_empty() {
+        return Err(crate::error::CompileError::without_span("no actions found in metadata for generated builder"));
+    }
+
+    Ok(metadata.actions.iter().collect())
+}
+
+fn write_typescript_builder_package(
+    output_dir: &Path,
+    package_name: &str,
+    metadata: &CompileMetadata,
+    actions: &[&crate::ActionMetadata],
+) -> Result<serde_json::Value> {
+    let src_dir = output_dir.join("src");
+    std::fs::create_dir_all(&src_dir)?;
+
+    let metadata_bytes = serde_json::to_vec(metadata).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to serialize metadata for builder digest: {}", error))
+    })?;
+    let metadata_hash = crate::hex_encode(&crate::ckb_blake2b256(&metadata_bytes));
+    let manifest = typescript_builder_manifest(package_name, metadata, actions, &metadata_hash);
+
+    let package_json_path = output_dir.join("package.json");
+    let tsconfig_path = output_dir.join("tsconfig.json");
+    let manifest_path = output_dir.join("cellscript-builder-manifest.json");
+    let metadata_path = src_dir.join("metadata.json");
+    let index_path = src_dir.join("index.ts");
+
+    std::fs::write(&package_json_path, json_bytes_pretty("package.json", &typescript_package_json(package_name))?)?;
+    std::fs::write(&tsconfig_path, json_bytes_pretty("tsconfig.json", &typescript_tsconfig_json())?)?;
+    std::fs::write(&manifest_path, json_bytes_pretty("builder manifest", &manifest)?)?;
+    std::fs::write(&metadata_path, json_bytes_pretty("metadata", metadata)?)?;
+    std::fs::write(&index_path, typescript_builder_index(package_name, metadata, actions, &metadata_hash)?)?;
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-generated-builder-summary-v0.20",
+        "target": "typescript",
+        "output_dir": output_dir.display().to_string(),
+        "package_name": package_name,
+        "metadata_hash": metadata_hash,
+        "artifact_hash": metadata.artifact_hash,
+        "action_count": actions.len(),
+        "actions": actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+        "files": [
+            package_json_path.display().to_string(),
+            tsconfig_path.display().to_string(),
+            manifest_path.display().to_string(),
+            metadata_path.display().to_string(),
+            index_path.display().to_string()
+        ],
+        "non_claims": [
+            "generated package does not prove live-cell availability",
+            "generated package does not sign or submit transactions by itself",
+            "generated package requires a runtime adapter for CCC or ckb-sdk-rust"
+        ]
+    }))
+}
+
+fn typescript_builder_manifest(
+    package_name: &str,
+    metadata: &CompileMetadata,
+    actions: &[&crate::ActionMetadata],
+    metadata_hash: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "cellscript-generated-action-builder-v0.20",
+        "target": "typescript",
+        "package_name": package_name,
+        "module": metadata.module,
+        "compiler_version": metadata.compiler_version,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_hash": metadata_hash,
+        "artifact_hash": metadata.artifact_hash,
+        "target_profile": metadata.target_profile.name,
+        "actions": actions
+            .iter()
+            .map(|action| {
+                serde_json::json!({
+                    "name": action.name,
+                    "params": action.params,
+                    "created_outputs": action.create_set.len(),
+                    "mutated_outputs": action.mutate_set.len(),
+                    "runtime_input_requirements": action.transaction_runtime_input_requirements.len(),
+                    "entry_witness_required": !action.params.is_empty(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "runtime_contract": {
+            "requires_live_cell_resolution": true,
+            "requires_deployment_resolution": true,
+            "requires_capacity_and_fee_policy": true,
+            "requires_witness_materialization": true,
+            "requires_dry_run_before_submit": true,
+            "must_not_infer_protocol_semantics_from_action_name": true,
+        }
+    })
+}
+
+fn typescript_package_json(package_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": package_name,
+        "version": "0.0.0-cellscript-generated",
+        "private": true,
+        "type": "module",
+        "main": "dist/index.js",
+        "types": "dist/index.d.ts",
+        "scripts": {
+            "build": "tsc -p tsconfig.json"
+        },
+        "devDependencies": {
+            "typescript": "^5.0.0"
+        }
+    })
+}
+
+fn typescript_tsconfig_json() -> serde_json::Value {
+    serde_json::json!({
+        "compilerOptions": {
+            "target": "ES2022",
+            "module": "NodeNext",
+            "moduleResolution": "NodeNext",
+            "declaration": true,
+            "outDir": "dist",
+            "rootDir": "src",
+            "strict": true,
+            "resolveJsonModule": true,
+            "esModuleInterop": true,
+            "skipLibCheck": true
+        },
+        "include": ["src/**/*.ts", "src/**/*.json"]
+    })
+}
+
+fn typescript_builder_index(
+    package_name: &str,
+    metadata: &CompileMetadata,
+    actions: &[&crate::ActionMetadata],
+    metadata_hash: &str,
+) -> Result<String> {
+    let action_specs = actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "name": action.name,
+                "params": action.params,
+                "createSet": action.create_set,
+                "mutateSet": action.mutate_set,
+                "readRefs": action.read_refs,
+                "verifierObligations": action.verifier_obligations,
+                "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
+            })
+        })
+        .collect::<Vec<_>>();
+    let action_specs_json = json_string_pretty("action specs", &action_specs)?;
+    let manifest_json =
+        json_string_pretty("builder manifest", &typescript_builder_manifest(package_name, metadata, actions, metadata_hash))?;
+    let metadata_json = json_string_pretty("metadata", metadata)?;
+
+    let mut ts = String::new();
+    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.20\" as const;\n");
+    ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
+    ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
+    ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
+    ts.push_str(
+        "export type HexString = `0x${string}`;\n\
+         export type CellScriptValue = string | number | bigint | boolean | Uint8Array | Record<string, unknown> | null;\n\
+         export type CellScriptParams = object;\n\n\
+         export interface BuildOptions {\n\
+           deploymentRef?: string;\n\
+           dryRun?: boolean;\n\
+           submit?: boolean;\n\
+           feeRate?: bigint | number | string;\n\
+           changeLock?: unknown;\n\
+         }\n\n\
+         export interface ActionBuilderPlan<P extends CellScriptParams = CellScriptParams> {\n\
+           schema: typeof CELLSCRIPT_BUILDER_SCHEMA;\n\
+           state: \"GeneratedActionPlan\";\n\
+           status: \"requires-runtime-resolution\";\n\
+           action: string;\n\
+           params: P;\n\
+           options: BuildOptions;\n\
+           metadataHash: string;\n\
+           artifactHash: string | null;\n\
+           targetProfile: string;\n\
+           canSubmit: false;\n\
+           requiresLiveCellResolution: true;\n\
+           requiresDeploymentResolution: true;\n\
+           notProvenByGeneratedBuilder: readonly string[];\n\
+         }\n\n\
+         export interface LiveCellResolutionRequest<P extends CellScriptParams = CellScriptParams> {\n\
+           plan: ActionBuilderPlan<P>;\n\
+           options: BuildOptions;\n\
+         }\n\n\
+         export interface LiveCellResolutionResult {\n\
+           inputs?: readonly unknown[];\n\
+           referenceInputs?: readonly unknown[];\n\
+           cellDeps?: readonly unknown[];\n\
+           headerDeps?: readonly unknown[];\n\
+           deploymentRef?: unknown;\n\
+           lineage?: readonly unknown[];\n\
+         }\n\n\
+         export interface CellScriptBuilderRuntime {\n\
+           resolveLiveCells<P extends CellScriptParams>(request: LiveCellResolutionRequest<P>): Promise<LiveCellResolutionResult>;\n\
+           buildTransaction<P extends CellScriptParams>(plan: ActionBuilderPlan<P> & { liveCellResolution: LiveCellResolutionResult }): Promise<unknown>;\n\
+           dryRun?(transaction: unknown): Promise<unknown>;\n\
+           submit?(transaction: unknown): Promise<unknown>;\n\
+         }\n\n",
+    );
+
+    for action in actions {
+        let suffix = typescript_type_suffix(&action.name);
+        let params_type = typescript_action_params_type(action);
+        ts.push_str(&format!("export interface {suffix}Params {{\n"));
+        for param in &action.params {
+            ts.push_str(&format!("  {}: {};\n", typescript_object_key(&param.name), typescript_param_type(param)));
+        }
+        if action.params.is_empty() {
+            ts.push_str("  readonly __noParams?: never;\n");
+        }
+        ts.push_str("}\n\n");
+        ts.push_str(&format!(
+            "export function plan{suffix}(params: {params_type}, options: BuildOptions = {{}}): ActionBuilderPlan<{params_type}> {{\n  \
+             return makeActionPlan({}, params, options);\n}}\n\n",
+            typescript_string_literal(&action.name)
+        ));
+    }
+
+    ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
+    ts.push_str(&format!(
+        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
+        typescript_string_literal(metadata_hash),
+        metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        typescript_string_literal(&metadata.target_profile.name)
+    ));
+
+    ts.push_str("export function createActionBuilder(runtime: CellScriptBuilderRuntime) {\n  return {\n");
+    for action in actions {
+        let method = typescript_identifier(&action.name, "action");
+        let suffix = typescript_type_suffix(&action.name);
+        let params_type = typescript_action_params_type(action);
+        ts.push_str(&format!(
+            "    async {method}(params: {params_type}, options: BuildOptions = {{}}) {{\n      \
+             const plan = plan{suffix}(params, options);\n      \
+             const liveCellResolution = await runtime.resolveLiveCells({{ plan, options }});\n      \
+             return runtime.buildTransaction({{ ...plan, liveCellResolution }});\n    }},\n"
+        ));
+    }
+    ts.push_str("  };\n}\n");
+
+    Ok(ts)
+}
+
+fn default_builder_package_name(metadata: &CompileMetadata) -> String {
+    let module = metadata.module.replace("::", "-").replace('_', "-");
+    let trimmed = module.trim_matches('-');
+    if trimmed.is_empty() {
+        "@cellscript/generated-builder".to_string()
+    } else {
+        format!("@cellscript/{}-builder", trimmed.to_ascii_lowercase())
+    }
+}
+
+fn typescript_action_params_type(action: &crate::ActionMetadata) -> String {
+    format!("{}Params", typescript_type_suffix(&action.name))
+}
+
+fn typescript_type_suffix(name: &str) -> String {
+    let mut output = String::new();
+    let mut uppercase_next = true;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if uppercase_next {
+                output.push(ch.to_ascii_uppercase());
+                uppercase_next = false;
+            } else {
+                output.push(ch);
+            }
+        } else {
+            uppercase_next = true;
+        }
+    }
+    if output.is_empty() || output.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        output.insert_str(0, "Action");
+    }
+    output
+}
+
+fn typescript_identifier(name: &str, fallback: &str) -> String {
+    let mut ident = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch == '_' || ch == '$' || ch.is_ascii_alphabetic() || (index > 0 && ch.is_ascii_digit()) {
+            ident.push(ch);
+        } else if ch.is_ascii_digit() && index == 0 {
+            ident.push('_');
+            ident.push(ch);
+        } else {
+            ident.push('_');
+        }
+    }
+    if ident.is_empty() || TYPESCRIPT_RESERVED_WORDS.contains(&ident.as_str()) {
+        format!("{}_{}", fallback, &crate::hex_encode(&crate::ckb_blake2b256(name.as_bytes()))[..8].to_ascii_lowercase())
+    } else {
+        ident
+    }
+}
+
+fn typescript_object_key(name: &str) -> String {
+    let ident = typescript_identifier(name, "param");
+    if ident == name {
+        ident
+    } else {
+        typescript_string_literal(name)
+    }
+}
+
+fn typescript_param_type(param: &ParamMetadata) -> &'static str {
+    if param.schema_pointer_abi
+        || param.schema_length_abi
+        || param.fixed_byte_len.is_some()
+        || param.ty == "Address"
+        || param.ty == "Hash"
+    {
+        return "HexString | Uint8Array";
+    }
+
+    match param.ty.as_str() {
+        "bool" => "boolean",
+        "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => "bigint | number | string",
+        "()" => "null | undefined",
+        _ => "CellScriptValue",
+    }
+}
+
+fn typescript_string_literal(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn json_bytes_pretty<T: serde::Serialize>(label: &str, value: &T) -> Result<Vec<u8>> {
+    serde_json::to_vec_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize {label}: {error}")))
+}
+
+fn json_string_pretty<T: serde::Serialize>(label: &str, value: &T) -> Result<String> {
+    serde_json::to_string_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize {label}: {error}")))
+}
+
+const TYPESCRIPT_RESERVED_WORDS: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "as",
+    "implements",
+    "interface",
+    "let",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "static",
+    "yield",
+];
 
 fn ckb_fixture_manifest_report(manifest: &serde_json::Value, base_dir: &Path, manifest_bytes: &[u8]) -> serde_json::Value {
     let mut issues = Vec::<String>::new();
@@ -6976,6 +7443,30 @@ impl CliParser {
                 ),
             )
             .subcommand(
+                ClapCommand::new("gen-builder")
+                    .about("Generate a registry-bound action builder package from CellScript metadata")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(
+                        Arg::new("metadata")
+                            .long("metadata")
+                            .value_name("FILE")
+                            .help("Read compile metadata JSON instead of compiling INPUT"),
+                    )
+                    .arg(
+                        Arg::new("target")
+                            .long("target")
+                            .value_name("TARGET")
+                            .required(true)
+                            .value_parser(["typescript"])
+                            .help("Generated builder target"),
+                    )
+                    .arg(Arg::new("action").long("action").value_name("NAME").help("Generate only this action; defaults to all actions"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output package directory"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile when compiling INPUT: ckb"))
+                    .arg(Arg::new("package-name").long("package-name").value_name("NAME").help("Generated package.json name"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable generation summary")),
+            )
+            .subcommand(
                 ClapCommand::new("entry-witness")
                     .about("Encode witness bytes for the generated _cellscript_entry wrapper")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
@@ -7394,6 +7885,16 @@ impl CliParser {
                 }),
                 _ => Command::ActionBuild(ActionBuildArgs::default()),
             },
+            Some(("gen-builder", m)) => Command::GenBuilder(GenBuilderArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                metadata: m.get_one::<String>("metadata").map(PathBuf::from),
+                action: m.get_one::<String>("action").cloned(),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned().unwrap_or_else(|| "typescript".to_string()),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                package_name: m.get_one::<String>("package-name").cloned(),
+                json: m.get_flag("json"),
+            }),
             Some(("entry-witness", m)) => Command::EntryWitness(EntryWitnessArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 action: m.get_one::<String>("action").cloned(),

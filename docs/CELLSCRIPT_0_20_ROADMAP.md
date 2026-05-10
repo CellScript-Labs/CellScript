@@ -1,6 +1,6 @@
 # CellScript 0.20 Roadmap
 
-**Status**: Planned
+**Status**: In progress
 **Scope**: Generated Action Builder, live-chain deployment verification,
 stateful transaction flows, and registry trust hardening
 **Depends on**: 0.19 Phase 1 package / deployment identity registry closure
@@ -33,6 +33,12 @@ Cell.lock + metadata + deployment facts
 
 CellScript Action Builder turns one CellScript action into one valid CKB
 transaction candidate.
+
+Current first slice on the 0.20 branch: `cellc gen-builder --target typescript`
+emits a compiling TypeScript package scaffold from compiler metadata, including
+typed action parameters, action-plan functions, runtime adapter contracts,
+builder manifest, embedded metadata, and explicit non-claims for live-chain
+availability, signing, submission, and CKB VM acceptance.
 
 Target CLI:
 

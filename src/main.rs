@@ -108,6 +108,7 @@ fn main() {
                     | "diff-deploy"
                     | "lock-deps"
                     | "action"
+                    | "gen-builder"
                     | "entry-witness"
                     | "verify-artifact"
                     | "run"

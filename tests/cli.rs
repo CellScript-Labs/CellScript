@@ -4037,6 +4037,107 @@ action mint(amount: u64) -> Token {
 }
 
 #[test]
+fn cellc_gen_builder_typescript_emits_package_scaffold() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64, owner: Address) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    let metadata_path = root.join("mint.meta.json");
+    let metadata = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("metadata")
+        .arg("--output")
+        .arg(&metadata_path)
+        .output()
+        .unwrap();
+    assert!(metadata.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata.stderr));
+
+    let output_dir = root.join("generated-builder");
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(&output_dir)
+        .arg("--package-name")
+        .arg("@demo/token-builder")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    assert_eq!(summary["schema"], "cellscript-generated-builder-summary-v0.20");
+    assert_eq!(summary["target"], "typescript");
+    assert_eq!(summary["package_name"], "@demo/token-builder");
+    assert_eq!(summary["action_count"], 1);
+    assert_eq!(summary["actions"][0], "mint");
+    assert!(summary["metadata_hash"].as_str().is_some_and(|hash| hash.len() == 64));
+
+    let package_json: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package_json["name"], "@demo/token-builder");
+    assert_eq!(package_json["type"], "module");
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema"], "cellscript-generated-action-builder-v0.20");
+    assert_eq!(manifest["target"], "typescript");
+    assert_eq!(manifest["actions"][0]["name"], "mint");
+    assert_eq!(manifest["runtime_contract"]["requires_live_cell_resolution"], true);
+    assert_eq!(manifest["runtime_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
+
+    let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
+    assert!(index_ts.contains("export interface MintParams"), "{index_ts}");
+    assert!(index_ts.contains("amount: bigint | number | string;"), "{index_ts}");
+    assert!(index_ts.contains("owner: HexString | Uint8Array;"), "{index_ts}");
+    assert!(index_ts.contains("export function planMint"), "{index_ts}");
+    assert!(index_ts.contains("createActionBuilder"), "{index_ts}");
+    assert!(index_ts.contains("canSubmit: false"), "{index_ts}");
+    assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
+    assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
+    assert!(!index_ts.contains("import metadataJson"), "{index_ts}");
+
+    let generated_metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_dir.join("src").join("metadata.json")).unwrap()).unwrap();
+    assert_eq!(generated_metadata["actions"][0]["name"], "mint");
+}
+
+#[test]
 fn cellc_entry_witness_subcommand_emits_parameterized_witness_json() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
