@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 # CellScript installer — curl -fsSL <URL> | sh
-set -euo pipefail
+set -eu
+if (set -o pipefail) 2>/dev/null; then
+    set -o pipefail
+fi
 
 REPO="tsukifune-kosei/CellScript"
 BINARY="cellc"

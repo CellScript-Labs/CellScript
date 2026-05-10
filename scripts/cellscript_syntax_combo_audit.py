@@ -133,16 +133,18 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
-        "name": "stdlib lifecycle helpers validate arity and cell kind",
+        "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
         "required_cases": (
             "matrix-reject-claim-non-receipt",
             "matrix-reject-claim-extra-args",
             "matrix-reject-transfer-extra-args",
             "matrix-reject-settle-missing-args",
+            "matrix-reject-claim-output-type-mismatch",
+            "matrix-reject-settle-lock-target-type",
         ),
         "required_origins": ("matrix:reject/stdlib-lifecycle",),
-        "release_boundary": "stdlib lifecycle patterns fail closed before lowering when arguments are invalid",
+        "release_boundary": "stdlib lifecycle patterns fail closed before lowering when arguments, lock targets, or claim outputs are invalid",
     },
     {
         "id": "SCA-BUG-METADATA-HELPER-VALIDATION",
@@ -628,6 +630,45 @@ def matrix_cases(include_deep: bool) -> list[AuditCase]:
                     """,
                 ),
                 expected=Expected("reject_compile", ("settle expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-output-type-mismatch",
+                source=module_source(
+                    "matrix_reject_claim_output_type_mismatch",
+                    """
+                    resource Badge has store, create, consume, replace, burn, relock {
+                        amount: u64,
+                        nonce: u64,
+                    }
+
+                    action bad_claim_output(voucher: Voucher, to: Address) -> badge: Badge {
+                        verification
+                        std::receipt::claim(voucher, badge, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim output type mismatch",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-settle-lock-target-type",
+                source=module_source(
+                    "matrix_reject_settle_lock_target_type",
+                    """
+                    action bad_settle_lock(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::lifecycle::settle(voucher, coin, voucher.amount) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("settle lock target must be Address or Hash",)),
                 origin="matrix:reject/stdlib-lifecycle",
             ),
             AuditCase(
