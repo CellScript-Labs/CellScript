@@ -4454,6 +4454,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(manifest["target"], "typescript");
     assert_eq!(manifest["actions"][0]["name"], "mint");
     assert_eq!(manifest["runtime_contract"]["requires_live_cell_resolution"], true);
+    assert_eq!(manifest["runtime_contract"]["requires_dry_run_before_submit"], true);
     assert_eq!(manifest["runtime_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
 
     let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
@@ -4462,6 +4463,9 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("owner: HexString | Uint8Array;"), "{index_ts}");
     assert!(index_ts.contains("export function planMint"), "{index_ts}");
     assert!(index_ts.contains("createActionBuilder"), "{index_ts}");
+    assert!(index_ts.contains("ActionBuilderResult"), "{index_ts}");
+    assert!(index_ts.contains("submittedTxHashFromRuntime"), "{index_ts}");
+    assert!(index_ts.contains("CellScript builder runtime missing dryRun adapter"), "{index_ts}");
     assert!(index_ts.contains("canSubmit: false"), "{index_ts}");
     assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
     assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
@@ -4471,6 +4475,8 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(builder_test.contains("node:test"), "{builder_test}");
     assert!(builder_test.contains("plans all generated actions without submitting"), "{builder_test}");
     assert!(builder_test.contains("delegates live-cell resolution and transaction build to runtime"), "{builder_test}");
+    assert!(builder_test.contains("delegates dry-run and submit modes to runtime"), "{builder_test}");
+    assert!(builder_test.contains("rejects missing runtime adapters and malformed runtime shapes"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched lockfile identity"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched deployment identity"), "{builder_test}");
 

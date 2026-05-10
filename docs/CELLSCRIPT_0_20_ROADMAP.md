@@ -59,6 +59,11 @@ Fifth slice: generated TypeScript packages now ship `npm test` and
 `test/builder.test.mjs` self-tests covering plan generation, runtime adapter
 delegation, and fail-closed lockfile/deployment mismatch cases.
 
+Sixth slice: generated builders now expose explicit `build`, `dry-run`, and
+`submit` result modes. Dry-run and submit remain delegated to the runtime
+adapter, submit forces a dry-run first, and generated self-tests cover missing
+adapter and malformed runtime-shape rejection.
+
 Target CLI:
 
 ```text

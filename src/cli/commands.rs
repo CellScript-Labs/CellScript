@@ -4452,6 +4452,21 @@ fn typescript_builder_index(
            requiresDeploymentResolution: true;\n\
            notProvenByGeneratedBuilder: readonly string[];\n\
          }\n\n\
+         export type ActionBuilderMode = \"build\" | \"dry-run\" | \"submit\";\n\n\
+         export interface ActionBuilderResult<P extends CellScriptParams = CellScriptParams> {\n\
+           schema: typeof CELLSCRIPT_BUILDER_SCHEMA;\n\
+           state: \"ActionBuilderResult\";\n\
+           status: \"built-by-runtime\" | \"dry-run-by-runtime\" | \"submitted-by-runtime\";\n\
+           mode: ActionBuilderMode;\n\
+           plan: ActionBuilderPlan<P>;\n\
+           liveCellResolution: LiveCellResolutionResult;\n\
+           transaction: unknown;\n\
+           dryRunResult?: unknown;\n\
+           submitResult?: unknown;\n\
+           submittedTxHash?: string | null;\n\
+           canSubmit: false;\n\
+           notProvenByGeneratedBuilder: readonly string[];\n\
+         }\n\n\
          export interface LiveCellResolutionRequest<P extends CellScriptParams = CellScriptParams> {\n\
            plan: ActionBuilderPlan<P>;\n\
            options: BuildOptions;\n\
@@ -4687,6 +4702,46 @@ fn typescript_builder_index(
         typescript_string_literal(&metadata.target_profile.name)
     ));
 
+    ts.push_str(
+        "function assertRuntimeObject(value: unknown, label: string): Record<string, unknown> {\n\
+           if (typeof value !== \"object\" || value === null || Array.isArray(value)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: \" + label + \" must be an object\");\n\
+           }\n\
+           return value as Record<string, unknown>;\n\
+         }\n\n\
+         function assertLiveCellResolutionResult(value: unknown): LiveCellResolutionResult {\n\
+           const record = assertRuntimeObject(value, \"resolveLiveCells result\");\n\
+           for (const field of [\"inputs\", \"referenceInputs\", \"cellDeps\", \"headerDeps\", \"lineage\"] as const) {\n\
+             const candidate = record[field];\n\
+             if (candidate !== undefined && !Array.isArray(candidate)) {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.\" + field + \" must be an array when present\");\n\
+             }\n\
+           }\n\
+           return value as LiveCellResolutionResult;\n\
+         }\n\n\
+         function assertBuiltTransaction(value: unknown): unknown {\n\
+           if (value === undefined || value === null) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: buildTransaction returned no transaction\");\n\
+           }\n\
+           return value;\n\
+         }\n\n\
+         function submittedTxHashFromRuntime(submitResult: unknown): string | null {\n\
+           if (typeof submitResult === \"string\") {\n\
+             return submitResult;\n\
+           }\n\
+           if (typeof submitResult === \"object\" && submitResult !== null) {\n\
+             const record = submitResult as Record<string, unknown>;\n\
+             if (typeof record.txHash === \"string\") {\n\
+               return record.txHash;\n\
+             }\n\
+             if (typeof record.hash === \"string\") {\n\
+               return record.hash;\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n",
+    );
+
     ts.push_str("export function createActionBuilder(runtime: CellScriptBuilderRuntime) {\n  return {\n");
     for action in actions {
         let method = typescript_identifier(&action.name, "action");
@@ -4695,11 +4750,49 @@ fn typescript_builder_index(
         ts.push_str(&format!(
             "    async {method}(params: {params_type}, options: BuildOptions = {{}}) {{\n      \
              const plan = plan{suffix}(params, options);\n      \
-             const liveCellResolution = await runtime.resolveLiveCells({{ plan, options }});\n      \
-             return runtime.buildTransaction({{ ...plan, liveCellResolution }});\n    }},\n"
+             return executeActionBuilderPlan(runtime, plan, options);\n    }},\n"
         ));
     }
-    ts.push_str("  };\n}\n");
+    ts.push_str(
+        "  };\n}\n\n\
+         async function executeActionBuilderPlan<P extends CellScriptParams>(\n\
+           runtime: CellScriptBuilderRuntime,\n\
+           plan: ActionBuilderPlan<P>,\n\
+           options: BuildOptions,\n\
+         ): Promise<ActionBuilderResult<P>> {\n\
+           const liveCellResolution = assertLiveCellResolutionResult(await runtime.resolveLiveCells({ plan, options }));\n\
+           const transaction = assertBuiltTransaction(await runtime.buildTransaction({ ...plan, liveCellResolution }));\n\
+           const result: ActionBuilderResult<P> = {\n\
+             schema: CELLSCRIPT_BUILDER_SCHEMA,\n\
+             state: \"ActionBuilderResult\",\n\
+             status: \"built-by-runtime\",\n\
+             mode: \"build\",\n\
+             plan,\n\
+             liveCellResolution,\n\
+             transaction,\n\
+             canSubmit: false,\n\
+             notProvenByGeneratedBuilder: plan.notProvenByGeneratedBuilder,\n\
+           };\n\
+           if (options.dryRun || options.submit) {\n\
+             if (!runtime.dryRun) {\n\
+               throw new Error(\"CellScript builder runtime missing dryRun adapter\");\n\
+             }\n\
+             result.dryRunResult = await runtime.dryRun(transaction);\n\
+             result.status = \"dry-run-by-runtime\";\n\
+             result.mode = \"dry-run\";\n\
+           }\n\
+           if (options.submit) {\n\
+             if (!runtime.submit) {\n\
+               throw new Error(\"CellScript builder runtime missing submit adapter\");\n\
+             }\n\
+             result.submitResult = await runtime.submit(transaction);\n\
+             result.submittedTxHash = submittedTxHashFromRuntime(result.submitResult);\n\
+             result.status = \"submitted-by-runtime\";\n\
+             result.mode = \"submit\";\n\
+           }\n\
+           return result;\n\
+         }\n",
+    );
 
     Ok(ts)
 }
@@ -4748,14 +4841,73 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              },\n\
              async buildTransaction(plan) {\n\
                calls.push([\"buildTransaction\", plan.action]);\n\
-               return plan;\n\
+               return { action: plan.action, inputs: plan.liveCellResolution.inputs };\n\
              },\n\
            };\n\
            const api = builder.createActionBuilder(runtime);\n\
            const result = await api[first.method](first.params);\n\
-           assert.equal(result.action, first.name);\n\
+           assert.equal(result.state, \"ActionBuilderResult\");\n\
+           assert.equal(result.status, \"built-by-runtime\");\n\
+           assert.equal(result.mode, \"build\");\n\
+           assert.equal(result.plan.action, first.name);\n\
+           assert.equal(result.transaction.action, first.name);\n\
            assert.deepEqual(result.liveCellResolution.inputs, [\"input-0\"]);\n\
            assert.deepEqual(calls, [[\"resolveLiveCells\", first.name], [\"buildTransaction\", first.name]]);\n\
+         });\n\n\
+         test(\"delegates dry-run and submit modes to runtime\", async () => {\n\
+           const [first] = actionCases;\n\
+           const calls = [];\n\
+           const runtime = {\n\
+             async resolveLiveCells(request) {\n\
+               calls.push([\"resolveLiveCells\", request.plan.action]);\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+             },\n\
+             async buildTransaction(plan) {\n\
+               calls.push([\"buildTransaction\", plan.action]);\n\
+               return { action: plan.action, built: true };\n\
+             },\n\
+             async dryRun(transaction) {\n\
+               calls.push([\"dryRun\", transaction.action]);\n\
+               return { cycles: 42, exitCode: 0 };\n\
+             },\n\
+             async submit(transaction) {\n\
+               calls.push([\"submit\", transaction.action]);\n\
+               return { txHash: \"0x1234\" };\n\
+             },\n\
+           };\n\
+           const api = builder.createActionBuilder(runtime);\n\
+           const dryRunResult = await api[first.method](first.params, { dryRun: true });\n\
+           assert.equal(dryRunResult.mode, \"dry-run\");\n\
+           assert.deepEqual(dryRunResult.dryRunResult, { cycles: 42, exitCode: 0 });\n\
+           calls.length = 0;\n\
+           const submitResult = await api[first.method](first.params, { submit: true });\n\
+           assert.equal(submitResult.mode, \"submit\");\n\
+           assert.equal(submitResult.submittedTxHash, \"0x1234\");\n\
+           assert.deepEqual(calls, [\n\
+             [\"resolveLiveCells\", first.name],\n\
+             [\"buildTransaction\", first.name],\n\
+             [\"dryRun\", first.name],\n\
+             [\"submit\", first.name],\n\
+           ]);\n\
+         });\n\n\
+         test(\"rejects missing runtime adapters and malformed runtime shapes\", async () => {\n\
+           const [first] = actionCases;\n\
+           const noDryRunRuntime = {\n\
+             async resolveLiveCells() { return { inputs: [] }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           const badShapeRuntime = {\n\
+             async resolveLiveCells() { return { inputs: \"not-an-array\" }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(noDryRunRuntime)[first.method](first.params, { dryRun: true }),\n\
+             /missing dryRun adapter/,\n\
+           );\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(badShapeRuntime)[first.method](first.params),\n\
+             /builder-shape mismatch/,\n\
+           );\n\
          });\n\n\
          test(\"rejects mismatched lockfile identity\", () => {\n\
            const [first] = actionCases;\n\
