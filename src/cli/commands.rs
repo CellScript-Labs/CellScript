@@ -476,6 +476,8 @@ pub struct RegistryVerifyArgs {
     pub live: bool,
     pub rpc_url: Option<String>,
     pub network: Option<String>,
+    pub require_publisher_signature: bool,
+    pub require_audit_report: bool,
 }
 
 #[derive(Debug, Default)]
@@ -3545,11 +3547,7 @@ impl CommandExecutor {
         let mut seen_networks = BTreeSet::new();
         for deployment in &deployed.deployments {
             seen_networks.insert(deployment.network.clone());
-            if let Some(status) = &deployment.status {
-                if status != &crate::package::DeploymentStatus::Active {
-                    violations.push(format!("deployment for network '{}' is not active: {:?}", deployment.network, status));
-                }
-            }
+            push_deployment_status_violation(deployment, &mut violations);
 
             let Some(deployment_ref) = lockfile.deployment.get(&deployment.network) else {
                 violations.push(format!("deployment for network '{}' is missing from Cell.lock", deployment.network));
@@ -3611,6 +3609,8 @@ impl CommandExecutor {
                 violations.push(format!("Cell.lock has stale deployment ref for network '{}'", network));
             }
         }
+        let trust_report =
+            verify_registry_trust_metadata(&deployed, args.require_publisher_signature, args.require_audit_report, &mut violations);
         let live_report = if args.live {
             let rpc_url = args.rpc_url.clone().or_else(|| std::env::var(CELLSCRIPT_CKB_RPC_URL_ENV).ok()).ok_or_else(|| {
                 crate::error::CompileError::without_span(format!(
@@ -3626,6 +3626,7 @@ impl CommandExecutor {
         if args.json {
             let summary = serde_json::json!({
                 "status": if violations.is_empty() { "ok" } else { "failed" },
+                "trust": trust_report,
                 "live": live_report.unwrap_or_else(|| serde_json::json!({
                     "enabled": false,
                     "evidence": []
@@ -3992,9 +3993,7 @@ fn verify_builder_deployment_identity(
         if network_filter.is_some_and(|network| network != deployment.network) {
             continue;
         }
-        if deployment.status.as_ref().is_some_and(|status| status != &crate::package::DeploymentStatus::Active) {
-            violations.push(format!("deployment for network '{}' is not active: {:?}", deployment.network, deployment.status));
-        }
+        push_deployment_status_violation(deployment, &mut violations);
         compare_builder_deployment_record_field(
             "artifact_hash",
             &deployment.artifact_hash,
@@ -4133,6 +4132,87 @@ fn compare_builder_identity_field(
         (None, _) => {}
         (_, None) => violations.push(format!("metadata has no {}", field)),
     }
+}
+
+fn deployment_status_violation(deployment: &crate::package::DeploymentRecord) -> Option<String> {
+    match deployment.status.as_ref() {
+        Some(crate::package::DeploymentStatus::Active) => None,
+        Some(status) => Some(format!("deployment for network '{}' is not active: {:?}", deployment.network, status)),
+        None => Some(format!("deployment for network '{}' has no status; expected active", deployment.network)),
+    }
+}
+
+fn push_deployment_status_violation(deployment: &crate::package::DeploymentRecord, violations: &mut Vec<String>) {
+    if let Some(violation) = deployment_status_violation(deployment) {
+        violations.push(violation);
+    }
+}
+
+fn verify_registry_trust_metadata(
+    deployed: &crate::package::DeployedManifest,
+    require_publisher_signature: bool,
+    require_audit_report: bool,
+    violations: &mut Vec<String>,
+) -> serde_json::Value {
+    let mut evidence = Vec::new();
+    if (require_publisher_signature || require_audit_report) && deployed.deployments.is_empty() {
+        violations.push("trust metadata policy requires at least one deployment record".to_string());
+    }
+    for deployment in &deployed.deployments {
+        let publisher_signature_present = deployment.publisher_signature.as_deref().is_some_and(|value| !value.trim().is_empty());
+        let audit_report_hash_present = deployment.audit_report_hash.as_deref().is_some_and(|value| !value.trim().is_empty());
+        let mut deployment_violations = Vec::new();
+        if require_publisher_signature && !publisher_signature_present {
+            deployment_violations.push(format!(
+                "deployment for network '{}' has no publisher_signature required by trust metadata policy",
+                deployment.network
+            ));
+        }
+        if require_audit_report && !audit_report_hash_present {
+            deployment_violations.push(format!(
+                "deployment for network '{}' has no audit_report_hash required by trust metadata policy",
+                deployment.network
+            ));
+        }
+        for violation in &deployment_violations {
+            if !violations.contains(violation) {
+                violations.push(violation.clone());
+            }
+        }
+        evidence.push(serde_json::json!({
+            "network": deployment.network,
+            "out_point": deployment.out_point,
+            "status": if deployment_violations.is_empty() { "policy-satisfied" } else { "failed" },
+            "publisher_signature_present": publisher_signature_present,
+            "publisher_signature_status": if publisher_signature_present {
+                "present-unverified"
+            } else if require_publisher_signature {
+                "missing"
+            } else {
+                "not-required"
+            },
+            "audit_report_hash_present": audit_report_hash_present,
+            "audit_report_hash_status": if audit_report_hash_present {
+                "present"
+            } else if require_audit_report {
+                "missing"
+            } else {
+                "not-required"
+            },
+            "violations": deployment_violations,
+        }));
+    }
+    serde_json::json!({
+        "enabled": require_publisher_signature || require_audit_report,
+        "checked": deployed.deployments.len(),
+        "verification_boundary": "metadata-presence-only",
+        "publisher_signature_verification": "not-implemented",
+        "policy": {
+            "require_publisher_signature": require_publisher_signature,
+            "require_audit_report": require_audit_report,
+        },
+        "evidence": evidence,
+    })
 }
 
 fn compare_builder_deployed_field(
@@ -4472,21 +4552,30 @@ fn typescript_builder_index(
            compiler_version?: string | null;\n\
            type_id?: string | null;\n\
            status?: string | null;\n\
+           audit_report_hash?: string | null;\n\
+           publisher_signature?: string | null;\n\
          }\n\n\
          export interface CellScriptLiveDeploymentEvidence {\n\
            network?: string;\n\
            out_point?: string;\n\
            rpc_status?: string;\n\
            status?: string;\n\
+           deployment_status?: string | null;\n\
            expected_data_hash?: string;\n\
            rpc_data_hash?: string | null;\n\
            expected_code_hash?: string;\n\
            rpc_code_hash?: string | null;\n\
+           violations?: readonly string[];\n\
+         }\n\n\
+         export interface CellScriptTrustPolicy {\n\
+           requirePublisherSignature?: boolean;\n\
+           requireAuditReportHash?: boolean;\n\
          }\n\n\
          export interface BuildOptions {\n\
            lockfile?: CellScriptLockfile;\n\
            deployment?: CellScriptDeploymentRecord;\n\
            liveDeploymentEvidence?: CellScriptLiveDeploymentEvidence;\n\
+           trustPolicy?: CellScriptTrustPolicy;\n\
            deploymentRef?: string;\n\
            dryRun?: boolean;\n\
            submit?: boolean;\n\
@@ -4740,13 +4829,21 @@ fn typescript_builder_index(
            lockfile?: CellScriptLockfile,\n\
            deployment?: CellScriptDeploymentRecord,\n\
            liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
          ): string[] {\n\
            const violations: string[] = [];\n\
            if (!deployment) {\n\
              if (liveEvidence) {\n\
                violations.push(\"live deployment evidence requires a deployment record\");\n\
              }\n\
+             violations.push(...validateCellScriptDeploymentTrust(deployment, trustPolicy));\n\
              return violations;\n\
+           }\n\
+           violations.push(...validateCellScriptDeploymentTrust(deployment, trustPolicy));\n\
+           if (!deployment.status) {\n\
+             violations.push(\"deployment record has no status; expected 'active'\");\n\
+           } else if (deployment.status !== \"active\") {\n\
+             violations.push(\"deployment status is '\" + deployment.status + \"'\");\n\
            }\n\
            compareDeploymentIdentity(\"compiler_version\", deployment.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
            compareDeploymentIdentity(\"artifact_hash\", deployment.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
@@ -4771,6 +4868,9 @@ fn typescript_builder_index(
                compareStringIdentity(\"embedded_deployment.out_point\", deployment.out_point, embedded.out_point, violations);\n\
                compareHexIdentity(\"embedded_deployment.data_hash\", deployment.data_hash, embedded.data_hash, violations);\n\
                compareStringIdentity(\"embedded_deployment.hash_type\", deployment.hash_type, embedded.hash_type, violations);\n\
+               if (embedded.status || deployment.status) {\n\
+                 compareStringIdentity(\"embedded_deployment.status\", deployment.status, embedded.status, violations);\n\
+               }\n\
                if (embedded.type_id || deployment.type_id) {\n\
                  compareHexIdentity(\"embedded_deployment.type_id\", deployment.type_id, embedded.type_id, violations);\n\
                }\n\
@@ -4784,9 +4884,39 @@ fn typescript_builder_index(
              if (liveEvidence.rpc_status && liveEvidence.rpc_status !== \"live\") {\n\
                violations.push(\"live deployment RPC status is '\" + liveEvidence.rpc_status + \"'\");\n\
              }\n\
+             if (!liveEvidence.deployment_status) {\n\
+               violations.push(\"live deployment evidence has no deployment_status\");\n\
+             } else if (liveEvidence.deployment_status !== \"active\") {\n\
+               violations.push(\"live deployment evidence deployment_status is '\" + liveEvidence.deployment_status + \"'\");\n\
+             }\n\
+             if (liveEvidence.violations && liveEvidence.violations.length > 0) {\n\
+               violations.push(\"live deployment evidence reports violations: \" + liveEvidence.violations.join(\"; \"));\n\
+             }\n\
              compareStringIdentity(\"live_deployment.out_point\", liveEvidence.out_point, deployment.out_point, violations);\n\
              compareHexIdentity(\"live_deployment.data_hash\", liveEvidence.rpc_data_hash, deployment.data_hash, violations);\n\
              compareHexIdentity(\"live_deployment.code_hash\", liveEvidence.rpc_code_hash, deployment.code_hash, violations);\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function validateCellScriptDeploymentTrust(\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
+         ): string[] {\n\
+           const violations: string[] = [];\n\
+           const requirePublisherSignature = trustPolicy?.requirePublisherSignature ?? false;\n\
+           const requireAuditReportHash = trustPolicy?.requireAuditReportHash ?? false;\n\
+           if (!requirePublisherSignature && !requireAuditReportHash) {\n\
+             return violations;\n\
+           }\n\
+           if (!deployment) {\n\
+             violations.push(\"trust policy requires a deployment record\");\n\
+             return violations;\n\
+           }\n\
+           if (requirePublisherSignature && !deployment.publisher_signature) {\n\
+             violations.push(\"deployment record has no publisher_signature required by trust policy\");\n\
+           }\n\
+           if (requireAuditReportHash && !deployment.audit_report_hash) {\n\
+             violations.push(\"deployment record has no audit_report_hash required by trust policy\");\n\
            }\n\
            return violations;\n\
          }\n\n\
@@ -4794,8 +4924,9 @@ fn typescript_builder_index(
            lockfile?: CellScriptLockfile,\n\
            deployment?: CellScriptDeploymentRecord,\n\
            liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
          ): void {\n\
-           const violations = validateCellScriptDeployment(lockfile, deployment, liveEvidence);\n\
+           const violations = validateCellScriptDeployment(lockfile, deployment, liveEvidence, trustPolicy);\n\
            if (violations.length > 0) {\n\
              throw new Error(\"CellScript deployment identity mismatch: \" + violations.join(\"; \"));\n\
            }\n\
@@ -4901,8 +5032,8 @@ fn typescript_builder_index(
     ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
     ts.push_str("  if (options.lockfile) {\n    assertCellScriptLockfile(options.lockfile);\n  }\n");
     ts.push_str(
-        "  if (options.deployment || options.liveDeploymentEvidence) {\n    \
-         assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence);\n  }\n",
+        "  if (options.deployment || options.liveDeploymentEvidence || options.trustPolicy) {\n    \
+         assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence, options.trustPolicy);\n  }\n",
     );
     ts.push_str(&format!(
         "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
@@ -5154,6 +5285,15 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
            const deployment = builder.builderManifest.deployment_identity?.deployments?.[0];\n\
            if (!deployment) {\n\
              assert.deepEqual(builder.validateCellScriptDeployment(undefined, undefined), []);\n\
+             assert.deepEqual(builder.validateCellScriptDeploymentTrust(undefined, undefined), []);\n\
+             assert.deepEqual(\n\
+               builder.validateCellScriptDeploymentTrust(undefined, { requirePublisherSignature: true }),\n\
+               [\"trust policy requires a deployment record\"],\n\
+             );\n\
+             assert.throws(\n\
+               () => builder[first.plan](first.params, { trustPolicy: { requirePublisherSignature: true } }),\n\
+               /trust policy requires a deployment record/,\n\
+             );\n\
              return;\n\
            }\n\
            const badDeployment = { ...deployment, code_hash: WRONG_HASH };\n\
@@ -5161,15 +5301,36 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              () => builder[first.plan](first.params, { deployment: badDeployment }),\n\
              /CellScript deployment identity mismatch/,\n\
            );\n\
+           const deprecatedDeployment = { ...deployment, status: \"deprecated\" };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: deprecatedDeployment }),\n\
+             /deployment status/,\n\
+           );\n\
+           const { status: _deploymentStatus, ...missingStatusDeployment } = deployment;\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: missingStatusDeployment }),\n\
+             /no status/,\n\
+           );\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment, trustPolicy: { requirePublisherSignature: true } }),\n\
+             /publisher_signature/,\n\
+           );\n\
+           const signedDeployment = { ...deployment, publisher_signature: \"sig:fixture\", audit_report_hash: \"0xaaa\" };\n\
+           assert.deepEqual(\n\
+             builder.validateCellScriptDeploymentTrust(signedDeployment, { requirePublisherSignature: true, requireAuditReportHash: true }),\n\
+             [],\n\
+           );\n\
            assert.throws(\n\
              () => builder[first.plan](first.params, {\n\
                deployment,\n\
                liveDeploymentEvidence: {\n\
                  status: \"failed\",\n\
+                 deployment_status: \"deprecated\",\n\
                  rpc_status: \"dead\",\n\
                  out_point: deployment.out_point,\n\
                  rpc_data_hash: deployment.data_hash,\n\
                  rpc_code_hash: deployment.code_hash,\n\
+                 violations: [\"deployment for network 'aggron4' is not active: Deprecated\"],\n\
                },\n\
              }),\n\
              /CellScript deployment identity mismatch/,\n\
@@ -7100,6 +7261,9 @@ fn verify_live_deployments(
         }
         checked += 1;
         let mut deployment_violations = Vec::new();
+        if let Some(violation) = deployment_status_violation(deployment) {
+            deployment_violations.push(violation);
+        }
 
         match chain.as_deref() {
             Some(chain) if chain_id_matches(chain, &deployment.chain_id) => {}
@@ -7161,11 +7325,14 @@ fn verify_live_deployments(
         }
 
         for violation in &deployment_violations {
-            violations.push(violation.clone());
+            if !violations.contains(violation) {
+                violations.push(violation.clone());
+            }
         }
         evidence.push(serde_json::json!({
             "network": deployment.network,
             "chain_id": deployment.chain_id,
+            "deployment_status": deployment.status.as_ref(),
             "out_point": deployment.out_point,
             "rpc_status": rpc_status,
             "status": if deployment_violations.is_empty() { "live-verified" } else { "failed" },
@@ -9111,7 +9278,19 @@ impl CliParser {
                             .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
                             .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
                             .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
-                            .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live")),
+                            .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
+                            .arg(
+                                Arg::new("require-publisher-signature")
+                                    .long("require-publisher-signature")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Require deployment publisher_signature metadata; cryptographic verification is not yet implemented"),
+                            )
+                            .arg(
+                                Arg::new("require-audit-report")
+                                    .long("require-audit-report")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Require deployment audit_report_hash metadata"),
+                            ),
                     )
                     .subcommand(
                         ClapCommand::new("add")
@@ -9127,7 +9306,19 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
                     .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
                     .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
-                    .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live")),
+                    .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
+                    .arg(
+                        Arg::new("require-publisher-signature")
+                            .long("require-publisher-signature")
+                            .action(ArgAction::SetTrue)
+                            .help("Require deployment publisher_signature metadata; cryptographic verification is not yet implemented"),
+                    )
+                    .arg(
+                        Arg::new("require-audit-report")
+                            .long("require-audit-report")
+                            .action(ArgAction::SetTrue)
+                            .help("Require deployment audit_report_hash metadata"),
+                    ),
             )
             .subcommand(
                 ClapCommand::new("package-verify")
@@ -9444,6 +9635,8 @@ impl CliParser {
                     live: verify.get_flag("live"),
                     rpc_url: verify.get_one::<String>("rpc-url").cloned(),
                     network: verify.get_one::<String>("network").cloned(),
+                    require_publisher_signature: verify.get_flag("require-publisher-signature"),
+                    require_audit_report: verify.get_flag("require-audit-report"),
                 }),
                 Some(("add", add)) => Command::RegistryAdd(RegistryAddArgs {
                     namespace: add.get_one::<String>("namespace").cloned().unwrap_or_default(),
@@ -9457,6 +9650,8 @@ impl CliParser {
                 live: m.get_flag("live"),
                 rpc_url: m.get_one::<String>("rpc-url").cloned(),
                 network: m.get_one::<String>("network").cloned(),
+                require_publisher_signature: m.get_flag("require-publisher-signature"),
+                require_audit_report: m.get_flag("require-audit-report"),
             }),
             Some(("package-verify", m)) => Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") }),
             Some(("registry-add", m)) => Command::RegistryAdd(RegistryAddArgs {

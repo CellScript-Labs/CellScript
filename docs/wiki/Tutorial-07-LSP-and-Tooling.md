@@ -76,6 +76,8 @@ Useful settings:
 | `cellscript.builderOutputDir` | Output directory for generated TypeScript action-builder packages. Relative paths resolve from the nearest package `Cell.toml`. |
 | `cellscript.ckbRpcUrl` | Optional CKB RPC URL for live registry verification. |
 | `cellscript.deploymentNetwork` | Optional network filter for live registry verification and generated builder deployment binding. |
+| `cellscript.registryRequirePublisherSignature` | Add `--require-publisher-signature` to registry verification commands. This is a metadata-presence gate, not cryptographic signature verification. |
+| `cellscript.registryRequireAuditReport` | Add `--require-audit-report` to registry verification commands. |
 
 The extension contributes commands for the local compiler and builder loop:
 
@@ -126,6 +128,12 @@ cellc build --target riscv64-elf --target-profile ckb --json
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb
 cellc package verify --json
 cellc registry verify --json
+```
+
+For trust metadata review, add the explicit presence gate:
+
+```bash
+cellc registry verify --require-publisher-signature --require-audit-report --json
 ```
 
 For CKB admission, keep the profile visible:

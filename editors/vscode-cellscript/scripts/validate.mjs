@@ -81,7 +81,9 @@ for (const setting of [
   "cellscript.target",
   "cellscript.builderOutputDir",
   "cellscript.ckbRpcUrl",
-  "cellscript.deploymentNetwork"
+  "cellscript.deploymentNetwork",
+  "cellscript.registryRequirePublisherSignature",
+  "cellscript.registryRequireAuditReport"
 ]) {
   if (!properties[setting]) {
     throw new Error(`missing configuration setting: ${setting}`);
@@ -126,6 +128,10 @@ for (const token of [
   "gen-builder",
   "package",
   "registry",
+  "registryRequirePublisherSignature",
+  "registryRequireAuditReport",
+  "--require-publisher-signature",
+  "--require-audit-report",
   "typescript",
   "--lsp",
   "TransportKind.stdio"

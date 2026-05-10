@@ -445,6 +445,12 @@ async function runRegistryVerify(document, output, status, live) {
       args.push("--network", network);
     }
   }
+  if (registryRequirePublisherSignature(document)) {
+    args.push("--require-publisher-signature");
+  }
+  if (registryRequireAuditReport(document)) {
+    args.push("--require-audit-report");
+  }
 
   await runSingleCellcCommand(document, output, status, {
     source: live ? "cellc registry verify --live" : "cellc registry verify",
@@ -676,6 +682,16 @@ function deploymentNetwork(document) {
   const config = vscode.workspace.getConfiguration("cellscript", document.uri);
   const value = config.get("deploymentNetwork", "");
   return value && value.trim() ? value.trim() : "";
+}
+
+function registryRequirePublisherSignature(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  return config.get("registryRequirePublisherSignature", false) === true;
+}
+
+function registryRequireAuditReport(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  return config.get("registryRequireAuditReport", false) === true;
 }
 
 function compilerTarget(document) {

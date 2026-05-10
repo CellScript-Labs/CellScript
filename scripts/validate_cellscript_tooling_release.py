@@ -99,6 +99,8 @@ def main() -> int:
         "cellscript.builderOutputDir",
         "cellscript.ckbRpcUrl",
         "cellscript.deploymentNetwork",
+        "cellscript.registryRequirePublisherSignature",
+        "cellscript.registryRequireAuditReport",
     ]:
         require(setting in settings, f"VS Code extension must expose {setting}")
 
@@ -146,6 +148,10 @@ def main() -> int:
             "verify",
             "registry",
             "ckbRpcUrl",
+            "registryRequirePublisherSignature",
+            "registryRequireAuditReport",
+            "--require-publisher-signature",
+            "--require-audit-report",
         ],
     )
     require_contains(
@@ -183,6 +189,8 @@ def main() -> int:
             "CellScript: Generate TypeScript Action Builder",
             "cellscript.builderOutputDir",
             "cellc registry verify --live",
+            "cellscript.registryRequirePublisherSignature",
+            "cellscript.registryRequireAuditReport",
             "npm test",
         ],
     )

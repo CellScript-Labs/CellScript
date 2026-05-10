@@ -264,6 +264,16 @@
           "type": "string",
           "default": "",
           "description": "Optional deployment network filter for live registry verification and generated builder deployment identity binding."
+        },
+        "cellscript.registryRequirePublisherSignature": {
+          "type": "boolean",
+          "default": false,
+          "description": "Pass --require-publisher-signature to registry verification commands. This checks deployment metadata presence only; cryptographic verification is not yet implemented."
+        },
+        "cellscript.registryRequireAuditReport": {
+          "type": "boolean",
+          "default": false,
+          "description": "Pass --require-audit-report to registry verification commands."
         }
       }
     }

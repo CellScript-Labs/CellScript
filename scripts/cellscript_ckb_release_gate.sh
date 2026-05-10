@@ -101,7 +101,7 @@ check_release_roadmap_docs() {
     for item in "${required[@]}"; do
         file="${item%%::*}"
         pattern="${item#*::}"
-        if ! rg --quiet --fixed-strings "$pattern" "$file"; then
+        if ! rg --quiet --fixed-strings -- "$pattern" "$file"; then
             printf '0.13 release roadmap docs are missing required boundary in %s: %s\n' "$file" "$pattern" >&2
             exit 1
         fi
@@ -123,7 +123,7 @@ check_ckb_release_docs() {
     )
     local pattern
     for pattern in "${required[@]}"; do
-        if ! rg --quiet --fixed-strings "$pattern" "$release_doc"; then
+        if ! rg --quiet --fixed-strings -- "$pattern" "$release_doc"; then
             printf 'CKB production-gate docs are missing required boundary: %s\n' "$pattern" >&2
             exit 1
         fi
@@ -140,6 +140,14 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
         'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
         'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
+        'scripts/ckb_cellscript_acceptance.sh::run_stateful_scenario_suite'
+        'scripts/ckb_cellscript_acceptance.sh::assert_stateful_step_constraints'
+        'scripts/ckb_cellscript_acceptance.sh::assert_not_live'
+        'scripts/ckb_cellscript_acceptance.sh::stateful_action_coverage'
+        'scripts/ckb_cellscript_acceptance.sh::consensus_serialized_tx_size_bytes'
+        'scripts/ckb_cellscript_acceptance.sh::occupied_capacity_shannons'
+        'scripts/cellscript_ckb_release_gate.sh::--production --stateful-scenarios'
+        'scripts/cellscript_ckb_stateful_scenarios.sh::--production --stateful-scenarios'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
     )
@@ -147,7 +155,7 @@ check_ckb_acceptance_boundaries() {
     for item in "${required[@]}"; do
         file="${item%%::*}"
         pattern="${item#*::}"
-        if ! rg --quiet --fixed-strings "$pattern" "$file"; then
+        if ! rg --quiet --fixed-strings -- "$pattern" "$file"; then
             printf 'CKB acceptance boundary is missing required pattern in %s: %s\n' "$file" "$pattern" >&2
             exit 1
         fi

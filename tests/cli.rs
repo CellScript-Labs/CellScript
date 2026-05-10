@@ -1276,6 +1276,134 @@ fn cellc_registry_verify_live_rejects_dead_rpc_cell() {
 }
 
 #[test]
+fn cellc_registry_verify_live_rejects_deprecated_deployment_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x6666666666666666666666666666666666666666666666666666666666666666";
+    write_live_registry_fixture(root, data_hash);
+    let mut deployed = cellscript::package::DeployedManifest::read_from_root(root).unwrap().unwrap();
+    deployed.deployments[0].status = Some(cellscript::package::DeploymentStatus::Deprecated);
+    deployed.write_to_root(root).unwrap();
+    let rpc_url = start_mock_ckb_rpc(vec![
+        ("get_blockchain_info", serde_json::json!({ "chain": "ckb-testnet" })),
+        ("get_live_cell", live_cell_rpc_result("live", data_hash)),
+    ]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--live")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["live"]["evidence"][0]["status"], "failed");
+    assert_eq!(report["live"]["evidence"][0]["deployment_status"], "deprecated");
+    assert!(report["live"]["evidence"][0]["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation.as_str().unwrap_or_default().contains("not active")));
+}
+
+#[test]
+fn cellc_registry_verify_live_rejects_missing_deployment_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x7777777777777777777777777777777777777777777777777777777777777777";
+    write_live_registry_fixture(root, data_hash);
+    let mut deployed = cellscript::package::DeployedManifest::read_from_root(root).unwrap().unwrap();
+    deployed.deployments[0].status = None;
+    deployed.write_to_root(root).unwrap();
+    let rpc_url = start_mock_ckb_rpc(vec![
+        ("get_blockchain_info", serde_json::json!({ "chain": "ckb-testnet" })),
+        ("get_live_cell", live_cell_rpc_result("live", data_hash)),
+    ]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--live")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["live"]["evidence"][0]["status"], "failed");
+    assert!(report["live"]["evidence"][0]["deployment_status"].is_null());
+    assert!(report["live"]["evidence"][0]["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation.as_str().unwrap_or_default().contains("has no status")));
+}
+
+#[test]
+fn cellc_registry_verify_requires_trust_metadata_when_requested() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x8888888888888888888888888888888888888888888888888888888888888888";
+    write_live_registry_fixture(root, data_hash);
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--require-publisher-signature")
+        .arg("--require-audit-report")
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(!rejected.status.success(), "unexpected success: {}", String::from_utf8_lossy(&rejected.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["trust"]["enabled"], true);
+    assert_eq!(report["trust"]["verification_boundary"], "metadata-presence-only");
+    assert_eq!(report["trust"]["evidence"][0]["publisher_signature_status"], "missing");
+    assert_eq!(report["trust"]["evidence"][0]["audit_report_hash_status"], "missing");
+    assert!(report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation.as_str().unwrap_or_default().contains("publisher_signature")));
+
+    let mut deployed = cellscript::package::DeployedManifest::read_from_root(root).unwrap().unwrap();
+    deployed.deployments[0].publisher_signature = Some("sig:fixture".to_string());
+    deployed.deployments[0].audit_report_hash = Some("0xabc".to_string());
+    deployed.write_to_root(root).unwrap();
+
+    let accepted = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--require-publisher-signature")
+        .arg("--require-audit-report")
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(accepted.status.success(), "stderr: {}", String::from_utf8_lossy(&accepted.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&accepted.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["trust"]["evidence"][0]["status"], "policy-satisfied");
+    assert_eq!(report["trust"]["evidence"][0]["publisher_signature_status"], "present-unverified");
+    assert_eq!(report["trust"]["evidence"][0]["audit_report_hash_status"], "present");
+    assert!(report["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn cellc_rejects_underdeclared_effects_from_path_dependency_calls() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -4472,6 +4600,11 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("runtimeErrorCatalog"), "{index_ts}");
     assert!(index_ts.contains("explainCellScriptRuntimeError"), "{index_ts}");
     assert!(index_ts.contains("runtimeErrorContextForAction"), "{index_ts}");
+    assert!(index_ts.contains("deployment record has no status"), "{index_ts}");
+    assert!(index_ts.contains("deployment status is"), "{index_ts}");
+    assert!(index_ts.contains("validateCellScriptDeploymentTrust"), "{index_ts}");
+    assert!(index_ts.contains("publisher_signature required by trust policy"), "{index_ts}");
+    assert!(index_ts.contains("live deployment evidence deployment_status"), "{index_ts}");
     assert!(index_ts.contains("canSubmit: false"), "{index_ts}");
     assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
     assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
@@ -4486,6 +4619,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(builder_test.contains("maps runtime errors to action field context"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched lockfile identity"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched deployment identity"), "{builder_test}");
+    assert!(builder_test.contains("trust policy requires a deployment record"), "{builder_test}");
 
     let generated_metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("src").join("metadata.json")).unwrap()).unwrap();
@@ -4650,7 +4784,9 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("validateCellScriptDeployment"), "{index_ts}");
     assert!(index_ts.contains("assertCellScriptLockfile(options.lockfile)"), "{index_ts}");
     assert!(
-        index_ts.contains("assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence)"),
+        index_ts.contains(
+            "assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence, options.trustPolicy)"
+        ),
         "{index_ts}"
     );
 
@@ -4679,7 +4815,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(stderr.contains("generated builder identity verification failed"), "{stderr}");
     assert!(stderr.contains("metadata_hash mismatch"), "{stderr}");
 
-    let mut bad_deployed = deployed;
+    let mut bad_deployed = deployed.clone();
     bad_deployed.deployments[0].code_hash = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
     let bad_deployed_path = root.join("BadDeployed.toml");
     std::fs::write(&bad_deployed_path, toml::to_string_pretty(&bad_deployed).unwrap()).unwrap();
@@ -4707,6 +4843,64 @@ action mint(amount: u64, owner: Address) -> Token {
     let stderr = String::from_utf8_lossy(&rejected_deployment.stderr);
     assert!(stderr.contains("generated builder deployment identity verification failed"), "{stderr}");
     assert!(stderr.contains("code_hash mismatch"), "{stderr}");
+
+    let mut missing_status_deployed = deployed.clone();
+    missing_status_deployed.deployments[0].status = None;
+    let missing_status_deployed_path = root.join("MissingStatusDeployed.toml");
+    std::fs::write(&missing_status_deployed_path, toml::to_string_pretty(&missing_status_deployed).unwrap()).unwrap();
+
+    let rejected_missing_status = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&lockfile_path)
+        .arg("--deployed")
+        .arg(&missing_status_deployed_path)
+        .arg("--deployment-network")
+        .arg(deployment_network)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(root.join("missing-status-deployment-builder"))
+        .output()
+        .unwrap();
+    assert!(!rejected_missing_status.status.success());
+    let stderr = String::from_utf8_lossy(&rejected_missing_status.stderr);
+    assert!(stderr.contains("generated builder deployment identity verification failed"), "{stderr}");
+    assert!(stderr.contains("has no status"), "{stderr}");
+
+    let mut deprecated_deployed = deployed;
+    deprecated_deployed.deployments[0].status = Some(cellscript::package::DeploymentStatus::Deprecated);
+    let deprecated_deployed_path = root.join("DeprecatedDeployed.toml");
+    std::fs::write(&deprecated_deployed_path, toml::to_string_pretty(&deprecated_deployed).unwrap()).unwrap();
+
+    let rejected_deprecated = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&lockfile_path)
+        .arg("--deployed")
+        .arg(&deprecated_deployed_path)
+        .arg("--deployment-network")
+        .arg(deployment_network)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(root.join("deprecated-deployment-builder"))
+        .output()
+        .unwrap();
+    assert!(!rejected_deprecated.status.success());
+    let stderr = String::from_utf8_lossy(&rejected_deprecated.stderr);
+    assert!(stderr.contains("generated builder deployment identity verification failed"), "{stderr}");
+    assert!(stderr.contains("not active"), "{stderr}");
 }
 
 #[test]

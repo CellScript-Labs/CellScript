@@ -137,8 +137,8 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Show Action Build Plan` | Select an action, then run `cellc action build --json` for the active file or package and show the builder contract. |
 | `CellScript: Generate TypeScript Action Builder` | Run `cellc gen-builder --target typescript` and write the generated package to `cellscript.builderOutputDir`. |
 | `CellScript: Verify Package` | Run `cellc package verify --json` from the nearest `Cell.toml` package root. |
-| `CellScript: Verify Registry` | Run `cellc registry verify --json` from the nearest `Cell.toml` package root. |
-| `CellScript: Verify Live Registry` | Run `cellc registry verify --live --json`, passing `cellscript.ckbRpcUrl` and `cellscript.deploymentNetwork` when configured. |
+| `CellScript: Verify Registry` | Run `cellc registry verify --json` from the nearest `Cell.toml` package root, adding trust metadata flags when configured. |
+| `CellScript: Verify Live Registry` | Run `cellc registry verify --live --json`, passing `cellscript.ckbRpcUrl`, `cellscript.deploymentNetwork`, and trust metadata flags when configured. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
 Diagnostics, completion, hover, go-to-definition, references, rename,
@@ -157,6 +157,8 @@ automatically by the language server — no explicit commands needed.
 | `cellscript.builderOutputDir` | `target/cellscript-builder/typescript` | Generated TypeScript action-builder package directory. Relative paths resolve from the nearest `Cell.toml` package root. |
 | `cellscript.ckbRpcUrl` | empty | CKB RPC URL for live registry verification. When empty, `cellc` may use `CELLSCRIPT_CKB_RPC_URL` from the environment. |
 | `cellscript.deploymentNetwork` | empty | Optional deployment network filter for live registry verification and generated builder deployment identity binding. |
+| `cellscript.registryRequirePublisherSignature` | `false` | Add `--require-publisher-signature` to registry verification commands. This is a metadata-presence gate, not cryptographic signature verification. |
+| `cellscript.registryRequireAuditReport` | `false` | Add `--require-audit-report` to registry verification commands. |
 
 ## Local Validation
 

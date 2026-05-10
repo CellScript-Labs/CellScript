@@ -5,8 +5,8 @@
 - Added VS Code commands for the 0.20 action-builder workflow:
   entry-witness ABI, action build plans, TypeScript builder generation,
   package verification, registry verification, and live registry verification.
-- Added extension settings for generated builder output, CKB RPC URL, and
-  deployment network filtering.
+- Added extension settings for generated builder output, CKB RPC URL,
+  deployment network filtering, and registry trust metadata gates.
 - Updated grammar, snippets, and README examples for the canonical
   `verification` action/lock surface and removed the legacy authoring model
   from current guidance.

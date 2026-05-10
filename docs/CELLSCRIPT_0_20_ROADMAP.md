@@ -76,6 +76,33 @@ live registry verification. The tooling release gate now runs
 from `examples/token`, installs its local dependencies, and runs generated
 `npm test`.
 
+Ninth slice: live deployment verification and generated-builder deployment
+binding now treat deployment status as part of the fail-closed identity
+boundary. `deprecated`, `revoked`, and other non-`active` deployment records
+plus missing deployment statuses fail `cellc registry verify --live`, are
+reported in live evidence, and are rejected by generated TypeScript deployment
+validators.
+
+Tenth slice: registry trust hardening now has an explicit metadata-presence
+policy. `cellc registry verify --require-publisher-signature
+--require-audit-report` fails closed when deployment records omit
+`publisher_signature` or `audit_report_hash`, and generated TypeScript builders
+expose the same opt-in trust policy without claiming cryptographic signature
+verification.
+
+Eleventh slice: the VS Code extension mirrors the trust metadata policy through
+settings that add the registry trust flags to both offline and live registry
+verification commands, and the tooling validator now guards those settings.
+
+Twelfth slice: generated-builder self-tests now exercise trust-policy rejection
+even when no deployment binding is embedded, so the release-gate generated
+package catches accidental downgrades in the opt-in trust surface.
+
+Thirteenth slice: the quick release gate now statically protects the stateful
+scenario acceptance boundary by checking that the production gate still invokes
+`--stateful-scenarios` and that the acceptance script still records live/dead
+lineage, tx-size, occupied-capacity, and stateful coverage evidence.
+
 Target CLI:
 
 ```text
@@ -223,6 +250,9 @@ Candidates:
 
 Acceptance should remain fail-closed: missing or unsupported trust metadata must
 not silently downgrade into name-only package or deployment resolution.
+For 0.20 this is a metadata-presence gate only: publisher signature
+cryptographic verification and trust-anchor management remain a later security
+milestone.
 
 ## P2: CellFabric Exploration (Frozen)
 
