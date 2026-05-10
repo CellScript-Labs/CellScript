@@ -4516,7 +4516,11 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(metadata_output.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata_output.stderr));
 
     let metadata: cellscript::CompileMetadata = serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    let lockfile = cellscript::package::Lockfile {
+    let build_info = locked_build_from_metadata_for_test(&metadata);
+    let deployment_network = "aggron4";
+    let deployment_code_hash = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    let deployment_out_point = "0xaaaa:0";
+    let mut lockfile = cellscript::package::Lockfile {
         version: 1,
         package: cellscript::package::LockfilePackageInfo {
             name: "demo".to_string(),
@@ -4525,11 +4529,65 @@ action mint(amount: u64, owner: Address) -> Token {
             source_hash: metadata.source_hash.clone(),
         },
         dependencies: Default::default(),
-        package_build: Some(locked_build_from_metadata_for_test(&metadata)),
+        package_build: Some(build_info.clone()),
         deployment: Default::default(),
     };
+    lockfile.deployment.insert(
+        deployment_network.to_string(),
+        cellscript::package::LockfileDeploymentRef {
+            record: deployment_out_point.to_string(),
+            record_hash: None,
+            code_hash: Some(deployment_code_hash.to_string()),
+            out_point: Some(deployment_out_point.to_string()),
+            data_hash: Some(deployment_code_hash.to_string()),
+        },
+    );
     let lockfile_path = root.join("Cell.lock");
     std::fs::write(&lockfile_path, toml::to_string_pretty(&lockfile).unwrap()).unwrap();
+
+    let deployed = cellscript::package::DeployedManifest {
+        version: 1,
+        schema: None,
+        package: cellscript::package::DeployedPackageInfo {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            source_hash: metadata.source_hash.clone(),
+        },
+        build: Some(cellscript::package::DeployedBuildInfo {
+            compiler_version: build_info.compiler_version.clone(),
+            artifact_hash: build_info.artifact_hash.clone(),
+            metadata_hash: build_info.metadata_hash.clone(),
+            schema_hash: build_info.schema_hash.clone(),
+            abi_hash: build_info.abi_hash.clone(),
+            constraints_hash: build_info.constraints_hash.clone(),
+        }),
+        deployments: vec![cellscript::package::DeploymentRecord {
+            network: deployment_network.to_string(),
+            chain_id: "ckb-testnet".to_string(),
+            tx_hash: "0xaaaa".to_string(),
+            output_index: 0,
+            code_hash: deployment_code_hash.to_string(),
+            hash_type: "data1".to_string(),
+            dep_type: "code".to_string(),
+            data_hash: deployment_code_hash.to_string(),
+            out_point: deployment_out_point.to_string(),
+            artifact_hash: build_info.artifact_hash.clone(),
+            metadata_hash: build_info.metadata_hash.clone(),
+            schema_hash: build_info.schema_hash.clone(),
+            abi_hash: build_info.abi_hash.clone(),
+            constraints_hash: build_info.constraints_hash.clone(),
+            compiler_version: build_info.compiler_version.clone(),
+            type_id: None,
+            script_role: Some(cellscript::package::ScriptRole::Type),
+            status: Some(cellscript::package::DeploymentStatus::Active),
+            upgrade_lineage: None,
+            audit_report_hash: None,
+            publisher_signature: None,
+            cell_deps: vec![],
+        }],
+    };
+    let deployed_path = root.join("Deployed.toml");
+    std::fs::write(&deployed_path, toml::to_string_pretty(&deployed).unwrap()).unwrap();
 
     let output_dir = root.join("locked-builder");
     let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
@@ -4541,6 +4599,10 @@ action mint(amount: u64, owner: Address) -> Token {
         .arg(&metadata_path)
         .arg("--lockfile")
         .arg(&lockfile_path)
+        .arg("--deployed")
+        .arg(&deployed_path)
+        .arg("--deployment-network")
+        .arg(deployment_network)
         .arg("--action")
         .arg("mint")
         .arg("--output")
@@ -4552,18 +4614,23 @@ action mint(amount: u64, owner: Address) -> Token {
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["lockfile_verified"], true);
+    assert_eq!(summary["deployment_verified"], true);
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest["locked_identity"]["schema"], "cellscript-builder-locked-identity-v0.20");
-    assert_eq!(
-        manifest["locked_identity"]["build"]["metadata_hash"],
-        locked_build_from_metadata_for_test(&metadata).metadata_hash.unwrap()
-    );
+    assert_eq!(manifest["deployment_identity"]["schema"], "cellscript-builder-deployment-identity-v0.20");
+    assert_eq!(manifest["deployment_identity"]["deployments"][0]["network"], deployment_network);
+    assert_eq!(manifest["locked_identity"]["build"]["metadata_hash"], build_info.metadata_hash.as_deref().unwrap());
 
     let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
     assert!(index_ts.contains("validateCellScriptLockfile"), "{index_ts}");
+    assert!(index_ts.contains("validateCellScriptDeployment"), "{index_ts}");
     assert!(index_ts.contains("assertCellScriptLockfile(options.lockfile)"), "{index_ts}");
+    assert!(
+        index_ts.contains("assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence)"),
+        "{index_ts}"
+    );
 
     let mut bad_lockfile = lockfile;
     bad_lockfile.package_build.as_mut().unwrap().metadata_hash = Some("bad_metadata_hash".to_string());
@@ -4589,6 +4656,35 @@ action mint(amount: u64, owner: Address) -> Token {
     let stderr = String::from_utf8_lossy(&rejected.stderr);
     assert!(stderr.contains("generated builder identity verification failed"), "{stderr}");
     assert!(stderr.contains("metadata_hash mismatch"), "{stderr}");
+
+    let mut bad_deployed = deployed;
+    bad_deployed.deployments[0].code_hash = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
+    let bad_deployed_path = root.join("BadDeployed.toml");
+    std::fs::write(&bad_deployed_path, toml::to_string_pretty(&bad_deployed).unwrap()).unwrap();
+
+    let rejected_deployment = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&lockfile_path)
+        .arg("--deployed")
+        .arg(&bad_deployed_path)
+        .arg("--deployment-network")
+        .arg(deployment_network)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(root.join("bad-deployment-builder"))
+        .output()
+        .unwrap();
+    assert!(!rejected_deployment.status.success());
+    let stderr = String::from_utf8_lossy(&rejected_deployment.stderr);
+    assert!(stderr.contains("generated builder deployment identity verification failed"), "{stderr}");
+    assert!(stderr.contains("code_hash mismatch"), "{stderr}");
 }
 
 #[test]

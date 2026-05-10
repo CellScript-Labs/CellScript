@@ -403,6 +403,8 @@ pub struct GenBuilderArgs {
     pub input: Option<PathBuf>,
     pub metadata: Option<PathBuf>,
     pub lockfile: Option<PathBuf>,
+    pub deployed: Option<PathBuf>,
+    pub deployment_network: Option<String>,
     pub action: Option<String>,
     pub output: Option<PathBuf>,
     pub target: String,
@@ -2700,6 +2702,20 @@ impl CommandExecutor {
         } else {
             None
         };
+        let deployment_identity = if let Some(deployed_path) = args.deployed.as_deref() {
+            let lockfile_path = args.lockfile.as_deref().ok_or_else(|| {
+                crate::error::CompileError::without_span("gen-builder --deployed requires --lockfile for deployment identity binding")
+            })?;
+            Some(verify_builder_deployment_identity(
+                lockfile_path,
+                deployed_path,
+                &metadata,
+                &metadata_hash,
+                args.deployment_network.as_deref(),
+            )?)
+        } else {
+            None
+        };
         let output_dir = args.output.unwrap_or_else(|| PathBuf::from("target").join("cellscript-builder").join("typescript"));
         let package_name = args.package_name.unwrap_or_else(|| default_builder_package_name(&metadata));
         let summary = write_typescript_builder_package(
@@ -2709,7 +2725,9 @@ impl CommandExecutor {
             &metadata_hash,
             &selected_actions,
             locked_identity.as_ref(),
+            deployment_identity.as_ref(),
             args.lockfile.as_deref(),
+            args.deployed.as_deref(),
         )?;
 
         if args.json {
@@ -3848,6 +3866,15 @@ fn read_lockfile_path(path: &Path) -> Result<Lockfile> {
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse lockfile '{}': {}", path.display(), error)))
 }
 
+fn read_deployed_manifest_path(path: &Path) -> Result<crate::package::DeployedManifest> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read deployed manifest '{}': {}", path.display(), error))
+    })?;
+    toml::from_str(&content).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse deployed manifest '{}': {}", path.display(), error))
+    })
+}
+
 fn verify_builder_lockfile_identity(
     lockfile_path: &Path,
     metadata: &CompileMetadata,
@@ -3914,6 +3941,184 @@ fn verify_builder_lockfile_identity(
     }))
 }
 
+fn verify_builder_deployment_identity(
+    lockfile_path: &Path,
+    deployed_path: &Path,
+    metadata: &CompileMetadata,
+    metadata_hash: &str,
+    network_filter: Option<&str>,
+) -> Result<serde_json::Value> {
+    let lockfile = read_lockfile_path(lockfile_path)?;
+    let deployed = read_deployed_manifest_path(deployed_path)?;
+    let expected_build = locked_build_info_from_metadata(metadata)?;
+    let mut violations = Vec::new();
+
+    if let Some(expected_source_hash) = &metadata.source_hash {
+        match &deployed.package.source_hash {
+            Some(source_hash) if source_hash == expected_source_hash => {}
+            Some(source_hash) => violations
+                .push(format!("source_hash mismatch: Deployed.toml has '{}', metadata has '{}'", source_hash, expected_source_hash)),
+            None => violations.push("Deployed.toml [package] has no source_hash".to_string()),
+        }
+    } else {
+        violations.push("metadata has no source_hash".to_string());
+    }
+
+    match &deployed.build {
+        Some(build) => {
+            push_missing_deployed_build_identity("Deployed.toml [build]", build, &mut violations);
+            compare_builder_deployed_field(
+                "compiler_version",
+                &build.compiler_version,
+                &expected_build.compiler_version,
+                &mut violations,
+            );
+            compare_builder_deployed_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
+            compare_builder_deployed_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
+            compare_builder_deployed_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_deployed_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
+            compare_builder_deployed_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &expected_build.constraints_hash,
+                &mut violations,
+            );
+        }
+        None => violations.push("Deployed.toml has no [build]".to_string()),
+    }
+
+    let mut verified_deployments = Vec::new();
+    for deployment in &deployed.deployments {
+        if network_filter.is_some_and(|network| network != deployment.network) {
+            continue;
+        }
+        if deployment.status.as_ref().is_some_and(|status| status != &crate::package::DeploymentStatus::Active) {
+            violations.push(format!("deployment for network '{}' is not active: {:?}", deployment.network, deployment.status));
+        }
+        compare_builder_deployment_record_field(
+            "artifact_hash",
+            &deployment.artifact_hash,
+            &expected_build.artifact_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "metadata_hash",
+            &deployment.metadata_hash,
+            &Some(metadata_hash.to_string()),
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "schema_hash",
+            &deployment.schema_hash,
+            &expected_build.schema_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "abi_hash",
+            &deployment.abi_hash,
+            &expected_build.abi_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "constraints_hash",
+            &deployment.constraints_hash,
+            &expected_build.constraints_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "compiler_version",
+            &deployment.compiler_version,
+            &expected_build.compiler_version,
+            &deployment.network,
+            &mut violations,
+        );
+
+        match lockfile.deployment.get(&deployment.network) {
+            Some(deployment_ref) => {
+                compare_required_deployment_ref_field(
+                    "code_hash",
+                    deployment_ref.code_hash.as_deref(),
+                    &deployment.code_hash,
+                    &deployment.network,
+                    &mut violations,
+                );
+                compare_required_deployment_ref_field(
+                    "out_point",
+                    deployment_ref.out_point.as_deref(),
+                    &deployment.out_point,
+                    &deployment.network,
+                    &mut violations,
+                );
+                compare_required_deployment_ref_field(
+                    "data_hash",
+                    deployment_ref.data_hash.as_deref(),
+                    &deployment.data_hash,
+                    &deployment.network,
+                    &mut violations,
+                );
+                if !deployment_ref.record.is_empty() {
+                    let chain_record = format!("{}:{}", deployment.chain_id, deployment.out_point);
+                    let network_record = format!("{}:{}", deployment.network, deployment.out_point);
+                    if deployment_ref.record != deployment.out_point
+                        && deployment_ref.record != chain_record
+                        && deployment_ref.record != network_record
+                    {
+                        violations.push(format!(
+                            "deployment record mismatch for network '{}': Cell.lock has '{}', Deployed.toml out_point is '{}'",
+                            deployment.network, deployment_ref.record, deployment.out_point
+                        ));
+                    }
+                } else {
+                    violations.push(format!("deployment ref for network '{}' has empty record", deployment.network));
+                }
+            }
+            None => violations.push(format!("deployment for network '{}' is missing from Cell.lock", deployment.network)),
+        }
+
+        verified_deployments.push(deployment);
+    }
+
+    if verified_deployments.is_empty() {
+        violations.push(match network_filter {
+            Some(network) => format!("no deployment record found for requested builder network '{}'", network),
+            None => "no deployment records found for generated builder".to_string(),
+        });
+    }
+
+    if !violations.is_empty() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "generated builder deployment identity verification failed: {}",
+            violations.join("; ")
+        )));
+    }
+
+    Ok(serde_json::json!({
+        "schema": "cellscript-builder-deployment-identity-v0.20",
+        "package": deployed.package.clone(),
+        "build": deployed.build.clone(),
+        "network": network_filter,
+        "deployments": verified_deployments,
+        "verified_fields": [
+            "source_hash",
+            "compiler_version",
+            "artifact_hash",
+            "metadata_hash",
+            "schema_hash",
+            "abi_hash",
+            "constraints_hash",
+            "code_hash",
+            "out_point",
+            "data_hash",
+            "deployment_status"
+        ]
+    }))
+}
+
 fn compare_builder_identity_field(
     field: &str,
     locked_value: &Option<String>,
@@ -3930,6 +4135,57 @@ fn compare_builder_identity_field(
     }
 }
 
+fn compare_builder_deployed_field(
+    field: &str,
+    deployed_value: &Option<String>,
+    metadata_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (deployed_value, metadata_value) {
+        (Some(deployed), Some(actual)) if deployed == actual => {}
+        (Some(deployed), Some(actual)) => {
+            violations.push(format!("{} mismatch: Deployed.toml has '{}', metadata has '{}'", field, deployed, actual))
+        }
+        (None, _) => {}
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
+fn compare_builder_deployment_record_field(
+    field: &str,
+    deployed_value: &Option<String>,
+    metadata_value: &Option<String>,
+    network: &str,
+    violations: &mut Vec<String>,
+) {
+    match (deployed_value, metadata_value) {
+        (Some(deployed), Some(actual)) if deployed == actual => {}
+        (Some(deployed), Some(actual)) => violations.push(format!(
+            "{} mismatch for network '{}': Deployed.toml has '{}', metadata has '{}'",
+            field, network, deployed, actual
+        )),
+        (None, _) => violations.push(format!("deployment record for network '{}' has no {}", network, field)),
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
+fn compare_required_deployment_ref_field(
+    field: &str,
+    locked_value: Option<&str>,
+    deployed_value: &str,
+    network: &str,
+    violations: &mut Vec<String>,
+) {
+    match locked_value {
+        Some(locked) if locked == deployed_value => {}
+        Some(locked) => violations.push(format!(
+            "{} mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+            field, network, locked, deployed_value
+        )),
+        None => violations.push(format!("deployment ref for network '{}' has no {}", network, field)),
+    }
+}
+
 fn write_typescript_builder_package(
     output_dir: &Path,
     package_name: &str,
@@ -3937,12 +4193,14 @@ fn write_typescript_builder_package(
     metadata_hash: &str,
     actions: &[&crate::ActionMetadata],
     locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
     lockfile_path: Option<&Path>,
+    deployed_path: Option<&Path>,
 ) -> Result<serde_json::Value> {
     let src_dir = output_dir.join("src");
     std::fs::create_dir_all(&src_dir)?;
 
-    let manifest = typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity);
+    let manifest = typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity);
 
     let package_json_path = output_dir.join("package.json");
     let tsconfig_path = output_dir.join("tsconfig.json");
@@ -3954,7 +4212,10 @@ fn write_typescript_builder_package(
     std::fs::write(&tsconfig_path, json_bytes_pretty("tsconfig.json", &typescript_tsconfig_json())?)?;
     std::fs::write(&manifest_path, json_bytes_pretty("builder manifest", &manifest)?)?;
     std::fs::write(&metadata_path, json_bytes_pretty("metadata", metadata)?)?;
-    std::fs::write(&index_path, typescript_builder_index(package_name, metadata, actions, metadata_hash, locked_identity)?)?;
+    std::fs::write(
+        &index_path,
+        typescript_builder_index(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity)?,
+    )?;
 
     Ok(serde_json::json!({
         "status": "ok",
@@ -3965,7 +4226,9 @@ fn write_typescript_builder_package(
         "metadata_hash": metadata_hash,
         "artifact_hash": metadata.artifact_hash,
         "lockfile_verified": locked_identity.is_some(),
+        "deployment_verified": deployment_identity.is_some(),
         "lockfile": lockfile_path.map(|path| path.display().to_string()),
+        "deployed": deployed_path.map(|path| path.display().to_string()),
         "action_count": actions.len(),
         "actions": actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
         "files": [
@@ -3989,6 +4252,7 @@ fn typescript_builder_manifest(
     actions: &[&crate::ActionMetadata],
     metadata_hash: &str,
     locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     serde_json::json!({
         "schema": "cellscript-generated-action-builder-v0.20",
@@ -4002,6 +4266,7 @@ fn typescript_builder_manifest(
         "source_hash": metadata.source_hash,
         "target_profile": metadata.target_profile.name,
         "locked_identity": locked_identity,
+        "deployment_identity": deployment_identity,
         "actions": actions
             .iter()
             .map(|action| {
@@ -4067,6 +4332,7 @@ fn typescript_builder_index(
     actions: &[&crate::ActionMetadata],
     metadata_hash: &str,
     locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
 ) -> Result<String> {
     let action_specs = actions
         .iter()
@@ -4086,7 +4352,7 @@ fn typescript_builder_index(
     let action_specs_json = json_string_pretty("action specs", &action_specs)?;
     let manifest_json = json_string_pretty(
         "builder manifest",
-        &typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity),
+        &typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity),
     )?;
     let metadata_json = json_string_pretty("metadata", metadata)?;
 
@@ -4114,13 +4380,51 @@ fn typescript_builder_index(
            abi_hash?: string | null;\n\
            constraints_hash?: string | null;\n\
          }\n\n\
+         export interface CellScriptLockfileDeployment {\n\
+           record?: string | null;\n\
+           record_hash?: string | null;\n\
+           code_hash?: string | null;\n\
+           out_point?: string | null;\n\
+           data_hash?: string | null;\n\
+         }\n\n\
          export interface CellScriptLockfile {\n\
            package?: CellScriptLockfilePackage;\n\
            package_build?: CellScriptLockfileBuild | null;\n\
-           deployment?: Record<string, unknown>;\n\
+           deployment?: Record<string, CellScriptLockfileDeployment | null | undefined>;\n\
+         }\n\n\
+         export interface CellScriptDeploymentRecord {\n\
+           network: string;\n\
+           chain_id: string;\n\
+           tx_hash: string;\n\
+           output_index: number;\n\
+           code_hash: string;\n\
+           hash_type: string;\n\
+           dep_type: string;\n\
+           data_hash: string;\n\
+           out_point: string;\n\
+           artifact_hash?: string | null;\n\
+           metadata_hash?: string | null;\n\
+           schema_hash?: string | null;\n\
+           abi_hash?: string | null;\n\
+           constraints_hash?: string | null;\n\
+           compiler_version?: string | null;\n\
+           type_id?: string | null;\n\
+           status?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLiveDeploymentEvidence {\n\
+           network?: string;\n\
+           out_point?: string;\n\
+           rpc_status?: string;\n\
+           status?: string;\n\
+           expected_data_hash?: string;\n\
+           rpc_data_hash?: string | null;\n\
+           expected_code_hash?: string;\n\
+           rpc_code_hash?: string | null;\n\
          }\n\n\
          export interface BuildOptions {\n\
            lockfile?: CellScriptLockfile;\n\
+           deployment?: CellScriptDeploymentRecord;\n\
+           liveDeploymentEvidence?: CellScriptLiveDeploymentEvidence;\n\
            deploymentRef?: string;\n\
            dryRun?: boolean;\n\
            submit?: boolean;\n\
@@ -4166,7 +4470,10 @@ fn typescript_builder_index(
          const GENERATED_ARTIFACT_HASH: string | null = {};\n\
          const GENERATED_SOURCE_HASH: string | null = {};\n\
          const GENERATED_COMPILER_VERSION = {};\n\
-         const GENERATED_TARGET_PROFILE = {};\n\n",
+         const GENERATED_TARGET_PROFILE = {};\n\
+         const BUILDER_MANIFEST_RUNTIME = builderManifest as unknown as {{\n\
+           deployment_identity?: {{ deployments?: readonly CellScriptDeploymentRecord[] }} | null;\n\
+         }};\n\n",
         typescript_string_literal(metadata_hash),
         metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         metadata.source_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
@@ -4199,6 +4506,70 @@ fn typescript_builder_index(
              throw new Error(\"CellScript builder identity mismatch: \" + violations.join(\"; \"));\n\
            }\n\
          }\n\n\
+         export function validateCellScriptDeployment(\n\
+           lockfile?: CellScriptLockfile,\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+         ): string[] {\n\
+           const violations: string[] = [];\n\
+           if (!deployment) {\n\
+             if (liveEvidence) {\n\
+               violations.push(\"live deployment evidence requires a deployment record\");\n\
+             }\n\
+             return violations;\n\
+           }\n\
+           compareDeploymentIdentity(\"compiler_version\", deployment.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
+           compareDeploymentIdentity(\"artifact_hash\", deployment.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
+           compareDeploymentIdentity(\"metadata_hash\", deployment.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+\n\
+           const lockDeployment = lockfile?.deployment?.[deployment.network];\n\
+           if (lockfile && !lockDeployment) {\n\
+             violations.push(\"Cell.lock has no deployment ref for network '\" + deployment.network + \"'\");\n\
+           } else if (lockDeployment) {\n\
+             compareHexIdentity(\"deployment.code_hash\", lockDeployment.code_hash, deployment.code_hash, violations);\n\
+             compareStringIdentity(\"deployment.out_point\", lockDeployment.out_point, deployment.out_point, violations);\n\
+             compareHexIdentity(\"deployment.data_hash\", lockDeployment.data_hash, deployment.data_hash, violations);\n\
+           }\n\
+\n\
+           const embeddedDeployments = BUILDER_MANIFEST_RUNTIME.deployment_identity?.deployments ?? [];\n\
+           if (embeddedDeployments.length > 0) {\n\
+             const embedded = embeddedDeployments.find((item) => item.network === deployment.network);\n\
+             if (!embedded) {\n\
+               violations.push(\"builder manifest has no embedded deployment for network '\" + deployment.network + \"'\");\n\
+             } else {\n\
+               compareHexIdentity(\"embedded_deployment.code_hash\", deployment.code_hash, embedded.code_hash, violations);\n\
+               compareStringIdentity(\"embedded_deployment.out_point\", deployment.out_point, embedded.out_point, violations);\n\
+               compareHexIdentity(\"embedded_deployment.data_hash\", deployment.data_hash, embedded.data_hash, violations);\n\
+               compareStringIdentity(\"embedded_deployment.hash_type\", deployment.hash_type, embedded.hash_type, violations);\n\
+               if (embedded.type_id || deployment.type_id) {\n\
+                 compareHexIdentity(\"embedded_deployment.type_id\", deployment.type_id, embedded.type_id, violations);\n\
+               }\n\
+             }\n\
+           }\n\
+\n\
+           if (liveEvidence) {\n\
+             if (liveEvidence.status && liveEvidence.status !== \"live-verified\") {\n\
+               violations.push(\"live deployment evidence status is '\" + liveEvidence.status + \"'\");\n\
+             }\n\
+             if (liveEvidence.rpc_status && liveEvidence.rpc_status !== \"live\") {\n\
+               violations.push(\"live deployment RPC status is '\" + liveEvidence.rpc_status + \"'\");\n\
+             }\n\
+             compareStringIdentity(\"live_deployment.out_point\", liveEvidence.out_point, deployment.out_point, violations);\n\
+             compareHexIdentity(\"live_deployment.data_hash\", liveEvidence.rpc_data_hash, deployment.data_hash, violations);\n\
+             compareHexIdentity(\"live_deployment.code_hash\", liveEvidence.rpc_code_hash, deployment.code_hash, violations);\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function assertCellScriptDeployment(\n\
+           lockfile?: CellScriptLockfile,\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+         ): void {\n\
+           const violations = validateCellScriptDeployment(lockfile, deployment, liveEvidence);\n\
+           if (violations.length > 0) {\n\
+             throw new Error(\"CellScript deployment identity mismatch: \" + violations.join(\"; \"));\n\
+           }\n\
+         }\n\n\
          function compareRequiredIdentity(\n\
            field: string,\n\
            actual: string | null | undefined,\n\
@@ -4216,6 +4587,66 @@ fn typescript_builder_index(
            if (actual !== expected) {\n\
              violations.push(field + \" mismatch: Cell.lock has '\" + actual + \"', metadata has '\" + expected + \"'\");\n\
            }\n\
+         }\n\n\
+         function compareDeploymentIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === null || expected === \"\") {\n\
+             violations.push(\"generated metadata has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(\"deployment record has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (!identityEquals(actual, expected)) {\n\
+             violations.push(field + \" mismatch: deployment has '\" + actual + \"', metadata has '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function compareStringIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null | undefined,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === undefined || expected === null || expected === \"\") {\n\
+             violations.push(\"expected \" + field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual !== expected) {\n\
+             violations.push(field + \" mismatch: actual '\" + actual + \"', expected '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function compareHexIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null | undefined,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === undefined || expected === null || expected === \"\") {\n\
+             violations.push(\"expected \" + field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (!hexEquals(actual, expected)) {\n\
+             violations.push(field + \" mismatch: actual '\" + actual + \"', expected '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function identityEquals(actual: string, expected: string): boolean {\n\
+           return actual === expected || hexEquals(actual, expected);\n\
+         }\n\n\
+         function hexEquals(actual: string, expected: string): boolean {\n\
+           return actual.replace(/^0x/i, \"\").toLowerCase() === expected.replace(/^0x/i, \"\").toLowerCase();\n\
          }\n\n",
     );
 
@@ -4239,6 +4670,10 @@ fn typescript_builder_index(
 
     ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
     ts.push_str("  if (options.lockfile) {\n    assertCellScriptLockfile(options.lockfile);\n  }\n");
+    ts.push_str(
+        "  if (options.deployment || options.liveDeploymentEvidence) {\n    \
+         assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence);\n  }\n",
+    );
     ts.push_str(&format!(
         "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
         typescript_string_literal(metadata_hash),
@@ -7982,6 +8417,18 @@ impl CliParser {
                             .help("Verify generated builder identity against Cell.lock before writing"),
                     )
                     .arg(
+                        Arg::new("deployed")
+                            .long("deployed")
+                            .value_name("FILE")
+                            .help("Verify generated builder deployment identity against Deployed.toml before writing"),
+                    )
+                    .arg(
+                        Arg::new("deployment-network")
+                            .long("deployment-network")
+                            .value_name("NAME")
+                            .help("Verify and embed only this deployment network when using --deployed"),
+                    )
+                    .arg(
                         Arg::new("target")
                             .long("target")
                             .value_name("TARGET")
@@ -8424,6 +8871,8 @@ impl CliParser {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
                 lockfile: m.get_one::<String>("lockfile").map(PathBuf::from),
+                deployed: m.get_one::<String>("deployed").map(PathBuf::from),
+                deployment_network: m.get_one::<String>("deployment-network").cloned(),
                 action: m.get_one::<String>("action").cloned(),
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned().unwrap_or_else(|| "typescript".to_string()),
