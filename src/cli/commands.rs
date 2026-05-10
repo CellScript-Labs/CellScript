@@ -4251,6 +4251,57 @@ fn write_typescript_builder_package(
     }))
 }
 
+fn runtime_error_catalog_json() -> Vec<serde_json::Value> {
+    ALL_RUNTIME_ERRORS
+        .iter()
+        .copied()
+        .map(|error| {
+            let info = runtime_error_info(error);
+            serde_json::json!({
+                "code": info.code,
+                "name": info.name,
+                "description": info.description,
+                "hint": info.hint,
+            })
+        })
+        .collect()
+}
+
+fn builder_action_error_contexts_json(actions: &[&crate::ActionMetadata]) -> Vec<serde_json::Value> {
+    actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "action": action.name,
+                "fields": action
+                    .params
+                    .iter()
+                    .map(|param| {
+                        serde_json::json!({
+                            "name": param.name,
+                            "type": param.ty,
+                            "source": param.source,
+                            "is_mut": param.is_mut,
+                            "is_ref": param.is_ref,
+                            "witness_data_source": param.witness_data_source,
+                            "lock_args_data_source": param.lock_args_data_source,
+                            "protected_spend_surface": param.protected_spend_surface,
+                            "cell_bound_abi": param.cell_bound_abi,
+                            "schema_pointer_abi": param.schema_pointer_abi,
+                            "schema_length_abi": param.schema_length_abi,
+                            "fixed_byte_len": param.fixed_byte_len,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                "entry_witness_required": !action.params.is_empty(),
+                "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "verifierObligations": action.verifier_obligations,
+                "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
+            })
+        })
+        .collect()
+}
+
 fn typescript_builder_manifest(
     package_name: &str,
     metadata: &CompileMetadata,
@@ -4285,6 +4336,7 @@ fn typescript_builder_manifest(
                 })
             })
             .collect::<Vec<_>>(),
+        "runtime_error_catalog": runtime_error_catalog_json(),
         "runtime_contract": {
             "requires_live_cell_resolution": true,
             "requires_deployment_resolution": true,
@@ -4356,6 +4408,8 @@ fn typescript_builder_index(
         })
         .collect::<Vec<_>>();
     let action_specs_json = json_string_pretty("action specs", &action_specs)?;
+    let action_error_contexts_json = json_string_pretty("action error contexts", &builder_action_error_contexts_json(actions))?;
+    let runtime_error_catalog_json = json_string_pretty("runtime error catalog", &runtime_error_catalog_json())?;
     let manifest_json = json_string_pretty(
         "builder manifest",
         &typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity),
@@ -4367,6 +4421,8 @@ fn typescript_builder_index(
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
     ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
     ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
+    ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
+    ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));
     ts.push_str(
         "export type HexString = `0x${string}`;\n\
          export type CellScriptValue = string | number | bigint | boolean | Uint8Array | Record<string, unknown> | null;\n\
@@ -4484,6 +4540,42 @@ fn typescript_builder_index(
            buildTransaction<P extends CellScriptParams>(plan: ActionBuilderPlan<P> & { liveCellResolution: LiveCellResolutionResult }): Promise<unknown>;\n\
            dryRun?(transaction: unknown): Promise<unknown>;\n\
            submit?(transaction: unknown): Promise<unknown>;\n\
+         }\n\n\
+         export interface CellScriptRuntimeErrorInfo {\n\
+           code: number;\n\
+           name: string;\n\
+           description: string;\n\
+           hint: string;\n\
+         }\n\n\
+         export interface CellScriptActionFieldContext {\n\
+           name: string;\n\
+           type: string;\n\
+           source: string;\n\
+           is_mut: boolean;\n\
+           is_ref: boolean;\n\
+           witness_data_source: boolean;\n\
+           lock_args_data_source: boolean;\n\
+           protected_spend_surface: boolean;\n\
+           cell_bound_abi: boolean;\n\
+           schema_pointer_abi: boolean;\n\
+           schema_length_abi: boolean;\n\
+           fixed_byte_len?: number | null;\n\
+         }\n\n\
+         export interface CellScriptActionErrorContext {\n\
+           action: string;\n\
+           fields: readonly CellScriptActionFieldContext[];\n\
+           entry_witness_required: boolean;\n\
+           runtimeInputRequirements: readonly unknown[];\n\
+           verifierObligations: readonly unknown[];\n\
+           failClosedRuntimeFeatures: readonly string[];\n\
+         }\n\n\
+         export interface CellScriptRuntimeErrorExplanation extends CellScriptRuntimeErrorInfo {\n\
+           action?: string;\n\
+           actionFields: readonly CellScriptActionFieldContext[];\n\
+           entryWitnessRequired: boolean;\n\
+           runtimeInputRequirements: readonly unknown[];\n\
+           verifierObligations: readonly unknown[];\n\
+           failClosedRuntimeFeatures: readonly string[];\n\
          }\n\n",
     );
     ts.push_str(&format!(
@@ -4502,7 +4594,124 @@ fn typescript_builder_index(
         typescript_string_literal(&metadata.target_profile.name),
     ));
     ts.push_str(
-        "export function validateCellScriptLockfile(lockfile: CellScriptLockfile): string[] {\n\
+        "export function runtimeErrorInfoByCode(code: number | string | bigint): CellScriptRuntimeErrorInfo | null {\n\
+           const parsed = runtimeErrorCodeFrom(code);\n\
+           if (parsed === null) {\n\
+             return null;\n\
+           }\n\
+           const item = runtimeErrorCatalog.find((error) => error.code === parsed);\n\
+           return item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+         }\n\n\
+         export function runtimeErrorInfoByName(name: string): CellScriptRuntimeErrorInfo | null {\n\
+           const normalized = name.trim().toLowerCase();\n\
+           const item = runtimeErrorCatalog.find((error) => error.name === normalized);\n\
+           return item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+         }\n\n\
+         export function runtimeErrorContextForAction(action: string): CellScriptActionErrorContext | null {\n\
+           const context = actionErrorContexts.find((item) => item.action === action);\n\
+           if (!context) {\n\
+             return null;\n\
+           }\n\
+           return {\n\
+             action: context.action,\n\
+             fields: context.fields.map((field) => ({ ...field })),\n\
+             entry_witness_required: context.entry_witness_required,\n\
+             runtimeInputRequirements: [...context.runtimeInputRequirements],\n\
+             verifierObligations: [...context.verifierObligations],\n\
+             failClosedRuntimeFeatures: [...context.failClosedRuntimeFeatures],\n\
+           };\n\
+         }\n\n\
+         export function explainCellScriptRuntimeError(error: unknown, action?: string): CellScriptRuntimeErrorExplanation | null {\n\
+           const code = runtimeErrorCodeFrom(error);\n\
+           const name = runtimeErrorNameFrom(error);\n\
+           const message = runtimeErrorMessageFrom(error);\n\
+           let info = code === null ? null : runtimeErrorInfoByCode(code);\n\
+           if (!info && name) {\n\
+             info = runtimeErrorInfoByName(name);\n\
+           }\n\
+           if (!info && message) {\n\
+             const normalizedMessage = message.toLowerCase();\n\
+             const item = runtimeErrorCatalog.find((known) => normalizedMessage.includes(known.name));\n\
+             info = item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+             if (!info && (normalizedMessage.includes(\"entry witness\") || normalizedMessage.includes(\"entry-witness\"))) {\n\
+               info = runtimeErrorInfoByName(\"entry-witness-abi-invalid\");\n\
+             }\n\
+             if (!info && normalizedMessage.includes(\"collection\")) {\n\
+               info = runtimeErrorInfoByName(\"collection-runtime-unsupported\");\n\
+             }\n\
+           }\n\
+           if (!info) {\n\
+             return null;\n\
+           }\n\
+           const context = action ? runtimeErrorContextForAction(action) : null;\n\
+           return {\n\
+             ...info,\n\
+             action: context?.action ?? action,\n\
+             actionFields: context?.fields ?? [],\n\
+             entryWitnessRequired: context?.entry_witness_required ?? false,\n\
+             runtimeInputRequirements: context?.runtimeInputRequirements ?? [],\n\
+             verifierObligations: context?.verifierObligations ?? [],\n\
+             failClosedRuntimeFeatures: context?.failClosedRuntimeFeatures ?? [],\n\
+           };\n\
+         }\n\n\
+         function runtimeErrorCodeFrom(error: unknown): number | null {\n\
+           if (typeof error === \"number\" && Number.isFinite(error)) {\n\
+             return Math.trunc(error);\n\
+           }\n\
+           if (typeof error === \"bigint\") {\n\
+             const value = Number(error);\n\
+             return Number.isSafeInteger(value) ? value : null;\n\
+           }\n\
+           if (typeof error === \"string\") {\n\
+             const trimmed = error.trim();\n\
+             return /^-?\\d+$/.test(trimmed) ? Number(trimmed) : null;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"code\", \"exitCode\", \"errorCode\", \"error_code\", \"ecode\"] as const) {\n\
+               const parsed = runtimeErrorCodeFrom(record[key]);\n\
+               if (parsed !== null) {\n\
+                 return parsed;\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         function runtimeErrorNameFrom(error: unknown): string | null {\n\
+           if (typeof error === \"string\") {\n\
+             const trimmed = error.trim().toLowerCase();\n\
+             return runtimeErrorCatalog.some((known) => known.name === trimmed) ? trimmed : null;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"name\", \"error\", \"errorName\", \"runtime_error\"] as const) {\n\
+               const value = record[key];\n\
+               if (typeof value === \"string\") {\n\
+                 const match = runtimeErrorNameFrom(value);\n\
+                 if (match) {\n\
+                   return match;\n\
+                 }\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         function runtimeErrorMessageFrom(error: unknown): string | null {\n\
+           if (typeof error === \"string\") {\n\
+             return error;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"message\", \"stderr\", \"reason\"] as const) {\n\
+               const value = record[key];\n\
+               if (typeof value === \"string\") {\n\
+                 return value;\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         export function validateCellScriptLockfile(lockfile: CellScriptLockfile): string[] {\n\
            const violations: string[] = [];\n\
            const pkg = lockfile.package;\n\
            if (!pkg) {\n\
@@ -4908,6 +5117,21 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              () => builder.createActionBuilder(badShapeRuntime)[first.method](first.params),\n\
              /builder-shape mismatch/,\n\
            );\n\
+         });\n\n\
+         test(\"maps runtime errors to action field context\", () => {\n\
+           const [first] = actionCases;\n\
+           const context = builder.runtimeErrorContextForAction(first.name);\n\
+           assert.equal(context.action, first.name);\n\
+           assert.equal(context.fields.length, Object.keys(first.params).length);\n\
+           const byCode = builder.runtimeErrorInfoByCode(25);\n\
+           assert.equal(byCode.name, \"entry-witness-abi-invalid\");\n\
+           const fromObject = builder.explainCellScriptRuntimeError({ exitCode: 25 }, first.name);\n\
+           assert.equal(fromObject.code, 25);\n\
+           assert.equal(fromObject.action, first.name);\n\
+           assert.equal(fromObject.actionFields.length, context.fields.length);\n\
+           const fromMessage = builder.explainCellScriptRuntimeError({ message: \"entry witness payload layout failed\" }, first.name);\n\
+           assert.equal(fromMessage.name, \"entry-witness-abi-invalid\");\n\
+           assert.equal(builder.explainCellScriptRuntimeError({ exitCode: 999999 }, first.name), null);\n\
          });\n\n\
          test(\"rejects mismatched lockfile identity\", () => {\n\
            const [first] = actionCases;\n\

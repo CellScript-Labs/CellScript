@@ -64,6 +64,10 @@ Sixth slice: generated builders now expose explicit `build`, `dry-run`, and
 adapter, submit forces a dry-run first, and generated self-tests cover missing
 adapter and malformed runtime-shape rejection.
 
+Seventh slice: generated builders now export the stable runtime error catalog
+and helpers that map runtime codes, names, messages, or runtime error objects
+back to action field context, witness/source metadata, and runtime requirements.
+
 Target CLI:
 
 ```text

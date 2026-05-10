@@ -4456,6 +4456,9 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(manifest["runtime_contract"]["requires_live_cell_resolution"], true);
     assert_eq!(manifest["runtime_contract"]["requires_dry_run_before_submit"], true);
     assert_eq!(manifest["runtime_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
+    assert!(manifest["runtime_error_catalog"]
+        .as_array()
+        .is_some_and(|errors| errors.iter().any(|error| { error["code"] == 25 && error["name"] == "entry-witness-abi-invalid" })));
 
     let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
     assert!(index_ts.contains("export interface MintParams"), "{index_ts}");
@@ -4466,6 +4469,9 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("ActionBuilderResult"), "{index_ts}");
     assert!(index_ts.contains("submittedTxHashFromRuntime"), "{index_ts}");
     assert!(index_ts.contains("CellScript builder runtime missing dryRun adapter"), "{index_ts}");
+    assert!(index_ts.contains("runtimeErrorCatalog"), "{index_ts}");
+    assert!(index_ts.contains("explainCellScriptRuntimeError"), "{index_ts}");
+    assert!(index_ts.contains("runtimeErrorContextForAction"), "{index_ts}");
     assert!(index_ts.contains("canSubmit: false"), "{index_ts}");
     assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
     assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
@@ -4477,6 +4483,7 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(builder_test.contains("delegates live-cell resolution and transaction build to runtime"), "{builder_test}");
     assert!(builder_test.contains("delegates dry-run and submit modes to runtime"), "{builder_test}");
     assert!(builder_test.contains("rejects missing runtime adapters and malformed runtime shapes"), "{builder_test}");
+    assert!(builder_test.contains("maps runtime errors to action field context"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched lockfile identity"), "{builder_test}");
     assert!(builder_test.contains("rejects mismatched deployment identity"), "{builder_test}");
 
