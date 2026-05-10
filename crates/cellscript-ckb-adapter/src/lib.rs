@@ -1913,7 +1913,7 @@ mod tests {
 
     #[test]
     fn manifest_resolver_resolves_deps_from_deployment_manifest() {
-        let code_hash = blake2b_256(&[0xddu8; 64]);
+        let code_hash = blake2b_256([0xddu8; 64]);
         let tx_hash = [0xeeu8; 32];
         let manifest = DeploymentManifest {
             schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
@@ -1971,8 +1971,8 @@ mod tests {
 
     #[test]
     fn manifest_resolver_supports_data_and_type_hash_types() {
-        let code_hash_data = blake2b_256(&[0x11u8; 32]);
-        let code_hash_type = blake2b_256(&[0x22u8; 32]);
+        let code_hash_data = blake2b_256([0x11u8; 32]);
+        let code_hash_type = blake2b_256([0x22u8; 32]);
         let tx_hash = [0xeeu8; 32];
         let manifest = DeploymentManifest {
             schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),

@@ -278,7 +278,7 @@ fn cmd_build_deploy(rpc: &str, json: bool, args: BuildDeployArgs) -> Result<()> 
     let estimate = CellScriptAdapter::connect(rpc).ok().and_then(|a| a.estimate_cycles(&tx).ok()).map(|e| e.cycles.value());
 
     if json {
-        let tx_json = serde_json::to_value(&cellscript_ckb_adapter::to_rpc_transaction(&tx))?;
+        let tx_json = serde_json::to_value(cellscript_ckb_adapter::to_rpc_transaction(&tx))?;
         let output = serde_json::json!({
             "transaction": tx_json,
             "estimate_cycles": estimate,
