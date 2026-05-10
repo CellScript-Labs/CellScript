@@ -397,9 +397,10 @@ CellScript includes production-style local language tooling for early users:
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
-  reports, CKB target-profile arguments, and status-bar feedback. It shells out to
-  `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
-  CI gates.
+  reports, entry-witness ABI selection, action build plans, TypeScript builder
+  generation, package/registry verification, CKB target-profile arguments, and
+  status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
+  behavior stays identical to CLI and CI gates.
 
 The 0.19 ecosystem-reuse work adds a formal headless
 `cellscript-ckb-adapter` crate. The compiler emits semantic action plans and
@@ -428,6 +429,7 @@ or CellFabric intent engine.
 - [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
 - [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
 - [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
+- [0.20 generated builder roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_20_ROADMAP.md)
 - [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
@@ -535,11 +537,12 @@ CKB cycle/capacity estimates.
 |---|---|---|
 | **CLI** | `cli/` + `main.rs` | `cellc` binary with all subcommands |
 | **LSP** | `lsp/` + `lsp/server.rs` | In-process `LspServer` + `tower-lsp` JSON-RPC over stdio (`cellc --lsp`) |
-| **VS Code** | `editors/vscode-cellscript/` | Shells out to `cellc` for highlighting, diagnostics, reports |
+| **VS Code** | `editors/vscode-cellscript/` | Shells out to `cellc` for LSP startup, reports, action-builder generation, and package/registry verification |
 | **Formatter** | `fmt/` | Idempotent formatter for `cellc fmt` and LSP |
 | **Doc generator** | `docgen/` | HTML/Markdown/JSON docs from AST + metadata |
 | **Simulator** | `simulate.rs` | Simulated evaluator — emits `TraceEvent` logs without ckb-vm |
 | **REPL** | `repl.rs` | Interactive read-eval-print loop |
+| **Generated builder package** | `cellc gen-builder --target typescript` | Emits a registry-bound TypeScript action-builder package with runtime adapter contracts and self-tests |
 
 ### Package & Build System
 
@@ -657,6 +660,12 @@ registry dependency resolution remain experimental and fail-closed.
 - `Cell.lock` — captures direct and transitive resolved dependency identity
   for reproducible checks
 - `cellc info --json` — exposes package metadata for CI and tooling
+- `cellc package verify --json` — fails closed when `Cell.toml`, source hash,
+  dependency resolution, or build identity disagree with `Cell.lock`
+- `cellc registry verify --json` — checks off-chain deployment facts against
+  `Cell.lock` and `Deployed.toml`
+- `cellc registry verify --live --rpc-url ... --json` — adds CKB RPC live-cell
+  checks for deployment records when RPC evidence is available
 
 **Experimental / fail-closed:**
 
@@ -677,6 +686,8 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc constraints` | Emit profile-aware production constraints |
 | `cellc abi` | Explain `_cellscript_entry` witness ABI layout for an action or lock |
 | `cellc entry-witness` | Encode `_cellscript_entry` witness bytes |
+| `cellc action build` | Emit a semantic action-builder contract and transaction draft |
+| `cellc gen-builder --target typescript` | Generate a TypeScript action-builder package from metadata, lockfile, and optional deployment facts |
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
 | `cellc opt-report` | Compare O0..O3 artifact size and constraints status |
@@ -688,6 +699,8 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc add` / `remove` | Mutate local package dependencies |
 | `cellc install --path` / `update` | Resolve local path dependencies and refresh `Cell.lock` |
 | `cellc info` | Print manifest and package information |
+| `cellc package verify` | Verify package/source/build identity against `Cell.lock` |
+| `cellc registry verify` | Verify deployment identity against `Cell.lock` and `Deployed.toml`; `--live` adds CKB RPC evidence |
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator |
 | `cellc publish` / registry `install` / registry-backed `update` / `login` | Experimental registry flows, fail-closed |

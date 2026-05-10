@@ -73,14 +73,45 @@ Useful settings:
 | `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a workspace when `cellc` is unavailable. |
 | `cellscript.target` | Compiler target for command-backed reports: `riscv64-asm` or `riscv64-elf`. |
 | `cellscript.commandTimeoutMs` | Timeout for compiler-backed commands. |
+| `cellscript.builderOutputDir` | Output directory for generated TypeScript action-builder packages. Relative paths resolve from the nearest package `Cell.toml`. |
+| `cellscript.ckbRpcUrl` | Optional CKB RPC URL for live registry verification. |
+| `cellscript.deploymentNetwork` | Optional network filter for live registry verification and generated builder deployment binding. |
 
-The extension contributes commands for compile, metadata, constraints, and
-production report. `CellScript: Show Production Report` is useful while editing
-because it displays compiler version, metadata, constraints, and release-audit
-boundaries.
+The extension contributes commands for the local compiler and builder loop:
+
+| Command | CLI boundary |
+|---|---|
+| `CellScript: Compile Current File` | `cellc <file>` |
+| `CellScript: Show Metadata` | `cellc metadata` |
+| `CellScript: Show Constraints` | `cellc constraints` |
+| `CellScript: Show Entry Witness ABI` | selects an action/lock, then runs `cellc abi` |
+| `CellScript: Show Action Build Plan` | selects an action, then runs `cellc action build --json` |
+| `CellScript: Generate TypeScript Action Builder` | `cellc gen-builder --target typescript` |
+| `CellScript: Verify Package` | `cellc package verify --json` |
+| `CellScript: Verify Registry` | `cellc registry verify --json` |
+| `CellScript: Verify Live Registry` | `cellc registry verify --live --json` |
+| `CellScript: Show Production Report` | compiler version + metadata + constraints + release-audit boundary |
+
+`CellScript: Show Production Report` is useful while editing because it displays
+compiler version, metadata, constraints, and release-audit boundaries.
 
 That report is a guide, not a deployment certificate. Chain acceptance still
 requires CLI evidence and builder-backed CKB transactions.
+
+Generated builder packages are local artifacts. After using
+`CellScript: Generate TypeScript Action Builder`, run the generated package's
+own checks before treating it as usable transaction-building evidence. This is
+the generated package's `npm test` boundary:
+
+```bash
+npm --prefix target/cellscript-builder/typescript install --ignore-scripts
+npm --prefix target/cellscript-builder/typescript test
+```
+
+The generated tests prove the TypeScript package compiles, plans actions,
+delegates live-cell resolution/build/dry-run/submit to the runtime adapter, and
+fails closed on mismatched lockfile or deployment identity. They do not prove
+wallet signing, CKB node acceptance, or committed stateful flows.
 
 ## A Comfortable Local Loop
 
@@ -93,6 +124,8 @@ cellc check --all-targets --json
 cellc metadata . --target riscv64-elf --target-profile ckb -o /tmp/metadata.json
 cellc build --target riscv64-elf --target-profile ckb --json
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb
+cellc package verify --json
+cellc registry verify --json
 ```
 
 For CKB admission, keep the profile visible:
@@ -101,6 +134,10 @@ For CKB admission, keep the profile visible:
 cellc check --target-profile ckb --json
 cellc build --target riscv64-elf --target-profile ckb --json
 cellc verify-artifact build/main.elf --expect-target-profile ckb
+cellc registry verify --live --rpc-url "$CELLSCRIPT_CKB_RPC_URL" --json
+cellc gen-builder . --target typescript --output target/cellscript-builder/typescript --target-profile ckb --json
+npm --prefix target/cellscript-builder/typescript install --ignore-scripts
+npm --prefix target/cellscript-builder/typescript test
 ```
 
 This loop gives fast feedback first, then more formal evidence as the contract
@@ -153,6 +190,8 @@ The package manager supports:
 - `cellc add --path`
 - `cellc remove`
 - `cellc info`
+- `cellc package verify`
+- `cellc registry verify`
 - lockfile consistency checks for local dependencies
 
 Use the top-level `cellc path/to/file.cell` form for one-off file compilation.

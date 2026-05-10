@@ -68,10 +68,20 @@ Seventh slice: generated builders now export the stable runtime error catalog
 and helpers that map runtime codes, names, messages, or runtime error objects
 back to action field context, witness/source metadata, and runtime requirements.
 
+Eighth slice: the VS Code extension now exposes the action-builder workflow
+through compiler-backed commands for entry-witness ABI, action build plans,
+TypeScript builder generation, package verification, registry verification, and
+live registry verification. The tooling release gate now runs
+`check_action_builder_toolchain`, which generates a TypeScript builder package
+from `examples/token`, installs its local dependencies, and runs generated
+`npm test`.
+
 Target CLI:
 
 ```text
 cellc gen-builder --target typescript --metadata target/.../metadata.json
+cellc package verify --json
+cellc registry verify --live --rpc-url ... --json
 ```
 
 The generated package should provide:
@@ -106,7 +116,40 @@ Acceptance:
   builder-shape rejection;
 - generated builders refuse packages, metadata, or deployment records that do
   not match `Cell.lock`;
+- VS Code extension commands map directly to the same CLI boundaries and do not
+  invent a parallel compiler or builder implementation;
+- `scripts/cellscript_ckb_release_gate.sh` keeps the generated-builder
+  scaffold, build, and self-tests in the local tooling gate through
+  `check_action_builder_toolchain`;
 - CCC remains the low-level wallet, signing, RPC, and indexer boundary.
+
+## P0: Tooling And Documentation Sync
+
+The 0.20 tooling surface must stay aligned across CLI, generated packages, VS
+Code, release scripts, and docs.
+
+Current status:
+
+- `scripts/validate_cellscript_tooling_release.py` checks VS Code command
+  contributions, activation events, generated-builder settings, extension
+  runtime wiring, README/wiki references, and 0.20 roadmap tokens.
+- `scripts/cellscript_ckb_release_gate.sh` validates the VS Code extension,
+  packages a local VSIX, generates a TypeScript action-builder package, installs
+  it, and runs its generated `npm test` suite.
+- `docs/wiki/Tutorial-07-LSP-and-Tooling.md` documents the editor commands,
+  package/registry verification commands, and generated-builder test loop.
+- `README.md` lists `cellc action build`, `cellc gen-builder --target
+  typescript`, `cellc package verify`, and `cellc registry verify --live` as
+  first-class tooling surfaces.
+
+Acceptance:
+
+- release validators fail if extension commands/settings drift from the CLI
+  builder workflow;
+- generated-builder tests run in the tooling gate, not only in Rust unit tests;
+- docs describe the exact evidence boundary: generated builders delegate
+  live-cell resolution, signing, dry-run, submit, and final CKB acceptance to
+  runtime adapters and node-backed gates.
 
 ## P0: Live-Chain Deployment Verification
 

@@ -210,6 +210,8 @@ builders and live-chain verification:
   builder-shape rejection;
 - `cellc registry verify --live` / equivalent live-cell verification for
   network-specific deployment facts;
+- VS Code and tooling-gate coverage for generated builder creation, package
+  verification, registry verification, and generated `npm test`;
 - stale/wrong-network/wrong-code-hash/missing-CellDep/deprecated deployment
   rejection fixtures;
 - stateful flow runner evidence for canonical examples;

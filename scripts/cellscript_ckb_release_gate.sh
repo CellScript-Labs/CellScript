@@ -45,13 +45,17 @@ check_trailing_whitespace() {
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
+        "docs/CELLSCRIPT_0_20_ROADMAP.md"
         "docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md"
         "docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md"
         "docs/wiki/Home.md"
         "docs/wiki/Tutorial-05-CKB-Target-Profiles.md"
         "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md"
         "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md"
         "editors/vscode-cellscript/extension.js"
+        "editors/vscode-cellscript/README.md"
+        "editors/vscode-cellscript/CHANGELOG.md"
         "editors/vscode-cellscript/package-lock.json"
         "editors/vscode-cellscript/package.json"
         "editors/vscode-cellscript/scripts/validate.mjs"
@@ -87,6 +91,11 @@ check_release_roadmap_docs() {
         'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Syntax Governance And Standard Library'
         'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Release tag'
         'docs/README.md::CellScript Documentation Map'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::Generated Action Builder'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::VS Code extension'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::CellFabric is frozen'
+        'docs/wiki/Tutorial-07-LSP-and-Tooling.md::CellScript: Generate TypeScript Action Builder'
+        'docs/wiki/Tutorial-07-LSP-and-Tooling.md::cellscript.builderOutputDir'
     )
     local item file pattern
     for item in "${required[@]}"; do
@@ -189,6 +198,23 @@ check_grammar_governance_regression() {
     printf 'Grammar governance regression check passed.\n'
 }
 
+check_action_builder_toolchain() {
+    local output_dir
+    output_dir="${TMPDIR:-/tmp}/cellscript-release-gate-builder-$MODE"
+    rm -rf "$output_dir"
+
+    # Keep the 0.20 cellc gen-builder workflow in the release tooling gate.
+    run cargo run --locked -p cellscript --bin cellc -- \
+        gen-builder examples/token \
+        --target typescript \
+        --output "$output_dir" \
+        --target-profile ckb \
+        --json
+    run npm --prefix "$output_dir" install --ignore-scripts
+    run npm --prefix "$output_dir" test
+    printf 'CellScript generated builder tooling check passed: %s\n' "$output_dir"
+}
+
 run_common_gate() {
     require_cmd cargo
     require_cmd python3
@@ -207,6 +233,7 @@ run_common_gate() {
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run npm --prefix editors/vscode-cellscript run validate
     run npm --prefix editors/vscode-cellscript run publish:dry-run
+    check_action_builder_toolchain
     run git diff --check
     check_trailing_whitespace
     check_release_roadmap_docs

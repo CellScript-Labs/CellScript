@@ -71,6 +71,36 @@ def main() -> int:
         in package_json["scripts"]["publish:dry-run"],
         "VS Code publish dry-run must package a local VSIX instead of using an unsupported publish --dry-run flag",
     )
+    commands = {command.get("command") for command in package_json.get("contributes", {}).get("commands", [])}
+    for command in [
+        "cellscript.compileCurrentFile",
+        "cellscript.showMetadata",
+        "cellscript.showConstraints",
+        "cellscript.showAbi",
+        "cellscript.showActionBuildPlan",
+        "cellscript.generateTypescriptBuilder",
+        "cellscript.verifyPackage",
+        "cellscript.verifyRegistry",
+        "cellscript.verifyLiveRegistry",
+        "cellscript.showProductionReport",
+    ]:
+        require(command in commands, f"VS Code extension must contribute {command}")
+        require(
+            f"onCommand:{command}" in package_json.get("activationEvents", []),
+            f"VS Code extension must activate for {command}",
+        )
+    settings = package_json.get("contributes", {}).get("configuration", {}).get("properties", {})
+    for setting in [
+        "cellscript.compilerPath",
+        "cellscript.useCargoRunFallback",
+        "cellscript.commandTimeoutMs",
+        "cellscript.maxOutputBytes",
+        "cellscript.target",
+        "cellscript.builderOutputDir",
+        "cellscript.ckbRpcUrl",
+        "cellscript.deploymentNetwork",
+    ]:
+        require(setting in settings, f"VS Code extension must expose {setting}")
 
     require_contains(
         "src/main.rs",
@@ -101,8 +131,21 @@ def main() -> int:
             "LanguageClient",
             "TransportKind.stdio",
             "--lsp",
+            "selectMetadataEntry",
+            "findPackageRootForDocument",
             "cellscript.showConstraints",
+            "cellscript.showAbi",
+            "cellscript.showActionBuildPlan",
+            "cellscript.generateTypescriptBuilder",
+            "cellscript.verifyPackage",
+            "cellscript.verifyRegistry",
+            "cellscript.verifyLiveRegistry",
             "cellscript.showProductionReport",
+            "gen-builder",
+            "package",
+            "verify",
+            "registry",
+            "ckbRpcUrl",
         ],
     )
     require_contains(
@@ -110,7 +153,45 @@ def main() -> int:
         [
             "LanguageClient",
             "TransportKind.stdio",
+            "cellscript.generateTypescriptBuilder",
+            "cellscript.verifyLiveRegistry",
+            "cellscript.builderOutputDir",
             "extension README must describe the production local tooling surface",
+        ],
+    )
+    require_contains(
+        "scripts/cellscript_ckb_release_gate.sh",
+        [
+            "check_action_builder_toolchain",
+            "cellc gen-builder",
+            "npm --prefix",
+            "generated builder",
+        ],
+    )
+    require_contains(
+        "README.md",
+        [
+            "cellc action build",
+            "cellc gen-builder --target typescript",
+            "cellc package verify",
+            "cellc registry verify --live",
+        ],
+    )
+    require_contains(
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md",
+        [
+            "CellScript: Generate TypeScript Action Builder",
+            "cellscript.builderOutputDir",
+            "cellc registry verify --live",
+            "npm test",
+        ],
+    )
+    require_contains(
+        "docs/CELLSCRIPT_0_20_ROADMAP.md",
+        [
+            "VS Code extension",
+            "check_action_builder_toolchain",
+            "CellFabric is frozen",
         ],
     )
     require_contains(
@@ -129,6 +210,8 @@ def main() -> int:
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
             "cellc_run_subcommand_executes_pure_elf_package",
+            "cellc_gen_builder_typescript_emits_package_scaffold",
+            "cellc_gen_builder_lockfile_identity_fails_closed",
         ],
     )
 

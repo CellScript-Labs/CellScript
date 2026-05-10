@@ -46,6 +46,7 @@ High-value active references include:
   require full parser/typechecker/lowering/metadata/formatter/LSP coverage
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`
 - `CELLSCRIPT_CKB_ADAPTER.md`
+- `CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md`
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
 - `CELLSCRIPT_RUNTIME_ERROR_CODES.md`
 
@@ -75,6 +76,9 @@ to branch-specific evidence or forward design:
   governance scope
 - `CELLSCRIPT_REGISTRY_PHASE1.md` for the 0.19 package/deployment identity
   registry closure and 0.20 handoff boundary
+- `CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
+  live-chain registry verification, stateful flow evidence, and the frozen
+  CellFabric boundary
 
 ## Archive
 

@@ -93,7 +93,7 @@ Each release answers a specific question:
 | v0.17 | iCKB-Grade Protocol Semantics | "Turn protocol-equivalence gaps into executable evidence gates." | Scoped milestone complete; equivalence not proven |
 | v0.18 | First-Class Script API and Equivalence Closure | "Make ScriptRef/ScriptArgs and remaining iCKB proof prerequisites first-class." | Planning |
 | v0.19 | Package Registry Phase 1 and Adapter Boundary | "Resolve and verify package/build/deployment identity before builders consume it." | Scope complete |
-| v0.20 | Generated Builder and Live Registry Proof | "Turn verified artifacts into valid transactions through registry-bound builders." | Planned |
+| v0.20 | Generated Builder and Live Registry Proof | "Turn verified artifacts into valid transactions through registry-bound builders." | In progress: generated TypeScript builders, live registry verification, VS Code commands, and generated-builder tooling-gate checks are active. |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or
