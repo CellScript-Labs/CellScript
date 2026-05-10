@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::Command;
 
 fn git_init(repo_dir: &std::path::Path) {
@@ -36,6 +38,41 @@ fn hash_json_for_test<T: serde::Serialize>(value: &T) -> String {
     hex_lower(&cellscript::ckb_blake2b256(&bytes))
 }
 
+fn ckb_script_hash_for_test(code_hash: &str, hash_type: &str, args: &str) -> String {
+    let code_hash_bytes = hex::decode(code_hash.trim_start_matches("0x")).unwrap();
+    let hash_type_byte = match hash_type {
+        "data" => 0u8,
+        "type" => 1u8,
+        "data1" => 2u8,
+        "data2" => 4u8,
+        other => panic!("unknown hash_type: {other}"),
+    };
+    let args_bytes = hex::decode(args.trim_start_matches("0x")).unwrap();
+    let mut args_molecule = Vec::with_capacity(4 + args_bytes.len());
+    args_molecule.extend_from_slice(&(args_bytes.len() as u32).to_le_bytes());
+    args_molecule.extend_from_slice(&args_bytes);
+
+    let header_size = 4 + 4 * 3;
+    let field_sizes = [32usize, 1usize, args_molecule.len()];
+    let mut cursor = header_size;
+    let mut offsets = Vec::with_capacity(3);
+    for size in field_sizes {
+        offsets.push(cursor);
+        cursor += size;
+    }
+
+    let mut serialized = Vec::with_capacity(cursor);
+    serialized.extend_from_slice(&(cursor as u32).to_le_bytes());
+    for offset in offsets {
+        serialized.extend_from_slice(&(offset as u32).to_le_bytes());
+    }
+    serialized.extend_from_slice(&code_hash_bytes);
+    serialized.push(hash_type_byte);
+    serialized.extend_from_slice(&args_molecule);
+
+    format!("0x{}", hex_lower(&cellscript::ckb_blake2b256(&serialized)))
+}
+
 fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -> cellscript::package::LockedBuildInfo {
     let abi = serde_json::json!({
         "metadata_schema_version": metadata.metadata_schema_version,
@@ -55,6 +92,162 @@ fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -
         abi_hash: Some(hash_json_for_test(&abi)),
         constraints_hash: Some(hash_json_for_test(&metadata.constraints)),
     }
+}
+
+fn start_mock_ckb_rpc(responses: Vec<(&'static str, serde_json::Value)>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for (expected_method, result) in responses {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request_body(&mut stream);
+            let request_json: serde_json::Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(request_json["method"], expected_method);
+            let response_body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request_json["id"].clone(),
+                "result": result,
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    format!("http://{}", addr)
+}
+
+fn read_http_request_body(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "mock RPC request ended before headers");
+        request.extend_from_slice(&buffer[..read]);
+        if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            let body_start = header_end + 4;
+            while request.len() < body_start + content_length {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "mock RPC request ended before body");
+                request.extend_from_slice(&buffer[..read]);
+            }
+            return request[body_start..body_start + content_length].to_vec();
+        }
+    }
+}
+
+fn write_live_registry_fixture(root: &std::path::Path, data_hash: &str) {
+    write_live_registry_fixture_with(root, data_hash, data_hash, "data1", None);
+}
+
+fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, code_hash: &str, hash_type: &str, type_id: Option<&str>) {
+    let out_point = "0xaaaa:0".to_string();
+    let mut lockfile = cellscript::package::Lockfile::new();
+    lockfile.package = cellscript::package::LockfilePackageInfo {
+        name: "token".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: Some("cellscript".to_string()),
+        source_hash: Some("source_hash".to_string()),
+    };
+    lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
+        compiler_version: Some("0.20.0".to_string()),
+        target_profile: Some("ckb".to_string()),
+        artifact_hash: Some("artifact_hash".to_string()),
+        metadata_hash: Some("metadata_hash".to_string()),
+        schema_hash: Some("schema_hash".to_string()),
+        abi_hash: Some("abi_hash".to_string()),
+        constraints_hash: Some("constraints_hash".to_string()),
+    });
+    lockfile.deployment.insert(
+        "aggron4".to_string(),
+        cellscript::package::LockfileDeploymentRef {
+            record: out_point.clone(),
+            record_hash: None,
+            code_hash: Some(code_hash.to_string()),
+            out_point: Some(out_point.clone()),
+            data_hash: Some(data_hash.to_string()),
+        },
+    );
+    lockfile.write_to_root(root).unwrap();
+
+    let deployed = cellscript::package::DeployedManifest {
+        version: 1,
+        schema: None,
+        package: cellscript::package::DeployedPackageInfo {
+            name: "token".to_string(),
+            version: "1.0.0".to_string(),
+            source_hash: Some("source_hash".to_string()),
+        },
+        build: Some(cellscript::package::DeployedBuildInfo {
+            compiler_version: Some("0.20.0".to_string()),
+            artifact_hash: Some("artifact_hash".to_string()),
+            metadata_hash: Some("metadata_hash".to_string()),
+            schema_hash: Some("schema_hash".to_string()),
+            abi_hash: Some("abi_hash".to_string()),
+            constraints_hash: Some("constraints_hash".to_string()),
+        }),
+        deployments: vec![cellscript::package::DeploymentRecord {
+            network: "aggron4".to_string(),
+            chain_id: "ckb-testnet".to_string(),
+            tx_hash: "0xaaaa".to_string(),
+            output_index: 0,
+            code_hash: code_hash.to_string(),
+            hash_type: hash_type.to_string(),
+            dep_type: "code".to_string(),
+            data_hash: data_hash.to_string(),
+            out_point,
+            artifact_hash: Some("artifact_hash".to_string()),
+            metadata_hash: Some("metadata_hash".to_string()),
+            schema_hash: Some("schema_hash".to_string()),
+            abi_hash: Some("abi_hash".to_string()),
+            constraints_hash: Some("constraints_hash".to_string()),
+            compiler_version: Some("0.20.0".to_string()),
+            type_id: type_id.map(str::to_string),
+            script_role: Some(cellscript::package::ScriptRole::Type),
+            status: Some(cellscript::package::DeploymentStatus::Active),
+            upgrade_lineage: None,
+            audit_report_hash: None,
+            publisher_signature: None,
+            cell_deps: vec![],
+        }],
+    };
+    deployed.write_to_root(root).unwrap();
+}
+
+fn live_cell_rpc_result(status: &str, data_hash: &str) -> serde_json::Value {
+    live_cell_rpc_result_with_type(status, data_hash, serde_json::Value::Null)
+}
+
+fn live_cell_rpc_result_with_type(status: &str, data_hash: &str, type_script: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "status": status,
+        "cell": {
+            "output": {
+                "capacity": "0x0",
+                "lock": {
+                    "code_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "hash_type": "data1",
+                    "args": "0x"
+                },
+                "type": type_script
+            },
+            "data": {
+                "content": "0x00",
+                "hash": data_hash
+            }
+        }
+    })
 }
 
 #[test]
@@ -970,6 +1163,116 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
         .unwrap()
         .iter()
         .any(|violation| violation.as_str().unwrap_or_default().contains("missing from Cell.lock")));
+}
+
+#[test]
+fn cellc_registry_verify_live_accepts_matching_rpc_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    write_live_registry_fixture(root, data_hash);
+    let rpc_url = start_mock_ckb_rpc(vec![
+        ("get_blockchain_info", serde_json::json!({ "chain": "ckb_testnet" })),
+        ("get_live_cell", live_cell_rpc_result("live", data_hash)),
+    ]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--live")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--network")
+        .arg("aggron4")
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["live"]["enabled"], true);
+    assert_eq!(report["live"]["checked"], 1);
+    assert_eq!(report["live"]["evidence"][0]["status"], "live-verified");
+    assert_eq!(report["live"]["evidence"][0]["rpc_data_hash"], data_hash);
+    assert!(report["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cellc_registry_verify_live_accepts_type_hash_and_type_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x3333333333333333333333333333333333333333333333333333333333333333";
+    let type_code_hash = "0x4444444444444444444444444444444444444444444444444444444444444444";
+    let type_id = "0x5555555555555555555555555555555555555555555555555555555555555555";
+    let script_hash = ckb_script_hash_for_test(type_code_hash, "data1", type_id);
+    write_live_registry_fixture_with(root, data_hash, &script_hash, "type", Some(type_id));
+    let rpc_url = start_mock_ckb_rpc(vec![
+        ("get_blockchain_info", serde_json::json!({ "chain": "ckb-testnet" })),
+        (
+            "get_live_cell",
+            live_cell_rpc_result_with_type(
+                "live",
+                data_hash,
+                serde_json::json!({
+                    "code_hash": type_code_hash,
+                    "hash_type": "data1",
+                    "args": type_id
+                }),
+            ),
+        ),
+    ]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--live")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["live"]["evidence"][0]["rpc_code_hash"], script_hash);
+    assert!(report["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cellc_registry_verify_live_rejects_dead_rpc_cell() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let data_hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
+    write_live_registry_fixture(root, data_hash);
+    let rpc_url = start_mock_ckb_rpc(vec![
+        ("get_blockchain_info", serde_json::json!({ "chain": "ckb-testnet" })),
+        ("get_live_cell", live_cell_rpc_result("dead", data_hash)),
+    ]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("registry")
+        .arg("verify")
+        .arg("--live")
+        .arg("--rpc-url")
+        .arg(&rpc_url)
+        .arg("--json")
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["live"]["evidence"][0]["rpc_status"], "dead");
+    assert!(report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation.as_str().unwrap_or_default().contains("is not live")));
 }
 
 #[test]

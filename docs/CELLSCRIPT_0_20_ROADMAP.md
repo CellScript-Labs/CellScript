@@ -45,6 +45,11 @@ and locked build identity before writing the package. Generated TypeScript also
 exports `validateCellScriptLockfile` / `assertCellScriptLockfile`, and action
 planning fails closed when callers provide a mismatched lockfile.
 
+Third slice: `cellc registry verify --live --rpc-url ...` adds CKB RPC-backed
+deployment checks for `get_blockchain_info` and `get_live_cell`, including
+chain-id matching, live-cell status, data hash, code hash, and Type ID args
+where declared.
+
 Target CLI:
 
 ```text
