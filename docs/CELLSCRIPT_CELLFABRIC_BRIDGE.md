@@ -68,16 +68,32 @@ cargo run --example cellscript_import -- \
 The example prints the same unsigned import response as the HTTP endpoint. Use
 `--summary-only` before the path for compact CI logs.
 
+For the stricter local flow check, CellFabric also provides:
+
+```sh
+cargo run --example cellscript_flow -- --summary-only \
+  /path/to/cellscript-envelope.json \
+  0x0000000000000000000000000000000000000000000000000000000000000000 \
+  1
+```
+
+That example imports the envelope, creates a dummy auth-binding signature,
+submits the resulting intent through a gateway with required CellScript app
+policy validation, builds a validated bundle, emits a non-final soft
+confirmation receipt, and verifies that settlement still requires an external
+CellScript runtime builder.
+
 For a repeatable cross-repo smoke check from this repo, run:
 
 ```sh
 scripts/cellscript_cellfabric_bridge_smoke.sh
 ```
 
-The script builds the CellScript envelope, imports it with sibling CellFabric,
-and checks the summary hash, namespace, action, signature requirement, and
-non-finality flags. Set `CELLFABRIC_DIR=/path/to/CellFabric` if the sibling repo
-is not at `../CellFabric`.
+The script builds the CellScript envelope, runs the sibling CellFabric flow
+example, and checks import identity, gateway indexing, validated bundle
+selection, non-final soft confirmation, and the external-settlement-builder
+boundary. Set `CELLFABRIC_DIR=/path/to/CellFabric` if the sibling repo is not at
+`../CellFabric`.
 
 ## Non-Claims
 

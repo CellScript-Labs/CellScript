@@ -122,9 +122,10 @@ cellc registry verify --live --rpc-url ... --json
 
 Fifteenth slice: `scripts/cellscript_cellfabric_bridge_smoke.sh` now performs a
 bounded cross-repo smoke check against sibling CellFabric. It generates a real
-CellScript envelope, imports it with CellFabric's `cellscript_import` example,
-and verifies schema, status, action, namespace, payload hash, signature
-requirement, and non-finality flags without making CellScript depend on the
+CellScript envelope, runs CellFabric's `cellscript_flow` example, and verifies
+schema, import status, action, namespace, payload hash, strict gateway
+submission, validated bundle selection, non-final soft confirmation, and the
+external-settlement-builder boundary without making CellScript depend on the
 CellFabric Rust crate.
 
 The generated package should provide:
