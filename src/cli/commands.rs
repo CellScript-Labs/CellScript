@@ -395,6 +395,7 @@ pub struct ActionBuildArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub fabric_intent: bool,
     pub json: bool,
 }
 
@@ -2645,18 +2646,31 @@ impl CommandExecutor {
             "constraints_failures": result.metadata.constraints.failures,
             "constraints_warnings": result.metadata.constraints.warnings,
         });
-        let json = serde_json::to_string_pretty(&plan)
-            .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize action build plan: {}", error)))?;
+        let output_value = if args.fabric_intent {
+            cellfabric_intent_envelope_json(&result.metadata, action, &plan, &input_path, &metadata_hash)?
+        } else {
+            plan
+        };
+        let json = serde_json::to_string_pretty(&output_value).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize action build output: {}", error))
+        })?;
 
         if let Some(output_path) = args.output {
             if let Some(parent) = output_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&output_path, json)?;
-            println!("{}", "Action build plan generated".green());
+            let label = if args.fabric_intent { "CellFabric intent envelope generated" } else { "Action build plan generated" };
+            println!("{}", label.green());
             println!("  Output: {}", output_path.display());
         } else if args.json {
             println!("{}", json);
+        } else if args.fabric_intent {
+            println!("CellFabric intent envelope: {}", action.name);
+            println!("  Target profile: {}", result.metadata.target_profile.name);
+            println!("  Status: requires-runtime-binding");
+            println!("  App conflict key templates: {}", cellfabric_app_conflict_key_templates(&result.metadata.module, action).len());
+            println!("  Embedded action plan: yes");
         } else {
             println!("Action build plan: {}", action.name);
             println!("  Target profile: {}", result.metadata.target_profile.name);
@@ -7183,6 +7197,166 @@ fn hash_json_value<T: serde::Serialize>(label: &str, value: &T) -> Result<String
     Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
 }
 
+fn cellfabric_intent_envelope_json(
+    metadata: &CompileMetadata,
+    action: &crate::ActionMetadata,
+    action_plan: &serde_json::Value,
+    input_path: &Path,
+    metadata_hash: &str,
+) -> Result<serde_json::Value> {
+    let action_plan_hash = hash_json_value("CellScript action plan", action_plan)?;
+    let app_namespace = metadata.module.clone();
+    let app_conflict_key_templates = cellfabric_app_conflict_key_templates(&app_namespace, action);
+    Ok(serde_json::json!({
+        "schema": "cellscript-cellfabric-intent-envelope-v0.20",
+        "status": "requires-runtime-binding",
+        "bridge_boundary": {
+            "kind": "json-bridge",
+            "cellscript_core_dependency": "no-cell-fabric-rust-crate",
+            "cellfabric_expected_role": "intent-ordering-soft-confirmation-and-settlement-tracking",
+            "not_a_cellfabric_signed_intent": true,
+            "not_a_soft_confirmation": true,
+            "not_l1_finality": true,
+            "compiler_must_not_infer_cellfabric_finality": true,
+        },
+        "source": {
+            "input": input_path.display().to_string(),
+            "module": metadata.module.clone(),
+            "action": action.name.clone(),
+            "target_profile": metadata.target_profile.name.clone(),
+            "compiler_version": metadata.compiler_version.clone(),
+            "metadata_hash": metadata_hash,
+            "artifact_hash": &metadata.artifact_hash,
+            "action_plan_hash": action_plan_hash.clone(),
+        },
+        "cellfabric_mapping": {
+            "target": "CellFabric IntentBody template",
+            "candidate_intent_action": "App",
+            "payload_format": "cellscript-action-plan-json-v1",
+            "payload_hash_field": "cellscript_action_plan_hash",
+            "resource_binding": "runtime-resolved-live-cells",
+            "auth_binding": "runtime-wallet-or-live-cell-context",
+            "settlement_compiler": "cellscript-ckb-adapter-or-generated-builder",
+        },
+        "cellfabric_intent_template": {
+            "version": 1,
+            "domain": {
+                "chain_id": metadata.target_profile.name.clone(),
+                "app_namespace": app_namespace.clone(),
+            },
+            "author": {
+                "lock_script_hash": serde_json::Value::Null,
+                "source": "runtime-wallet-or-live-cell-context",
+            },
+            "nonce": serde_json::Value::Null,
+            "validity": {
+                "valid_after_ms": serde_json::Value::Null,
+                "valid_until_ms": serde_json::Value::Null,
+            },
+            "resources": {
+                "consumes": [],
+                "reads": [],
+                "app_keys": app_conflict_key_templates,
+                "status": "template-only-runtime-outpoints-required",
+            },
+            "action": {
+                "kind": "App",
+                "action": action.name.clone(),
+                "payload_format": "cellscript-action-plan-json-v1",
+                "payload_hash": action_plan_hash.clone(),
+            },
+            "constraints": {
+                "source": "cellscript-action-plan",
+                "runtime_input_requirements": &action.transaction_runtime_input_requirements,
+                "verifier_obligations": &action.verifier_obligations,
+                "fail_closed_runtime_features": &action.fail_closed_runtime_features,
+            },
+            "dependencies": {
+                "requires": [],
+                "source": "service-supplied-cellfabric-intent-ids",
+            },
+            "replacement": {
+                "supersedes": [],
+                "rule": "service-policy",
+            },
+            "fee": {
+                "fee_bid_shannons": serde_json::Value::Null,
+                "max_fee_shannons": serde_json::Value::Null,
+                "source": "runtime-builder-policy",
+            },
+            "auth_mode": "CoSignConcreteTx",
+            "metadata": {
+                "cellscript_action": action.name.clone(),
+                "cellscript_metadata_hash": metadata_hash,
+                "cellscript_action_plan_hash": action_plan_hash.clone(),
+                "cellscript_artifact_hash": &metadata.artifact_hash,
+            },
+        },
+        "resource_access_template": {
+            "hard_conflicts": {
+                "status": "runtime-required",
+                "consumed_cell_patterns": &action.consume_set,
+                "runtime_input_requirements": &action.transaction_runtime_input_requirements,
+                "note": "CellFabric OutPointRef conflicts must be filled from resolved live cells before submitting a SignedIntent.",
+            },
+            "reads": &action.read_refs,
+            "writes": {
+                "creates": &action.create_set,
+                "mutates": &action.mutate_set,
+            },
+            "app_conflict_key_templates": cellfabric_app_conflict_key_templates(&app_namespace, action),
+        },
+        "required_runtime_evidence": [
+            "author_lock_script_hash",
+            "intent_nonce",
+            "resolved_consumed_outpoints",
+            "resolved_read_outpoints",
+            "cellfabric_auth_signature",
+            "deployment_identity",
+            "live_cell_resolution",
+            "capacity_fee_balance",
+            "estimate_cycles",
+            "tx_pool_acceptance",
+            "l1_status_observation"
+        ],
+        "non_claims": [
+            "does not create a CellFabric SignedIntent",
+            "does not prove CellFabric orderer acceptance",
+            "does not soft-confirm the action",
+            "does not prove live-cell availability",
+            "does not prove CKB tx-pool acceptance",
+            "does not prove L1 finality"
+        ],
+        "action_plan": action_plan,
+    }))
+}
+
+fn cellfabric_app_conflict_key_templates(app_namespace: &str, action: &crate::ActionMetadata) -> Vec<serde_json::Value> {
+    let mut keys = BTreeSet::<(String, String)>::new();
+    for shared in &action.touches_shared {
+        keys.insert(("cellscript-shared-resource".to_string(), shared.clone()));
+    }
+    for pattern in &action.mutate_set {
+        keys.insert(("cellscript-mutate-binding".to_string(), format!("{}:{}", pattern.ty, pattern.binding)));
+    }
+    for primitive in &action.pool_primitives {
+        if let Ok(value) = serde_json::to_value(primitive) {
+            keys.insert(("cellscript-pool-primitive".to_string(), value.to_string()));
+        }
+    }
+    keys.into_iter()
+        .map(|(key_type, key)| {
+            serde_json::json!({
+                "namespace": app_namespace,
+                "key_type": key_type,
+                "key": key,
+                "key_encoding": "utf8",
+                "key_bytes_hex": crate::hex_encode(key.as_bytes()),
+            })
+        })
+        .collect()
+}
+
 fn push_missing_locked_build_identity(label: &str, build: &crate::package::LockedBuildInfo, violations: &mut Vec<String>) {
     if build.compiler_version.is_none() {
         violations.push(format!("{} has no compiler_version", label));
@@ -9071,6 +9245,12 @@ impl CliParser {
                         .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                         .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                         .arg(
+                            Arg::new("fabric-intent")
+                                .long("fabric-intent")
+                                .action(ArgAction::SetTrue)
+                                .help("Emit a CellFabric intent envelope instead of the raw CellScript action plan"),
+                        )
+                        .arg(
                             Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON builder plan"),
                         ),
                 ),
@@ -9562,6 +9742,7 @@ impl CliParser {
                     output: build.get_one::<String>("output").map(PathBuf::from),
                     target: build.get_one::<String>("target").cloned(),
                     target_profile: build.get_one::<String>("target-profile").cloned(),
+                    fabric_intent: build.get_flag("fabric-intent"),
                     json: build.get_flag("json"),
                 }),
                 _ => Command::ActionBuild(ActionBuildArgs::default()),

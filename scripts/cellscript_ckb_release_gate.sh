@@ -43,6 +43,7 @@ check_trailing_whitespace() {
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
+        "docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
         "docs/CELLSCRIPT_0_20_ROADMAP.md"
@@ -62,6 +63,7 @@ check_trailing_whitespace() {
         "scripts/cellscript_ckb_release_gate.sh"
         "scripts/cellscript_syntax_combo_audit.sh"
         "scripts/cellscript_syntax_combo_audit.py"
+        "scripts/cellscript_cellfabric_bridge_smoke.sh"
         "scripts/ckb_cellscript_acceptance.sh"
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
@@ -94,6 +96,8 @@ check_release_roadmap_docs() {
         'docs/CELLSCRIPT_0_20_ROADMAP.md::Generated Action Builder'
         'docs/CELLSCRIPT_0_20_ROADMAP.md::VS Code extension'
         'docs/CELLSCRIPT_0_20_ROADMAP.md::CellFabric is frozen'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::cellc action build --fabric-intent'
+        'docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md::cellscript-cellfabric-intent-envelope-v0.20'
         'docs/wiki/Tutorial-07-LSP-and-Tooling.md::CellScript: Generate TypeScript Action Builder'
         'docs/wiki/Tutorial-07-LSP-and-Tooling.md::cellscript.builderOutputDir'
     )
@@ -237,6 +241,7 @@ run_common_gate() {
     run bash -n scripts/ckb_cellscript_acceptance.sh
     run bash -n scripts/cellscript_ckb_release_gate.sh
     run bash -n scripts/cellscript_syntax_combo_audit.sh
+    run bash -n scripts/cellscript_cellfabric_bridge_smoke.sh
     run python3 -m py_compile scripts/cellscript_syntax_combo_audit.py
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run npm --prefix editors/vscode-cellscript run validate

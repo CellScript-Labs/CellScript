@@ -4498,6 +4498,87 @@ action mint(amount: u64) -> Token {
 }
 
 #[test]
+fn cellc_action_build_emits_cellfabric_intent_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("action")
+        .arg("build")
+        .arg("--action")
+        .arg("mint")
+        .arg("--fabric-intent")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["schema"], "cellscript-cellfabric-intent-envelope-v0.20");
+    assert_eq!(envelope["status"], "requires-runtime-binding");
+    assert_eq!(envelope["bridge_boundary"]["kind"], "json-bridge");
+    assert_eq!(envelope["bridge_boundary"]["cellscript_core_dependency"], "no-cell-fabric-rust-crate");
+    assert_eq!(envelope["bridge_boundary"]["not_a_cellfabric_signed_intent"], true);
+    assert_eq!(envelope["bridge_boundary"]["not_a_soft_confirmation"], true);
+    assert_eq!(envelope["bridge_boundary"]["not_l1_finality"], true);
+
+    let action_plan_hash = envelope["source"]["action_plan_hash"].as_str().expect("action plan hash");
+    assert_eq!(action_plan_hash.len(), 64);
+    assert_eq!(envelope["source"]["action"], "mint");
+    assert_eq!(envelope["source"]["target_profile"], "ckb");
+    assert_eq!(envelope["cellfabric_mapping"]["candidate_intent_action"], "App");
+    assert_eq!(envelope["cellfabric_intent_template"]["domain"]["chain_id"], "ckb");
+    assert_eq!(envelope["cellfabric_intent_template"]["action"]["kind"], "App");
+    assert_eq!(envelope["cellfabric_intent_template"]["action"]["action"], "mint");
+    assert_eq!(envelope["cellfabric_intent_template"]["action"]["payload_format"], "cellscript-action-plan-json-v1");
+    assert_eq!(envelope["cellfabric_intent_template"]["action"]["payload_hash"], action_plan_hash);
+    assert_eq!(envelope["cellfabric_intent_template"]["resources"]["status"], "template-only-runtime-outpoints-required");
+    assert_eq!(envelope["cellfabric_intent_template"]["author"]["lock_script_hash"], serde_json::Value::Null);
+    assert_eq!(envelope["cellfabric_intent_template"]["auth_mode"], "CoSignConcreteTx");
+    assert!(envelope["resource_access_template"]["hard_conflicts"]["runtime_input_requirements"].as_array().is_some());
+    assert!(envelope["resource_access_template"]["app_conflict_key_templates"].as_array().is_some());
+    assert!(envelope["required_runtime_evidence"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "resolved_consumed_outpoints")
+            && items.iter().any(|item| item == "l1_status_observation")));
+    assert!(envelope["non_claims"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item.as_str().is_some_and(|text| text.contains("does not soft-confirm")))));
+    assert_eq!(envelope["action_plan"]["policy"], "cellscript-action-builder-plan-v1");
+    assert_eq!(envelope["action_plan"]["transaction_draft"]["state"], "ActionPlan");
+}
+
+#[test]
 fn cellc_gen_builder_typescript_emits_package_scaffold() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

@@ -103,13 +103,29 @@ scenario acceptance boundary by checking that the production gate still invokes
 `--stateful-scenarios` and that the acceptance script still records live/dead
 lineage, tx-size, occupied-capacity, and stateful coverage evidence.
 
+Fourteenth slice: `cellc action build --fabric-intent` now emits a
+`cellscript-cellfabric-intent-envelope-v0.20` JSON bridge for parent-project
+CellFabric services. The envelope embeds the original action plan, hashes it,
+maps CellScript metadata into a CellFabric intent template, and explicitly
+states that it is not a signed intent, soft confirmation, live-cell proof,
+tx-pool proof, or L1 finality claim. The detailed boundary is documented in
+`docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md`.
+
 Target CLI:
 
 ```text
 cellc gen-builder --target typescript --metadata target/.../metadata.json
+cellc action build --fabric-intent --json
 cellc package verify --json
 cellc registry verify --live --rpc-url ... --json
 ```
+
+Fifteenth slice: `scripts/cellscript_cellfabric_bridge_smoke.sh` now performs a
+bounded cross-repo smoke check against sibling CellFabric. It generates a real
+CellScript envelope, imports it with CellFabric's `cellscript_import` example,
+and verifies schema, status, action, namespace, payload hash, signature
+requirement, and non-finality flags without making CellScript depend on the
+CellFabric Rust crate.
 
 The generated package should provide:
 
@@ -254,18 +270,21 @@ For 0.20 this is a metadata-presence gate only: publisher signature
 cryptographic verification and trust-anchor management remain a later security
 milestone.
 
-## P2: CellFabric Exploration (Frozen)
+## P2: CellFabric Exploration (Frozen Except Bridge)
 
-CellFabric is frozen for the 0.20 acceptance pass and remains a later target:
+CellFabric is frozen for the 0.20 acceptance pass beyond the bounded
+`cellc action build --fabric-intent` JSON bridge. Deeper integration remains a
+later target:
 
 ```text
 intent -> action DAG -> UTXO graph -> CKB transactions
 ```
 
-Do not add generated code, CLI flags, public interfaces, fixture requirements,
-or release claims for intent schemas, action-DAG planning, multi-transaction
-batching, live-cell conflict detection, or planner evidence in 0.20. Revisit
-only after the per-action builder and stateful flow runner are proven.
+Do not add generated code, additional CLI flags, direct Rust crate coupling,
+fixture requirements, or release claims for signed CellFabric intents,
+action-DAG planning, multi-transaction batching, live-cell conflict detection,
+or planner evidence in 0.20. Revisit only after the per-action builder,
+stateful flow runner, and bridge envelope have real service-side consumers.
 
 ## Non-Goals
 

@@ -143,6 +143,7 @@ cellc check --target-profile ckb --json
 cellc build --target riscv64-elf --target-profile ckb --json
 cellc verify-artifact build/main.elf --expect-target-profile ckb
 cellc registry verify --live --rpc-url "$CELLSCRIPT_CKB_RPC_URL" --json
+cellc action build . --action mint --target-profile ckb --fabric-intent --json
 cellc gen-builder . --target typescript --output target/cellscript-builder/typescript --target-profile ckb --json
 npm --prefix target/cellscript-builder/typescript install --ignore-scripts
 npm --prefix target/cellscript-builder/typescript test
