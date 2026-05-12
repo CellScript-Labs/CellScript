@@ -978,7 +978,7 @@ def load_cases(mode: str, budget: int | None, seed: int) -> list[AuditCase]:
 
     seed_cases: list[AuditCase] = []
     if SEEDS.exists():
-        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell"))]
+        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell")) if path.is_file()]
 
     if mode == "quick":
         default_budget = read_matrix().get("mode", {}).get("quick", {}).get("budget", len(cases))
