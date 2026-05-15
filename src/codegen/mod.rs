@@ -6785,17 +6785,8 @@ impl CodeGenerator {
             return Ok(());
         }
 
-        match left {
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
-            _ => self.emit("li t0, 0"),
-        }
-
-        match right {
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t1, {}", n)),
-            IrOperand::Var(v) => self.emit_stack_load("t1", v.id * 8),
-            _ => self.emit("li t1, 0"),
-        }
+        self.emit_operand_to_register("t0", left);
+        self.emit_operand_to_register("t1", right);
 
         match op {
             BinaryOp::Add => self.emit("add t0, t0, t1"),
@@ -11927,6 +11918,32 @@ mod tests {
             undeclared.is_empty(),
             "bundled examples used mnemonics outside the declared internal assembler surface:\n{}",
             undeclared.join("\n")
+        );
+    }
+
+    #[test]
+    fn binary_codegen_materializes_narrow_integer_constants() {
+        let program = r#"
+module codegen::narrow_constants
+
+const MAX_COUNT: u8 = 10
+
+action check_count(count: u64) -> u64
+where
+    assert(count <= MAX_COUNT as usize, "too many")
+    return count
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("narrow integer constant comparison should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("li t1, 10\n    sgt t0, t0, t1"),
+            "binary comparison should materialize the u8 constant value instead of falling back to zero:\n{}",
+            assembly
         );
     }
 

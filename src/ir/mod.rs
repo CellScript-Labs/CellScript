@@ -397,7 +397,7 @@ pub struct IrGenerator {
     flow_state_fields: HashMap<String, String>,
     flow_rules: HashMap<String, Vec<IrFlowRule>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
-    constants: HashMap<String, Expr>,
+    constants: HashMap<String, (Type, Expr)>,
     function_effects: HashMap<String, EffectClass>,
     external_function_effects: HashMap<String, EffectClass>,
     function_return_types: HashMap<String, Option<IrType>>,
@@ -474,7 +474,7 @@ impl IrGenerator {
     pub fn generate(mut self, ast: &Module) -> Result<IrModule> {
         for item in &ast.items {
             if let Item::Const(c) = item {
-                self.constants.insert(c.name.clone(), c.value.clone());
+                self.constants.insert(c.name.clone(), (c.ty.clone(), c.value.clone()));
             }
             match item {
                 Item::Resource(r) => {
@@ -838,7 +838,7 @@ impl IrGenerator {
                 }
                 let size = self.type_fields.get(base_name).and_then(|fields| {
                     fields.values().try_fold(0usize, |acc, field_ty| {
-                        self.fixed_encoded_size_with_seen(field_ty, seen).map(|field_size| acc + field_size)
+                        self.fixed_encoded_size_with_seen(field_ty, seen).and_then(|field_size| acc.checked_add(field_size))
                     })
                 });
                 seen.remove(base_name);
@@ -1643,7 +1643,11 @@ impl IrGenerator {
             body.blocks.iter().filter(|block| matches!(block.terminator, IrTerminator::Jump(_) | IrTerminator::Branch { .. })).count()
                 as u64;
         let cell_ops = (body.consume_set.len() + body.read_refs.len() + body.create_set.len()) as u64;
-        (instruction_count * 8) + (branch_count * 4) + (cell_ops * 128) + 32
+        instruction_count
+            .saturating_mul(8)
+            .saturating_add(branch_count.saturating_mul(4))
+            .saturating_add(cell_ops.saturating_mul(128))
+            .saturating_add(32)
     }
 
     fn lower_stmts(
@@ -3360,13 +3364,62 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         match expr {
+            Expr::Integer(value) => match Self::integer_const_for_ir_type(*value, expected_ty) {
+                Some(value) => LoweredExpr { operand: IrOperand::Const(value), current: Some(current) },
+                None => {
+                    self.record_error(format!("integer literal {} is out of range for {:?}", value, expected_ty), Span::default());
+                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                }
+            },
             Expr::Array(items) if collection_item_ir_type(expected_ty).is_some() => {
                 self.lower_vec_literal_expr(items, expected_ty.clone(), current, blocks, vars)
             }
             Expr::Array(items) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
                 self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), current, blocks)
             }
-            _ => self.lower_expr(expr, current, blocks, vars),
+            _ => {
+                let lowered = self.lower_expr(expr, current, blocks, vars);
+                let Some(active) = lowered.current else {
+                    return lowered;
+                };
+                let actual_ty = self.operand_type(&lowered.operand);
+                if actual_ty != *expected_ty && Self::ir_numeric_widening_compatible(expected_ty, &actual_ty) {
+                    let block = self.block_mut(blocks, active);
+                    let widened = self.materialize_operand_with_type("widened", lowered.operand, expected_ty.clone(), block);
+                    LoweredExpr { operand: IrOperand::Var(widened), current: Some(active) }
+                } else {
+                    lowered
+                }
+            }
+        }
+    }
+
+    fn ir_numeric_widening_compatible(expected: &IrType, actual: &IrType) -> bool {
+        match (Self::ir_numeric_bit_width(expected), Self::ir_numeric_bit_width(actual)) {
+            (Some(expected), Some(actual)) => actual <= expected,
+            _ => false,
+        }
+    }
+
+    fn ir_numeric_bit_width(ty: &IrType) -> Option<u16> {
+        match ty {
+            IrType::U8 => Some(8),
+            IrType::U16 => Some(16),
+            IrType::U32 => Some(32),
+            IrType::U64 => Some(64),
+            IrType::U128 => Some(128),
+            _ => None,
+        }
+    }
+
+    fn integer_const_for_ir_type(value: u64, expected_ty: &IrType) -> Option<IrConst> {
+        match expected_ty {
+            IrType::U8 => u8::try_from(value).ok().map(IrConst::U8),
+            IrType::U16 => u16::try_from(value).ok().map(IrConst::U16),
+            IrType::U32 => u32::try_from(value).ok().map(IrConst::U32),
+            IrType::U64 => Some(IrConst::U64(value)),
+            IrType::U128 => Some(IrConst::U128(value as u128)),
+            _ => None,
         }
     }
 
@@ -4049,7 +4102,7 @@ impl IrGenerator {
                     let target = match &call.args[0] {
                         Expr::String(value) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
                         Expr::Identifier(name) => match self.constants.get(name) {
-                            Some(Expr::String(value)) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
+                            Some((_, Expr::String(value))) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
                             _ => {
                                 let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
                                 let active = lowered.current?;
@@ -4565,12 +4618,21 @@ impl IrGenerator {
     }
 
     fn lower_constant(&mut self, name: &str, span: Span) -> Option<IrOperand> {
-        let value = self.constants.get(name)?;
+        let (ty, value) = self.constants.get(name)?.clone();
         match value {
-            Expr::Integer(n) => Some(IrOperand::Const(IrConst::U64(*n))),
-            Expr::Bool(b) => Some(IrOperand::Const(IrConst::Bool(*b))),
+            Expr::Integer(n) => {
+                let expected_ty = Self::convert_type(&ty);
+                match Self::integer_const_for_ir_type(n, &expected_ty) {
+                    Some(value) => Some(IrOperand::Const(value)),
+                    None => {
+                        self.record_error(format!("constant '{}' is out of range for {:?}", name, expected_ty), span);
+                        None
+                    }
+                }
+            }
+            Expr::Bool(b) => Some(IrOperand::Const(IrConst::Bool(b))),
             Expr::ByteString(bytes) => {
-                let items = bytes.iter().copied().map(IrConst::U8).collect::<Vec<_>>();
+                let items = bytes.into_iter().map(IrConst::U8).collect::<Vec<_>>();
                 Some(IrOperand::Const(IrConst::Array(items)))
             }
             _ => {

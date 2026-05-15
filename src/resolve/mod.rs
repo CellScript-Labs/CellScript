@@ -181,12 +181,9 @@ impl ModuleResolver {
             }
 
             if let Some(full_path) = table.imported.get(name) {
-                let parts: Vec<&str> = full_path.split("::").collect();
-                if let Some(type_name) = parts.last() {
-                    for (mod_name, table) in &self.symbol_tables {
-                        if full_path.starts_with(mod_name) {
-                            return table.types.get(*type_name).cloned();
-                        }
+                if let Some((target_module, type_name)) = full_path.rsplit_once("::") {
+                    if let Some(target_table) = self.symbol_tables.get(target_module) {
+                        return target_table.types.get(type_name).cloned();
                     }
                 }
             }
@@ -249,7 +246,9 @@ impl ModuleResolver {
 
     pub fn resolve_type_global(&self, name: &str) -> Option<TypeDef> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.types.get(symbol).cloned())
+        let mut matches = self.symbol_tables.values().filter_map(|table| table.types.get(symbol).cloned());
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_function_global(&self, name: &str) -> Option<FunctionDef> {
@@ -258,14 +257,19 @@ impl ModuleResolver {
 
     pub fn resolve_function_global_with_module(&self, name: &str) -> Option<(String, FunctionDef)> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables
+        let mut matches = self
+            .symbol_tables
             .iter()
-            .find_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)))
+            .filter_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)));
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_constant_global(&self, name: &str) -> Option<ConstantDef> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.constants.get(symbol).cloned())
+        let mut matches = self.symbol_tables.values().filter_map(|table| table.constants.get(symbol).cloned());
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn imports_for_module(&self, module: &str) -> Vec<ImportItem> {
@@ -443,6 +447,81 @@ mod tests {
 
         assert!(matches!(resolver.resolve_type("cellscript::launch", "Token"), Some(TypeDef::Resource(_))));
         assert!(matches!(resolver.resolve_type("cellscript::launch", "MintAuthority"), Some(TypeDef::Resource(_))));
+    }
+
+    #[test]
+    fn test_imported_type_resolution_uses_exact_module_path() {
+        let mut resolver = ModuleResolver::new();
+
+        resolver
+            .register_module(Module {
+                name: "foo".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Type".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "small".to_string(), ty: Type::U8, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+        resolver
+            .register_module(Module {
+                name: "foobar".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Type".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "wide".to_string(), ty: Type::U64, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+        resolver
+            .register_module(Module {
+                name: "app".to_string(),
+                items: vec![Item::Use(UseStmt {
+                    module_path: vec!["foobar".to_string()],
+                    imports: vec![UseImport { name: "Type".to_string(), alias: None }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+
+        let Some(TypeDef::Struct(resolved)) = resolver.resolve_type("app", "Type") else {
+            panic!("expected imported struct to resolve");
+        };
+        assert_eq!(resolved.fields[0].name, "wide");
+    }
+
+    #[test]
+    fn test_global_type_resolution_rejects_ambiguous_symbol() {
+        let mut resolver = ModuleResolver::new();
+
+        for module_name in ["left", "right"] {
+            resolver
+                .register_module(Module {
+                    name: module_name.to_string(),
+                    items: vec![Item::Struct(StructDef {
+                        name: "Token".to_string(),
+                        type_id: None,
+                        default_hash_type: None,
+                        capacity_floor: None,
+                        fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                        span: Span::default(),
+                    })],
+                    span: Span::default(),
+                })
+                .unwrap();
+        }
+
+        assert!(resolver.resolve_type_global("Token").is_none());
+        assert!(resolver.resolve_type("left", "Token").is_some());
     }
 
     #[test]

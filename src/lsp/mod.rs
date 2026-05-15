@@ -1388,15 +1388,16 @@ impl LspServer {
             ranges.push(line_range);
         }
 
-        ranges.sort_by(|a, b| {
-            let a_size = (b.start.line - a.start.line) * 10000 + b.start.character.saturating_sub(a.start.character);
-            let b_size = (b.start.line - a.start.line) * 10000 + b.start.character.saturating_sub(a.start.character);
-            a_size.cmp(&b_size)
+        ranges.sort_by_key(|range| {
+            let line_span = range.end.line.saturating_sub(range.start.line) as u64;
+            let character_span = range.end.character.saturating_sub(range.start.character) as u64;
+            line_span.saturating_mul(10_000).saturating_add(character_span)
         });
 
-        let mut result = SelectionRange { range: ranges[0], parent: None };
-        for range in ranges.iter().skip(1) {
-            result = SelectionRange { range: *range, parent: Some(Box::new(result)) };
+        let mut sorted = ranges.into_iter().rev();
+        let mut result = SelectionRange { range: sorted.next()?, parent: None };
+        for range in sorted {
+            result = SelectionRange { range, parent: Some(Box::new(result)) };
         }
 
         Some(result)
@@ -2262,6 +2263,20 @@ mod tests {
 
         let keywords: Vec<_> = completions.iter().filter(|c| c.kind == CompletionItemKind::Keyword).collect();
         assert!(!keywords.is_empty());
+    }
+
+    #[test]
+    fn test_selection_range_orders_child_before_parent() {
+        let mut server = LspServer::new();
+        let uri = "file:///selection.cell".to_string();
+        let content = "module test\n\naction answer(x: u64) -> u64\nwhere\n    let y = x + 1\n    return y\n".to_string();
+
+        server.open_document(uri.clone(), content);
+        let selection = server.selection_range(&uri, Position { line: 4, character: 8 }).expect("selection range");
+        let parent = selection.parent.as_ref().expect("parent range");
+
+        assert!(position_le(parent.range.start, selection.range.start));
+        assert!(position_le(selection.range.end, parent.range.end));
     }
 
     #[test]

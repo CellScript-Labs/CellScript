@@ -554,13 +554,17 @@ impl Formatter {
                     .iter()
                     .map(|stmt| {
                         let mut formatter = Formatter::new(self.config.clone());
-                        formatter.indent_level = 0;
+                        formatter.indent_level = 1;
                         formatter.format_stmt(stmt);
-                        formatter.output.trim().to_string()
+                        formatter.output.trim_end().to_string()
                     })
                     .collect::<Vec<_>>()
-                    .join(" ");
-                format!("{{ {} }}", inner)
+                    .join("\n");
+                if inner.is_empty() {
+                    "{}".to_string()
+                } else {
+                    format!("{{\n{}\n}}", inner)
+                }
             }
             Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::Array(items) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
@@ -981,6 +985,31 @@ where
         let module2 = parser::parse(&tokens2).unwrap();
         let formatted2 = format_default(&module2).unwrap();
         assert_eq!(formatted, formatted2, "formatter round-trip failed for require block");
+    }
+
+    #[test]
+    fn format_round_trips_multiline_expression_block() {
+        let source = r#"
+module demo
+
+action calc(x: u64) -> u64
+where
+    let y = {
+        let z = x + 1
+        z
+    }
+    return y
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("let y = {\n    let z = x + 1\n    z\n}"), "unexpected formatted source:\n{}", formatted);
+
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for expression block");
     }
 
     #[test]

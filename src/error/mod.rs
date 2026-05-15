@@ -15,7 +15,8 @@ impl Span {
     }
 
     pub fn combine(&self, other: &Span) -> Span {
-        Span { start: self.start.min(other.start), end: self.end.max(other.end), line: self.line, column: self.column }
+        let (line, column) = if other.start < self.start { (other.line, other.column) } else { (self.line, self.column) };
+        Span { start: self.start.min(other.start), end: self.end.max(other.end), line, column }
     }
 }
 

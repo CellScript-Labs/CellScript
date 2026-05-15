@@ -21,6 +21,7 @@ struct FunctionSignature {
 struct FlowSpec {
     type_name: String,
     field_name: String,
+    field_ty: Type,
     field_enum_type: Option<String>,
     states: Vec<String>,
     transitions: Vec<StateTransition>,
@@ -625,7 +626,14 @@ impl<'a> TypeChecker<'a> {
             self.flow_state_fields.insert(type_name.clone(), field_name.clone());
             self.flows.insert(
                 type_name.clone(),
-                FlowSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
+                FlowSpec {
+                    type_name,
+                    field_name,
+                    field_ty: field_ty.clone(),
+                    field_enum_type,
+                    states,
+                    transitions: normalized_transitions,
+                },
             );
         }
 
@@ -1080,7 +1088,7 @@ impl<'a> TypeChecker<'a> {
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
         let mut env = self.env.clone();
-        let value_ty = self.infer_expr(&mut env, &const_def.value)?;
+        let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
             return Err(CompileError::new(
                 format!("const '{}' has type mismatch: expected {:?}, found {:?}", const_def.name, const_def.ty, value_ty),
@@ -2491,7 +2499,11 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
             Stmt::Return(Some(expr)) => {
-                let ty = self.infer_expr(env, expr)?;
+                let expected_return = self.current_return_type.clone();
+                let ty = match &expected_return {
+                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, expected, expr_span(expr))?,
+                    _ => self.infer_expr(env, expr)?,
+                };
                 match &self.current_return_type {
                     Some(Some(expected)) if !self.types_equal(expected, &ty) => {
                         return Err(CompileError::new(
@@ -2592,9 +2604,7 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_let_value_type(&mut self, env: &mut TypeEnv, let_stmt: &LetStmt) -> Result<Type> {
         if let Some(declared_ty) = &let_stmt.ty {
-            if matches!(let_stmt.value, Expr::Array(_)) {
-                return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
-            }
+            return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
         }
         if let Expr::Array(elems) = &let_stmt.value {
             if elems.is_empty() {
@@ -2614,8 +2624,32 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
+            Expr::Integer(value) => self.infer_integer_literal_with_expected_type(*value, expected_ty, span),
             Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
-            _ => self.infer_expr(env, expr),
+            _ => {
+                let actual_ty = self.infer_expr(env, expr)?;
+                if self.numeric_widening_compatible(expected_ty, &actual_ty) {
+                    Ok(expected_ty.clone())
+                } else {
+                    Ok(actual_ty)
+                }
+            }
+        }
+    }
+
+    fn infer_integer_literal_with_expected_type(&self, value: u64, expected_ty: &Type, span: Span) -> Result<Type> {
+        let fits = match expected_ty {
+            Type::U8 => value <= u8::MAX as u64,
+            Type::U16 => value <= u16::MAX as u64,
+            Type::U32 => value <= u32::MAX as u64,
+            Type::U64 | Type::U128 => true,
+            _ => return Ok(Type::U64),
+        };
+
+        if fits {
+            Ok(expected_ty.clone())
+        } else {
+            Err(CompileError::new(format!("integer literal {} is out of range for {}", value, type_repr(expected_ty)), span))
         }
     }
 
@@ -2629,7 +2663,7 @@ impl<'a> TypeChecker<'a> {
         if let Type::Named(name) = expected_ty {
             if let Some(item_ty) = self.parse_named_collection_item_type(name) {
                 for elem in elems {
-                    let actual_ty = self.infer_expr(env, elem)?;
+                    let actual_ty = self.infer_expr_with_expected_type(env, elem, &item_ty, expr_span(elem))?;
                     if self.type_contains_reference(&actual_ty) {
                         return Err(CompileError::new(
                             format!(
@@ -2664,7 +2698,7 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             for elem in elems {
-                let actual_ty = self.infer_expr(env, elem)?;
+                let actual_ty = self.infer_expr_with_expected_type(env, elem, item_ty, expr_span(elem))?;
                 if !self.types_equal(&actual_ty, item_ty) {
                     return Err(CompileError::new(
                         format!("array literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
@@ -3525,8 +3559,16 @@ impl<'a> TypeChecker<'a> {
             return Ok(None);
         };
         if states.iter().any(|state| state == state_name) {
-            if let Some(spec) = self.flows.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
-                return Ok(Some(Type::Named(spec.clone())));
+            if let Some(spec) = self.flows.get(type_name) {
+                if let Some(enum_name) = &spec.field_enum_type {
+                    return Ok(Some(Type::Named(enum_name.clone())));
+                }
+                return Ok(Some(spec.field_ty.clone()));
+            }
+            if let Some(field_name) = self.flow_state_fields.get(type_name) {
+                if let Some(field_ty) = self.resolve_named_type_fields(type_name).and_then(|fields| fields.get(field_name).cloned()) {
+                    return Ok(Some(field_ty));
+                }
             }
             return Ok(Some(Type::U64));
         }
@@ -3770,6 +3812,7 @@ impl<'a> TypeChecker<'a> {
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
         self.types_equal(actual, expected)
+            || self.numeric_widening_compatible(expected, actual)
             || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
     }
 
@@ -3891,7 +3934,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         if let Stmt::Expr(expr) = last {
-            let tail_ty = self.infer_expr(&mut tail_env, expr)?;
+            let tail_ty = self.infer_expr_with_expected_type(&mut tail_env, expr, return_type, expr_span(expr))?;
             if self.types_equal(&tail_ty, return_type) {
                 return Ok(true);
             }
@@ -4994,9 +5037,6 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
-        if self.is_numeric_type(a) && self.is_numeric_type(b) {
-            return true;
-        }
         match (a, b) {
             (Type::U8, Type::U8) => true,
             (Type::U16, Type::U16) => true,
@@ -5015,6 +5055,24 @@ impl<'a> TypeChecker<'a> {
             (Type::Ref(a1), Type::Ref(b1)) => self.types_equal(a1, b1),
             (Type::MutRef(a1), Type::MutRef(b1)) => self.types_equal(a1, b1),
             _ => false,
+        }
+    }
+
+    fn numeric_widening_compatible(&self, expected: &Type, actual: &Type) -> bool {
+        match (Self::numeric_bit_width(expected), Self::numeric_bit_width(actual)) {
+            (Some(expected), Some(actual)) => actual <= expected,
+            _ => false,
+        }
+    }
+
+    fn numeric_bit_width(ty: &Type) -> Option<u16> {
+        match ty {
+            Type::U8 => Some(8),
+            Type::U16 => Some(16),
+            Type::U32 => Some(32),
+            Type::U64 => Some(64),
+            Type::U128 => Some(128),
+            _ => None,
         }
     }
 
@@ -5822,6 +5880,17 @@ mod tests {
     fn source_module(source: &str) -> Module {
         let tokens = lexer::lex(source).unwrap();
         parser::parse(&tokens).unwrap()
+    }
+
+    #[test]
+    fn numeric_type_equality_respects_width() {
+        let checker = TypeChecker::new();
+
+        assert!(checker.types_equal(&Type::U64, &Type::U64));
+        assert!(!checker.types_equal(&Type::U8, &Type::U64));
+        assert!(!checker.types_equal(&Type::Array(Box::new(Type::U8), 1), &Type::Array(Box::new(Type::U64), 1)));
+        assert!(checker.numeric_widening_compatible(&Type::U64, &Type::U8));
+        assert!(!checker.numeric_widening_compatible(&Type::U8, &Type::U64));
     }
 
     #[test]

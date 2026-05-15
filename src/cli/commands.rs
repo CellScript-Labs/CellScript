@@ -17,6 +17,8 @@ use ckb_vm::{
 };
 use colored::Colorize;
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -910,7 +912,7 @@ impl CommandExecutor {
                 if !args.json {
                     println!("  Removing {}", path);
                 }
-                std::fs::remove_dir_all(path)?;
+                remove_clean_path(Path::new(path))?;
                 removed_paths.push(path.to_string());
             }
         }
@@ -2293,7 +2295,18 @@ impl CommandExecutor {
         credentials.insert(registry.clone(), RegistryCredential { registry: registry.clone(), token });
 
         let content = toml::to_string_pretty(&credentials)?;
-        std::fs::write(&credentials_path, content)?;
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+
+            let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&credentials_path)?;
+            file.write_all(content.as_bytes())?;
+            std::fs::set_permissions(&credentials_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&credentials_path, content)?;
+        }
 
         println!("{}", format!("Login credentials saved for {}", registry).green());
         println!("  Config directory: {}", config_dir.display());
@@ -2552,7 +2565,7 @@ fn ensure_new_package_destination(path: &Path) -> Result<()> {
 }
 
 fn init_git_repo(path: &Path) -> Result<bool> {
-    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg(path).output().map_err(|error| {
+    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg("--").arg(path).output().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to run git init for '{}': {}", path.display(), error))
     })?;
     if !output.status.success() {
@@ -2560,6 +2573,33 @@ fn init_git_repo(path: &Path) -> Result<bool> {
         return Err(crate::error::CompileError::without_span(format!("git init failed for '{}': {}", path.display(), stderr.trim())));
     }
     Ok(true)
+}
+
+fn remove_clean_path(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        std::fs::remove_file(path)?;
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let canonical = path.canonicalize()?;
+    if !canonical.starts_with(&cwd) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to remove '{}' because it resolves outside the current directory",
+            path.display()
+        )));
+    }
+
+    if !metadata.is_dir() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to clean '{}' because it is not a directory",
+            path.display()
+        )));
+    }
+
+    std::fs::remove_dir_all(path)?;
+    Ok(())
 }
 
 fn runtime_error_info_from_query(query: &str) -> Option<CellScriptRuntimeErrorInfo> {
