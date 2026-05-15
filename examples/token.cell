@@ -1,5 +1,13 @@
 module cellscript::fungible_token
 
+invariant token_amount_non_increase {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+}
+
 resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
     symbol: [u8; 8],

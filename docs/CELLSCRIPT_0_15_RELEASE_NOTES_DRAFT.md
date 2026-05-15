@@ -2,7 +2,7 @@
 
 **Status**: Release-gate draft for the `cellscript-0.15` implementation branch.
 
-**Updated**: 2026-04-28.
+**Updated**: 2026-05-15.
 
 CellScript 0.15 is the scoped-invariant and Covenant ProofPlan milestone. It
 makes verifier triggers, scope, coverage, builder assumptions, and enforcement
@@ -48,18 +48,23 @@ relations:
 ```cellscript
 assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 assert_conserved(Token.amount, scope = group)
-assert_delta(Token.amount, delta, scope = selected_cells)
+assert_delta(Token.amount, witness.delta, scope = selected_cells)
 assert_distinct(outputs<NFT>.token_id, scope = transaction)
 assert_singleton(Config.config_id, scope = group)
 ```
 
 Aggregate fields must resolve to fixed-width integer or fixed-byte schema
 fields. Dynamic tables, generic collections, and bool fields are rejected.
+Non-literal `assert_delta` arguments must be bound through `reads` to
+`witness.*` or `lock_args.*`, so the runtime delta has an auditable source.
 
-**Boundary**: Aggregate primitives are currently metadata-only. They emit
-`codegen_coverage_status: "gap:metadata-only"` and
-`status: "runtime-required"` until a later lowering pass proves them on
-chain.
+**Boundary**: Aggregate primitives are currently metadata-only for automatic
+aggregate verifier-loop lowering. They emit `codegen_coverage_status:
+"gap:metadata-only"` and `status: "runtime-required"` until a later lowering
+pass proves them on chain. 0.15 now also cross-references declared aggregate
+invariants against checked action obligations; matched obligations are reported
+as bounded action coverage, while unmatched declarations remain visible and
+gateable.
 
 ### Covenant ProofPlan Metadata
 
@@ -73,6 +78,7 @@ Runtime, action, function, and lock metadata expose ProofPlan records with:
 - identity/lifecycle policy
 - builder assumptions
 - diagnostics and codegen coverage status
+- matched/unmatched invariant action coverage
 
 `cellc explain-proof` prints trigger/scope/reads/coverage/on-chain status in
 human-readable and JSON output.
@@ -81,7 +87,8 @@ human-readable and JSON output.
 not `reads.witness`; witness remains reserved for transaction witness data.
 
 `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan
-gaps, including declared invariants whose coverage is still metadata-only.
+gaps, including declared invariants whose coverage is still metadata-only or
+whose action coverage is unmatched.
 
 Lock-group transaction risk diagnostics warn when a `lock_group` verifier
 scans transaction-wide views, because only inputs sharing that lock trigger
@@ -232,7 +239,8 @@ it is not a replacement for builder-backed CKB transaction evidence.
 ### Runtime-Obligation Policy Gate
 
 `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan
-gaps, including declared invariants whose coverage is still metadata-only.
+gaps, including declared invariants whose coverage is still metadata-only or
+whose action coverage is unmatched.
 
 ## New Syntax Reference
 
@@ -333,8 +341,12 @@ invariant no_duplicate_nft {
 
 0.15 does not include:
 
-- executable verifier lowering for aggregate invariants (metadata-only);
+- automatic executable verifier-loop lowering for aggregate invariants
+  (aggregate records remain metadata-only; existing action checks may be
+  cross-referenced but are not formal aggregate lowering);
 - automatic constraint placement between lock and type;
+- complete formal invariant satisfaction checking across all action effects
+  (v0.16 scope);
 - covenant helper stdlib;
 - Address/LockScript/LockHash type split;
 - explicit CKB script role declarations;

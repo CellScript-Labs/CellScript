@@ -2323,6 +2323,8 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         proof_plan.iter().flat_map(|plan| &plan.diagnostics).filter(|diagnostic| diagnostic.severity == "warning").count();
     let macro_provenance_count =
         proof_plan.iter().flat_map(|plan| &plan.coverage).filter(|coverage| coverage.starts_with("macro_expansion:")).count();
+    let invariant_action_match_count = invariant_action_coverage_match_count(proof_plan);
+    let invariant_unmatched_action_coverage_count = invariant_unmatched_action_coverage_count(proof_plan);
     let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
     let has_fail_closed_gaps = fail_closed_count > 0;
 
@@ -2335,10 +2337,48 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         "diagnostic_error_count": diagnostic_error_count,
         "diagnostic_warning_count": diagnostic_warning_count,
         "macro_provenance_count": macro_provenance_count,
+        "invariant_action_match_count": invariant_action_match_count,
+        "invariant_unmatched_action_coverage_count": invariant_unmatched_action_coverage_count,
         "has_runtime_required_gaps": has_runtime_required_gaps,
         "has_fail_closed_gaps": has_fail_closed_gaps,
+        "has_unmatched_invariant_action_coverage": invariant_unmatched_action_coverage_count > 0,
         "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
     })
+}
+
+fn invariant_action_coverage_match_count(proof_plan: &[ProofPlanMetadata]) -> usize {
+    proof_plan
+        .iter()
+        .flat_map(|plan| &plan.coverage)
+        .filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:"))
+        .count()
+}
+
+fn invariant_unmatched_action_coverage_count(proof_plan: &[ProofPlanMetadata]) -> usize {
+    proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.category == "aggregate-invariant"
+                && plan
+                    .builder_assumptions
+                    .iter()
+                    .any(|assumption| assumption.starts_with("declared(no_checked_action_obligation_matches:"))
+        })
+        .count()
+}
+
+fn invariant_unmatched_action_coverage_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
+    proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.category == "aggregate-invariant"
+                && plan
+                    .builder_assumptions
+                    .iter()
+                    .any(|assumption| assumption.starts_with("declared(no_checked_action_obligation_matches:"))
+        })
+        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+        .collect()
 }
 
 fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
@@ -2352,6 +2392,8 @@ fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
     println!("    diagnostic_warnings: {}", summary["diagnostic_warning_count"]);
     println!("    macro_provenance_records: {}", summary["macro_provenance_count"]);
+    println!("    invariant_action_matches: {}", summary["invariant_action_match_count"]);
+    println!("    invariant_unmatched_action_coverage: {}", summary["invariant_unmatched_action_coverage_count"]);
 }
 
 fn print_proof_plan_record(plan: &ProofPlanMetadata) {
@@ -2708,6 +2750,11 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             .collect::<Vec<_>>();
         if !runtime_required_proof_plan.is_empty() {
             violations.push(format!("runtime-required ProofPlan gaps: {}", runtime_required_proof_plan.join(", ")));
+        }
+
+        let unmatched_invariant_action_coverage = invariant_unmatched_action_coverage_summaries(&metadata.runtime.proof_plan);
+        if !unmatched_invariant_action_coverage.is_empty() {
+            violations.push(format!("unmatched invariant action coverage: {}", unmatched_invariant_action_coverage.join(", ")));
         }
 
         let transaction_invariants = transaction_invariant_checked_subcondition_summaries(metadata);

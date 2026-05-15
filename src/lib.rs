@@ -5406,6 +5406,7 @@ fn module_proof_plan_metadata(
             ir::IrItem::TypeDef(_) => {}
         }
     }
+    crate::proof_plan::link_invariant_action_coverage(&mut proof_plan);
     proof_plan
 }
 
@@ -23090,8 +23091,8 @@ invariant nft_uniqueness {
 invariant selected_token_delta {
     trigger: explicit_entry
     scope: selected_cells
-    reads: input<Token>.amount, output<Token>.amount
-    assert_delta(Token.amount, expected_delta, scope = selected_cells)
+    reads: input<Token>.amount, output<Token>.amount, witness.expected_delta
+    assert_delta(Token.amount, witness.expected_delta, scope = selected_cells)
 }
 
 resource Nft {
@@ -23124,12 +23125,126 @@ where
             .runtime
             .proof_plan
             .iter()
-            .find(|plan| plan.feature == "assert_delta:Token.amount:expected_delta")
+            .find(|plan| plan.feature == "assert_delta:Token.amount:witness.expected_delta")
             .expect("selected cell delta aggregate ProofPlan");
         assert_eq!(delta.category, "aggregate-invariant");
         assert_eq!(delta.scope, "selected_cells");
-        assert_eq!(delta.input_output_relation_checks, vec!["assert_delta:Token.amount:expected_delta=metadata-only"]);
+        assert_eq!(delta.input_output_relation_checks, vec!["assert_delta:Token.amount:witness.expected_delta=metadata-only"]);
         assert_eq!(delta.codegen_coverage_status, "gap:metadata-only");
+    }
+
+    #[test]
+    fn compile_rejects_unbound_assert_delta_argument() {
+        let source = r#"
+module test
+
+invariant selected_token_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: input<Token>.amount, output<Token>.amount
+    assert_delta(Token.amount, expected_delta, scope = selected_cells)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action run() -> u64
+where
+    return 0
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("uses unbound delta 'expected_delta'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_assert_delta_argument_from_cell_read() {
+        let source = r#"
+module test
+
+invariant selected_token_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: input<Token>.amount, output<Token>.amount
+    assert_delta(Token.amount, input<Token>.amount, scope = selected_cells)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action run() -> u64
+where
+    return 0
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("uses unbound delta 'input<Token>.amount'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn proof_plan_cross_references_matching_action_obligation_for_invariant() {
+        let source = r#"
+module test
+
+invariant token_supply_conserved {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token {
+        amount: amount
+    }
+    return out
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+        assert!(
+            aggregate.coverage.iter().any(|coverage| coverage
+                == "invariant_coverage:matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"),
+            "missing action coverage cross-reference: {:?}",
+            aggregate.coverage
+        );
+        assert!(
+            aggregate
+                .on_chain_checked_obligations
+                .iter()
+                .any(|obligation| obligation == "matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"),
+            "missing checked obligation cross-reference: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+        assert_eq!(aggregate.codegen_coverage_status, "gap:metadata-only");
+
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_matches=1/1"),
+            "missing declared invariant coverage summary: {:?}",
+            declared.coverage
+        );
     }
 
     #[test]

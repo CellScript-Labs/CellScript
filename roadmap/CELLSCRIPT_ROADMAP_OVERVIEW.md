@@ -228,8 +228,10 @@ coverage   = which cells are actually protected
 **Implementation status**: P0 complete, P1 partial. The following items have been implemented:
 
 - First-class script semantics (scoped invariants with trigger/scope/reads)
-- Aggregate invariant primitives (metadata-only)
+- Aggregate invariant primitives (metadata-only aggregate lowering, with
+  invariant/action coverage links)
 - Covenant ProofPlan metadata and `cellc explain-proof`
+- Invariant/action coverage summaries in ProofPlan, CLI, and audit docs
 - Runtime-obligation policy gate
 - Lock-group transaction risk diagnostics
 - Protocol macro provenance
@@ -244,6 +246,7 @@ Deferred to v0.16 production assurance:
 
 - executable verifier lowering for aggregate invariants
 - full ProofPlan soundness checker
+- formal invariant satisfaction gate beyond bounded action-coverage matching
 - full macro-only lowering with no protocol-name recognizers in core/codegen
 - covenant helper stdlib
 - `Address` / `LockScript` / `LockHash` type split
@@ -277,15 +280,19 @@ invariant udt_amount_non_increase {
 ```cellscript
 assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 assert_conserved(Token.amount, scope = group)
-assert_delta(Token.amount, delta, scope = selected_cells)
+assert_delta(Token.amount, witness.delta, scope = selected_cells)
 assert_distinct(outputs<NFT>.id, scope = transaction)
 assert_singleton(type_id, scope = group)
 ```
 
 - Every aggregate invariant must bind an explicit scope
 - Field types must be fixed-width integers or fixed bytes
-- Overflow and malformed cell data fail closed
-- UDT, pool, settlement, and covenant helpers lower through these primitives
+- Non-literal `assert_delta` values must be bound to `witness.*` or `lock_args.*`
+- Future executable aggregate lowering must fail closed on overflow and malformed
+  cell data
+- UDT, pool, settlement, and covenant helpers are represented through these
+  primitives in ProofPlan; executable aggregate verifier-loop lowering remains
+  v0.16 scope
 
 ### 5.3 Covenant ProofPlan (P0)
 
@@ -316,6 +323,8 @@ ProofPlan records:
 - on-chain checked obligations
 - builder assumptions
 - codegen coverage status
+- invariant action coverage status, including matched checked action obligations
+  and unmatched declarations
 
 ### 5.4 Protocol Macros Lower Through Scoped Invariants (P0)
 
@@ -370,6 +379,7 @@ v0.16 does not add another large DSL surface. It proves, validates, and operatio
 
 - formal semantics
 - ProofPlan soundness checks
+- invariant satisfaction/completeness checks
 - executable aggregate invariant lowering
 - macro-only protocol lowering
 - CKB standard compatibility suites
@@ -406,6 +416,11 @@ Rejected cases:
 - mismatched Source views
 - unchecked builder assumptions
 - missing emitted checks
+
+v0.16 also adds a separate invariant satisfaction gate: every declared
+invariant must have executable aggregate coverage or checked action-obligation
+coverage, otherwise strict mode fails instead of leaving the audit trail as a
+manual comparison exercise.
 
 ### 6.3 Standard CKB Compatibility Suite (P0)
 
@@ -496,9 +511,9 @@ dates, quarters, week counts, and effort estimates.
 
 **Implemented (v0.14)**: CellScript covers CKB's execution surface. Spawn/IPC enables bounded verifier reuse and delegated checks within explicit lock/type boundaries; it is not a promise of multi-tenant type-script composition. WitnessArgs, Source views, ScriptGroup, outputs_data binding, TYPE_ID metadata validation, script references, Capacity, and time constraints are explicit and testable.
 
-**Current (v0.15)**: CellScript is a semantic auditing layer for CKB transaction invariants. It does not hide lock/type differences; it shows when each invariant runs, what it reads, which cells it protects, which obligations are checked on-chain, and which are builder assumptions. Cell identity is now a first-class primitive; `create_unique`/`replace_unique` carry identity through the full compile pipeline. Destruction policies make it explicit whether you're proving output absence, identity continuation, or quantity delta. The capability vocabulary has been reset from protocol verbs (`transfer`, `destroy`) to kernel effects (`create`, `consume`, `replace`, `burn`, `relock`). A compat/strict migration path lets existing code compile with `--primitive-compat=0.14` while new code enforces v0.15 semantics with `--primitive-strict=0.15`.
+**Current (v0.15)**: CellScript is a semantic auditing layer for CKB transaction invariants. It does not hide lock/type differences; it shows when each invariant runs, what it reads, which cells it protects, which obligations are checked on-chain, which declared invariants match checked action obligations, and which are builder assumptions. Cell identity is now a first-class primitive; `create_unique`/`replace_unique` carry identity through the full compile pipeline. Destruction policies make it explicit whether you're proving output absence, identity continuation, or quantity delta. The capability vocabulary has been reset from protocol verbs (`transfer`, `destroy`) to kernel effects (`create`, `consume`, `replace`, `burn`, `relock`). A compat/strict migration path lets existing code compile with `--primitive-compat=0.14` while new code enforces v0.15 semantics with `--primitive-strict=0.15`.
 
-**After that (v0.16)**: CellScript turns those visible semantics into production assurance. It checks ProofPlan soundness, validates transactions against builder assumptions before signing, ships CKB compatibility fixtures, and produces audit bundles that link source, proof, generated code, metadata, and cycles.
+**After that (v0.16)**: CellScript turns those visible semantics into production assurance. It checks ProofPlan soundness, adds a strict invariant satisfaction gate, validates transactions against builder assumptions before signing, ships CKB compatibility fixtures, and produces audit bundles that link source, proof, generated code, metadata, and cycles.
 
 ---
 
@@ -528,6 +543,7 @@ dates, quarters, week counts, and effort estimates.
 | Lock covenant | `trigger: lock_group`, explicit reads and coverage diagnostics | v0.15 |
 | Type invariant | `trigger: type_group`, group-scoped invariants | v0.15 |
 | ProofPlan | `cellc explain-proof` trigger/scope/reads/coverage report | v0.15 |
+| Invariant action coverage | matched/unmatched declared invariant coverage in ProofPlan and audit docs | v0.15 |
 | Builder assumption metadata | ProofPlan `builder_assumptions` marked as not on-chain checked | v0.15 |
 | TypeID lifecycle | `identity ckb_type_id`, `create_unique`, `replace_unique`, `destroy_unique` | v0.15 |
 | Destruction policy | `destroy_singleton_type`, `destroy_instance`, `burn_amount`, `DestructionPolicy` | v0.15 |
@@ -535,6 +551,7 @@ dates, quarters, week counts, and effort estimates.
 | Identity policy | `IdentityPolicy` (`none`, `ckb_type_id`, `field`, `script_args`, `singleton_type`) | v0.15 |
 | Formal semantics | operational semantics spec + conformance fixtures | v0.16 |
 | Proof soundness | ProofPlan-to-code coverage checker | v0.16 |
+| Invariant satisfaction gate | strict coverage/completeness check for declared invariants | v0.16 |
 | Standard compatibility | CKB standard script fixture suites | v0.16 |
 | Transaction solving | `cellc solve-tx` / `cellc validate-tx` | v0.16 |
 | Deployment governance | deploy plan, dep locks, proof diff, audit bundle | v0.16 |

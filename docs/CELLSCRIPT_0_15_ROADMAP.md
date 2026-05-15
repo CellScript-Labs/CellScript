@@ -1,10 +1,13 @@
 # CellScript 0.15 Roadmap
 
-**Updated**: 2026-04-28
+**Updated**: 2026-05-15
 
 0.15 is the scoped-invariant and Covenant ProofPlan track. It builds on the
 0.14 CKB semantic surface by making verifier trigger, scope, reads, coverage,
 builder assumptions, and enforcement gaps explicit in source and metadata.
+It also records bounded invariant/action coverage links so auditors can see
+which checked action obligations satisfy a declared aggregate invariant and
+which declarations remain unmatched.
 
 ## Goals
 
@@ -26,10 +29,11 @@ builder assumptions, and enforcement gaps explicit in source and metadata.
 |---|---|---|
 | Scoped invariant syntax | Implemented | Top-level `invariant` declarations require explicit `trigger`, `scope`, and `reads`. Supported triggers are `explicit_entry`, `lock_group`, and `type_group`; supported scopes are `selected_cells`, `group`, and `transaction`. |
 | Invariant IR and metadata model | Implemented | Invariants are preserved through AST, type checking, IR, module metadata, formatting, LSP symbols, hover/completions, docs, and scoped CKB entry compilation. |
-| Aggregate invariant primitives | Implemented as metadata-only | `assert_sum`, `assert_conserved`, `assert_delta`, `assert_distinct`, and `assert_singleton` are parsed, type-checked, formatted, lowered into IR metadata, and emitted into ProofPlan records. Aggregate fields must resolve to fixed-width integer or fixed-byte schema fields. |
+| Aggregate invariant primitives | Implemented with metadata-only aggregate lowering and action-coverage links | `assert_sum`, `assert_conserved`, `assert_delta`, `assert_distinct`, and `assert_singleton` are parsed, type-checked, formatted, lowered into IR metadata, and emitted into ProofPlan records. Aggregate fields must resolve to fixed-width integer or fixed-byte schema fields. Non-literal `assert_delta` arguments must be bound through `reads` to `witness.*` or `lock_args.*`. |
 | Covenant ProofPlan metadata | Implemented | Runtime, action, function, and lock metadata expose ProofPlan records with trigger, scope, reads, coverage, relation checks, group cardinality, identity/lifecycle policy, builder assumptions, diagnostics, and codegen coverage status. |
 | `cellc explain-proof` | Implemented | The CLI emits human-readable and JSON ProofPlan output for packages and single `.cell` files. |
-| Runtime-obligation policy gate | Implemented | `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan gaps, including declared invariants whose coverage is still metadata-only. |
+| Invariant/action coverage cross-reference | Implemented | Declared aggregate invariants are matched against checked action obligations where the type, field, relation, and runtime coverage line up. Unmatched declarations are marked with `declared(no_checked_action_obligation_matches:...)` and warning diagnostics. |
+| Runtime-obligation policy gate | Implemented | `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan gaps, including declared invariants whose coverage is still metadata-only or whose action coverage is unmatched. |
 | Lock-group transaction risk diagnostics | Implemented | ProofPlan records warn when a `lock_group` verifier scans transaction-wide views, because only inputs sharing that lock trigger the verifier. |
 | Protocol macro provenance | Implemented | ProofPlan coverage records include macro provenance for selected compiler-recognized flows such as `transfer`, `create`, `claim`, `settle`, `consume`, `destroy`, and pool protocol metadata. |
 | Cell identity and TYPE_ID lifecycle | Implemented with executable local verifier boundary | `IdentityPolicy` enum (`none`, `ckb_type_id`, `field(path)`, `script_args`, `singleton_type`) is a first-class type metadata primitive. `TypeMetadata.identity_policy` exposes the policy in compiled JSON metadata. `create_unique<T>(identity = ...)` and `replace_unique<T>(identity = ...)` lower through identity-aware IR/codegen records. `replace_unique` preserves field, script-args/lock-hash, and singleton/type-hash identity on chain. `create_unique` anchors the declared identity to the created output and reports global uniqueness, including TYPE_ID builder-plan completion, as runtime-required. |
@@ -43,9 +47,15 @@ builder assumptions, and enforcement gaps explicit in source and metadata.
 ## Boundaries
 
 - Declared invariants and aggregate primitives are currently ProofPlan metadata,
-  not executable verifier lowering. They intentionally emit
+  not automatic aggregate verifier-loop lowering. They intentionally emit
   `codegen_coverage_status: "gap:metadata-only"` and `status:
-  "runtime-required"` until a later lowering pass proves them on chain.
+  "runtime-required"` until a later lowering pass proves them on chain. When a
+  matching checked action obligation already exists, ProofPlan records that
+  bounded action coverage separately; unmatched invariants remain visible and
+  gateable.
+- `assert_delta` accepts literal deltas, or non-literal deltas that are bound
+  through `reads` to `witness.*` or `lock_args.*`. Bare names and cell reads are
+  rejected so the ProofPlan cannot contain an untraceable runtime value.
 - `lock_group + transaction` means the verifier can inspect transaction-wide
   views, but the active CKB trigger is still the lock ScriptGroup. Builders and
   auditors must not read that as type-group conservation.
@@ -83,6 +93,7 @@ Focused 0.15 checks:
 cargo test --locked -p cellscript proof_plan --lib
 cargo test --locked -p cellscript aggregate_invariant --lib
 cargo test --locked -p cellscript explain_proof --test cli
+cargo test --locked -p cellscript docgen --lib
 cargo run --locked -p cellscript -- explain-proof examples/token.cell --target-profile ckb --json
 ```
 

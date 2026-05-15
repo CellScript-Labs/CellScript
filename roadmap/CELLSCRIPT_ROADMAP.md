@@ -23,7 +23,7 @@ The current project direction is simple:
 |---|---|---|
 | 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate now includes stateful business-flow/action coverage. | [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | 0.14 release scope | `nightly-0.14` carries the current CKB semantic-completeness exploration surface. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
-| 0.15 release scope | `nightly-0.15` adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, macro provenance, and identity-aware lifecycle forms. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 roadmap summary](../docs/CELLSCRIPT_0_15_ROADMAP.md), [0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
+| 0.15 release scope | `nightly-0.15` adds scoped invariants, aggregate invariant primitives, invariant/action coverage links, Covenant ProofPlan output, risk diagnostics, macro provenance, and identity-aware lifecycle forms. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 roadmap summary](../docs/CELLSCRIPT_0_15_ROADMAP.md), [0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -85,6 +85,8 @@ metadata-only declarations are already executable CKB verifier code:
   and `reads`;
 - aggregate primitives for sum, conservation, delta, distinct field, and
   singleton identity relations;
+- bounded invariant/action coverage links that show whether a declared
+  aggregate invariant matches a checked action obligation;
 - Covenant ProofPlan records for declared invariants, aggregate primitives,
   selected protocol flows, and pool protocol metadata;
 - diagnostics for risky coverage assumptions such as `lock_group` verifiers that

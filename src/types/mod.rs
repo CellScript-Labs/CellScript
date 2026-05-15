@@ -945,6 +945,9 @@ impl<'a> TypeChecker<'a> {
                         aggregate.span,
                     ));
                 }
+                if let Some(argument) = &aggregate.argument {
+                    self.validate_delta_argument_binding(invariant, aggregate, argument)?;
+                }
                 self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
             }
             AggregateInvariantKind::Sum => {
@@ -967,6 +970,29 @@ impl<'a> TypeChecker<'a> {
         }
 
         Ok(())
+    }
+
+    fn validate_delta_argument_binding(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, argument: &str) -> Result<()> {
+        if argument.chars().all(|ch| ch.is_ascii_digit()) || argument.starts_with('"') {
+            return Ok(());
+        }
+
+        let bound = invariant.reads.iter().any(|read| {
+            let read_source = read.split(['.', '<']).next();
+            let read_is_delta_source = matches!(read_source, Some("witness" | "lock_args"));
+            read_is_delta_source && (read == argument || read.rsplit('.').next().is_some_and(|field| field == argument))
+        });
+        if bound {
+            return Ok(());
+        }
+
+        Err(CompileError::new(
+            format!(
+                "assert_delta in invariant '{}' uses unbound delta '{}'; bind it through reads, for example `reads: witness.{}` and `assert_delta({}, witness.{}, scope = {})`",
+                invariant.name, argument, argument, aggregate.target, argument, aggregate.scope
+            ),
+            aggregate.span,
+        ))
     }
 
     fn validate_aggregate_field_target(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, target: &str) -> Result<()> {

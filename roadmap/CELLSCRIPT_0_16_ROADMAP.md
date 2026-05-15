@@ -16,12 +16,15 @@ v0.15 makes CKB invariants visible:
 - scope
 - reads
 - coverage
+- matched or unmatched action coverage for aggregate invariants
 - on-chain checked obligations
 - builder assumptions
 
 v0.16 answers the next questions:
 
 - Can we prove the invariant model is sound?
+- Can we prove that declared invariants are satisfied by emitted aggregate
+  checks or by checked action obligations?
 - Can CellScript match standard CKB contract behavior, ABI/layout, error behavior, and cycle envelopes where needed?
 - Can wallets/builders/indexers honor the assumptions emitted by the compiler?
 - Can developers debug, audit, deploy, and upgrade contracts without relying on ad hoc tooling?
@@ -58,6 +61,8 @@ soundness-checked, compatibility-tested production behavior:
 
 - executable verifier lowering for aggregate invariants
 - full ProofPlan soundness checking
+- formal invariant satisfaction checking beyond the bounded v0.15
+  action-coverage cross-reference
 - macro-only protocol lowering, with no protocol-name recognizers in core/codegen
 - covenant helper stdlib
 - `Address` / `LockScript` / `LockHash` type separation
@@ -112,6 +117,11 @@ Publish a machine-checkable or mechanically precise semantics for:
 
 `ProofPlan` is auditable metadata, not a proof. v0.16 must verify that ProofPlan obligations match emitted code and cannot overstate enforcement.
 
+This is a soundness check, not a completeness check: it proves that metadata does
+not lie about generated checks. The separate invariant satisfaction gate below
+proves, or fails closed when it cannot prove, that declared invariants are
+covered by executable aggregate lowering or by checked action obligations.
+
 **Change**
 
 Add soundness checks:
@@ -149,7 +159,46 @@ Add an internal checker that rejects:
 
 ---
 
-### 3. Executable Aggregate Invariant Lowering
+### 3. Invariant Satisfaction Gate
+
+**Problem**
+
+v0.15 now cross-references declared aggregate invariants with checked action
+obligations, but that is a bounded coverage heuristic. It catches useful gaps,
+yet it is not a full proof that every action preserves every declared invariant.
+
+**Change**
+
+Add a strict invariant satisfaction gate:
+
+```text
+declared invariant
+  -> aggregate obligation
+  -> executable aggregate lowering OR matched checked action obligation
+  -> satisfaction status
+```
+
+The checker must reject or explicitly mark:
+
+- declared invariants with no executable aggregate check and no matching checked action obligation
+- action effects that can obviously violate a declared invariant
+- aggregate obligations whose `reads` or `scope` cannot be related to an action obligation
+- `assert_delta` obligations whose delta source is not bound to witness or lock-args data
+- wildcard matches that ignore field, type, trigger, or scope mismatches
+
+**Acceptance**
+
+- strict mode fails when a declared invariant has no satisfaction evidence
+- satisfaction status appears in `cellc explain-proof`, JSON ProofPlan output,
+  docgen audit output, and audit bundles
+- negative fixtures cover missing action obligations, mismatched fields,
+  mismatched scopes, and unbound delta sources
+- bounded action-coverage matches from v0.15 remain visible, but cannot be
+  reported as formal satisfaction without this gate
+
+---
+
+### 4. Executable Aggregate Invariant Lowering
 
 **Problem**
 
@@ -184,7 +233,7 @@ Rules:
 
 ---
 
-### 4. Macro-Only Protocol Lowering
+### 5. Macro-Only Protocol Lowering
 
 **Problem**
 
@@ -220,7 +269,7 @@ Each stable macro must publish:
 
 ---
 
-### 5. Standard CKB Contract Compatibility Suite
+### 6. Standard CKB Contract Compatibility Suite
 
 **Problem**
 
@@ -264,7 +313,7 @@ Each suite must cover:
 
 ---
 
-### 6. Script Role and Lock Identity Precision
+### 7. Script Role and Lock Identity Precision
 
 **Problem**
 
@@ -301,7 +350,7 @@ action transfer(...)
 
 ---
 
-### 7. Builder Assumption Contract
+### 8. Builder Assumption Contract
 
 **Problem**
 
@@ -341,7 +390,7 @@ Add validation APIs:
 
 ## P1
 
-### 8. Versioned Data-Layout Policies
+### 9. Versioned Data-Layout Policies
 
 **Problem**
 
@@ -369,7 +418,7 @@ ProofPlan obligations.
 
 ---
 
-### 9. Non-TYPE-ID Global Uniqueness Proof Boundaries
+### 10. Non-TYPE-ID Global Uniqueness Proof Boundaries
 
 **Problem**
 
@@ -395,7 +444,7 @@ Define proof boundaries for non-TYPE-ID uniqueness:
 
 ---
 
-### 10. Transaction Solver
+### 11. Transaction Solver
 
 **Problem**
 
@@ -432,7 +481,7 @@ Solver responsibilities:
 
 ---
 
-### 11. Deployment and Upgrade Governance
+### 12. Deployment and Upgrade Governance
 
 **Problem**
 
@@ -467,7 +516,7 @@ cellc lock-deps
 
 ---
 
-### 12. Audit and Debug UX
+### 13. Audit and Debug UX
 
 **Problem**
 
@@ -505,7 +554,7 @@ cellc audit-bundle
 
 ---
 
-### 13. Standard Library Release Track
+### 14. Standard Library Release Track
 
 **Problem**
 
@@ -538,7 +587,7 @@ Rules:
 
 ## P2
 
-### 9. Advanced Linear Collections
+### 15. Advanced Linear Collections
 
 **Problem**
 
@@ -569,7 +618,7 @@ Constraints:
 
 ---
 
-### 10. Formal Verification Backend Exploration
+### 16. Formal Verification Backend Exploration
 
 **Problem**
 
@@ -598,6 +647,8 @@ v0.16 cannot ship until:
 
 - operational semantics document covers resource state, cell effects, triggers, scopes, and ProofPlan
 - ProofPlan soundness checker is mandatory in strict mode
+- invariant satisfaction gate is mandatory in strict mode and rejects declared
+  invariants with no executable aggregate coverage or checked action coverage
 - aggregate invariants have executable verifier lowering or fail strict executable coverage gates
 - stable protocol flows lower through stdlib macros, not protocol-name codegen recognizers
 - standard CKB compatibility suites cover accepted and rejected fixtures

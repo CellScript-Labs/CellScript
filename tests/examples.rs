@@ -3,7 +3,7 @@
 use camino::Utf8PathBuf;
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata,
+    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata, ProofPlanMetadata,
 };
 
 const BUNDLED_EXAMPLES: [&str; 7] =
@@ -221,7 +221,7 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 10,
+        BUNDLED_EXAMPLES.len() + 1 + 12,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 
@@ -1713,4 +1713,170 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         "simple_launch does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
         simple_launch.verifier_obligations
     );
+}
+
+#[test]
+fn canonical_examples_compile_under_primitive_strict_015() {
+    let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() };
+    for example in BUNDLED_EXAMPLES {
+        let path = example_path(example);
+        compile_file(&path, strict_options.clone())
+            .unwrap_or_else(|err| panic!("canonical example {example} should compile under --primitive-strict=0.15: {}", err.message));
+    }
+}
+
+fn assert_proof_plan_invariant_record(
+    proof_plan: &[ProofPlanMetadata],
+    category: &str,
+    trigger: &str,
+    scope: &str,
+    coverage_status: &str,
+    status: &str,
+    on_chain_checked: bool,
+) -> ProofPlanMetadata {
+    let record = proof_plan
+        .iter()
+        .find(|plan| plan.category == category)
+        .unwrap_or_else(|| panic!("no ProofPlan record with category '{}' found: {:?}", category, proof_plan));
+    assert_eq!(record.trigger, trigger, "wrong trigger for {category}: expected {trigger}, got {}", record.trigger);
+    assert_eq!(record.scope, scope, "wrong scope for {category}: expected {scope}, got {}", record.scope);
+    assert_eq!(
+        record.codegen_coverage_status, coverage_status,
+        "wrong coverage for {category}: expected {coverage_status}, got {}",
+        record.codegen_coverage_status
+    );
+    assert_eq!(record.status, status, "wrong status for {category}: expected {status}, got {}", record.status);
+    assert_eq!(record.on_chain_checked, on_chain_checked, "wrong on_chain_checked for {category}");
+    record.clone()
+}
+
+#[test]
+fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_scoped_invariant.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_scoped_invariant should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "scoped invariant example must emit ProofPlan records");
+
+    // All declared-invariant and aggregate-invariant records must be metadata-only
+    let declared = assert_proof_plan_invariant_record(
+        proof_plan,
+        "declared-invariant",
+        "type_group",
+        "group",
+        "gap:metadata-only",
+        "runtime-required",
+        false,
+    );
+    assert_eq!(declared.name, "token_amount_conservation");
+
+    // All 5 aggregate invariant primitives must appear in ProofPlan
+    let aggregate_names: Vec<&str> =
+        proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant").map(|plan| plan.feature.as_str()).collect();
+    assert!(aggregate_names.iter().any(|name| name.starts_with("assert_sum:")), "missing assert_sum aggregate: {:?}", aggregate_names);
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_conserved:")),
+        "missing assert_conserved aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_delta:")),
+        "missing assert_delta aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_distinct:")),
+        "missing assert_distinct aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_singleton:")),
+        "missing assert_singleton aggregate: {:?}",
+        aggregate_names
+    );
+
+    // Every aggregate-invariant record must be metadata-only
+    for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
+        assert_eq!(aggregate.codegen_coverage_status, "gap:metadata-only", "aggregate must be metadata-only: {:?}", aggregate);
+        assert_eq!(aggregate.status, "runtime-required", "aggregate must be runtime-required: {:?}", aggregate);
+        assert!(!aggregate.on_chain_checked, "aggregate must not be on_chain_checked: {:?}", aggregate);
+    }
+
+    // lock_group + transaction must produce coverage diagnostics
+    let lock_tx_invariant = proof_plan.iter().find(|plan| plan.trigger == "lock_group" && plan.scope == "transaction");
+    if let Some(record) = lock_tx_invariant {
+        assert!(
+            record
+                .diagnostics
+                .iter()
+                .any(|diag| diag.severity == "warning" && diag.message.contains("do not imply type-group conservation")),
+            "lock_group + transaction must warn about coverage: {:?}",
+            record.diagnostics
+        );
+    }
+}
+
+#[test]
+fn v0_15_identity_lifecycle_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_identity_lifecycle.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_identity_lifecycle should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "identity lifecycle example must emit ProofPlan records");
+
+    // create_unique and replace_unique must appear as transaction-invariant obligations
+    let create_unique_records = proof_plan.iter().filter(|plan| plan.feature.starts_with("create-unique-output:")).collect::<Vec<_>>();
+    assert!(!create_unique_records.is_empty(), "missing create_unique ProofPlan records");
+
+    let replace_unique_records =
+        proof_plan.iter().filter(|plan| plan.feature.starts_with("replace-unique-output:")).collect::<Vec<_>>();
+    assert!(!replace_unique_records.is_empty(), "missing replace_unique ProofPlan records");
+
+    // Identity lifecycle policy must appear in ProofPlan records
+    let identity_records = proof_plan.iter().filter(|plan| plan.identity_lifecycle_policy != "none").collect::<Vec<_>>();
+    assert!(!identity_records.is_empty(), "missing identity lifecycle policy records");
+
+    // Destruction policy records must appear
+    let destroy_records = proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.feature.starts_with("destroy-output-scan:")
+                || plan.feature.starts_with("destroy-unique:")
+                || plan.feature.starts_with("destroy-instance:")
+                || plan.feature.starts_with("burn-amount:")
+        })
+        .collect::<Vec<_>>();
+    assert!(!destroy_records.is_empty(), "missing destruction policy ProofPlan records");
+}
+
+#[test]
+fn token_cell_invariant_appears_in_proof_plan() {
+    let result =
+        compile_file(example_path("token.cell"), CompileOptions::default()).expect("token.cell with invariant should compile");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "token.cell must emit ProofPlan records");
+
+    // The declared invariant must appear alongside action obligations
+    let declared_invariant = proof_plan
+        .iter()
+        .find(|plan| plan.category == "declared-invariant")
+        .expect("token.cell must emit declared-invariant ProofPlan record");
+    assert_eq!(declared_invariant.name, "token_amount_non_increase");
+    assert_eq!(declared_invariant.trigger, "type_group");
+    assert_eq!(declared_invariant.scope, "group");
+    assert_eq!(declared_invariant.codegen_coverage_status, "gap:metadata-only");
+    assert_eq!(declared_invariant.status, "runtime-required");
+    assert!(!declared_invariant.on_chain_checked);
+
+    // Action obligations must still be present
+    let action_obligations =
+        proof_plan.iter().filter(|plan| plan.category != "declared-invariant" && plan.category != "aggregate-invariant").count();
+    assert!(action_obligations > 0, "token.cell action obligations must still appear in ProofPlan");
 }

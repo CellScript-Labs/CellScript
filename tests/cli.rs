@@ -2800,6 +2800,7 @@ where
     assert!(docs.contains("## Module `demo::main`"));
     assert!(docs.contains("### action `ping`"));
     assert!(docs.contains("## Lowering Audit Report"));
+    assert!(docs.contains("### Invariant Coverage"));
     assert!(docs.contains("### Verifier Obligations"));
 }
 
@@ -3049,6 +3050,9 @@ where
     assert_eq!(summary["status"], "ok");
     assert!(summary["proof_plan_summary"]["runtime_required_count"].as_u64().unwrap() > 0);
     assert!(summary["proof_plan_summary"]["metadata_only_gap_count"].as_u64().unwrap() > 0);
+    assert_eq!(summary["proof_plan_summary"]["invariant_action_match_count"].as_u64().unwrap(), 0);
+    assert_eq!(summary["proof_plan_summary"]["invariant_unmatched_action_coverage_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["has_unmatched_invariant_action_coverage"], true);
     assert_eq!(summary["proof_plan_summary"]["has_runtime_required_gaps"], true);
     assert_eq!(declared["category"], "declared-invariant");
     assert_eq!(declared["trigger"], "type_group");
@@ -3060,6 +3064,57 @@ where
         .unwrap()
         .iter()
         .any(|check| check == "assert_conserved:Token.amount=metadata-only"));
+}
+
+#[test]
+fn cellc_explain_proof_reports_invariant_action_coverage_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("token.cell");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token { amount: amount }
+    return out
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["proof_plan_summary"]["invariant_action_match_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["invariant_unmatched_action_coverage_count"].as_u64().unwrap(), 0);
+    assert_eq!(summary["proof_plan_summary"]["has_unmatched_invariant_action_coverage"], false);
+
+    let aggregate = summary["proof_plan"]
+        .as_array()
+        .expect("proof_plan array")
+        .iter()
+        .find(|plan| plan["origin"] == "invariant:token_conservation#aggregate:0")
+        .expect("aggregate invariant ProofPlan record");
+    assert!(aggregate["coverage"].as_array().unwrap().iter().any(|coverage| {
+        coverage.as_str().is_some_and(|coverage| {
+            coverage == "invariant_coverage:matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"
+        })
+    }));
 }
 
 #[test]
@@ -3148,6 +3203,7 @@ invariant token_conservation {
     trigger: type_group
     scope: group
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
     assert_invariant(true, "token amount is conserved")
 }
 
@@ -3170,6 +3226,7 @@ where
     assert!(stderr.contains("runtime-required ProofPlan gaps"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("invariant:token_conservation"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("gap:metadata-only"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("unmatched invariant action coverage"), "unexpected stderr: {}", stderr);
 }
 
 #[test]

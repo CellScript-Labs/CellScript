@@ -130,6 +130,69 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant) -> Vec<ProofPlanMetadata
     plans
 }
 
+pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
+    let checked_action_plans =
+        proof_plan.iter().filter(|plan| plan.origin.starts_with("action:") && plan.on_chain_checked).cloned().collect::<Vec<_>>();
+
+    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "aggregate-invariant") {
+        let Some(query) = aggregate_coverage_query(&plan.feature) else {
+            continue;
+        };
+        let matches = matching_action_coverage(&query, &checked_action_plans);
+        if matches.is_empty() {
+            plan.builder_assumptions
+                .push(format!("declared(no_checked_action_obligation_matches:{}.{})", query.type_name, query.field));
+            plan.diagnostics.push(ProofPlanDiagnosticMetadata {
+                severity: "warning".to_string(),
+                message: "aggregate invariant has no matching checked action obligation; it remains runtime-required until executable invariant lowering or action coverage closes it".to_string(),
+            });
+        } else {
+            plan.coverage.extend(matches.iter().map(|label| format!("invariant_coverage:{}", label)));
+            plan.on_chain_checked_obligations.extend(matches);
+            plan.builder_assumptions
+                .push(format!("declared(matched_checked_action_obligation_count:{})", plan.on_chain_checked_obligations.len()));
+        }
+        dedup(&mut plan.coverage);
+        dedup(&mut plan.on_chain_checked_obligations);
+        dedup(&mut plan.builder_assumptions);
+    }
+
+    let aggregate_summaries = proof_plan
+        .iter()
+        .filter(|plan| plan.category == "aggregate-invariant")
+        .filter_map(|plan| {
+            let (parent, _) = plan.origin.split_once("#aggregate:")?;
+            let matched =
+                plan.coverage.iter().filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:")).count();
+            Some((parent.to_string(), matched))
+        })
+        .collect::<Vec<_>>();
+
+    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "declared-invariant") {
+        let mut total = 0usize;
+        let mut matched = 0usize;
+        for (parent, count) in &aggregate_summaries {
+            if parent == &plan.origin {
+                total += 1;
+                matched += count.min(&1);
+            }
+        }
+        if total == 0 {
+            continue;
+        }
+        plan.coverage.push(format!("invariant_coverage:aggregate_action_matches={}/{}", matched, total));
+        if matched == 0 {
+            plan.builder_assumptions.push("declared(no_aggregate_action_coverage_matches)".to_string());
+        } else if matched < total {
+            plan.builder_assumptions.push(format!("declared(partial_aggregate_action_coverage:{}/{})", matched, total));
+        } else {
+            plan.builder_assumptions.push(format!("declared(all_aggregate_action_coverage_matched:{})", total));
+        }
+        dedup(&mut plan.coverage);
+        dedup(&mut plan.builder_assumptions);
+    }
+}
+
 fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
@@ -766,6 +829,130 @@ fn aggregate_feature_label(aggregate: &ir::IrAggregateInvariant) -> String {
         AggregateInvariantKind::Distinct => format!("assert_distinct:{}", aggregate.target),
         AggregateInvariantKind::Singleton => format!("assert_singleton:{}", aggregate.target),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggregateCoverageMode {
+    Equality,
+    NonIncrease,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AggregateCoverageQuery {
+    type_name: String,
+    field: String,
+    mode: AggregateCoverageMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AggregateTarget {
+    source: Option<String>,
+    type_name: String,
+    field: String,
+}
+
+fn aggregate_coverage_query(feature: &str) -> Option<AggregateCoverageQuery> {
+    if let Some(target) = feature.strip_prefix("assert_conserved:") {
+        let target = aggregate_target_parts(target)?;
+        return Some(AggregateCoverageQuery {
+            type_name: target.type_name,
+            field: target.field,
+            mode: AggregateCoverageMode::Equality,
+        });
+    }
+
+    let expression = feature.strip_prefix("assert_sum:")?;
+    let (left, relation, right) = split_sum_relation(expression)?;
+    let left = aggregate_target_parts(left)?;
+    let right = aggregate_target_parts(right)?;
+    if left.type_name != right.type_name || left.field != right.field {
+        return None;
+    }
+
+    let left_is_output = left.source.as_deref().is_some_and(source_is_output);
+    let left_is_input = left.source.as_deref().is_some_and(source_is_input);
+    let right_is_output = right.source.as_deref().is_some_and(source_is_output);
+    let right_is_input = right.source.as_deref().is_some_and(source_is_input);
+
+    let mode = if relation == "==" && ((left_is_output && right_is_input) || (left_is_input && right_is_output)) {
+        AggregateCoverageMode::Equality
+    } else if relation == "<=" && left_is_output && right_is_input {
+        AggregateCoverageMode::NonIncrease
+    } else if relation == ">=" && left_is_input && right_is_output {
+        AggregateCoverageMode::NonIncrease
+    } else {
+        return None;
+    };
+
+    Some(AggregateCoverageQuery { type_name: left.type_name, field: left.field, mode })
+}
+
+fn split_sum_relation(expression: &str) -> Option<(&str, &str, &str)> {
+    for relation in ["<=", ">=", "==", "<", ">"] {
+        if let Some((left, right)) = expression.split_once(relation) {
+            return Some((left, relation, right));
+        }
+    }
+    None
+}
+
+fn aggregate_target_parts(target: &str) -> Option<AggregateTarget> {
+    if let Some(type_start) = target.find('<') {
+        let type_end = target[type_start + 1..].find('>')? + type_start + 1;
+        let source = &target[..type_start];
+        let type_name = &target[type_start + 1..type_end];
+        let field = target[type_end + 1..].strip_prefix('.')?;
+        return Some(AggregateTarget { source: Some(source.to_string()), type_name: type_name.to_string(), field: field.to_string() });
+    }
+
+    let (type_name, field) = target.split_once('.')?;
+    Some(AggregateTarget { source: None, type_name: type_name.to_string(), field: field.to_string() })
+}
+
+fn source_is_input(source: &str) -> bool {
+    matches!(source, "input" | "inputs" | "group_input" | "group_inputs")
+}
+
+fn source_is_output(source: &str) -> bool {
+    matches!(source, "output" | "outputs" | "group_output" | "group_outputs")
+}
+
+fn matching_action_coverage(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut matches = action_plans
+        .iter()
+        .filter(|plan| action_plan_covers_query(query, plan))
+        .map(|plan| format!("matched-action-obligation:{}:{}={}", plan.origin, plan.feature, plan.status))
+        .collect::<Vec<_>>();
+    dedup(&mut matches);
+    matches
+}
+
+fn action_plan_covers_query(query: &AggregateCoverageQuery, plan: &ProofPlanMetadata) -> bool {
+    if plan.category != "transaction-invariant" || !plan.on_chain_checked {
+        return false;
+    }
+
+    if action_resource_conservation_covers_field(plan, &query.type_name, &query.field) {
+        return true;
+    }
+
+    query.mode == AggregateCoverageMode::NonIncrease
+        && query.field == "amount"
+        && plan.feature == format!("destroy-output-scan:{}", query.type_name)
+}
+
+fn action_resource_conservation_covers_field(plan: &ProofPlanMetadata, type_name: &str, field: &str) -> bool {
+    plan.feature == format!("resource-conservation:{}", type_name) && detail_fields_include(&plan.detail, field)
+}
+
+fn detail_fields_include(detail: &str, field: &str) -> bool {
+    let Some((_, fields)) = detail.split_once("fields:") else {
+        return false;
+    };
+    fields
+        .split([',', ';'])
+        .map(str::trim)
+        .any(|candidate| candidate == field || candidate.strip_suffix('.').is_some_and(|candidate| candidate == field))
 }
 
 fn aggregate_reads(aggregate: &ir::IrAggregateInvariant) -> Vec<String> {
