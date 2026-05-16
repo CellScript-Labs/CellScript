@@ -3269,6 +3269,71 @@ where
 }
 
 #[test]
+fn cellc_check_denies_checked_partial_proof_plan_gap() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Ticket has store {
+    state: u8
+    note: String
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket, note: String) -> output: Ticket
+    transition ticket.state: Created -> output.state: Active
+where
+    consume ticket
+    create output = Ticket {
+        state: Ticket::Active,
+        note: note
+    }
+"#,
+    )
+    .unwrap();
+
+    let explain = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(root).arg("--json").output().unwrap();
+    assert!(explain.status.success(), "stderr: {}", String::from_utf8_lossy(&explain.stderr));
+    let summary: serde_json::Value = serde_json::from_slice(&explain.stdout).unwrap();
+    assert_eq!(summary["proof_plan_summary"]["checked_partial_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["has_partial_gaps"], true);
+    assert_eq!(summary["proof_plan_summary"]["has_blocking_diagnostics"], true);
+    let partial = summary["proof_plan"]
+        .as_array()
+        .expect("proof_plan array")
+        .iter()
+        .find(|plan| plan["feature"] == "Ticket.state")
+        .expect("state transition ProofPlan record");
+    assert_eq!(partial["codegen_coverage_status"], "gap:checked-partial");
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("partial verifier obligations"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("partial ProofPlan gaps"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("Ticket.state"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("gap:checked-partial"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
 fn cellc_clean_subcommand_supports_json_summary() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

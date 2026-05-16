@@ -2337,6 +2337,7 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
     let record_count = proof_plan.len();
     let on_chain_checked_count = proof_plan.iter().filter(|plan| plan.on_chain_checked).count();
     let runtime_required_count = proof_plan.iter().filter(|plan| plan.status == "runtime-required").count();
+    let checked_partial_count = proof_plan.iter().filter(|plan| plan.status == "checked-partial").count();
     let metadata_only_gap_count = proof_plan.iter().filter(|plan| plan.codegen_coverage_status == "gap:metadata-only").count();
     let fail_closed_count =
         proof_plan.iter().filter(|plan| plan.status == "fail-closed" || plan.codegen_coverage_status == "fail-closed").count();
@@ -2349,12 +2350,14 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
     let invariant_action_match_count = invariant_action_coverage_match_count(proof_plan);
     let invariant_unmatched_action_coverage_count = invariant_unmatched_action_coverage_count(proof_plan);
     let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
+    let has_partial_gaps = proof_plan.iter().any(|plan| plan.status == "checked-partial" && !plan.on_chain_checked);
     let has_fail_closed_gaps = fail_closed_count > 0;
 
     serde_json::json!({
         "record_count": record_count,
         "on_chain_checked_count": on_chain_checked_count,
         "runtime_required_count": runtime_required_count,
+        "checked_partial_count": checked_partial_count,
         "metadata_only_gap_count": metadata_only_gap_count,
         "fail_closed_count": fail_closed_count,
         "diagnostic_error_count": diagnostic_error_count,
@@ -2363,9 +2366,10 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         "invariant_action_match_count": invariant_action_match_count,
         "invariant_unmatched_action_coverage_count": invariant_unmatched_action_coverage_count,
         "has_runtime_required_gaps": has_runtime_required_gaps,
+        "has_partial_gaps": has_partial_gaps,
         "has_fail_closed_gaps": has_fail_closed_gaps,
         "has_unmatched_invariant_action_coverage": invariant_unmatched_action_coverage_count > 0,
-        "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
+        "has_blocking_diagnostics": has_runtime_required_gaps || has_partial_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
     })
 }
 
@@ -2382,10 +2386,10 @@ fn invariant_unmatched_action_coverage_count(proof_plan: &[ProofPlanMetadata]) -
         .iter()
         .filter(|plan| {
             plan.category == "aggregate-invariant"
-                && plan
-                    .builder_assumptions
-                    .iter()
-                    .any(|assumption| assumption.starts_with("declared(no_checked_action_obligation_matches:"))
+                && plan.builder_assumptions.iter().any(|assumption| {
+                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
+                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
+                })
         })
         .count()
 }
@@ -2395,10 +2399,10 @@ fn invariant_unmatched_action_coverage_summaries(proof_plan: &[ProofPlanMetadata
         .iter()
         .filter(|plan| {
             plan.category == "aggregate-invariant"
-                && plan
-                    .builder_assumptions
-                    .iter()
-                    .any(|assumption| assumption.starts_with("declared(no_checked_action_obligation_matches:"))
+                && plan.builder_assumptions.iter().any(|assumption| {
+                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
+                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
+                })
         })
         .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
         .collect()
@@ -2410,6 +2414,7 @@ fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     println!("    records: {}", summary["record_count"]);
     println!("    on_chain_checked: {}", summary["on_chain_checked_count"]);
     println!("    runtime_required: {}", summary["runtime_required_count"]);
+    println!("    checked_partial: {}", summary["checked_partial_count"]);
     println!("    metadata_only_gaps: {}", summary["metadata_only_gap_count"]);
     println!("    fail_closed: {}", summary["fail_closed_count"]);
     println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
@@ -2791,6 +2796,17 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             violations.push(format!("runtime-required verifier obligations: {}", runtime_required_obligations.join(", ")));
         }
 
+        let partial_obligations = metadata
+            .runtime
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.status == "checked-partial")
+            .map(|obligation| format!("{}:{} ({})", obligation.scope, obligation.feature, obligation.category))
+            .collect::<Vec<_>>();
+        if !partial_obligations.is_empty() {
+            violations.push(format!("partial verifier obligations: {}", partial_obligations.join(", ")));
+        }
+
         let runtime_required_proof_plan = metadata
             .runtime
             .proof_plan
@@ -2800,6 +2816,17 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             .collect::<Vec<_>>();
         if !runtime_required_proof_plan.is_empty() {
             violations.push(format!("runtime-required ProofPlan gaps: {}", runtime_required_proof_plan.join(", ")));
+        }
+
+        let partial_proof_plan = metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .filter(|plan| plan.status == "checked-partial" && !plan.on_chain_checked)
+            .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+            .collect::<Vec<_>>();
+        if !partial_proof_plan.is_empty() {
+            violations.push(format!("partial ProofPlan gaps: {}", partial_proof_plan.join(", ")));
         }
 
         let unmatched_invariant_action_coverage = invariant_unmatched_action_coverage_summaries(&metadata.runtime.proof_plan);

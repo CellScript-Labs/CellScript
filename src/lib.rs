@@ -23168,6 +23168,10 @@ where
             .expect("selected cell delta aggregate ProofPlan");
         assert_eq!(delta.category, "aggregate-invariant");
         assert_eq!(delta.scope, "selected_cells");
+        assert!(delta.reads.contains(&"input".to_string()), "{:?}", delta.reads);
+        assert!(delta.reads.contains(&"output".to_string()), "{:?}", delta.reads);
+        assert!(delta.reads.contains(&"witness.expected_delta".to_string()), "{:?}", delta.reads);
+        assert!(delta.witness_fields.contains(&"witness.expected_delta".to_string()), "{:?}", delta.witness_fields);
         assert_eq!(delta.input_output_relation_checks, vec!["assert_delta:Token.amount:witness.expected_delta=metadata-only"]);
         assert_eq!(delta.codegen_coverage_status, "gap:metadata-only");
     }
@@ -23280,9 +23284,94 @@ where
             .find(|plan| plan.origin == "invariant:token_supply_conserved" && plan.category == "declared-invariant")
             .expect("declared invariant ProofPlan");
         assert!(
-            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_matches=1/1"),
+            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_evidence_matches=1/1"),
             "missing declared invariant coverage summary: {:?}",
             declared.coverage
+        );
+    }
+
+    #[test]
+    fn proof_plan_marks_invariant_action_evidence_as_non_exhaustive() {
+        let source = r#"
+module test
+
+invariant token_supply_conserved {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token { amount: amount }
+    return out
+
+action mint(amount: u64) -> Token
+where
+    let out = create Token { amount: amount }
+    return out
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+
+        assert!(
+            aggregate
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption == "declared(action_coverage_evidence_is_existential_not_exhaustive)"),
+            "missing existential evidence caveat: {:?}",
+            aggregate.builder_assumptions
+        );
+        assert!(
+            aggregate
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption.starts_with("declared(unmatched_related_action_obligation_count:1:action:mint")),
+            "mint action should remain unmatched related evidence: {:?}",
+            aggregate.builder_assumptions
+        );
+        assert!(
+            aggregate
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == "warning" && diagnostic.message.contains("related action origin")),
+            "missing non-exhaustive warning: {:?}",
+            aggregate.diagnostics
+        );
+
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_evidence_matches=1/1"),
+            "missing declared invariant evidence summary: {:?}",
+            declared.coverage
+        );
+        assert!(
+            !declared
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption.starts_with("declared(all_aggregate_action_coverage_matched:")),
+            "declared invariant must not claim exhaustive action coverage: {:?}",
+            declared.builder_assumptions
         );
     }
 
@@ -23383,8 +23472,8 @@ where
             .find(|plan| plan.origin == "invariant:token_amount_non_increasing" && plan.category == "declared-invariant")
             .expect("declared invariant ProofPlan");
         assert!(
-            declared.coverage.iter().any(|coverage| coverage.contains("aggregate_action_matches=1/1")),
-            "declared invariant should claim full aggregate action coverage via checked-runtime obligation: {:?}",
+            declared.coverage.iter().any(|coverage| coverage.contains("aggregate_action_evidence_matches=1/1")),
+            "declared invariant should report aggregate action evidence via checked-runtime obligation: {:?}",
             declared.coverage
         );
     }

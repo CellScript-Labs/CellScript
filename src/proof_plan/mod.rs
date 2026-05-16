@@ -131,14 +131,18 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant) -> Vec<ProofPlanMetadata
 }
 
 pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
-    let checked_action_plans =
-        proof_plan.iter().filter(|plan| plan.origin.starts_with("action:") && plan.on_chain_checked).cloned().collect::<Vec<_>>();
+    let action_plans = proof_plan.iter().filter(|plan| plan.origin.starts_with("action:")).cloned().collect::<Vec<_>>();
+    let checked_action_plans = action_plans.iter().filter(|plan| plan.on_chain_checked).cloned().collect::<Vec<_>>();
 
     for plan in proof_plan.iter_mut().filter(|plan| plan.category == "aggregate-invariant") {
         let Some(query) = aggregate_coverage_query(&plan.feature) else {
             continue;
         };
         let matches = matching_action_coverage(&query, &checked_action_plans);
+        let matched_origins = matching_action_origins(&query, &checked_action_plans);
+        let related_origins = related_action_origins(&query, &action_plans);
+        let unmatched_related_origins =
+            related_origins.iter().filter(|origin| !matched_origins.contains(*origin)).cloned().collect::<Vec<_>>();
         if matches.is_empty() {
             plan.builder_assumptions
                 .push(format!("declared(no_checked_action_obligation_matches:{}.{})", query.type_name, query.field));
@@ -151,6 +155,20 @@ pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
             plan.on_chain_checked_obligations.extend(matches);
             plan.builder_assumptions
                 .push(format!("declared(matched_checked_action_obligation_count:{})", plan.on_chain_checked_obligations.len()));
+            plan.builder_assumptions.push("declared(action_coverage_evidence_is_existential_not_exhaustive)".to_string());
+            if !unmatched_related_origins.is_empty() {
+                plan.builder_assumptions.push(format!(
+                    "declared(unmatched_related_action_obligation_count:{}:{})",
+                    unmatched_related_origins.len(),
+                    unmatched_related_origins.join(",")
+                ));
+                plan.diagnostics.push(ProofPlanDiagnosticMetadata {
+                    severity: "warning".to_string(),
+                    message:
+                        "aggregate invariant has matching action evidence, but at least one related action origin lacks a matching checked obligation"
+                            .to_string(),
+                });
+            }
         }
         dedup(&mut plan.coverage);
         dedup(&mut plan.on_chain_checked_obligations);
@@ -180,13 +198,13 @@ pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
         if total == 0 {
             continue;
         }
-        plan.coverage.push(format!("invariant_coverage:aggregate_action_matches={}/{}", matched, total));
+        plan.coverage.push(format!("invariant_coverage:aggregate_action_evidence_matches={}/{}", matched, total));
         if matched == 0 {
-            plan.builder_assumptions.push("declared(no_aggregate_action_coverage_matches)".to_string());
+            plan.builder_assumptions.push("declared(no_aggregate_action_evidence_matches)".to_string());
         } else if matched < total {
-            plan.builder_assumptions.push(format!("declared(partial_aggregate_action_coverage:{}/{})", matched, total));
+            plan.builder_assumptions.push(format!("declared(partial_aggregate_action_evidence:{}/{})", matched, total));
         } else {
-            plan.builder_assumptions.push(format!("declared(all_aggregate_action_coverage_matched:{})", total));
+            plan.builder_assumptions.push(format!("declared(all_aggregate_action_evidence_present:{})", total));
         }
         dedup(&mut plan.coverage);
         dedup(&mut plan.builder_assumptions);
@@ -715,6 +733,12 @@ fn diagnostics_for_plan(
             message: "obligation is not fully covered by generated on-chain code".to_string(),
         });
     }
+    if obligation.status == "checked-partial" {
+        diagnostics.push(ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "obligation is only partially covered by generated on-chain code".to_string(),
+        });
+    }
     if !builder_assumptions.is_empty() && obligation.status == "fail-closed" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "error".to_string(),
@@ -771,6 +795,8 @@ fn codegen_coverage_status(status: &str, on_chain_checked: bool) -> &str {
         "covered"
     } else if status == "runtime-required" {
         "gap:runtime-required"
+    } else if status == "checked-partial" {
+        "gap:checked-partial"
     } else if status == "fail-closed" {
         "fail-closed"
     } else {
@@ -925,6 +951,13 @@ fn matching_action_coverage(query: &AggregateCoverageQuery, action_plans: &[Proo
     matches
 }
 
+fn matching_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut origins =
+        action_plans.iter().filter(|plan| action_plan_covers_query(query, plan)).map(|plan| plan.origin.clone()).collect::<Vec<_>>();
+    dedup(&mut origins);
+    origins
+}
+
 fn action_plan_covers_query(query: &AggregateCoverageQuery, plan: &ProofPlanMetadata) -> bool {
     if plan.category != "transaction-invariant" || !plan.on_chain_checked {
         return false;
@@ -943,6 +976,53 @@ fn action_resource_conservation_covers_field(plan: &ProofPlanMetadata, type_name
     plan.feature == format!("resource-conservation:{}", type_name) && detail_fields_include(&plan.detail, field)
 }
 
+fn related_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut origins = action_plans
+        .iter()
+        .filter(|plan| action_plan_references_type(plan, &query.type_name))
+        .map(|plan| plan.origin.clone())
+        .collect::<Vec<_>>();
+    dedup(&mut origins);
+    origins
+}
+
+fn action_plan_references_type(plan: &ProofPlanMetadata, type_name: &str) -> bool {
+    matches!(plan.category.as_str(), "transaction-invariant" | "state-transition" | "cell-state" | "shared-state")
+        && proof_plan_feature_type_name(&plan.feature).is_some_and(|candidate| candidate == type_name)
+}
+
+fn proof_plan_feature_type_name(feature: &str) -> Option<&str> {
+    for prefix in [
+        "consume-input:",
+        "transfer-input:",
+        "claim-input:",
+        "settle-input:",
+        "destroy-input:",
+        "replace-unique-input:",
+        "create-output:",
+        "transfer-output:",
+        "claim-output:",
+        "settle-output:",
+        "create-unique-output:",
+        "replace-unique-output:",
+        "create-unique-identity:",
+        "replace-unique-identity:",
+        "destroy-output-scan:",
+        "destroy-unique:",
+        "destroy-instance:",
+        "burn-amount:",
+        "resource-conservation:",
+        "linear-collection:",
+        "mutable-cell:",
+        "shared-mutation:",
+    ] {
+        if let Some(rest) = feature.strip_prefix(prefix) {
+            return rest.split(':').next();
+        }
+    }
+    feature.split_once('.').map(|(type_name, _)| type_name)
+}
+
 fn detail_fields_include(detail: &str, field: &str) -> bool {
     let Some((_, fields)) = detail.split_once("fields:") else {
         return false;
@@ -959,13 +1039,22 @@ fn aggregate_reads(aggregate: &ir::IrAggregateInvariant) -> Vec<String> {
     if let Some(rhs) = &aggregate.rhs {
         reads.extend(reads_from_aggregate_target(rhs));
     }
-    if reads.is_empty() {
+    if matches!(aggregate.kind, AggregateInvariantKind::Delta) {
+        if let Some(argument) = &aggregate.argument {
+            reads.extend(reads_from_aggregate_argument(argument));
+        }
+    }
+    if !reads.iter().any(|read| matches!(read.as_str(), "input" | "output" | "group_input" | "group_output")) {
         match aggregate.scope.as_str() {
             "group" => {
                 reads.push("group_input".to_string());
                 reads.push("group_output".to_string());
             }
             "transaction" => {
+                reads.push("input".to_string());
+                reads.push("output".to_string());
+            }
+            "selected_cells" => {
                 reads.push("input".to_string());
                 reads.push("output".to_string());
             }
@@ -984,6 +1073,17 @@ fn reads_from_aggregate_target(target: &str) -> Vec<String> {
         "group_input" | "group_inputs" => vec!["group_input".to_string()],
         "group_output" | "group_outputs" => vec!["group_output".to_string()],
         _ => Vec::new(),
+    }
+}
+
+fn reads_from_aggregate_argument(argument: &str) -> Vec<String> {
+    if argument.chars().all(|ch| ch.is_ascii_digit()) || argument.starts_with('"') {
+        return Vec::new();
+    }
+    let base = argument.split('.').next().unwrap_or(argument);
+    match base {
+        "witness" | "lock_args" => vec![argument.to_string()],
+        _ => reads_from_aggregate_target(argument),
     }
 }
 

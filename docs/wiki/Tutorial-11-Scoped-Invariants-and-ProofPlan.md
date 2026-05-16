@@ -174,17 +174,23 @@ invariant is enforced by CKB-VM.
 
 ProofPlan also compares invariant claims with action evidence when possible. If
 an action has explicit `require`, `consume`, `create`, lifecycle, or cell-access
-summaries that match an aggregate claim, ProofPlan can report coverage links.
+summaries that match an aggregate claim, ProofPlan can report evidence links.
+These links are existential evidence, not a proof that every action touching the
+same type is covered.
 
 When there is no match, you may see assumptions such as:
 
 ```text
-declared(no_aggregate_action_coverage_matches)
+declared(no_aggregate_action_evidence_matches)
 ```
 
 That means the invariant is still a runtime-required obligation until executable
 invariant lowering, stronger action checks, or builder-side evidence closes the
 gap.
+
+When some related action origins still lack matching evidence, ProofPlan reports
+`declared(unmatched_related_action_obligation_count:...)` so reviewers do not
+mistake one matching action for exhaustive action coverage.
 
 ## JSON Output
 
