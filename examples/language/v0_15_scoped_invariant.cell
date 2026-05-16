@@ -1,7 +1,7 @@
 module cellscript::language::v0_15_scoped_invariant
 
 // v0.15 scoped invariant primitives: demonstrates all five aggregate
-// invariant kinds, three trigger types, and three scope types.
+// invariant kinds, explicit_entry/type_group triggers, and three scope types.
 
 resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
