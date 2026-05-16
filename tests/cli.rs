@@ -132,6 +132,45 @@ where
 }
 
 #[test]
+fn cellc_verify_artifact_primitive_strict_rechecks_disk_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("legacy.cell");
+    let output = dir.path().join("legacy.s");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+resource Token has store, destroy {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#,
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("verify-artifact")
+        .arg(&output)
+        .arg("--primitive-strict")
+        .arg("0.15")
+        .output()
+        .unwrap();
+
+    assert!(!verify.status.success(), "strict verification unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("primitive mode source verification failed"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("CS0151"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("legacy capability 'destroy'"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
 fn cellc_constraints_subcommand_surfaces_ckb_deployment_manifest() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

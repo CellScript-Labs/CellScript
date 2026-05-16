@@ -70,7 +70,7 @@ Useful settings:
 | Setting | Purpose |
 |---|---|
 | `cellscript.compilerPath` | Path to the `cellc` binary used for LSP and CLI-backed commands. |
-| `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a workspace when `cellc` is unavailable. |
+| `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a trusted workspace when `cellc` is unavailable. |
 | `cellscript.target` | Compiler target for command-backed reports: `riscv64-asm` or `riscv64-elf`. |
 | `cellscript.commandTimeoutMs` | Timeout for compiler-backed commands. |
 

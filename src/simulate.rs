@@ -164,6 +164,11 @@ impl SimulateInterpreter {
     pub fn simulate_action(&mut self, name: &str, args: &[SimValue]) -> Result<SimulateResult, SimulateError> {
         let key = format!("action::{}", name);
         let (params, body) = self.functions.get(&key).cloned().ok_or(SimulateError::UndefinedFunction { name: key })?;
+        if args.len() != params.len() {
+            return Err(SimulateError::Unsupported {
+                description: format!("action '{}' expects {} argument(s), got {}", name, params.len(), args.len()),
+            });
+        }
 
         for (param, arg) in params.iter().zip(args.iter()) {
             self.env.insert(param.name.clone(), arg.clone());
@@ -607,6 +612,21 @@ where
         let result = interp.simulate_action("add", &[SimValue::Integer(3), SimValue::Integer(5)]).unwrap();
         assert_eq!(result.return_value, SimValue::Integer(8));
         assert!(!result.has_cell_ops);
+    }
+
+    #[test]
+    fn simulate_rejects_wrong_action_arity() {
+        let source = r#"
+module sim_test
+
+action add(a: u64, b: u64) -> u64
+where
+    a + b
+"#;
+        let module = parse_module(source);
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let error = interp.simulate_action("add", &[SimValue::Integer(3)]).unwrap_err();
+        assert!(error.to_string().contains("expects 2 argument(s), got 1"), "{}", error);
     }
 
     #[test]

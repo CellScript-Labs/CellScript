@@ -107,7 +107,7 @@ Install `cellc` and make it available on `PATH`, or set
 `cellscript.compilerPath` to the full compiler path.
 
 When developing inside the CellScript Rust workspace, the extension can
-fall back to:
+fall back to this command after the workspace is trusted:
 
 ```bash
 cargo run -q -p cellscript --
@@ -133,7 +133,7 @@ automatically by the language server — no explicit commands needed.
 | Setting | Default | Description |
 |---|---:|---|
 | `cellscript.compilerPath` | `cellc` | Compiler binary used for the language server and CLI commands. |
-| `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable. |
+| `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable and the workspace is trusted. |
 | `cellscript.commandTimeoutMs` | `15000` | Timeout for compiler-backed CLI commands. |
 | `cellscript.maxOutputBytes` | `4194304` | Captured stdout/stderr limit. |
 | `cellscript.target` | `riscv64-asm` | Compiler target for compile/metadata/constraints commands. |

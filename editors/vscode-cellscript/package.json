@@ -143,7 +143,7 @@
         "cellscript.useCargoRunFallback": {
           "type": "boolean",
           "default": true,
-          "description": "If compilerPath is unavailable, try `cargo run -q -p cellscript --` from the workspace root."
+          "description": "If compilerPath is unavailable and the workspace is trusted, try `cargo run -q -p cellscript --` from the workspace root."
         },
         "cellscript.commandTimeoutMs": {
           "type": "number",

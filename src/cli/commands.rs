@@ -6,8 +6,8 @@ use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, Cell
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
-    TargetProfile, ENTRY_WITNESS_ABI,
+    validate_source_units_on_disk, validate_source_units_primitive_mode, ArtifactFormat, CompileMetadata, CompileOptions,
+    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
 };
 use camino::Utf8Path;
 #[cfg(feature = "vm-runner")]
@@ -351,6 +351,16 @@ impl CommandExecutor {
     }
 
     fn build(args: BuildArgs) -> Result<()> {
+        if let Some(jobs) = args.jobs {
+            if jobs == 0 {
+                return Err(crate::error::CompileError::without_span("cellc build --jobs must be at least 1"));
+            }
+            if jobs != 1 {
+                return Err(crate::error::CompileError::without_span(
+                    "cellc build --jobs is reserved for future parallel package builds; current builds compile one package entry, so omit --jobs or use --jobs 1",
+                ));
+            }
+        }
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
@@ -1805,8 +1815,13 @@ impl CommandExecutor {
             crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", metadata_path.display(), error))
         })?;
         let result = validate_artifact_metadata(artifact_bytes, metadata)?;
-        if args.verify_sources {
+        let primitive_compat = args.primitive_compat.clone();
+        let sources_verified = args.verify_sources || primitive_compat.is_some();
+        if sources_verified {
             validate_source_units_on_disk(&result.metadata)?;
+        }
+        if primitive_compat.is_some() {
+            validate_source_units_primitive_mode(&result.metadata, primitive_compat.clone())?;
         }
         validate_expected_target_profile(result.metadata.target_profile.name.as_str(), args.expect_target_profile.as_deref())?;
         validate_expected_metadata_hash(
@@ -1872,7 +1887,8 @@ impl CommandExecutor {
                 "runtime_required_pool_invariant_blocker_class_summaries": pool_invariant_family_blocker_class_summaries(&result.metadata, "runtime-required"),
                 "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
                 "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
-                "sources_verified": args.verify_sources,
+                "sources_verified": sources_verified,
+                "primitive_mode_verified": primitive_compat.is_some(),
                 "expected_target_profile_verified": expected_target_profile_verified,
                 "expected_hashes_verified": expected_hashes_verified,
                 "policy_verified": policy_verified,
@@ -1900,8 +1916,11 @@ impl CommandExecutor {
         if expected_hashes_verified {
             println!("  Expected hashes: verified");
         }
-        if args.verify_sources {
+        if sources_verified {
             println!("  Sources: verified {} unit(s)", result.metadata.source_units.len());
+        }
+        if primitive_compat.is_some() {
+            println!("  Primitive mode: verified");
         }
         if policy_verified {
             println!("  Policy: verified");
@@ -1941,32 +1960,23 @@ impl CommandExecutor {
                 .chain(result.metadata.locks.iter().filter(|lock| !lock.params.is_empty()).map(|lock| format!("lock {}", lock.name)))
                 .collect::<Vec<_>>();
             if !parameterized_entries.is_empty() {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Warning: {} requires transaction/parameter ABI context; falling back to simulate mode",
-                        parameterized_entries.join(", ")
-                    )
-                    .yellow()
-                );
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(format!(
+                    "cellc run only supports no-argument pure ELF entrypoints; {} requires transaction/parameter ABI context; use `cellc run --simulate` for AST-level simulation or build a transaction witness with `cellc entry-witness`",
+                    parameterized_entries.join(", ")
+                )));
             }
 
             if result.metadata.runtime.ckb_runtime_required {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Warning: CKB runtime required ({}); falling back to simulate mode",
-                        result.metadata.runtime.ckb_runtime_features.join(", ")
-                    )
-                    .yellow()
-                );
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(format!(
+                    "cellc run cannot provide CKB transaction/syscall context ({}); use `cellc run --simulate` for AST-level simulation or run builder-backed CKB acceptance",
+                    result.metadata.runtime.ckb_runtime_features.join(", ")
+                )));
             }
 
             if !result.metadata.runtime.standalone_runner_compatible {
-                eprintln!("{}", "Warning: ELF is not standalone-compatible; falling back to simulate mode".yellow());
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(
+                    "cellc run only supports standalone-compatible no-argument pure ELF entrypoints; use `cellc run --simulate` for AST-level simulation",
+                ));
             }
 
             let vm_args = args.args.into_iter().map(|arg| arg.into_bytes()).collect::<Vec<_>>();
@@ -3781,7 +3791,14 @@ impl CliParser {
                             .conflicts_with("entry-action")
                             .help("Compile only this lock as the artifact entrypoint"),
                     )
-                    .arg(Arg::new("jobs").long("jobs").short('j').value_name("N").help("Number of parallel jobs"))
+                    .arg(
+                        Arg::new("jobs")
+                            .long("jobs")
+                            .short('j')
+                            .value_name("N")
+                            .value_parser(clap::value_parser!(usize))
+                            .help("Reserved for future parallel package builds; only 1 is currently accepted"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON build summary"))
                     .arg(
                         Arg::new("production")
@@ -4211,7 +4228,7 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 entry_action: m.get_one::<String>("entry-action").cloned(),
                 entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                jobs: m.get_one::<String>("jobs").and_then(|s| s.parse().ok()),
+                jobs: m.get_one::<usize>("jobs").copied(),
                 json: m.get_flag("json"),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),

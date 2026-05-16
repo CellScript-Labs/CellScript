@@ -477,18 +477,22 @@ dist/
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("Warning: git pull failed for {}: {}", clone_dir.display(), stderr.trim());
+            return Err(format!("git fetch failed for {}: {}", clone_dir.display(), stderr.trim()));
         }
 
         Ok(())
     }
 
     fn git_checkout(clone_dir: &Path, ref_str: &str) -> std::result::Result<(), String> {
-        let _output = std::process::Command::new("git")
+        let fetch = std::process::Command::new("git")
             .args(["fetch", "origin", ref_str])
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git fetch: {}", e))?;
+        if !fetch.status.success() {
+            let stderr = String::from_utf8_lossy(&fetch.stderr);
+            return Err(format!("git fetch {} failed: {}", ref_str, stderr.trim()));
+        }
 
         let output = std::process::Command::new("git")
             .args(["checkout", ref_str])
@@ -1400,5 +1404,19 @@ rev = "abc123"
         assert!(error.message.contains("remote"));
         assert!(error.message.contains("https://example.invalid/remote.git"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_git_update_fails_closed_on_fetch_error() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = tempdir().unwrap();
+        let output = std::process::Command::new("git").arg("init").current_dir(temp.path()).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+        let error = PackageManager::git_update(temp.path()).unwrap_err();
+        assert!(error.contains("git fetch failed"), "{}", error);
     }
 }

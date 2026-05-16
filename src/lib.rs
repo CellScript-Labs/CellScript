@@ -2689,6 +2689,37 @@ pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_source_units_primitive_mode(metadata: &CompileMetadata, primitive_compat: Option<String>) -> Result<()> {
+    let options = CompileOptions { primitive_compat, ..CompileOptions::default() };
+    validate_compile_options(&options)?;
+    if !options.is_primitive_strict() {
+        return Ok(());
+    }
+
+    for unit in &metadata.source_units {
+        if unit.path.starts_with('<') && unit.path.ends_with('>') {
+            return Err(CompileError::without_span(format!(
+                "primitive mode verification requires disk-backed source units, got '{}'",
+                unit.path
+            )));
+        }
+        let path = Utf8Path::new(&unit.path);
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| CompileError::without_span(format!("failed to read source unit '{}': {}", unit.path, error)))?;
+        let tokens = lexer::lex(&source).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+        let ast = parser::parse(&tokens).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+        check_primitive_strict_015(&ast).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+    }
+
+    Ok(())
+}
+
 pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
     validate_compile_metadata(&result.metadata, result.artifact_format)?;
 
