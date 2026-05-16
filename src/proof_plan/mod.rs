@@ -598,7 +598,7 @@ fn lock_args_fields(params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccess
 }
 
 fn on_chain_checked(status: &str) -> bool {
-    matches!(status, "checked-runtime" | "checked-static" | "ckb-runtime")
+    matches!(status, "checked-runtime" | "ckb-runtime")
 }
 
 fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_primitives: &[PoolPrimitiveMetadata]) -> Vec<String> {
