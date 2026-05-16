@@ -5037,6 +5037,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::U8, Type::U8) => true,
