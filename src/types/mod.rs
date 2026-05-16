@@ -4032,6 +4032,7 @@ impl<'a> TypeChecker<'a> {
                 env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)
             }
             Expr::Match(match_expr) => {
+                self.mark_expr_as_moved(env, &match_expr.expr)?;
                 let mut arm_envs = Vec::with_capacity(match_expr.arms.len());
                 for arm in &match_expr.arms {
                     let mut arm_env = env.child();
@@ -5036,6 +5037,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::U8, Type::U8) => true,
