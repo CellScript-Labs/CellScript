@@ -23256,6 +23256,109 @@ where
     }
 
     #[test]
+    fn proof_plan_checked_static_excluded_from_on_chain_checked_obligations() {
+        // Regression test for Bug 7: checked-static obligations must NOT be
+        // conflated with on-chain-checked status, and must NOT satisfy aggregate
+        // invariant coverage matches.
+        let source = r#"
+module test
+
+resource Token has destroy {
+    amount: u64,
+}
+
+invariant token_amount_non_increasing {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
+
+        // The burn action should carry a checked-static obligation for destroy,
+        // NOT a checked-runtime obligation.
+        let burn_action = result.metadata.actions.iter().find(|action| action.name == "burn").expect("burn action metadata");
+        assert!(
+            burn_action.verifier_obligations.iter().any(|obligation| {
+                obligation.category == "resource-operation"
+                    && obligation.feature == "destroy:Token"
+                    && obligation.status == "checked-static"
+            }),
+            "expected checked-static destroy obligation: {:?}",
+            burn_action.verifier_obligations
+        );
+        assert!(
+            !burn_action.verifier_obligations.iter().any(|obligation| {
+                obligation.category == "resource-operation"
+                    && obligation.feature == "destroy:Token"
+                    && obligation.status == "checked-runtime"
+            }),
+            "destroy must NOT be checked-runtime: {:?}",
+            burn_action.verifier_obligations
+        );
+
+        // The corresponding ProofPlan for the action must NOT set on_chain_checked.
+        let action_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "action:burn" && plan.feature == "destroy:Token")
+            .expect("action ProofPlan for destroy");
+        assert!(!action_plan.on_chain_checked, "checked-static action plan must have on_chain_checked=false");
+        assert!(
+            action_plan.on_chain_checked_obligations.is_empty(),
+            "checked-static action plan must have empty on_chain_checked_obligations: {:?}",
+            action_plan.on_chain_checked_obligations
+        );
+
+        // The aggregate invariant must NOT match the checked-static obligation
+        // as a coverage-closing cross-reference.
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_amount_non_increasing#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+        assert!(
+            !aggregate.on_chain_checked_obligations.iter().any(|obligation| obligation.contains("destroy:Token")),
+            "aggregate invariant must NOT include checked-static destroy in on_chain_checked_obligations: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+        // Because the destroy action also emits a checked-runtime transaction-invariant
+        // obligation (destroy-output-scan), the aggregate WILL match that runtime
+        // obligation. The critical regression check is that the checked-static
+        // resource-operation obligation does NOT leak in, which we verified above.
+        assert!(
+            aggregate.on_chain_checked_obligations.iter().any(|obligation| obligation.contains("destroy-output-scan:Token")),
+            "aggregate invariant SHOULD match the checked-runtime destroy-output-scan obligation: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+
+        // Declared invariant must report full action coverage (1/1) because the
+        // checked-runtime destroy-output-scan satisfies the aggregate.
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_amount_non_increasing" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage.contains("aggregate_action_matches=1/1")),
+            "declared invariant should claim full aggregate action coverage via checked-runtime obligation: {:?}",
+            declared.coverage
+        );
+    }
+
+    #[test]
     fn compile_metadata_warns_for_lock_group_transaction_invariant_scope() {
         let source = r#"
 module test
