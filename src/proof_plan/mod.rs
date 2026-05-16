@@ -876,9 +876,7 @@ fn aggregate_coverage_query(feature: &str) -> Option<AggregateCoverageQuery> {
 
     let mode = if relation == "==" && ((left_is_output && right_is_input) || (left_is_input && right_is_output)) {
         AggregateCoverageMode::Equality
-    } else if relation == "<=" && left_is_output && right_is_input {
-        AggregateCoverageMode::NonIncrease
-    } else if relation == ">=" && left_is_input && right_is_output {
+    } else if (relation == "<=" && left_is_output && right_is_input) || (relation == ">=" && left_is_input && right_is_output) {
         AggregateCoverageMode::NonIncrease
     } else {
         return None;

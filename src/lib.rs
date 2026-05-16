@@ -57,8 +57,8 @@ pub struct CompileOptions {
 
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
-    pub fn is_primitive_strict_015(&self) -> bool {
-        self.primitive_compat.as_deref() == Some("0.15")
+    pub fn is_primitive_strict(&self) -> bool {
+        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17" | "0.18"))
     }
 
     /// Returns true when running in v0.14 compat mode (the default when
@@ -71,6 +71,14 @@ impl CompileOptions {
 fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
+    }
+    if let Some(mode) = options.primitive_compat.as_deref() {
+        if !matches!(mode, "0.14" | "0.15") {
+            return Err(CompileError::without_span(format!(
+                "unsupported primitive compatibility mode '{}'; supported values: 0.14, 0.15",
+                mode
+            )));
+        }
     }
     Ok(())
 }
@@ -3722,7 +3730,7 @@ fn compile_ast_with_build(
     let artifact_format = ArtifactFormat::from_target(resolve_target(options, build))?;
 
     // 2.5. Primitive compat/strict mode: reject v0.14 protocol verbs in strict mode
-    if options.is_primitive_strict_015() {
+    if options.is_primitive_strict() {
         check_primitive_strict_015(ast)?;
     };
 

@@ -97,6 +97,8 @@ impl<'a> Parser<'a> {
             TokenKind::Launch => Some("launch".to_string()),
             TokenKind::Assert => Some("assert".to_string()),
             TokenKind::Preserve => Some("preserve".to_string()),
+            TokenKind::Claim => Some("claim".to_string()),
+            TokenKind::Settle => Some("settle".to_string()),
             TokenKind::Address => Some("Address".to_string()),
             TokenKind::Hash => Some("Hash".to_string()),
             TokenKind::Env => Some("env".to_string()),
@@ -2168,6 +2170,15 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_primary()?;
 
         loop {
+            // Allow multiline method chains by skipping newlines before a dot,
+            // but still break if the next non-newline token is not a postfix operator.
+            while self.check(&TokenKind::Newline) {
+                if self.peek(1).kind == TokenKind::Dot {
+                    self.advance(); // skip the newline
+                } else {
+                    break;
+                }
+            }
             if self.check(&TokenKind::Newline) {
                 break;
             }
@@ -2241,13 +2252,9 @@ impl<'a> Parser<'a> {
             TokenKind::Assert => self.parse_assert(),
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
+            TokenKind::Claim => self.parse_claim_expr(),
+            TokenKind::Settle => self.parse_settle_expr(),
             _ if self.ident_like_name().is_some() => {
-                if matches!(self.ident_like_name().as_deref(), Some("claim")) && !self.check_next_lparen() {
-                    return self.parse_claim_expr();
-                }
-                if matches!(self.ident_like_name().as_deref(), Some("settle")) && !self.check_next_lparen() {
-                    return self.parse_settle_expr();
-                }
                 let name = self.parse_name_path()?;
                 // v0.15 destruction policy forms (context-sensitive identifiers)
                 match name.as_str() {
@@ -2295,10 +2302,6 @@ impl<'a> Parser<'a> {
             }
             _ => Err(CompileError::new(format!("unexpected token in expression: {}", self.current().kind), self.current().span)),
         }
-    }
-
-    fn check_next_lparen(&self) -> bool {
-        self.peek(1).kind == TokenKind::LParen
     }
 
     fn parse_array_expr(&mut self) -> Result<Expr> {
