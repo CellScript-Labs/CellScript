@@ -21,7 +21,7 @@ This tutorial explains the syntax introduced and tightened in the 0.13 surface:
 - named output bindings: `-> (next: T, receipt: R)`;
 - `where` proof blocks;
 - singular state edges with colons: `transition old.state: A -> new.state: B`;
-- prefix source qualifiers: `read`, `protected`, `witness`, and `lock_args`;
+- prefix source qualifiers: `read`, `witness` (actions and locks), `protected` and `lock_args` (locks only);
 - named output constraints: `create out = T { ... }`;
 - explicit lifecycle verbs: `consume` and `destroy`.
 
@@ -543,9 +543,9 @@ Common source qualifiers:
 | Syntax | Meaning |
 |---|---|
 | `read config: T` | Read-only CellDep/reference-backed data. |
-| `protected cell: T` | A lock-guarded Cell view. |
+| `protected cell: T` | A lock-guarded Cell view (lock parameters only). |
 | `witness sig: T` | Decoded witness data. |
-| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
+| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args` (lock parameters only). |
 
 Expression-level `read_ref<T>()` still exists for lower-level reference reads.
 At the action boundary, prefer the prefix form:
@@ -996,8 +996,8 @@ When writing 0.13-style actions, use this checklist:
 
 - Put Cell-backed inputs on the left side of the action signature.
 - Put proposed output Cells on the right side as named outputs.
-- Use `read`, `protected`, `witness`, and `lock_args` as prefix source
-  qualifiers.
+- Use `read` and `witness` as prefix source qualifiers in actions and locks.
+- Use `protected` and `lock_args` as prefix source qualifiers in locks only.
 - Keep ordinary scalar arguments as ordinary parameters.
 - Put `transition` clauses before `where`.
 - Use `transition field: From -> field: To`, with colons.
