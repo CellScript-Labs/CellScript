@@ -301,7 +301,7 @@ python3 scripts/validate_cellscript_tooling_release.py
 
 **Prompt**：
 > 作为工具链审计员，验证：
-> - `Cargo.toml` 版本 == `Cargo.lock` 版本 == VS Code `package.json` 版本 == `CHANGELOG.md` 首行版本。
+> - `Cargo.toml` 版本 == `Cargo.lock` 版本 == VS Code `package.json` 版本 == `CHANGELOG.md` 首个版本条目（如 `## 0.15.0 - ...`）。
 > - `src/lib.rs` 中 `VERSION` 使用 `env!("CARGO_PKG_VERSION")`。
 > - `src/main.rs` 中 `#[command(version = cellscript::VERSION)]`。
 > - VS Code 扩展包含完整的 LSP 客户端配置（`--lsp`、`TransportKind.stdio`）。
