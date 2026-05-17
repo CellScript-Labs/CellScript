@@ -2862,13 +2862,35 @@ impl CodeGenerator {
                         self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
                     }
                 }
+                IrOperand::Const(IrConst::U8(n)) => {
+                    if *n != 0 {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
+                    } else {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
+                    }
+                }
+                IrOperand::Const(IrConst::U16(n)) => {
+                    if *n != 0 {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
+                    } else {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
+                    }
+                }
+                IrOperand::Const(IrConst::U32(n)) => {
+                    if *n != 0 {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
+                    } else {
+                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
+                    }
+                }
                 IrOperand::Var(v) => {
                     self.emit_stack_load("t0", v.id * 8);
                     self.emit(format!("beqz t0, .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
                     self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
                 }
                 _ => {
-                    self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
+                    self.emit("# cellscript abi: fail closed because branch condition is not a boolean or integer");
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                 }
             },
         }
@@ -5595,7 +5617,8 @@ impl CodeGenerator {
                 }
             }
             _ => {
-                self.emit("# cellscript abi: cannot store unknown const type to scratch".to_string());
+                self.emit("# cellscript abi: fail closed because unknown const type cannot be stored to scratch");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             }
         }
     }
@@ -5692,7 +5715,7 @@ impl CodeGenerator {
                     self.emit_stack_load("t1", var.id * 8);
                 }
             }
-            _ => self.emit("li t1, 0"),
+            operand => self.emit_operand_to_register("t1", operand),
         }
     }
 
@@ -6864,11 +6887,7 @@ impl CodeGenerator {
     }
 
     fn emit_unary(&mut self, dest: &IrVar, op: UnaryOp, operand: &IrOperand) -> Result<()> {
-        match operand {
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t0, {}", n)),
-            IrOperand::Var(v) => self.emit_stack_load("t0", v.id * 8),
-            _ => self.emit("li t0, 0"),
-        }
+        self.emit_operand_to_register("t0", operand);
 
         match op {
             UnaryOp::Neg => self.emit("neg t0, t0"),
@@ -7180,8 +7199,7 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t1, {}", n)),
-            _ => self.emit("li t1, 0"),
+            operand => self.emit_operand_to_register("t1", operand),
         }
 
         let bounds_ok = self.fresh_label("molecule_vector_index_bounds_ok");
@@ -7278,8 +7296,7 @@ impl CodeGenerator {
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li t1, {}", n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li t1, {}", n)),
-            IrOperand::Const(IrConst::U64(n)) => self.emit(format!("li t1, {}", n)),
-            _ => self.emit("li t1, 0"),
+            operand => self.emit_operand_to_register("t1", operand),
         }
 
         // Bounds check: index < len
@@ -9023,7 +9040,11 @@ impl CodeGenerator {
         ));
         let input_index = match operand {
             IrOperand::Var(var) => self.consume_indices.get(&var.id).copied().unwrap_or(0),
-            _ => 0,
+            _ => {
+                self.emit("# cellscript abi: fail closed because replace_unique identity input is not a consumed cell variable");
+                self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
+                return;
+            }
         };
         match identity {
             IrIdentityPolicy::None => {}

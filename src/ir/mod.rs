@@ -1182,6 +1182,36 @@ impl IrGenerator {
                     self.check_expr_effects(elem, footprint);
                 }
             }
+            Expr::Transfer(transfer) => {
+                footprint.has_consume = true;
+                self.check_expr_effects(&transfer.expr, footprint);
+                self.check_expr_effects(&transfer.to, footprint);
+            }
+            Expr::Claim(claim) => {
+                footprint.has_consume = true;
+                self.check_expr_effects(&claim.receipt, footprint);
+            }
+            Expr::Settle(settle) => {
+                footprint.has_consume = true;
+                self.check_expr_effects(&settle.expr, footprint);
+            }
+            Expr::CreateUnique(cu) => {
+                footprint.has_create = true;
+                for (_, value) in &cu.fields {
+                    self.check_expr_effects(value, footprint);
+                }
+                if let Some(lock) = &cu.lock {
+                    self.check_expr_effects(lock, footprint);
+                }
+            }
+            Expr::ReplaceUnique(ru) => {
+                footprint.has_consume = true;
+                footprint.has_create = true;
+                self.check_expr_effects(&ru.expr, footprint);
+                for (_, value) in &ru.fields {
+                    self.check_expr_effects(value, footprint);
+                }
+            }
             _ => {}
         }
     }
@@ -1961,7 +1991,32 @@ impl IrGenerator {
             Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars),
             Expr::If(if_expr) => self.lower_if_expr(if_expr, current, blocks, vars),
             Expr::Match(match_expr) => self.lower_match_expr(match_expr, current, blocks, vars),
-            Expr::Cast(cast) => self.lower_expr(&cast.expr, current, blocks, vars),
+            Expr::Cast(cast) => {
+                let lowered = self.lower_expr(&cast.expr, current, blocks, vars);
+                let Some(active) = lowered.current else {
+                    return lowered;
+                };
+                let target_ty = Self::convert_type(&cast.ty);
+                match &lowered.operand {
+                    IrOperand::Const(value) => {
+                        if let Some(converted) = Self::cast_const(value, &target_ty) {
+                            LoweredExpr { operand: IrOperand::Const(converted), current: Some(active) }
+                        } else {
+                            self.record_error(
+                                format!("constant cast from {:?} to {:?} is not supported", value, target_ty),
+                                cast.span,
+                            );
+                            LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) }
+                        }
+                    }
+                    IrOperand::Var(var) if var.ty == target_ty => lowered,
+                    operand => {
+                        let block = self.block_mut(blocks, active);
+                        let dest = self.materialize_operand_with_type("cast", operand.clone(), target_ty, block);
+                        LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+                    }
+                }
+            }
             Expr::Array(items) => self.lower_array_expr(items, current, blocks, vars),
             Expr::Tuple(items) => self.lower_tuple_expr(items, current, blocks, vars),
             Expr::String(_) => {
@@ -3073,7 +3128,9 @@ impl IrGenerator {
 
         for (field_name, field_expr) in &cu.fields {
             let expected_ty = self.type_fields.get(&cu.ty).and_then(|fields| fields.get(field_name)).cloned();
-            let lowered = if let Some(expected_ty) = expected_ty {
+            let lowered = if let Some(state_operand) = self.lower_flow_state_initializer(&cu.ty, field_name, field_expr) {
+                LoweredExpr { operand: state_operand, current: Some(active) }
+            } else if let Some(expected_ty) = expected_ty {
                 self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
             } else {
                 self.lower_expr(field_expr, active, blocks, vars)
@@ -3140,7 +3197,9 @@ impl IrGenerator {
 
         for (field_name, field_expr) in &ru.fields {
             let expected_ty = self.type_fields.get(&ru.ty).and_then(|fields| fields.get(field_name)).cloned();
-            let lowered = if let Some(expected_ty) = expected_ty {
+            let lowered = if let Some(state_operand) = self.lower_flow_state_initializer(&ru.ty, field_name, field_expr) {
+                LoweredExpr { operand: state_operand, current: Some(active) }
+            } else if let Some(expected_ty) = expected_ty {
                 self.lower_expr_with_expected_type(field_expr, &expected_ty, active, blocks, vars)
             } else {
                 self.lower_expr(field_expr, active, blocks, vars)
@@ -3419,6 +3478,46 @@ impl IrGenerator {
             IrType::U32 => u32::try_from(value).ok().map(IrConst::U32),
             IrType::U64 => Some(IrConst::U64(value)),
             IrType::U128 => Some(IrConst::U128(value as u128)),
+            _ => None,
+        }
+    }
+
+    fn cast_const(value: &IrConst, target_ty: &IrType) -> Option<IrConst> {
+        match (value, target_ty) {
+            (IrConst::Unit, IrType::Unit) => Some(IrConst::Unit),
+            (IrConst::Bool(b), IrType::Bool) => Some(IrConst::Bool(*b)),
+            (IrConst::Bool(b), IrType::U8) => Some(IrConst::U8(*b as u8)),
+            (IrConst::Bool(b), IrType::U16) => Some(IrConst::U16(*b as u16)),
+            (IrConst::Bool(b), IrType::U32) => Some(IrConst::U32(*b as u32)),
+            (IrConst::Bool(b), IrType::U64) => Some(IrConst::U64(*b as u64)),
+            (IrConst::U8(n), IrType::U8) => Some(IrConst::U8(*n)),
+            (IrConst::U8(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
+            (IrConst::U8(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
+            (IrConst::U8(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
+            (IrConst::U8(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
+            (IrConst::U16(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
+            (IrConst::U16(n), IrType::U16) => Some(IrConst::U16(*n)),
+            (IrConst::U16(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
+            (IrConst::U16(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
+            (IrConst::U16(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
+            (IrConst::U32(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
+            (IrConst::U32(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
+            (IrConst::U32(n), IrType::U32) => Some(IrConst::U32(*n)),
+            (IrConst::U32(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
+            (IrConst::U32(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
+            (IrConst::U64(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
+            (IrConst::U64(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
+            (IrConst::U64(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
+            (IrConst::U64(n), IrType::U64) => Some(IrConst::U64(*n)),
+            (IrConst::U64(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
+            (IrConst::U128(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
+            (IrConst::U128(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
+            (IrConst::U128(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
+            (IrConst::U128(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
+            (IrConst::U128(n), IrType::U128) => Some(IrConst::U128(*n)),
+            (IrConst::Address(a), IrType::Address) => Some(IrConst::Address(*a)),
+            (IrConst::Hash(h), IrType::Hash) => Some(IrConst::Hash(*h)),
+            (value, IrType::Named(name)) if name == "usize" || name == "isize" => Self::cast_const(value, &IrType::U64),
             _ => None,
         }
     }
@@ -3955,15 +4054,6 @@ impl IrGenerator {
                 }
                 "Hash::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Hash([0; 32])), current: Some(current) })
-                }
-                "env::current_timepoint" if call.args.is_empty() => {
-                    let dest = self.new_var("current_timepoint", IrType::U64);
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
-                        dest: Some(dest.clone()),
-                        func: "__env_current_timepoint".to_string(),
-                        args: Vec::new(),
-                    });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
                 "env::current_timepoint" if call.args.is_empty() => {
                     let dest = self.new_var("current_timepoint", IrType::U64);
@@ -5362,6 +5452,41 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
             for stmt in stmts {
                 collect_ast_stmt_effects(stmt, footprint);
             }
+        }
+        Expr::StdlibCall(call) => {
+            for arg in &call.args {
+                collect_ast_expr_effects(arg, footprint);
+            }
+        }
+        Expr::CreateUnique(cu) => {
+            footprint.has_create = true;
+            for (_, value) in &cu.fields {
+                collect_ast_expr_effects(value, footprint);
+            }
+            if let Some(lock) = &cu.lock {
+                collect_ast_expr_effects(lock, footprint);
+            }
+        }
+        Expr::ReplaceUnique(ru) => {
+            footprint.has_consume = true;
+            footprint.has_create = true;
+            collect_ast_expr_effects(&ru.expr, footprint);
+            for (_, value) in &ru.fields {
+                collect_ast_expr_effects(value, footprint);
+            }
+        }
+        Expr::Transfer(transfer) => {
+            footprint.has_consume = true;
+            collect_ast_expr_effects(&transfer.expr, footprint);
+            collect_ast_expr_effects(&transfer.to, footprint);
+        }
+        Expr::Claim(claim) => {
+            footprint.has_consume = true;
+            collect_ast_expr_effects(&claim.receipt, footprint);
+        }
+        Expr::Settle(settle) => {
+            footprint.has_consume = true;
+            collect_ast_expr_effects(&settle.expr, footprint);
         }
         Expr::Tuple(items) | Expr::Array(items) => {
             for item in items {

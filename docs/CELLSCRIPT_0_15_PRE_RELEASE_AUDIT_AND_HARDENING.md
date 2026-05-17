@@ -515,3 +515,94 @@ A passing positive transaction without corresponding negative evidence is not su
 4. 任何 lock 缺少 valid-spend 或 invalid-spend 证据 → **禁止发布**。
 5. 最终生产硬化门控未明确记录为 passed → **禁止发布**。
 6. 存在未记录的 `runtime-required` ProofPlan 义务 → **禁止发布**（必须在 release notes 中列出）。
+
+---
+
+## Appendix D: IR Lowering Audit Findings & Fixes
+
+**Audit scope**: `src/ir/mod.rs` (~6K lines) — lowering of AST (`Expr`, `Stmt`, `Item`) to `IrModule`.
+
+**Audit date**: 2026-05-17
+
+### D.1 Bug: `create_unique` / `replace_unique` missing flow-state initializer
+
+**Severity**: Medium — affects identity-aware lifecycle cells that also use flow states.
+
+**Description**: `lower_create_expr` calls `lower_flow_state_initializer` to auto-convert state-name identifiers (e.g. `state = Active`) into their numeric index constants during IR lowering. Both `lower_create_unique_expr` and `lower_replace_unique_expr` omitted this call, meaning `create_unique<T> { state = Active }` would lower `Active` as an unresolved identifier rather than a state index.
+
+**Root cause**: Copy-paste omission when `CreateUniqueExpr` and `ReplaceUniqueExpr` were added in 0.15.
+
+**Fix**: Added the `lower_flow_state_initializer` guard to both functions (lines ~3075 and ~3145).
+
+**Verification**: All 652 tests pass after fix.
+
+### D.2 Bug: `Expr::Cast` is a no-op
+
+**Severity**: Low — CellScript 0.15 primarily uses `U64`; cast expressions are rare in production code.
+
+**Description**: `Expr::Cast(cast) => self.lower_expr(&cast.expr, ...)` completely ignores `cast.ty`, so any explicit cast produces the same IR as its inner expression with no type conversion instruction.
+
+**Risk**: If future front-end code introduces cross-width arithmetic (e.g. `x as u32`), codegen will emit the un-widened/narrowed value, potentially causing silent truncation or sign bugs.
+
+**Fix**: Added proper cast lowering in `lower_expr`:
+- Constant folding: `cast_const` converts `IrConst` values across all integer widths (U8/U16/U32/U64/U128), Bool, Address, and Hash, including `usize`/`isize` → U64.
+- Variable casts: `materialize_operand_with_type` ensures the destination variable carries the target IR type, so codegen emits the correctly-typed stack slot.
+
+**Verification**: All 652 tests pass after fix.
+
+### D.3 Bug: Duplicate `env::current_timepoint` branch in `try_lower_builtin_call`
+
+**Severity**: Trivial — duplicate match arm, no runtime impact.
+
+**Description**: Two identical branches handled `"env::current_timepoint"`.
+
+**Fix**: Removed the duplicate arm.
+
+### D.4 Pattern: Soft-error continuation with dummy values
+
+**Severity**: Low — by design, but documented for transparency.
+
+**Description**: Several `lower_*` helpers record an error via `record_error(...)` and then return a dummy constant (`U64(0)` or `Bool(true)`) so that lowering continues and the compiler can accumulate multiple diagnostics for LSP/reporting. Examples:
+- `Expr::String` / `Expr::ByteString` / `Expr::Range` outside valid contexts
+- `lower_stdlib_call` unknown pattern
+- `lower_match_expr` empty arms or unsupported pattern
+- `lower_field_access` on unlowered aggregate
+- `lower_index_expr` out-of-bounds or non-constant index
+- `lower_call` with unknown return type
+
+**Mitigation**: These paths are defensive; malformed AST reaching IR lowering should already be rejected by parser/type-checker. The dummy values prevent codegen panic but will never be emitted to a valid ELF because `generate()` returns `Err(...)` if `self.errors` is non-empty (line ~585).
+
+### D.5 Round 2: Cross-cutting audit (codegen + effect analysis)
+
+**Codegen — silent fallback to zero/else-branch:**
+
+| 位置 | 症状 | 修复 |
+|------|------|------|
+| `emit_unary` | 只对 `U64` 常量和变量做 unary，其他常量（`U8`/`U16`/`U32`/`Bool`/`U128`/`Array`）当作 0 | 统一使用 `emit_operand_to_register` |
+| `emit_expected_operand_to_t1` | `U128`/`Array` 常量 fallback 到 `li t1, 0` | 统一使用 `emit_operand_to_register` |
+| `emit_index` (两处) | `Bool`/`U128`/`Array` 常量作为索引 fallback 到 0 | 统一使用 `emit_operand_to_register` |
+| `emit_branch` | `U8`/`U16`/`U32` 常量作为条件直接跳 else，不检查是否为 0 | 显式添加这三种类型的零值判断 |
+
+**根因**：codegen 里多个地方手写 `match operand` 时只覆盖了最常用的类型，新增类型（`U128`、`Bool` 在更多上下文中）后没同步补全。统一使用 `emit_operand_to_register` 可以根治这类遗漏。
+
+**Effect analysis — missing 0.15 expression variants:**
+
+| 函数 | 遗漏 |
+|------|------|
+| `check_expr_effects` | `CreateUnique`、`ReplaceUnique`、`Claim`、`Settle`、`Transfer` |
+| `collect_ast_expr_effects` | `StdlibCall` 参数递归、`CreateUnique`、`ReplaceUnique`、`Claim`、`Settle`、`Transfer` |
+
+**影响**：效果推断会低估 action 的副作用等级。例如一个 action 内部用了 `transfer`，但效果分析没检测到 `has_consume = true`，可能导致调度器错误地把它标记为 `Pure` 而不是 `Mutating`。
+
+**根因**：0.15 新增 AST 表达式变体时，IR lowering 和 codegen 都更新了，但 AST 遍历辅助函数（效果分析、消费绑定收集、调用名收集）漏掉了同步。
+
+### D.6 Verification results
+
+```bash
+cargo test --locked -p cellscript --all-targets
+# 524 lib + 2 cli + 81 examples + 26 syntax_combo + 6 fuzzy + 13 v0_14 = 652 passed
+cargo check --locked -p cellscript --all-targets
+# clean, zero warnings
+cargo clippy --locked -p cellscript --all-targets -- -D warnings
+# clean, zero warnings
+```
