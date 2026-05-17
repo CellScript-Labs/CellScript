@@ -78,13 +78,23 @@ cargo test --locked -p cellscript docgen --lib
 ### 1.3 后端形状稳定性
 
 ```bash
-# 生成后端形状报告
-mkdir -p target/cellscript-backend-shape
+# 生成后端审计产物（ELF + metadata）
+mkdir -p target/cellscript-audit
 cargo run --locked -p cellscript -- \
   examples/token.cell \
   --target riscv64-elf --target-profile ckb --primitive-strict 0.15 \
-  --backend-shape-report target/cellscript-backend-shape/backend-shape-report-main.json
+  -o target/cellscript-audit/token.elf
 ```
+
+**Expected artifacts**：
+- `target/cellscript-audit/token.elf`
+- `target/cellscript-audit/token.elf.meta.json`
+
+**Backend shape evidence is collected from**：
+1. ELF header validation (`xxd -l 4` → `\x7fELF`).
+2. Generated `.meta.json` inspection (runtime features, verifier obligations, fail-closed list).
+3. Targeted source inspection of RISC-V emit paths (`emit_create_unique`, `emit_replace_unique`, `emit_destroy`).
+4. Negative confirmation that unsupported policies remain `runtime-required` rather than being over-lowered.
 
 **Prompt**：
 > 作为后端审计员，验证：
@@ -94,6 +104,8 @@ cargo run --locked -p cellscript -- \
 > - `destroy_unique`（`identity = type_id`）发射了可执行的 output TypeHash absence scan，而不是 fail-closed。
 > - `destroy_instance` 和 `burn_amount` 明确标记为 metadata-visible runtime-required，不发射 over-broad 的 TypeHash scan。
 > - 没有新增的未处理 IR pattern 导致 panic 或默认分支。
+
+**Decision**：Do not add `--backend-shape-report` for 0.15. The audit document was ahead of the current CLI surface. A dedicated backend-shape report is a valuable 0.16+ compiler evidence feature, not a 0.15 release blocker.
 
 ---
 
