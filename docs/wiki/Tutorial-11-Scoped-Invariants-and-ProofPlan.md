@@ -96,6 +96,25 @@ This does not hide the hard part. A transaction-wide uniqueness claim needs the
 builder and verifier boundary to agree on what was read. ProofPlan records that
 assumption instead of pretending it is automatically solved.
 
+## Simple Invariant Assertions
+
+For boolean checks that do not need aggregate primitives, use `assert_invariant`
+inside the invariant body:
+
+```cellscript
+invariant token_positive {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount
+
+    assert_invariant(true, "placeholder for future executable check")
+}
+```
+
+`assert_invariant` is accepted alongside aggregate primitives. It is recorded in
+ProofPlan metadata and counts toward `declared_invariant_assertions` coverage.
+Like aggregate primitives, it is currently metadata-only in 0.15.
+
 ## Inspect ProofPlan Output
 
 Run:
@@ -115,8 +134,14 @@ Covenant ProofPlan for module `cellscript::language::v0_15_scoped_invariant`
     records: 16
     on_chain_checked: 6
     runtime_required: 10
+    checked_partial: 0
     metadata_only_gaps: 10
+    fail_closed: 0
+    diagnostic_errors: 0
     diagnostic_warnings: 12
+    macro_provenance_records: 2
+    invariant_action_matches: 0
+    invariant_unmatched_action_coverage: 2
 ```
 
 The exact counts may change as the compiler grows, but the categories matter:
@@ -125,9 +150,17 @@ The exact counts may change as the compiler grows, but the categories matter:
 - `on_chain_checked`: obligations represented by executable checks today;
 - `runtime_required`: obligations that still need runtime/builder/verifier
   evidence;
+- `checked_partial`: obligations where only a subset of checks are executable;
 - `metadata_only_gaps`: declared claims that are not yet executable verifier
   lowering;
-- `diagnostic_warnings`: review warnings that deserve human attention.
+- `fail_closed`: obligations that fail closed at runtime because lowering is
+  not yet available;
+- `diagnostic_errors` / `diagnostic_warnings`: review issues that deserve human
+  attention;
+- `macro_provenance_records`: macro-generated obligation records;
+- `invariant_action_matches`: invariant claims with matching action evidence;
+- `invariant_unmatched_action_coverage`: related actions that still lack
+  invariant evidence.
 
 ## Read One Record
 
@@ -141,21 +174,39 @@ constraint: token_amount_conservation
   reads:
     - group_inputs<Token>.amount
     - group_outputs<Token>.amount
+    - Source::GroupOutput
+    - Source::GroupInput
+  coverage:
+    - declared_invariant_assertions:0
+    - aggregate_assertion:group_outputs<Token>.amount==group_inputs<Token>.amount scope=group
+    - type ScriptGroup coverage: cells sharing this type script
+    - invariant_coverage:aggregate_action_evidence_matches=0/1
   relation_checks:
     - assert_sum:group_outputs<Token>.amount==group_inputs<Token>.amount=metadata-only
   on_chain_checked: no
   codegen_coverage_status: gap:metadata-only
+  builder_assumption:
+    - declared(metadata-only invariant not yet lowered to executable verifier code)
+    - declared(assert_invariant_count:0)
+    - declared(aggregate_invariant_count:1)
+    - declared(no_aggregate_action_evidence_matches)
+  warning: declared invariant is metadata-only until executable lowering covers it
 ```
 
 Interpretation:
 
 - `origin` tells you which source construct emitted the record;
 - `trigger` and `scope` are the intended CKB boundary;
-- `reads` is the audit read set;
+- `reads` is the audit read set (the compiler may append inferred sources);
+- `coverage` describes how the invariant maps to action evidence and script-group
+  semantics;
 - `relation_checks` lists the invariant primitive and relation;
 - `on_chain_checked: no` means this record is not executable verifier code yet;
 - `gap:metadata-only` means the compiler preserved the claim for audit, but the
-  production system still needs a closing mechanism.
+  production system still needs a closing mechanism;
+- `builder_assumption` lists metadata obligations that builders or reviewers must
+  close;
+- `warning` surfaces review notes that deserve human attention.
 
 ## Metadata-Only Is Not Failure
 

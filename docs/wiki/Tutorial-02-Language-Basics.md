@@ -34,7 +34,7 @@ syntax forms you will see in the examples:
 | `use cellscript::path::{A, B}` | Grouped imports from another module. |
 | `resource T has store, create, consume, replace, burn, relock` | Linear Cell-backed assets with explicit kernel-effect capabilities. |
 | `shared T has store` | Shared Cell-backed state such as pools or registries. |
-| `receipt T has store` | Settlement-style proof Cells. |
+| `receipt T` | Settlement-style proof Cells. |
 | `receipt T -> Output` | Claimable receipt Cells with a declared claim output type. |
 | `with_default_hash_type(Data1)` | Default CKB hash type metadata for a persistent declaration. |
 | `flow Name for T.state { A -> B by action; }` | Named state graph for one explicit state field. |
@@ -43,9 +43,9 @@ syntax forms you will see in the examples:
 | `-> (left: T, right: Receipt)` | Multiple named proposed output Cell bindings. |
 | `input x: T` | Explicit consumed input Cell qualifier when the default action side is not enough. |
 | `read cfg: T` | Read-only CellDep-backed action input. |
-| `protected cell: T` | Lock-guarded input Cell view. |
+| `protected cell: T` | Lock-guarded input Cell view (lock parameters only). |
 | `witness arg: T` | Decoded witness data. |
-| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
+| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args` (lock parameters only). |
 | `transition old.state: A -> new.state: B` | Explicit field-to-field state edge. |
 | `transition { ... }` | Non-empty block form for multiple explicit state edges. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
@@ -258,7 +258,9 @@ receipt VestingGrant has store {
 }
 ```
 
-Use a claim output arrow when a receipt has a direct claim output type:
+`has store` is optional for receipts; ephemeral records such as execution logs
+or settlement proofs may omit it. Use a claim output arrow when a receipt has a
+direct claim output type:
 
 ```cellscript
 receipt ClaimTicket -> Token {
