@@ -388,7 +388,8 @@ cargo run --locked -p cellscript -- \
 >   - `type_hash-absence` → `ckb_type_script_hash-absence`
 >   - `type_hash-preservation` → `ckb_type_script_hash-preservation`
 >   - `lock_hash-preservation` → `ckb_lock_script_hash-preservation`
-> - `entry_abi` 和 `entry_witness` 元数据包含 invariant 相关的 witness 布局。
+> - `entry_abi` 元数据包含 action/lock 参数的 witness 布局（`witness_payload_bytes`、`min_witness_bytes`、`params[].witness_bytes`）。
+> - `proof_plan` 元数据包含 invariant 的 `reads` 声明，描述 invariant 所需的数据视图（cell data、witness、group input/output 等）。
 
 ---
 
