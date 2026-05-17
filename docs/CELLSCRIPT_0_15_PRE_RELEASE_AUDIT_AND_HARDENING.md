@@ -197,7 +197,7 @@ done
 > - `verify-artifact` 对每个捆绑示例都通过，且 `target_profile` 确实是 `ckb`。
 > - `examples/registry.cell` 和 `examples/language/*.cell` 作为非生产语言示例，至少不导致编译器 panic。
 > - 严格模式下，`has transfer` 和 `has destroy` 被正确拒绝（CS0150/CS0151）。
-> - 所有资源、共享状态、收据都声明了 `has store`（除了明确设计为 ephemeral 的 receipt）。
+> - 所有 resource 和 shared 声明了 `has store`；receipt 的 `has store` 是可选的（ephemeral records 可 omit）。
 
 ### 3.2 CKB 发布门控脚本
 
@@ -287,6 +287,7 @@ cargo run --locked -p cellscript -- explain-proof \
 > - 多步协议流程（如 vesting grant → claim → revoke）在本地 CKB 链上按顺序执行成功。
 > - 中间状态 Cell 在每个步骤后都可被正确索引。
 > - 违反 invariant 的交易（如重复 claim 同一 vesting grant）被正确拒绝。
+>   **Note**: Dedicated negative stateful scenarios (e.g. duplicate vesting claim) are not yet present in the current acceptance script. Lock invalid-spend matrix covers script-level rejection, but action-level stateful negative evidence should be added as a 0.15.x follow-up.
 > - 时间锁示例的 `env::current_timepoint()` 映射到 HeaderDep#0 epoch number，而非 Unix 时间戳。
 
 ---
@@ -373,11 +374,11 @@ docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md
 ### 5.3 Molecule Schema 与元数据契约
 
 ```bash
-# 生成 schema manifest 报告
-mkdir -p target/cellscript-schema-manifest
+# 生成 ELF + metadata，从 .meta.json 中检查 schema 声明
 cargo run --locked -p cellscript -- \
   examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 \
-  --schema-manifest-report target/cellscript-schema-manifest/schema-manifest-report-main.json
+  -o target/cellscript-audit/token.elf
+# Schema manifest 在 token.elf.meta.json → molecule_schema_manifest 中
 ```
 
 **Prompt**：
