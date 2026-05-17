@@ -25,7 +25,7 @@ compiler does not understand.
 
 ## Namespaces
 
-The 0.13.2 release line uses these source-facing namespaces:
+The 0.15 release line uses these source-facing namespaces:
 
 | Namespace | Purpose |
 |---|---|
@@ -89,7 +89,7 @@ reviewable.
 
 ## Lifecycle Patterns
 
-Lifecycle patterns are the main reason stdlib exists in the 0.13.2 line. The
+Lifecycle patterns are the main reason stdlib exists in the 0.15 line. The
 old core `transfer`, `claim`, and `settle` expression verbs are gone. The
 stdlib replacements are explicit patterns with canonical expansions.
 
@@ -284,7 +284,7 @@ The compact language example lives at:
 examples/language/stdlib.cell
 ```
 
-It demonstrates the stable 0.13.2 stdlib patterns:
+It demonstrates the stable 0.15 stdlib patterns:
 
 ```cellscript
 std::cell::preserve_type(coin_after, coin_before)
