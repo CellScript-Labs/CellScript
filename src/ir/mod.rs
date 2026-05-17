@@ -1937,6 +1937,15 @@ impl IrGenerator {
                     return lowered;
                 }
                 let mut active = current;
+                // If the call target is a field access (e.g. obj.method()), lower the receiver
+                // expression first so that any side effects (e.g. consume) are not dropped.
+                if let Expr::FieldAccess(field) = call.func.as_ref() {
+                    let lowered = self.lower_expr(&field.expr, active, blocks, vars);
+                    let Some(next) = lowered.current else {
+                        return lowered;
+                    };
+                    active = next;
+                }
                 let mut args = Vec::with_capacity(call.args.len());
                 for arg in &call.args {
                     let lowered = self.lower_expr(arg, active, blocks, vars);

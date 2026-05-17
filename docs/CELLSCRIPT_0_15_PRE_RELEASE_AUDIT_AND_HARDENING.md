@@ -606,3 +606,39 @@ cargo check --locked -p cellscript --all-targets
 cargo clippy --locked -p cellscript --all-targets -- -D warnings
 # clean, zero warnings
 ```
+
+## Appendix D.6 — IR Lowering Audit Round 4 (Method Call Receiver Side-Effect Drop)
+
+**Finding:** `lower_call` did not lower the receiver expression when `call.func` is an
+`Expr::FieldAccess` (e.g. `obj.method()`). The receiver (`field.expr`) could contain
+side effects — most critically `consume` or `destroy` — which were silently dropped,
+producing incorrect IR and potential silent mis-compilation.
+
+**Root cause:** The lowering path for `Expr::Call` always lowers arguments, but only
+`collect_call_names` traversed `call.func` to extract the function name. No IR was
+generated for the receiver expression itself.
+
+**Fix:** In `lower_call`, before lowering arguments, check if `call.func` is a
+`FieldAccess`. If so, `lower_expr(&field.expr)` first, updating `active` and bailing on
+soft-error, exactly like argument lowering.
+
+**Evidence:**
+- Code inspection of `lower_call` in `src/ir/mod.rs`
+- All 652 tests pass after fix
+- `cargo clippy --locked -p cellscript --all-targets -- -D warnings` clean
+
+## Appendix D.7 — Potential: Cast of Non-Constant Variables to U128
+
+**Observation:** `Expr::Cast` lowering for non-constant operands delegates to
+`materialize_operand_with_type`, which emits a plain `Move` instruction.
+For `U64 -> U128` this is incorrect because `U128` variables store a *pointer*
+to 16-byte data, whereas `Move` copies only 64 bits of scalar value into that
+pointer slot. No test currently exercises this path (`u128` appears only in
+iCKB benchmark metadata, not in `.cell` source casts).
+
+**Severity:** Low — unexercised, type checker conditions are bool-only so no
+runtime path triggers the branch-condition variant either.
+
+**Recommended follow-up:** If `u128` casts become user-facing, introduce a
+dedicated `Cast` IR instruction or widen `materialize_operand_with_type` to
+handle fixed-byte destinations.
