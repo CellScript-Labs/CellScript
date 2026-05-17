@@ -642,3 +642,27 @@ runtime path triggers the branch-condition variant either.
 **Recommended follow-up:** If `u128` casts become user-facing, introduce a
 dedicated `Cast` IR instruction or widen `materialize_operand_with_type` to
 handle fixed-byte destinations.
+
+## Appendix D.8 — U128 Lowering & Codegen Hardening (Fixed)
+
+**Findings:**
+1. `Expr::Cast` of a non-constant expression to `u128` delegated to
+   `materialize_operand_with_type`, which emits a plain `Move`. A `u128` variable
+   stores a *pointer* to 16-byte data, so copying a 64-bit scalar into that slot
+   causes the program to dereference the scalar value as an address at runtime.
+2. `lower_expr_with_expected_type` had the same flaw for implicit widening to
+   `u128` (e.g. `let x: u128 = some_u64_var`).
+3. `emit_branch` on a `u128` variable loaded `v.id * 8` (the pointer) and did
+   `beqz`, comparing the pointer address against zero instead of the 128-bit value.
+
+**Fixes:**
+- `Expr::Cast` → `record_error("cast to u128 from a non-constant expression is not yet supported")`
+- `lower_expr_with_expected_type` → `record_error("implicit widening to u128 is not yet supported")`
+- `emit_branch` → `emit_fail(AssertionFailed)` with comment explaining u128 branch conditions are invalid
+
+All three paths now fail loudly (compile-time error or runtime fail-closed)
+instead of silently generating wrong machine code.
+
+**Validation:**
+- All 652 tests pass
+- `cargo clippy --locked -p cellscript --all-targets -- -D warnings` clean

@@ -2883,6 +2883,10 @@ impl CodeGenerator {
                         self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
                     }
                 }
+                IrOperand::Var(v) if v.ty == IrType::U128 => {
+                    self.emit("# cellscript abi: fail closed because u128 cannot be used as a branch condition");
+                    self.emit_fail(CellScriptRuntimeError::AssertionFailed);
+                }
                 IrOperand::Var(v) => {
                     self.emit_stack_load("t0", v.id * 8);
                     self.emit(format!("beqz t0, .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));

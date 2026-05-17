@@ -2019,6 +2019,10 @@ impl IrGenerator {
                         }
                     }
                     IrOperand::Var(var) if var.ty == target_ty => lowered,
+                    IrOperand::Var(_) if target_ty == IrType::U128 => {
+                        self.record_error("cast to u128 from a non-constant expression is not yet supported".to_string(), cast.span);
+                        LoweredExpr { operand: IrOperand::Const(IrConst::U128(0)), current: Some(active) }
+                    }
                     operand => {
                         let block = self.block_mut(blocks, active);
                         let dest = self.materialize_operand_with_type("cast", operand.clone(), target_ty, block);
@@ -3452,6 +3456,10 @@ impl IrGenerator {
                 };
                 let actual_ty = self.operand_type(&lowered.operand);
                 if actual_ty != *expected_ty && Self::ir_numeric_widening_compatible(expected_ty, &actual_ty) {
+                    if *expected_ty == IrType::U128 {
+                        self.record_error("implicit widening to u128 is not yet supported".to_string(), Span::default());
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::U128(0)), current: Some(active) };
+                    }
                     let block = self.block_mut(blocks, active);
                     let widened = self.materialize_operand_with_type("widened", lowered.operand, expected_ty.clone(), block);
                     LoweredExpr { operand: IrOperand::Var(widened), current: Some(active) }
