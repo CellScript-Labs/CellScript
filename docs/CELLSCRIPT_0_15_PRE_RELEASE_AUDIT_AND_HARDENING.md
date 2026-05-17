@@ -62,7 +62,7 @@ cargo test --locked -p cellscript
 # 0.15 专属聚焦测试
 cargo test --locked -p cellscript proof_plan --lib
 cargo test --locked -p cellscript aggregate_invariant --lib
-cargo test --locked -p cellscript identity_policy --lib
+cargo test --locked -p cellscript --lib -- compile_identity compile_unique
 cargo test --locked -p cellscript explain_proof --test cli
 cargo test --locked -p cellscript docgen --lib
 ```
@@ -71,7 +71,7 @@ cargo test --locked -p cellscript docgen --lib
 > 作为编译器测试审计员，确认：
 > - `proof_plan` 测试覆盖 invariant trigger、scope、reads、relation_checks、coverage_status 的元数据正确性。
 > - `aggregate_invariant` 测试覆盖五种原语（`assert_sum`、`assert_conserved`、`assert_delta`、`assert_distinct`、`assert_singleton`）的解析、类型检查、格式化、IR lowering。
-> - `identity_policy` 测试覆盖四种策略（`ckb_type_id`、`field(...)`、`script_args`、`singleton_type`）的解析、元数据、codegen 锚点。
+> - `compile_identity` 和 `compile_unique` 测试覆盖四种策略（`ckb_type_id`、`field(...)`、`script_args`、`singleton_type`）的解析、元数据、codegen 锚点。
 > - `explain_proof` CLI 测试覆盖人类可读输出和 JSON 输出的 schema 稳定性。
 > - 不存在被忽略的测试（`#[ignore]`）除非有对应的 roadmap issue 编号。
 
@@ -480,21 +480,20 @@ echo "=== All Hardening Layers Passed ==="
 
 ---
 
-## 签核清单
+### Mutation / Negative Evidence Gate
 
-以下人员必须在发布前签字确认：
+For each bundled example, the release gate must include at least one semantic mutation test per protected dimension:
 
-| 角色 | 签核项 | 责任人 |
-|---|---|---|
-| 编译器核心审计 | Rust 工程健康、单元/集成测试、后端形状 | |
-| 语法组合审计 | quick/ci/deep 三层全部通过 | |
-| CKB 生产审计 | release gate full、builder evidence、chain evidence | |
-| ProofPlan 审计 | explain-proof 输出正确、metadata-only 边界清晰 | |
-| 工具链审计 | LSP、VS Code 扩展、CLI、包管理器 | |
-| 文档审计 | Wiki、release notes、roadmap、CHANGELOG 一致 | |
-| 安全审计 | lock valid/invalid spend 矩阵完整、无 fail-closed 遗漏 | |
-| 发布经理 | 版本号一致、git tag 准备、双 remote 推送验证 | |
+- ownership mutation
+- amount/accounting mutation
+- identity mutation
+- witness/action selector mutation
+- lock authorisation mutation
+- type/lock hash preservation mutation
+- capacity floor mutation
+- duplicate/replay mutation where applicable
 
+A passing positive transaction without corresponding negative evidence is not sufficient release evidence.
 **发布阻塞规则**：
 1. 任何 Layer 1 检查失败 → **禁止发布**。
 2. 任何 bundled example 在 `--primitive-strict=0.15` 下编译失败 → **禁止发布**。
