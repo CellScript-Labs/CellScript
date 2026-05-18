@@ -2771,11 +2771,11 @@ impl<'a> TypeChecker<'a> {
                         self.validate_numeric_binary_types(bin.op, &left_ty, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
-                        if !self.types_equal(&left_ty, &right_ty)
-                            && !(Self::widen_to(&left_ty, &right_ty).is_some()
+                        let same_or_widenable = self.types_equal(&left_ty, &right_ty)
+                            || (Self::widen_to(&left_ty, &right_ty).is_some()
                                 && !matches!(left_ty, Type::U128)
-                                && !matches!(right_ty, Type::U128))
-                        {
+                                && !matches!(right_ty, Type::U128));
+                        if !same_or_widenable {
                             return Err(CompileError::new("comparison requires matching types", bin.span));
                         }
                         Ok(Type::Bool)
@@ -4195,10 +4195,7 @@ impl<'a> TypeChecker<'a> {
                         }
                     }
                     AssignOp::AddAssign => {
-                        if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
-                            return Err(CompileError::new("'+=' requires numeric types", assign.span));
-                        }
-                        self.validate_numeric_binary_types(BinaryOp::Add, &target_ty, &value_ty, assign.span)?;
+                        self.validate_compound_assign_types(&target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -4237,10 +4234,7 @@ impl<'a> TypeChecker<'a> {
                         }
                     }
                     AssignOp::AddAssign => {
-                        if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
-                            return Err(CompileError::new("'+=' requires numeric types", assign.span));
-                        }
-                        self.validate_numeric_binary_types(BinaryOp::Add, &target_ty, &value_ty, assign.span)?;
+                        self.validate_compound_assign_types(&target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -5101,6 +5095,30 @@ impl<'a> TypeChecker<'a> {
         }
 
         Err(CompileError::new("arithmetic operations require matching numeric types", span))
+    }
+
+    /// Validate compound assignment (+=): the RHS must be same width or
+    /// narrower than the target so that the result does not silently narrow.
+    /// u16 += u8 is fine (widens u8 to u16, result fits in u16).
+    /// u16 += u64 is rejected (u16 + u64 -> u64, silently truncating to u16).
+    fn validate_compound_assign_types(&self, target_ty: &Type, value_ty: &Type, span: Span) -> Result<()> {
+        if !self.is_numeric_type(target_ty) || !self.is_numeric_type(value_ty) {
+            return Err(CompileError::new("'+=' requires numeric types", span));
+        }
+        if self.types_equal(target_ty, value_ty) {
+            return Ok(());
+        }
+        // Allow if value widens to target (value is narrower or equal).
+        if let Some(promoted) = Self::widen_to(target_ty, value_ty) {
+            if self.types_equal(&promoted, target_ty) {
+                // value is narrower than or equal to target: safe.
+                return Ok(());
+            }
+        }
+        Err(CompileError::new(
+            "compound assignment would implicitly narrow the result; use an explicit expression and checked cast",
+            span,
+        ))
     }
 
     fn validate_cast(&self, source_ty: &Type, target_ty: &Type, source_expr: &Expr, span: Span) -> Result<()> {
@@ -6223,6 +6241,34 @@ where
         ))
         .unwrap_err();
         assert!(err.message.contains("u128"), "u32 + u128 should be rejected as u128 arithmetic, got: {}", err.message);
+    }
+
+    #[test]
+    fn compound_assign_rejects_implicit_narrowing() {
+        // u16 += u64 must be rejected: result would silently truncate.
+        let err = check(&source_module(
+            r#"
+module types::compound_narrow
+action bad(mut x: u16, y: u64) -> u16
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 += u64 should be rejected as implicit narrowing, got: {}", err.message);
+
+        // u64 += u16 is fine: u16 widens to u64, result fits.
+        check(&source_module(
+            r#"
+module types::compound_widen
+action ok(mut x: u64, y: u16) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += u16 should succeed");
     }
 
     #[test]
