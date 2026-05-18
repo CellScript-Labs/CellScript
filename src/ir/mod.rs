@@ -2164,17 +2164,22 @@ impl IrGenerator {
 
         // Implicit integer widening: widen the narrower variable operand to the
         // wider type so that mixed-width arithmetic like u64 * u16 compiles.
+        // Only widen to types smaller than u128; u128 arithmetic has its own
+        // dedicated delta path above.
         let lw = Self::ir_numeric_width(&left_ty);
         let rw = Self::ir_numeric_width(&right_ty);
         if let (Some(lw), Some(rw)) = (lw, rw) {
-            if lw < rw {
-                let widened = self.new_var("widened", right_ty);
-                block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: left });
-                return (IrOperand::Var(widened), right);
-            } else {
-                let widened = self.new_var("widened", left_ty);
-                block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: right });
-                return (left, IrOperand::Var(widened));
+            let target_is_u128 = lw < rw && matches!(right_ty, IrType::U128) || lw >= rw && matches!(left_ty, IrType::U128);
+            if !target_is_u128 {
+                if lw < rw {
+                    let widened = self.new_var("widened", right_ty);
+                    block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: left });
+                    return (IrOperand::Var(widened), right);
+                } else {
+                    let widened = self.new_var("widened", left_ty);
+                    block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: right });
+                    return (left, IrOperand::Var(widened));
+                }
             }
         }
 
@@ -2193,7 +2198,7 @@ impl IrGenerator {
                 let supported = (types_match && left_ty != IrType::U128)
                     || (left_ty == IrType::U128 && right_ty == IrType::U64)
                     || (left_ty == IrType::U64 && right_ty == IrType::U128)
-                    || widenable;
+                    || (widenable && left_ty != IrType::U128 && right_ty != IrType::U128);
                 if supported {
                     Ok(())
                 } else {
@@ -2201,8 +2206,9 @@ impl IrGenerator {
                 }
             }
             BinaryOp::Sub => {
-                let supported =
-                    (types_match && left_ty != IrType::U128) || (left_ty == IrType::U128 && right_ty == IrType::U64) || widenable;
+                let supported = (types_match && left_ty != IrType::U128)
+                    || (left_ty == IrType::U128 && right_ty == IrType::U64)
+                    || (widenable && left_ty != IrType::U128 && right_ty != IrType::U128);
                 if supported {
                     Ok(())
                 } else {
@@ -2210,14 +2216,14 @@ impl IrGenerator {
                 }
             }
             BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                if (types_match && left_ty != IrType::U128) || widenable {
+                if (types_match && left_ty != IrType::U128) || (widenable && left_ty != IrType::U128 && right_ty != IrType::U128) {
                     Ok(())
                 } else {
                     Err(format!("unsupported arithmetic operand types {:?} and {:?}", left_ty, right_ty))
                 }
             }
             BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                if (types_match && left_ty != IrType::U128) || widenable {
+                if (types_match && left_ty != IrType::U128) || (widenable && left_ty != IrType::U128 && right_ty != IrType::U128) {
                     Ok(())
                 } else {
                     Err(format!("unsupported ordering operand types {:?} and {:?}", left_ty, right_ty))

@@ -2771,7 +2771,11 @@ impl<'a> TypeChecker<'a> {
                         self.validate_numeric_binary_types(bin.op, &left_ty, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
-                        if !self.types_equal(&left_ty, &right_ty) {
+                        if !self.types_equal(&left_ty, &right_ty)
+                            && !(Self::widen_to(&left_ty, &right_ty).is_some()
+                                && !matches!(left_ty, Type::U128)
+                                && !matches!(right_ty, Type::U128))
+                        {
                             return Err(CompileError::new("comparison requires matching types", bin.span));
                         }
                         Ok(Type::Bool)
@@ -2783,7 +2787,7 @@ impl<'a> TypeChecker<'a> {
                         if !self.numeric_types_equal(&left_ty, &right_ty) && Self::widen_to(&left_ty, &right_ty).is_none() {
                             return Err(CompileError::new("ordering comparison requires matching numeric types", bin.span));
                         }
-                        if matches!(left_ty, Type::U128) {
+                        if matches!(left_ty, Type::U128) || matches!(right_ty, Type::U128) {
                             return Err(CompileError::new("ordering comparison is not supported for u128", bin.span));
                         }
                         Ok(Type::Bool)
@@ -6153,12 +6157,9 @@ action bad(x: u32, y: u128) -> u32
 where
     return x + y
 "#,
-        )).unwrap_err();
-        assert!(
-            err.message.contains("u128") || err.message.contains("matching numeric types"),
-            "unexpected error: {}",
-            err.message
-        );
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128") || err.message.contains("matching numeric types"), "unexpected error: {}", err.message);
 
         // u8 < u64 is now allowed with implicit widening (ordering comparison).
         check(&source_module(
@@ -6168,7 +6169,8 @@ action ok(x: u8, y: u64) -> bool
 where
     return x < y
 "#,
-        )).expect("ordering with widening should succeed");
+        ))
+        .expect("ordering with widening should succeed");
 
         // Return type mismatch: u8 + u64 widens to u64, but declared return is u8.
         // This must still be rejected: assignment/return boundary does not narrow.
@@ -6179,12 +6181,48 @@ action bad(x: u8, y: u64) -> u8
 where
     return x + y
 "#,
-        )).unwrap_err();
-        assert!(
-            err.message.contains("return type") || err.message.contains("type mismatch"),
-            "unexpected error: {}",
-            err.message
-        );
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("return type") || err.message.contains("type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn u128_ordering_and_arithmetic_still_rejected_on_widening() {
+        // u64 < u128 must NOT pass through widening: ordering is unsupported for u128.
+        let err = check(&source_module(
+            r#"
+module types::u64_lt_u128
+action bad(x: u64, y: u128) -> bool
+where
+    return x < y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64 < u128 should be rejected as u128 ordering, got: {}", err.message);
+
+        // u64 * u128 must NOT pass through widening: generic u128 arithmetic unsupported.
+        let err = check(&source_module(
+            r#"
+module types::u64_mul_u128
+action bad(x: u64, y: u128) -> u128
+where
+    return x * y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64 * u128 should be rejected as u128 arithmetic, got: {}", err.message);
+
+        // u32 + u128 must NOT pass through widening.
+        let err = check(&source_module(
+            r#"
+module types::u32_add_u128
+action bad(x: u32, y: u128) -> u128
+where
+    return x + y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u32 + u128 should be rejected as u128 arithmetic, got: {}", err.message);
     }
 
     #[test]
