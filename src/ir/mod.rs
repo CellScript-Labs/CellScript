@@ -2236,9 +2236,8 @@ impl IrGenerator {
     fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub if self.operand_type(left) == IrType::U128 || self.operand_type(right) == IrType::U128 => {
-                IrType::U128
-            }
+            BinaryOp::Add if self.operand_type(left) == IrType::U128 || self.operand_type(right) == IrType::U128 => IrType::U128,
+            BinaryOp::Sub if self.operand_type(left) == IrType::U128 && self.operand_type(right) != IrType::U128 => IrType::U128,
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 let left_ty = self.operand_type(left);
                 let right_ty = self.operand_type(right);
