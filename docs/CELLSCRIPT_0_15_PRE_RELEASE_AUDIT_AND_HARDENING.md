@@ -666,3 +666,27 @@ instead of silently generating wrong machine code.
 **Validation:**
 - All 652 tests pass
 - `cargo clippy --locked -p cellscript --all-targets -- -D warnings` clean
+
+## Appendix D.9 — ProofPlan Audit Round 1 (Fixed)
+
+**Findings:**
+1. `macro_expansion_provenance` contained `replace_unique-input:` (underscore) as a
+   feature-prefix match arm. All generated obligation features use hyphenated
+   prefixes (`replace-unique-input:`), so the underscore variant was dead code
+   that could never match. The correct hyphenated prefix was already handled on
+   the preceding line.
+2. `aggregate_target_parts` parsed generic target syntax with a naive
+   first-`<` / first-`>` search. For `input<MyType<Nested>>.field` it would
+   produce `type_name="MyType<Nested"` (truncated at the first `>`), causing
+   downstream type-name comparisons to silently fail. CellScript does not yet
+   use nested generics in aggregate invariant targets, so this was latent.
+
+**Fixes:**
+- Removed the dead `replace_unique-input:` branch.
+- Replaced naive search with bracket-depth tracking; returns `None` on unmatched
+  brackets instead of producing a truncated type name.
+
+**Validation:**
+- All 655 tests pass (527 lib + 2 cli + 81 examples + 26 syntax_combo + 6 fuzzy + 13 v0_14)
+- `cargo clippy --locked -p cellscript --all-targets -- -D warnings` clean
+- CKB production acceptance passed

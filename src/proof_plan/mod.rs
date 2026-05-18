@@ -642,7 +642,6 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
     } else if obligation.feature.starts_with("replace-unique-output:")
         || obligation.feature.starts_with("replace-unique-input:")
         || obligation.feature.starts_with("replace-unique-identity:")
-        || obligation.feature.starts_with("replace_unique-input:")
     {
         vec!["macro_expansion:replace_unique=consume-input+create-output+preserve-identity".to_string()]
     } else if obligation.feature.starts_with("claim-output:") || obligation.feature.starts_with("claim-input:") {
@@ -922,10 +921,22 @@ fn split_sum_relation(expression: &str) -> Option<(&str, &str, &str)> {
 
 fn aggregate_target_parts(target: &str) -> Option<AggregateTarget> {
     if let Some(type_start) = target.find('<') {
-        let type_end = target[type_start + 1..].find('>')? + type_start + 1;
+        let mut depth = 1;
+        let mut type_end = type_start + 1;
+        while type_end < target.len() && depth > 0 {
+            match target.as_bytes()[type_end] {
+                b'<' => depth += 1,
+                b'>' => depth -= 1,
+                _ => {}
+            }
+            type_end += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
         let source = &target[..type_start];
-        let type_name = &target[type_start + 1..type_end];
-        let field = target[type_end + 1..].strip_prefix('.')?;
+        let type_name = &target[type_start + 1..type_end - 1];
+        let field = target[type_end..].strip_prefix('.')?;
         return Some(AggregateTarget { source: Some(source.to_string()), type_name: type_name.to_string(), field: field.to_string() });
     }
 
