@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0 - 2026-05-04
+## 0.15.0 - 2026-05-18
 
 - Add scoped invariant declarations with explicit trigger, scope, reads,
   coverage, and runtime-obligation metadata for CKB covenant auditing.
