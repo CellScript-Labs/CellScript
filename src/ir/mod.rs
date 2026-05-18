@@ -4120,6 +4120,20 @@ impl IrGenerator {
             let arm_entry = arm_entries[index];
             if arm.pattern == "_" {
                 self.block_mut(blocks, check_block).terminator = IrTerminator::Jump(arm_entry);
+                let mut arm_vars = vars.clone();
+                let lowered_value = self.lower_expr(&arm.value, arm_entry, blocks, &mut arm_vars);
+                let Some(arm_exit) = lowered_value.current else {
+                    break;
+                };
+                if result_dest.is_none() {
+                    let ty = self.operand_type(&lowered_value.operand);
+                    result_dest = Some(self.new_var("match_tmp", ty));
+                }
+                let dest = result_dest.as_ref().expect("match result destination must be initialized");
+                let block = self.block_mut(blocks, arm_exit);
+                block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered_value.operand });
+                block.terminator = IrTerminator::Jump(join);
+                break;
             } else {
                 let Some(pattern_operand) = self.lower_match_pattern_operand(&arm.pattern, arm.span) else {
                     return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };

@@ -58,13 +58,13 @@ pub struct CompileOptions {
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
     pub fn is_primitive_strict(&self) -> bool {
-        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17" | "0.18"))
+        matches!(self.primitive_compat.as_deref(), Some("0.15"))
     }
 
     /// Returns true when running in v0.14 compat mode (the default when
     /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
     pub fn is_primitive_compat_014(&self) -> bool {
-        self.primitive_compat.as_deref() != Some("0.15")
+        matches!(self.primitive_compat.as_deref(), None | Some("0.14"))
     }
 }
 
@@ -342,7 +342,7 @@ pub struct MoleculeSchemaManifestEntryMetadata {
     pub type_name: String,
     pub kind: String,
     pub layout: String,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub encoded_size: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
@@ -691,39 +691,37 @@ const MOLECULE_VM_ABI_VERSION: u16 = 0x8001;
 
 /// Strip CellScript's fixed VM ABI trailer before directly loading an ELF into CKB-VM.
 pub fn strip_vm_abi_trailer(bytes: &[u8]) -> &[u8] {
-    if has_vm_abi_trailer_magic(bytes) {
+    if vm_abi_trailer(bytes).is_some() {
         &bytes[..bytes.len() - VM_ABI_TRAILER_LEN]
     } else {
         bytes
     }
 }
 
-fn has_vm_abi_trailer_magic(bytes: &[u8]) -> bool {
+fn vm_abi_trailer(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.len() < VM_ABI_TRAILER_LEN {
-        return false;
+        return None;
     }
     let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    &bytes[trailer_start..trailer_start + VM_ABI_TRAILER_MAGIC.len()] == VM_ABI_TRAILER_MAGIC
+    let trailer = &bytes[trailer_start..];
+    if &trailer[..VM_ABI_TRAILER_MAGIC.len()] != VM_ABI_TRAILER_MAGIC {
+        return None;
+    }
+    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
+    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
+    (flags == 0 && reserved == 0).then_some(trailer)
 }
 
 fn vm_abi_trailer_version(bytes: &[u8]) -> Result<Option<u16>> {
-    if !has_vm_abi_trailer_magic(bytes) {
+    let Some(trailer) = vm_abi_trailer(bytes) else {
         return Ok(None);
-    }
-
-    let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    let trailer = &bytes[trailer_start..];
+    };
     let version = u16::from_le_bytes([trailer[8], trailer[9]]);
-    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
-    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
-    if flags != 0 || reserved != 0 {
-        return Err(CompileError::without_span("invalid VM ABI trailer: flags/reserved bytes must be zero"));
-    }
     Ok(Some(version))
 }
 
 fn append_vm_abi_trailer(mut artifact: Vec<u8>, abi_version: u16) -> Vec<u8> {
-    if strip_vm_abi_trailer(&artifact).len() != artifact.len() {
+    if vm_abi_trailer(&artifact).is_some() {
         artifact.truncate(artifact.len() - VM_ABI_TRAILER_LEN);
     }
     artifact.extend_from_slice(VM_ABI_TRAILER_MAGIC);
@@ -976,12 +974,13 @@ fn constraints_metadata(
         .collect();
 
     let max_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).max().unwrap_or(0);
+    let min_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).min().unwrap_or(0);
     let estimated_cycles = metadata.actions.iter().map(|action| action.estimated_cycles).chain(metadata.locks.iter().map(|_| 0)).max();
     let ckb = (target_profile == TargetProfile::Ckb).then(|| {
         warnings.push(
             "CKB cycles and transaction size are not measured by the compiler; require builder dry-run for production".to_string(),
         );
-        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, estimated_cycles);
+        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, min_entry_witness_bytes, estimated_cycles);
         if ckb.uses_input_since || ckb.uses_header_epoch {
             warnings.push(format!(
                 "CKB timelock-related runtime features are in use (input_since={}, header_epoch={}); declarative DSL policy surface is not yet first-class",
@@ -1116,11 +1115,23 @@ fn ckb_constraints(
     metadata: &CompileMetadata,
     artifact_size_bytes: usize,
     max_entry_witness_bytes: usize,
+    min_entry_witness_bytes: usize,
     estimated_cycles: Option<u64>,
 ) -> CkbConstraintsMetadata {
     let max_tx_verify_cycles = env_u64("CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES").unwrap_or(CKB_DEFAULT_MAX_TX_VERIFY_CYCLES);
     let max_block_cycles = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_CYCLES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_CYCLES);
     let max_block_bytes = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_BYTES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_BYTES);
+
+    // Surface obviously invalid environment overrides without changing the
+    // explicit metadata value the caller requested.
+    if max_tx_verify_cycles == 0 || max_block_cycles == 0 || max_block_bytes == 0 {
+        log::warn!(
+            "CKB limit env override produced zero: max_tx_verify_cycles={}, max_block_cycles={}, max_block_bytes={}",
+            max_tx_verify_cycles,
+            max_block_cycles,
+            max_block_bytes
+        );
+    }
     let min_code_cell_data_capacity_shannons = (artifact_size_bytes as u64 + 8) * CKB_SHANNONS_PER_CKB;
     let recommended_code_cell_capacity_shannons = (artifact_size_bytes as u64 + 1_000) * CKB_SHANNONS_PER_CKB;
     let ckb_runtime_features = metadata.runtime.ckb_runtime_features.clone();
@@ -1200,7 +1211,7 @@ fn ckb_constraints(
         cycles_status: "not-measured-by-compiler".to_string(),
         min_code_cell_data_capacity_shannons,
         recommended_code_cell_capacity_shannons,
-        min_witness_bytes: ENTRY_WITNESS_ABI_MAGIC.len(),
+        min_witness_bytes: min_entry_witness_bytes,
         max_entry_witness_bytes,
         dry_run_required_for_production: true,
         tx_size_bytes: None,
@@ -2500,17 +2511,17 @@ fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
         }
         match schema.layout.as_str() {
             "fixed-struct-v1" => {
-                if ty.encoded_size != Some(schema.fixed_size) {
+                if ty.encoded_size != schema.fixed_size {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} does not match encoded_size {:?}",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} does not match encoded_size {:?}",
                         ty.name, schema.fixed_size, ty.encoded_size
                     )));
                 }
             }
             "molecule-table-v1" => {
-                if schema.fixed_size != 0 {
+                if schema.fixed_size.is_some() {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} must be 0 for molecule-table-v1",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} must be null for molecule-table-v1",
                         ty.name, schema.fixed_size
                     )));
                 }
@@ -2961,7 +2972,7 @@ pub struct MoleculeSchemaMetadata {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub schema_hash: String,
     pub schema: String,
 }
@@ -12216,7 +12227,6 @@ fn type_molecule_schema_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
 ) -> Option<MoleculeSchemaMetadata> {
     let encoded_size = type_encoded_size(type_def, type_defs);
-    let fixed_size = encoded_size.unwrap_or(0);
     let mut aliases = BTreeMap::new();
     let mut structs = Vec::new();
     let mut emitted = BTreeSet::new();
@@ -12246,7 +12256,7 @@ fn type_molecule_schema_metadata(
         layout: if encoded_size.is_some() { "fixed-struct-v1" } else { "molecule-table-v1" }.to_string(),
         name: type_def.name.clone(),
         dynamic_fields: if encoded_size.is_some() { Vec::new() } else { molecule_dynamic_fields(type_def, type_defs) },
-        fixed_size,
+        fixed_size: encoded_size,
         schema_hash,
         schema,
     })
@@ -12292,7 +12302,7 @@ fn molecule_schema_manifest_metadata(types: &[TypeMetadata], target_profile: Tar
         canonical.push('|');
         canonical.push_str(&entry.layout);
         canonical.push('|');
-        canonical.push_str(&entry.fixed_size.to_string());
+        canonical.push_str(&entry.fixed_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
         canonical.push_str(&entry.encoded_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
@@ -16120,6 +16130,22 @@ where
     }
 "#;
 
+    const WILDCARD_NON_LAST_MATCH_PROGRAM: &str = r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action select(flag: Flag) -> u64
+where
+    return match flag {
+        _ => { 1 }
+        Flag::Off => { 2 }
+    }
+"#;
+
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
 module test
 
@@ -17653,7 +17679,9 @@ where
         let owner = lock.params.iter().find(|param| param.name == "owner").expect("owner param");
         assert_eq!(owner.source, "lock_args");
         assert!(owner.lock_args_data_source);
-        assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
+        let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
+        assert_eq!(ckb_constraints.min_witness_bytes, 0);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, 0);
     }
 
     #[test]
@@ -18959,6 +18987,13 @@ where
             non_exhaustive.message
         );
         assert!(non_exhaustive.message.contains("Off"), "unexpected error: {}", non_exhaustive.message);
+
+        let wildcard_non_last = compile(WILDCARD_NON_LAST_MATCH_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            wildcard_non_last.message.contains("wildcard pattern '_' must be the last match arm"),
+            "unexpected error: {}",
+            wildcard_non_last.message
+        );
     }
 
     #[test]
@@ -20905,6 +20940,8 @@ where
 
         assert_eq!(ckb_constraints.created_output_count, 1, "ckb constraints must count created outputs");
         assert_eq!(ckb_constraints.mutated_output_count, 0, "create-only action must not report mutated outputs");
+        assert_eq!(ckb_constraints.min_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
         assert!(ckb_constraints.capacity_planning_required, "create outputs must mark capacity planning as required");
         assert!(
             ckb_constraints.occupied_capacity_measurement_required,
@@ -21341,6 +21378,25 @@ where
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn vm_abi_trailer_detection_requires_complete_zero_reserved_trailer() {
+        let mut artifact = b"\x7fELFpayload".to_vec();
+        artifact.extend_from_slice(crate::VM_ABI_TRAILER_MAGIC);
+        artifact.extend_from_slice(&crate::MOLECULE_VM_ABI_VERSION.to_le_bytes());
+        artifact.extend_from_slice(&1u16.to_le_bytes());
+        artifact.extend_from_slice(&0u32.to_le_bytes());
+
+        assert_eq!(crate::strip_vm_abi_trailer(&artifact).len(), artifact.len());
+        assert_eq!(crate::vm_abi_trailer_version(&artifact).unwrap(), None);
+
+        let appended = crate::append_vm_abi_trailer(artifact.clone(), crate::MOLECULE_VM_ABI_VERSION);
+        assert_eq!(appended.len(), artifact.len() + crate::VM_ABI_TRAILER_LEN);
+        assert_eq!(&appended[..artifact.len()], artifact.as_slice());
+
+        let stripped = crate::strip_vm_abi_trailer(&appended);
+        assert_eq!(stripped, artifact.as_slice());
     }
 
     #[test]
@@ -23723,6 +23779,25 @@ where
     }
 
     #[test]
+    fn primitive_compat_predicates_match_validator_modes() {
+        let default_options = CompileOptions::default();
+        assert!(default_options.is_primitive_compat_014());
+        assert!(!default_options.is_primitive_strict());
+
+        let compat_options = CompileOptions { primitive_compat: Some("0.14".to_string()), ..Default::default() };
+        assert!(compat_options.is_primitive_compat_014());
+        assert!(!compat_options.is_primitive_strict());
+
+        let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() };
+        assert!(!strict_options.is_primitive_compat_014());
+        assert!(strict_options.is_primitive_strict());
+
+        let unsupported_options = CompileOptions { primitive_compat: Some("0.16".to_string()), ..Default::default() };
+        assert!(!unsupported_options.is_primitive_compat_014());
+        assert!(!unsupported_options.is_primitive_strict());
+    }
+
+    #[test]
     fn compile_accepts_kernel_effect_capabilities_for_destroy() {
         let source = r#"
 module test
@@ -24152,10 +24227,19 @@ where
         let molecule_schema = snapshot.molecule_schema.as_ref().expect("Snapshot molecule schema metadata");
         assert_eq!(molecule_schema.abi, "molecule");
         assert_eq!(molecule_schema.layout, "fixed-struct-v1");
-        assert_eq!(molecule_schema.fixed_size, 8);
+        assert_eq!(molecule_schema.fixed_size, Some(8));
         assert!(molecule_schema.schema.contains("struct Snapshot"));
         assert!(molecule_schema.schema.contains("amount: CellScriptUint64"));
         assert_eq!(molecule_schema.schema_hash, crate::hex_encode(&crate::ckb_blake2b256(molecule_schema.schema.as_bytes())));
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Snapshot")
+            .expect("Snapshot manifest entry");
+        assert_eq!(manifest_entry.fixed_size, Some(8));
+        assert_eq!(manifest_entry.encoded_size, Some(8));
         let amount = snapshot.fields.iter().find(|field| field.name == "amount").expect("amount field metadata");
         assert_eq!(amount.ty, "u64");
         assert_eq!(amount.offset, 0);
@@ -24352,7 +24436,7 @@ where
         assert_eq!(lock_type.encoded_size, Some(1));
         let schema = time_lock.molecule_schema.as_ref().expect("TimeLock molecule schema");
         assert_eq!(schema.layout, "fixed-struct-v1");
-        assert_eq!(schema.fixed_size, 41);
+        assert_eq!(schema.fixed_size, Some(41));
         assert!(schema.schema.contains("array CellScriptEnumTag [byte; 1];"));
         assert!(schema.schema.contains("lock_type: CellScriptEnumTag"));
     }
@@ -24441,8 +24525,17 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
         let schema = collection.molecule_schema.as_ref().expect("dynamic Collection molecule schema");
         assert_eq!(collection.encoded_size, None);
         assert_eq!(schema.layout, "molecule-table-v1");
-        assert_eq!(schema.fixed_size, 0);
+        assert_eq!(schema.fixed_size, None);
         assert_eq!(schema.dynamic_fields, vec!["name".to_string()]);
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Collection")
+            .expect("Collection manifest entry");
+        assert_eq!(manifest_entry.fixed_size, None);
+        assert_eq!(manifest_entry.encoded_size, None);
         assert!(schema.schema.contains("vector CellScriptString <byte>;"));
         assert!(schema.schema.contains("table Collection"));
         assert!(schema.schema.contains("name: CellScriptString"));
@@ -24634,7 +24727,7 @@ where
         assert_eq!(amount_field.encoded_size, Some(8));
 
         let molecule_schema = token.molecule_schema.as_ref().expect("Token molecule schema metadata");
-        assert_eq!(molecule_schema.fixed_size, 168);
+        assert_eq!(molecule_schema.fixed_size, Some(168));
         assert!(molecule_schema.schema.contains("struct Owner"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenPair"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenCheckpoints"));
