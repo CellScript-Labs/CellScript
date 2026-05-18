@@ -399,6 +399,21 @@ fn fixed_scalar_const_value(value: &IrConst) -> Option<u64> {
     }
 }
 
+fn const_ir_type(value: &IrConst) -> IrType {
+    match value {
+        IrConst::Unit => IrType::Unit,
+        IrConst::U8(_) => IrType::U8,
+        IrConst::U16(_) => IrType::U16,
+        IrConst::U32(_) => IrType::U32,
+        IrConst::U64(_) => IrType::U64,
+        IrConst::U128(_) => IrType::U128,
+        IrConst::Bool(_) => IrType::Bool,
+        IrConst::Address(_) => IrType::Address,
+        IrConst::Hash(_) => IrType::Hash,
+        IrConst::Array(values) => IrType::Array(Box::new(values.first().map(const_ir_type).unwrap_or(IrType::U8)), values.len()),
+    }
+}
+
 fn const_usize_operand(operand: &IrOperand) -> Option<usize> {
     match operand {
         IrOperand::Const(IrConst::U8(value)) => Some((*value).into()),
@@ -1845,7 +1860,11 @@ impl CodeGenerator {
                 for instruction in &block.instructions {
                     let alias = match instruction {
                         IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) }
-                        | IrInstruction::Move { dest, src: IrOperand::Var(src) } => Some((dest, src)),
+                        | IrInstruction::Move { dest, src: IrOperand::Var(src) }
+                            if dest.ty == src.ty =>
+                        {
+                            Some((dest, src))
+                        }
                         _ => None,
                     };
                     let Some((dest, src)) = alias else {
@@ -2064,22 +2083,27 @@ impl CodeGenerator {
                     {
                         self.aggregate_pointer_sources.insert(dest.id, AggregatePointerSource { ty: dest.ty.clone() });
                     }
-                    IrInstruction::Move { dest, src } if dest.ty == IrType::U64 => {
+                    IrInstruction::Move { dest, src } | IrInstruction::Cast { dest, src } if dest.ty == IrType::U64 => {
                         if self.prelude_u64_value_source(src).is_some() {
                             self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::StackVar(dest.id));
                         }
                     }
-                    IrInstruction::Move { dest, src } if matches!(dest.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32) => {
+                    IrInstruction::Move { dest, src } | IrInstruction::Cast { dest, src }
+                        if matches!(dest.ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32) =>
+                    {
                         if let Some(value) = self.prelude_scalar_immediate(src) {
                             self.prelude_scalar_immediates.insert(dest.id, value);
                         }
                     }
-                    IrInstruction::Move { dest, src } if fixed_byte_width(&dest.ty, type_static_length(&dest.ty)).is_some() => {
+                    IrInstruction::Move { dest, src } | IrInstruction::Cast { dest, src }
+                        if fixed_byte_width(&dest.ty, type_static_length(&dest.ty)).is_some() =>
+                    {
                         if let Some(bytes) = self.prelude_fixed_byte_constant(src) {
                             self.prelude_fixed_byte_constants.insert(dest.id, bytes);
                         }
                     }
                     IrInstruction::Move { dest, src: IrOperand::Var(src) }
+                    | IrInstruction::Cast { dest, src: IrOperand::Var(src) }
                     | IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) } => {
                         if self.stack_collection_vars.contains(&src.id) && dest.ty == src.ty {
                             self.stack_collection_vars.insert(dest.id);
@@ -2774,6 +2798,9 @@ impl CodeGenerator {
             }
             IrInstruction::Move { dest, src } => {
                 self.emit_move(dest, src)?;
+            }
+            IrInstruction::Cast { dest, src } => {
+                self.emit_cast(dest, src)?;
             }
             IrInstruction::Tuple { dest, fields } => {
                 self.emit_tuple(dest, fields)?;
@@ -5748,7 +5775,10 @@ impl CodeGenerator {
                     BinaryOp::Add => self.emit("add t1, t3, t1"),
                     BinaryOp::Sub => self.emit("sub t1, t3, t1"),
                     BinaryOp::Mul => self.emit("mul t1, t3, t1"),
-                    BinaryOp::Div => self.emit("divu t1, t3, t1"),
+                    BinaryOp::Div => {
+                        self.emit_divisor_nonzero_guard("t1");
+                        self.emit("divu t1, t3, t1");
+                    }
                     _ => unreachable!("prelude u64 binary source only supports add/sub/mul/div"),
                 }
             }
@@ -6543,7 +6573,7 @@ impl CodeGenerator {
                     self.record_operand(capacity, max_var_id);
                 }
             }
-            IrInstruction::Move { dest, src } => {
+            IrInstruction::Move { dest, src } | IrInstruction::Cast { dest, src } => {
                 self.record_var(dest, max_var_id);
                 self.record_operand(src, max_var_id);
             }
@@ -6673,6 +6703,7 @@ impl CodeGenerator {
             | IrInstruction::CollectionPop { dest, .. }
             | IrInstruction::CollectionNew { dest, .. }
             | IrInstruction::Move { dest, .. }
+            | IrInstruction::Cast { dest, .. }
             | IrInstruction::Tuple { dest, .. }
             | IrInstruction::Binary { dest, .. } => record(offsets, dest),
             IrInstruction::Call { dest, func, .. } => {
@@ -6782,6 +6813,51 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn emit_truncate_register_to_type(&mut self, register: &str, ty: &IrType) {
+        match ty {
+            IrType::U8 => self.emit(format!("andi {}, {}, 255", register, register)),
+            IrType::U16 => self.emit_truncate_register_to_width(register, 16),
+            IrType::U32 => self.emit_truncate_register_to_width(register, 32),
+            _ => {}
+        }
+    }
+
+    fn emit_truncate_register_to_width(&mut self, register: &str, width: u32) {
+        if width >= 64 {
+            return;
+        }
+        let shift = 64 - width;
+        self.emit(format!("slli {}, {}, {}", register, register, shift));
+        self.emit(format!("srli {}, {}, {}", register, register, shift));
+    }
+
+    fn emit_checked_scalar_fits(&mut self, register: &str, width: u32) {
+        if width >= 64 {
+            return;
+        }
+        let ok_label = self.fresh_label("cast_fit_ok");
+        self.emit(format!("srli t2, {}, {}", register, width));
+        self.emit(format!("beqz t2, {}", ok_label));
+        self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+        self.emit_label(&ok_label);
+    }
+
+    fn emit_bool_canonical_check(&mut self, register: &str) {
+        let ok_label = self.fresh_label("bool_canonical_ok");
+        self.emit(format!("beqz {}, {}", register, ok_label));
+        self.emit("li t2, 1");
+        self.emit(format!("beq {}, t2, {}", register, ok_label));
+        self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+        self.emit_label(&ok_label);
+    }
+
+    fn emit_divisor_nonzero_guard(&mut self, register: &str) {
+        let ok_label = self.fresh_label("divisor_nonzero");
+        self.emit(format!("bnez {}, {}", register, ok_label));
+        self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+        self.emit_label(&ok_label);
+    }
+
     fn emit_binary(&mut self, dest: &IrVar, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> Result<()> {
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && self.emit_dynamic_byte_comparison(dest, op, left, right) {
             return Ok(());
@@ -6819,8 +6895,14 @@ impl CodeGenerator {
             BinaryOp::Add => self.emit("add t0, t0, t1"),
             BinaryOp::Sub => self.emit("sub t0, t0, t1"),
             BinaryOp::Mul => self.emit("mul t0, t0, t1"),
-            BinaryOp::Div => self.emit("divu t0, t0, t1"),
-            BinaryOp::Mod => self.emit("remu t0, t0, t1"),
+            BinaryOp::Div => {
+                self.emit_divisor_nonzero_guard("t1");
+                self.emit("divu t0, t0, t1");
+            }
+            BinaryOp::Mod => {
+                self.emit_divisor_nonzero_guard("t1");
+                self.emit("remu t0, t0, t1");
+            }
             BinaryOp::Eq => {
                 self.emit("sub t0, t0, t1");
                 self.emit("seqz t0, t0");
@@ -6839,10 +6921,21 @@ impl CodeGenerator {
                 self.emit("sltu t0, t0, t1");
                 self.emit("xori t0, t0, 1");
             }
-            BinaryOp::And => self.emit("and t0, t0, t1"),
-            BinaryOp::Or => self.emit("or t0, t0, t1"),
+            BinaryOp::And => {
+                self.emit_bool_canonical_check("t0");
+                self.emit_bool_canonical_check("t1");
+                self.emit("and t0, t0, t1");
+            }
+            BinaryOp::Or => {
+                self.emit_bool_canonical_check("t0");
+                self.emit_bool_canonical_check("t1");
+                self.emit("or t0, t0, t1");
+            }
         }
 
+        if matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) {
+            self.emit_truncate_register_to_type("t0", &dest.ty);
+        }
         self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
@@ -6897,7 +6990,10 @@ impl CodeGenerator {
             UnaryOp::Neg => {
                 return Err(CompileError::new("unary negation is not supported for unsigned integers", crate::error::Span::default()));
             }
-            UnaryOp::Not => self.emit("xori t0, t0, 1"),
+            UnaryOp::Not => {
+                self.emit_bool_canonical_check("t0");
+                self.emit("xori t0, t0, 1");
+            }
             UnaryOp::Ref | UnaryOp::Deref => self.emit("# reference conversion (no-op in asm backend)"),
         }
 
@@ -6951,6 +7047,9 @@ impl CodeGenerator {
                 self.emit_loaded_schema_bounds_check(size_offset, layout.offset + width, &format!("{}.{}", type_name, field));
                 if layout_fixed_scalar_width(&layout).is_some() {
                     self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+                    if dest.ty == IrType::Bool {
+                        self.emit_bool_canonical_check("t0");
+                    }
                 } else {
                     self.emit(format!("addi t0, t4, {}", layout.offset));
                 }
@@ -6965,6 +7064,9 @@ impl CodeGenerator {
                 self.emit("add t4, t4, t5");
                 if layout_fixed_scalar_width(&layout).is_some() {
                     self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
+                    if dest.ty == IrType::Bool {
+                        self.emit_bool_canonical_check("t0");
+                    }
                 } else {
                     self.emit("addi t0, t4, 0");
                 }
@@ -6975,6 +7077,9 @@ impl CodeGenerator {
             }
             if layout_fixed_scalar_width(&layout).is_some() {
                 self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+                if dest.ty == IrType::Bool {
+                    self.emit_bool_canonical_check("t0");
+                }
             } else {
                 self.emit(format!("addi t0, t4, {}", layout.offset));
             }
@@ -7042,6 +7147,9 @@ impl CodeGenerator {
         self.emit_stack_load("t4", var.id * 8);
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+            if dest.ty == IrType::Bool {
+                self.emit_bool_canonical_check("t0");
+            }
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
@@ -7101,6 +7209,9 @@ impl CodeGenerator {
         self.emit_stack_load("t4", var.id * 8);
         if layout_fixed_scalar_width(&layout).is_some() {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+            if dest.ty == IrType::Bool {
+                self.emit_bool_canonical_check("t0");
+            }
         } else {
             self.emit(format!("addi t0, t4, {}", layout.offset));
         }
@@ -8810,7 +8921,75 @@ impl CodeGenerator {
     }
 
     fn emit_move(&mut self, dest: &IrVar, src: &IrOperand) -> Result<()> {
+        if dest.ty == IrType::U128 {
+            let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+                self.emit("# cellscript abi: fail closed because u128 move destination has no fixed-byte storage");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(());
+            };
+            let Some(source) = self.expected_fixed_byte_source(src, 16) else {
+                self.emit("# cellscript abi: fail closed because u128 move source is not addressable");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(());
+            };
+            self.emit_fixed_byte_source_scalar_to("t0", "t2", "t4", &source, 0, 8);
+            self.emit_fixed_byte_source_scalar_to("t1", "t2", "t4", &source, 8, 8);
+            self.emit_stack_store("t0", dest_offset);
+            self.emit_stack_store("t1", dest_offset + 8);
+            self.emit_sp_addi("t0", dest_offset);
+            self.emit_stack_store("t0", dest.id * 8);
+            return Ok(());
+        }
+        if let IrOperand::Var(src_var) = src {
+            if src_var.ty != dest.ty {
+                self.emit("# cellscript abi: fail closed because Move cannot change value type");
+                self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+                return Ok(());
+            }
+        }
         self.emit_operand_to_register("t0", src);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(())
+    }
+
+    fn emit_cast(&mut self, dest: &IrVar, src: &IrOperand) -> Result<()> {
+        if dest.ty == IrType::U128 {
+            self.emit("# cellscript abi: fail closed because runtime casts to u128 are not supported");
+            self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+            return Ok(());
+        }
+
+        self.emit_operand_to_register("t0", src);
+        let src_ty = match src {
+            IrOperand::Var(var) => var.ty.clone(),
+            IrOperand::Const(value) => const_ir_type(value),
+        };
+        if src_ty == IrType::Bool {
+            self.emit_bool_canonical_check("t0");
+        }
+
+        match dest.ty {
+            IrType::Bool => self.emit_checked_scalar_fits("t0", 1),
+            IrType::U8 => {
+                self.emit_checked_scalar_fits("t0", 8);
+                self.emit("andi t0, t0, 255");
+            }
+            IrType::U16 => {
+                self.emit_checked_scalar_fits("t0", 16);
+                self.emit_truncate_register_to_width("t0", 16);
+            }
+            IrType::U32 => {
+                self.emit_checked_scalar_fits("t0", 32);
+                self.emit_truncate_register_to_width("t0", 32);
+            }
+            IrType::U64 => {}
+            _ => {
+                self.emit("# cellscript abi: fail closed because runtime cast target is unsupported");
+                self.emit_fail(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+                return Ok(());
+            }
+        }
+
         self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
@@ -10026,6 +10205,7 @@ enum Instruction {
     Add { rd: u8, rs1: u8, rs2: u8 },
     Sub { rd: u8, rs1: u8, rs2: u8 },
     And { rd: u8, rs1: u8, rs2: u8 },
+    Andi { rd: u8, rs1: u8, imm: i64 },
     Or { rd: u8, rs1: u8, rs2: u8 },
     Xor { rd: u8, rs1: u8, rs2: u8 },
     Mul { rd: u8, rs1: u8, rs2: u8 },
@@ -11018,6 +11198,11 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
         }),
+        "andi" => Ok(Instruction::Andi {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            imm: parse_immediate(arg(&args, 2)?)?,
+        }),
         "or" => Ok(Instruction::Or {
             rd: parse_register(arg(&args, 0)?)?,
             rs1: parse_register(arg(&args, 1)?)?,
@@ -11216,6 +11401,7 @@ fn encode_instruction(
         Instruction::And { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b111, *rs1, *rs2, 0b0000000).to_le_bytes())
         }
+        Instruction::Andi { rd, rs1, imm } => out.extend_from_slice(&encode_i_type(0x13, *rd, 0b111, *rs1, *imm)?.to_le_bytes()),
         Instruction::Or { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b110, *rs1, *rs2, 0b0000000).to_le_bytes())
         }
@@ -11774,6 +11960,7 @@ mod tests {
         ("add", "add t0, a0, a1"),
         ("addi", "addi t0, t0, -1"),
         ("and", "and t2, a0, a1"),
+        ("andi", "andi a0, a0, 255"),
         ("beq", "beq a0, a1, branch_target"),
         ("bge", "bge a0, a1, branch_target"),
         ("bgeu", "bgeu a0, a1, branch_target"),
@@ -11820,7 +12007,6 @@ mod tests {
     const INTENTIONALLY_UNSUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
         ("addiw", "addiw a0, a0, 1"),
         ("addw", "addw a0, a0, a1"),
-        ("andi", "andi a0, a0, 1"),
         ("amoadd.w", "amoadd.w a0, a1, (a2)"),
         ("auipc", "auipc a0, 0"),
         ("ble", "ble a0, a1, target"),
@@ -12002,6 +12188,117 @@ where
             "binary comparison should materialize the u8 constant value instead of falling back to zero:\n{}",
             assembly
         );
+    }
+
+    #[test]
+    fn narrow_arithmetic_codegen_truncates_to_declared_width() {
+        let program = r#"
+module codegen::narrow_wrap
+
+action wrap8(x: u8) -> u8
+where
+    return x + 1
+
+action wrap16(x: u16) -> u16
+where
+    return x + 1
+
+action wrap32(x: u32) -> u32
+where
+    return x + 1
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("narrow arithmetic should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(assembly.contains("andi t0, t0, 255"), "u8 arithmetic should mask to 8 bits:\n{}", assembly);
+        assert!(assembly.contains("slli t0, t0, 48\n    srli t0, t0, 48"), "u16 arithmetic should truncate to 16 bits:\n{}", assembly);
+        assert!(assembly.contains("slli t0, t0, 32\n    srli t0, t0, 32"), "u32 arithmetic should truncate to 32 bits:\n{}", assembly);
+    }
+
+    #[test]
+    fn runtime_cast_codegen_checks_narrowing_and_bool_canonicality() {
+        let program = r#"
+module codegen::runtime_casts
+
+action cast_u8(x: u64) -> u8
+where
+    return x as u8
+
+action cast_bool(x: u64) -> bool
+where
+    return x as bool
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("runtime casts should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(assembly.contains("srli t2, t0, 8"), "u64->u8 cast should check high bits:\n{}", assembly);
+        assert!(assembly.contains("andi t0, t0, 255"), "u64->u8 cast should materialize a canonical u8:\n{}", assembly);
+        assert!(assembly.contains("srli t2, t0, 1"), "numeric->bool cast should check canonical 0/1:\n{}", assembly);
+    }
+
+    #[test]
+    fn division_codegen_guards_zero_divisors() {
+        let program = r#"
+module codegen::div_guard
+
+action div(x: u64, y: u64) -> u64
+where
+    return x / y
+
+action rem(x: u64, y: u64) -> u64
+where
+    return x % y
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("division should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(assembly.contains("bnez t1, .L"), "division/rem should guard zero divisor:\n{}", assembly);
+        assert!(assembly.contains("divu t0, t0, t1"), "division should use unsigned div:\n{}", assembly);
+        assert!(assembly.contains("remu t0, t0, t1"), "modulo should use unsigned rem:\n{}", assembly);
+    }
+
+    #[test]
+    fn u128_delta_arithmetic_codegen_uses_fixed_byte_storage() {
+        let program = r#"
+module codegen::u128_delta
+
+struct Wide {
+    value: u128
+}
+
+action add_delta(input: Wide, delta: u64) -> bool
+where
+    let next: u128 = input.value + delta
+    return next == input.value
+
+action sub_delta(input: Wide, delta: u64) -> bool
+where
+    let next: u128 = input.value - delta
+    return next == input.value
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("u128 delta arithmetic should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(assembly.contains("u128 Add with u64 delta"), "u128 + u64 lowering missing:\n{}", assembly);
+        assert!(assembly.contains("u128 Sub with u64 delta"), "u128 - u64 lowering missing:\n{}", assembly);
+        assert!(assembly.contains("sltu t2, t5, t0"), "u128 add carry check missing:\n{}", assembly);
+        assert!(assembly.contains("sltu t2, t0, t1"), "u128 subtract borrow check missing:\n{}", assembly);
     }
 
     fn supported_instruction_surface_lines() -> Vec<String> {

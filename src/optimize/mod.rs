@@ -958,6 +958,15 @@ mod tests {
     }
 
     #[test]
+    fn folds_unsigned_high_bit_integer_operations() {
+        assert_eq!(fold_binary(BinaryOp::Gt, &ConstValue::U64(u64::MAX), &ConstValue::U64(1)), Some(ConstValue::Bool(true)));
+        assert_eq!(fold_binary(BinaryOp::Div, &ConstValue::U64(u64::MAX), &ConstValue::U64(2)), Some(ConstValue::U64(u64::MAX / 2)));
+        assert_eq!(fold_binary(BinaryOp::Mod, &ConstValue::U64(u64::MAX), &ConstValue::U64(2)), Some(ConstValue::U64(u64::MAX % 2)));
+        assert_eq!(fold_binary(BinaryOp::Div, &ConstValue::U64(u64::MAX), &ConstValue::U64(0)), None);
+        assert_eq!(fold_binary(BinaryOp::Mod, &ConstValue::U64(u64::MAX), &ConstValue::U64(0)), None);
+    }
+
+    #[test]
     fn folds_boolean_expressions() {
         let mut optimizer = Optimizer::new(1);
         let expr = Expr::Unary(UnaryExpr {

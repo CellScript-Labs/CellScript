@@ -2637,11 +2637,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
             _ => {
                 let actual_ty = self.infer_expr(env, expr)?;
-                if self.numeric_widening_compatible(expected_ty, &actual_ty) {
-                    Ok(expected_ty.clone())
-                } else {
-                    Ok(actual_ty)
-                }
+                Ok(actual_ty)
             }
         }
     }
@@ -3848,7 +3844,6 @@ impl<'a> TypeChecker<'a> {
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
         self.types_equal(actual, expected)
-            || self.numeric_widening_compatible(expected, actual)
             || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
     }
 
@@ -5271,25 +5266,6 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn numeric_widening_compatible(&self, expected: &Type, actual: &Type) -> bool {
-        match (Self::numeric_bit_width(expected), Self::numeric_bit_width(actual)) {
-            (Some(expected), Some(actual)) => actual <= expected,
-            _ => false,
-        }
-    }
-
-    fn numeric_bit_width(ty: &Type) -> Option<u16> {
-        match ty {
-            Type::U8 => Some(8),
-            Type::U16 => Some(16),
-            Type::U32 => Some(32),
-            Type::U64 => Some(64),
-            Type::U128 => Some(128),
-            Type::Named(name) if name == "usize" || name == "isize" => Some(64),
-            _ => None,
-        }
-    }
-
     fn numeric_types_equal(&self, a: &Type, b: &Type) -> bool {
         self.types_equal(a, b)
             || matches!(
@@ -6114,8 +6090,8 @@ mod tests {
         assert!(checker.types_equal(&Type::U64, &Type::U64));
         assert!(!checker.types_equal(&Type::U8, &Type::U64));
         assert!(!checker.types_equal(&Type::Array(Box::new(Type::U8), 1), &Type::Array(Box::new(Type::U64), 1)));
-        assert!(checker.numeric_widening_compatible(&Type::U64, &Type::U8));
-        assert!(!checker.numeric_widening_compatible(&Type::U8, &Type::U64));
+        assert_eq!(TypeChecker::widen_to(&Type::U64, &Type::U8), Some(Type::U64));
+        assert_eq!(TypeChecker::widen_to(&Type::U8, &Type::U64), Some(Type::U64));
     }
 
     #[test]
@@ -6311,16 +6287,16 @@ where
         ))
         .expect("u16 < u64 should be allowed with widening");
 
-        // u8 == u64 (equality)
+        // u16 == u64 (equality)
         check(&source_module(
             r#"
 module types::boundary_eq
-action ok(a: u8, b: u64) -> bool
+action ok(a: u16, b: u64) -> bool
 where
     return a == b
 "#,
         ))
-        .expect("u8 == u64 should be allowed with widening");
+        .expect("u16 == u64 should be allowed with widening");
 
         // u32 != u16 (equality)
         check(&source_module(
@@ -6350,6 +6326,22 @@ where
             err.message
         );
 
+        let err = check(&source_module(
+            r#"
+module types::boundary_let_widen
+action bad(a: u16) -> u64
+where
+    let x: u64 = a
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let u64 = u16 should fail as an assignment boundary: {}",
+            err.message
+        );
+
         // === BOUNDARY: return rejects narrowing ===
         let err = check(&source_module(
             r#"
@@ -6363,6 +6355,36 @@ where
         assert!(
             err.message.contains("return type") || err.message.contains("mismatch"),
             "return u64*u16 as u16 should fail: {}",
+            err.message
+        );
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_direct_narrow
+action bad(a: u64) -> u16
+where
+    return a
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u64 as u16 should fail: {}",
+            err.message
+        );
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_widen
+action bad(a: u16) -> u64
+where
+    return a
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u16 as u64 should fail as a return boundary: {}",
             err.message
         );
 
@@ -6392,6 +6414,24 @@ where
         .unwrap_err();
         assert!(err.message.contains("narrow"), "u16 += u64 should fail as narrowing: {}", err.message);
 
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_compound
+
+struct Holder {
+    value: u16,
+}
+
+action bad(y: u64) -> u16
+where
+    let mut holder = Holder { value: 1 }
+    holder.value += y
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 field += u64 should fail as narrowing: {}", err.message);
+
         // === BOUNDARY: += allows value narrower than target ===
         check(&source_module(
             r#"
@@ -6403,6 +6443,76 @@ where
 "#,
         ))
         .expect("u64 += u16 should succeed");
+
+        // === BOUNDARY: field initializers require exact declared widths ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_narrow
+
+struct Holder {
+    value: u16,
+}
+
+action bad(y: u64) -> u16
+where
+    let holder = Holder { value: y }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "field u16 = u64 should fail: {}", err.message);
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_widen
+
+struct Holder {
+    value: u64,
+}
+
+action bad(y: u16) -> u64
+where
+    let holder = Holder { value: y }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "field u64 = u16 should fail as a layout boundary: {}", err.message);
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_cell_layout
+
+resource Token has store, destroy {
+    amount: u16,
+}
+
+action bad(amount: u64) -> u64
+where
+    let token = create Token { amount: amount }
+    destroy token
+    return 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "cell layout field u16 = u64 should fail: {}", err.message);
+
+        // === BOUNDARY: ABI/function arguments require exact declared widths ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_call_arg
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action bad(y: u16) -> u64
+where
+    return takes_u64(y)
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("argument 1 type mismatch"), "ABI argument u64 <- u16 should fail: {}", err.message);
 
         // === BOUNDARY: u128 rejects in every widening path ===
 

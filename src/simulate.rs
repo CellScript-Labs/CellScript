@@ -617,6 +617,38 @@ where
     }
 
     #[test]
+    fn simulate_unsigned_high_bit_integer_operations() {
+        let source = r#"
+module sim_test
+
+action greater(a: u64, b: u64) -> bool
+where
+    return a > b
+
+action div(a: u64, b: u64) -> u64
+where
+    return a / b
+
+action rem(a: u64, b: u64) -> u64
+where
+    return a % b
+"#;
+        let module = parse_module(source);
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("greater", &[SimValue::Integer(u64::MAX), SimValue::Integer(1)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Bool(true));
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("div", &[SimValue::Integer(u64::MAX), SimValue::Integer(2)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Integer(u64::MAX / 2));
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("rem", &[SimValue::Integer(u64::MAX), SimValue::Integer(2)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Integer(u64::MAX % 2));
+    }
+
+    #[test]
     fn simulate_rejects_wrong_action_arity() {
         let source = r#"
 module sim_test

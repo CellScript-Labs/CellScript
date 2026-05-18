@@ -3599,42 +3599,7 @@ impl IrGenerator {
             Expr::Array(items) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
                 self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), current, blocks)
             }
-            _ => {
-                let lowered = self.lower_expr(expr, current, blocks, vars);
-                let Some(active) = lowered.current else {
-                    return lowered;
-                };
-                let actual_ty = self.operand_type(&lowered.operand);
-                if actual_ty != *expected_ty && Self::ir_numeric_widening_compatible(expected_ty, &actual_ty) {
-                    if *expected_ty == IrType::U128 {
-                        self.record_error("implicit widening to u128 is not yet supported".to_string(), Span::default());
-                        return LoweredExpr { operand: IrOperand::Const(IrConst::U128(0)), current: Some(active) };
-                    }
-                    let block = self.block_mut(blocks, active);
-                    let widened = self.materialize_operand_with_type("widened", lowered.operand, expected_ty.clone(), block);
-                    LoweredExpr { operand: IrOperand::Var(widened), current: Some(active) }
-                } else {
-                    lowered
-                }
-            }
-        }
-    }
-
-    fn ir_numeric_widening_compatible(expected: &IrType, actual: &IrType) -> bool {
-        match (Self::ir_numeric_bit_width(expected), Self::ir_numeric_bit_width(actual)) {
-            (Some(expected), Some(actual)) => actual <= expected,
-            _ => false,
-        }
-    }
-
-    fn ir_numeric_bit_width(ty: &IrType) -> Option<u16> {
-        match ty {
-            IrType::U8 => Some(8),
-            IrType::U16 => Some(16),
-            IrType::U32 => Some(32),
-            IrType::U64 => Some(64),
-            IrType::U128 => Some(128),
-            _ => None,
+            _ => self.lower_expr(expr, current, blocks, vars),
         }
     }
 
@@ -6221,6 +6186,78 @@ where
             .expect("expected add right operand");
 
         assert!(matches!(right, IrOperand::Const(IrConst::U8(1))));
+    }
+
+    #[test]
+    fn mixed_width_expression_local_widening_lowers_as_explicit_casts() {
+        let ir = parse_and_lower(
+            r#"
+module ir::mixed_width_widening
+
+action check(a: u64, b: u16) -> bool
+where
+    let product: u64 = a * b
+    let ordered: bool = b < a
+    return b == a
+"#,
+        );
+
+        let instructions = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) => {
+                    Some(action.body.blocks.iter().flat_map(|block| block.instructions.iter()).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .expect("expected lowered action");
+
+        let cast_count = instructions
+            .iter()
+            .filter(|instruction| matches!(instruction, IrInstruction::Cast { dest, src: IrOperand::Var(src) } if dest.ty == IrType::U64 && src.ty == IrType::U16))
+            .count();
+        assert!(cast_count >= 3, "expected arithmetic, ordering, and equality widening casts, got {cast_count}: {instructions:#?}");
+
+        assert!(instructions.iter().any(|instruction| {
+            matches!(
+                instruction,
+                IrInstruction::Binary {
+                    dest,
+                    op: BinaryOp::Mul,
+                    left,
+                    right,
+                } if dest.ty == IrType::U64
+                    && matches!(left, IrOperand::Var(var) if var.ty == IrType::U64)
+                    && matches!(right, IrOperand::Var(var) if var.ty == IrType::U64)
+            )
+        }));
+        assert!(instructions.iter().any(|instruction| {
+            matches!(
+                instruction,
+                IrInstruction::Binary {
+                    dest,
+                    op: BinaryOp::Lt,
+                    left,
+                    right,
+                } if dest.ty == IrType::Bool
+                    && matches!(left, IrOperand::Var(var) if var.ty == IrType::U64)
+                    && matches!(right, IrOperand::Var(var) if var.ty == IrType::U64)
+            )
+        }));
+        assert!(instructions.iter().any(|instruction| {
+            matches!(
+                instruction,
+                IrInstruction::Binary {
+                    dest,
+                    op: BinaryOp::Eq,
+                    left,
+                    right,
+                } if dest.ty == IrType::Bool
+                    && matches!(left, IrOperand::Var(var) if var.ty == IrType::U64)
+                    && matches!(right, IrOperand::Var(var) if var.ty == IrType::U64)
+            )
+        }));
     }
 
     #[test]

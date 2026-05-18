@@ -89,7 +89,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
         "timelock.cell",
         AssemblyShapeBudget {
             max_lines: 16_000,
-            max_fail_handlers: 64,
+            max_fail_handlers: 68,
             max_shared_epilogues: 22,
             max_text_bytes: 64 * 1024,
             max_relaxed_branches: 4,

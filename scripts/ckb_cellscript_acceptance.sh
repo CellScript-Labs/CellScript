@@ -1305,7 +1305,7 @@ where
         proposer: proposer,
         operation: 3,
         target: Address::zero(),
-        amount: new_threshold,
+        amount: new_threshold as u64,
         required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,

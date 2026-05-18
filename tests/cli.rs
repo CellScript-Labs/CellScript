@@ -1653,7 +1653,7 @@ shared Ledger has store {
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
 where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta

@@ -4867,7 +4867,8 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         | ir::IrInstruction::Index { dest, arr: operand, .. }
         | ir::IrInstruction::Length { dest, operand }
         | ir::IrInstruction::TypeHash { dest, operand }
-        | ir::IrInstruction::Move { dest, src: operand } => {
+        | ir::IrInstruction::Move { dest, src: operand }
+        | ir::IrInstruction::Cast { dest, src: operand } => {
             collect_ir_type_named_types(&dest.ty, used_types);
             collect_operand_named_types(operand, used_types);
         }
@@ -25353,6 +25354,9 @@ where
         expected.extend_from_slice(&77u64.to_le_bytes());
         assert_eq!(witness, expected);
         assert_eq!(encode_entry_witness_args_for_params(&action.params, &[EntryWitnessArg::U64(77)]).unwrap(), expected);
+
+        let err = action.entry_witness_args(&[EntryWitnessArg::U16(77)]).unwrap_err();
+        assert!(err.message.contains("expects scalar payload for type 'u64'"), "unexpected error: {}", err.message);
     }
 
     #[test]
