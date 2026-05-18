@@ -2,7 +2,7 @@
 
 **Status**: Release-gate draft for the `cellscript-0.15` implementation branch.
 
-**Updated**: 2026-05-15.
+**Updated**: 2026-05-18.
 
 CellScript 0.15 is the scoped-invariant and Covenant ProofPlan milestone. It
 makes verifier triggers, scope, coverage, builder assumptions, and enforcement
@@ -13,8 +13,8 @@ verbs to kernel effects.
 The short version: 0.15 adds scoped invariant declarations, aggregate
 assertion primitives, Covenant ProofPlan metadata and `cellc explain-proof`,
 first-class cell identity policies, explicit destruction policies, a
-kernel/protocol primitive split, a compat/strict migration path, and renames
-internal `type_hash` metadata fields.
+kernel/protocol primitive split, expression-local unsigned widening, a
+compat/strict migration path, and renames internal `type_hash` metadata fields.
 
 ## Highlights
 
@@ -93,6 +93,29 @@ whose action coverage is unmatched.
 Lock-group transaction risk diagnostics warn when a `lock_group` verifier
 scans transaction-wide views, because only inputs sharing that lock trigger
 the verifier.
+
+### Expression-local Unsigned Widening
+
+0.15 defines a deliberately bounded coercion rule for primitive unsigned
+integers. CellScript may widen `u8 -> u16 -> u32 -> u64 -> u128` only inside
+arithmetic and numeric comparison expressions.
+
+This is not a general implicit numeric coercion feature. Assignment, return,
+ABI, witness, `create` layout, struct field initialization, Molecule layout,
+and serialization boundaries remain exact-type boundaries. Integer literals may
+be context-typed by an expected primitive integer type, but non-literal values
+must use an explicit cast at boundaries:
+
+```cellscript
+let total: u64 = amount_u64 + fee_u16 // accepted expression-local widening
+let stored: u64 = fee_u16             // rejected boundary widening
+let stored: u64 = fee_u16 as u64      // accepted explicit boundary cast
+```
+
+Compound assignment is a write boundary: `target += rhs` is valid only when
+`rhs` is the same width as, or narrower than, `target`. Generic `u128`
+arithmetic and ordering remain unsupported except for explicitly implemented
+`u128` delta and equality paths.
 
 ### Cell Identity and TYPE_ID Lifecycle
 
