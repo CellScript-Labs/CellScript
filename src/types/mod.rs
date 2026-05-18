@@ -6271,6 +6271,178 @@ where
         .expect("u64 += u16 should succeed");
     }
 
+    /// Comprehensive boundary test: widening is expression-local only.
+    /// Every boundary (let, return, assign, field write, call arg) must reject
+    /// implicit narrowing, even when the expression itself involves widening.
+    #[test]
+    fn widening_boundary_matrix() {
+        // === EXPRESSION-LOCAL: widening allowed ===
+
+        // u64 * u16 -> u64 (arithmetic)
+        check(&source_module(
+            r#"
+module types::boundary_arith
+action ok(a: u64, b: u16) -> u64
+where
+    return a * b
+"#,
+        ))
+        .expect("u64 * u16 should widen to u64");
+
+        // u8 + u32 -> u32 (arithmetic)
+        check(&source_module(
+            r#"
+module types::boundary_arith_u8_u32
+action ok(a: u8, b: u32) -> u32
+where
+    return a + b
+"#,
+        ))
+        .expect("u8 + u32 should widen to u32");
+
+        // u16 < u64 (ordering)
+        check(&source_module(
+            r#"
+module types::boundary_order
+action ok(a: u16, b: u64) -> bool
+where
+    return a < b
+"#,
+        ))
+        .expect("u16 < u64 should be allowed with widening");
+
+        // u8 == u64 (equality)
+        check(&source_module(
+            r#"
+module types::boundary_eq
+action ok(a: u8, b: u64) -> bool
+where
+    return a == b
+"#,
+        ))
+        .expect("u8 == u64 should be allowed with widening");
+
+        // u32 != u16 (equality)
+        check(&source_module(
+            r#"
+module types::boundary_ne
+action ok(a: u32, b: u16) -> bool
+where
+    return a != b
+"#,
+        ))
+        .expect("u32 != u16 should be allowed with widening");
+
+        // === BOUNDARY: let binding rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_let_narrow
+action bad(a: u64, b: u16) -> u16
+where
+    let x: u16 = a * b
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let u16 = u64*u16 should fail: {}",
+            err.message
+        );
+
+        // === BOUNDARY: return rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_narrow
+action bad(a: u64, b: u16) -> u16
+where
+    return a * b
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u64*u16 as u16 should fail: {}",
+            err.message
+        );
+
+        // === BOUNDARY: plain assign rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_assign_narrow
+action bad(mut x: u16, a: u64, b: u16) -> u16
+where
+    x = a * b
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("matching types"), "assign u64 result to u16 should fail: {}", err.message);
+
+        // === BOUNDARY: += rejects widening-past-target ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_compound_widen_past
+action bad(mut x: u16, y: u64) -> u16
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 += u64 should fail as narrowing: {}", err.message);
+
+        // === BOUNDARY: += allows value narrower than target ===
+        check(&source_module(
+            r#"
+module types::boundary_compound_safe
+action ok(mut x: u64, y: u16) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += u16 should succeed");
+
+        // === BOUNDARY: u128 rejects in every widening path ===
+
+        // u32 + u128 -> rejected
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_add
+action bad(a: u32, b: u128) -> u128
+where
+    return a + b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u32+u128 rejected: {}", err.message);
+
+        // u64 < u128 -> rejected
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_lt
+action bad(a: u64, b: u128) -> bool
+where
+    return a < b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64<u128 rejected: {}", err.message);
+
+        // u64 == u128 -> rejected (types_equal fails)
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_eq
+action bad(a: u64, b: u128) -> bool
+where
+    return a == b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("matching types") || err.message.contains("u128"), "u64==u128 rejected: {}", err.message);
+    }
+
     #[test]
     fn contextual_integer_literals_fit_declared_widths() {
         let module = source_module(
