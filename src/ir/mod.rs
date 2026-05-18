@@ -304,6 +304,7 @@ pub enum IrInstruction {
     Call { dest: Option<IrVar>, func: String, args: Vec<IrOperand> },
     ReadRef { dest: IrVar, ty: String },
     Move { dest: IrVar, src: IrOperand },
+    Cast { dest: IrVar, src: IrOperand },
     Tuple { dest: IrVar, fields: Vec<IrOperand> },
     Consume { operand: IrOperand },
     Create { dest: IrVar, pattern: CreatePattern },
@@ -991,6 +992,7 @@ impl IrGenerator {
             Type::Hash => IrType::Hash,
             Type::Array(elem, size) => IrType::Array(Box::new(Self::convert_type(elem)), *size),
             Type::Tuple(types) => IrType::Tuple(types.iter().map(Self::convert_type).collect()),
+            Type::Named(name) if name == "usize" || name == "isize" => IrType::U64,
             Type::Named(name) => IrType::Named(name.clone()),
             Type::Ref(inner) => IrType::Ref(Box::new(Self::convert_type(inner))),
             Type::MutRef(inner) => IrType::MutRef(Box::new(Self::convert_type(inner))),
@@ -1846,13 +1848,21 @@ impl IrGenerator {
             IrOperand::Var(var) => {
                 let dest = self.new_var(name.to_string(), ty);
                 let source = IrOperand::Var(var);
-                block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: source.clone() });
+                block.instructions.push(IrInstruction::Cast { dest: dest.clone(), src: source.clone() });
                 self.copy_aggregate_metadata(&source, dest.id);
                 dest
             }
             IrOperand::Const(value) => {
                 let dest = self.new_var(name.to_string(), ty);
-                block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value });
+                if let Some(value) = Self::cast_const(&value, &dest.ty) {
+                    block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value });
+                } else {
+                    self.record_error(
+                        format!("constant materialization from {:?} to {:?} is not supported", value, dest.ty),
+                        Span::default(),
+                    );
+                    block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value: IrConst::U64(0) });
+                }
                 dest
             }
         }
@@ -1912,13 +1922,22 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
-                let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left.operand, &right.operand));
-                let block = self.block_mut(blocks, active);
-                block.instructions.push(IrInstruction::Binary {
+                let (left_operand, right_operand) = self.coerce_binary_integer_operands(
+                    binary.op,
+                    left.operand,
+                    right.operand,
+                    binary.span,
+                    self.block_mut(blocks, active),
+                );
+                if let Err(message) = self.validate_binary_operands(binary.op, &left_operand, &right_operand) {
+                    self.record_error(message, binary.span);
+                }
+                let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left_operand, &right_operand));
+                self.block_mut(blocks, active).instructions.push(IrInstruction::Binary {
                     dest: dest.clone(),
                     op: binary.op,
-                    left: left.operand,
-                    right: right.operand,
+                    left: left_operand,
+                    right: right_operand,
                 });
                 LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
             }
@@ -1927,6 +1946,9 @@ impl IrGenerator {
                 let Some(active) = operand.current else {
                     return operand;
                 };
+                if unary.op == UnaryOp::Neg {
+                    self.record_error("unary negation is not supported for unsigned integer types", unary.span);
+                }
                 let dest = self.new_var("tmp", self.unary_result_type(unary.op, &operand.operand));
                 let block = self.block_mut(blocks, active);
                 block.instructions.push(IrInstruction::Unary { dest: dest.clone(), op: unary.op, operand: operand.operand });
@@ -2092,10 +2114,140 @@ impl IrGenerator {
         }
     }
 
-    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, _right: &IrOperand) -> IrType {
+    fn ir_numeric_width(ty: &IrType) -> Option<u32> {
+        match ty {
+            IrType::U8 => Some(8),
+            IrType::U16 => Some(16),
+            IrType::U32 => Some(32),
+            IrType::U64 => Some(64),
+            IrType::U128 => Some(128),
+            _ => None,
+        }
+    }
+
+    fn coerce_binary_integer_operands(
+        &mut self,
+        op: BinaryOp,
+        left: IrOperand,
+        right: IrOperand,
+        span: Span,
+        block: &mut IrBlock,
+    ) -> (IrOperand, IrOperand) {
+        let left_ty = self.operand_type(&left);
+        let right_ty = self.operand_type(&right);
+        if left_ty == right_ty {
+            return (left, right);
+        }
+        if matches!(op, BinaryOp::Add | BinaryOp::Sub) && left_ty == IrType::U128 && right_ty == IrType::U64 {
+            return (left, right);
+        }
+        if matches!(op, BinaryOp::Add) && left_ty == IrType::U64 && right_ty == IrType::U128 {
+            return (left, right);
+        }
+
+        match (&left, &right) {
+            (IrOperand::Const(value), _) => {
+                let expected = if right_ty == IrType::U128 && matches!(op, BinaryOp::Add) { IrType::U64 } else { right_ty.clone() };
+                if let Some(converted) = Self::cast_const(value, &expected) {
+                    return (IrOperand::Const(converted), right);
+                }
+            }
+            (_, IrOperand::Const(value)) => {
+                let expected =
+                    if left_ty == IrType::U128 && matches!(op, BinaryOp::Add | BinaryOp::Sub) { IrType::U64 } else { left_ty.clone() };
+                if let Some(converted) = Self::cast_const(value, &expected) {
+                    return (left, IrOperand::Const(converted));
+                }
+            }
+            _ => {}
+        }
+
+        // Implicit integer widening: widen the narrower variable operand to the
+        // wider type so that mixed-width arithmetic like u64 * u16 compiles.
+        let lw = Self::ir_numeric_width(&left_ty);
+        let rw = Self::ir_numeric_width(&right_ty);
+        if let (Some(lw), Some(rw)) = (lw, rw) {
+            if lw < rw {
+                let widened = self.new_var("widened", right_ty);
+                block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: left });
+                return (IrOperand::Var(widened), right);
+            } else {
+                let widened = self.new_var("widened", left_ty);
+                block.instructions.push(IrInstruction::Cast { dest: widened.clone(), src: right });
+                return (left, IrOperand::Var(widened));
+            }
+        }
+
+        self.record_error(format!("IR lowering encountered mixed-width {:?} operands {:?} and {:?}", op, left_ty, right_ty), span);
+        (left, right)
+    }
+
+    fn validate_binary_operands(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> std::result::Result<(), String> {
+        let left_ty = self.operand_type(left);
+        let right_ty = self.operand_type(right);
+        let types_match = left_ty == right_ty;
+        let both_integer = Self::ir_numeric_width(&left_ty).is_some() && Self::ir_numeric_width(&right_ty).is_some();
+        let widenable = both_integer && !types_match;
+        match op {
+            BinaryOp::Add => {
+                let supported = (types_match && left_ty != IrType::U128)
+                    || (left_ty == IrType::U128 && right_ty == IrType::U64)
+                    || (left_ty == IrType::U64 && right_ty == IrType::U128)
+                    || widenable;
+                if supported {
+                    Ok(())
+                } else {
+                    Err(format!("unsupported arithmetic operand types {:?} and {:?}", left_ty, right_ty))
+                }
+            }
+            BinaryOp::Sub => {
+                let supported =
+                    (types_match && left_ty != IrType::U128) || (left_ty == IrType::U128 && right_ty == IrType::U64) || widenable;
+                if supported {
+                    Ok(())
+                } else {
+                    Err(format!("unsupported arithmetic operand types {:?} and {:?}", left_ty, right_ty))
+                }
+            }
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                if (types_match && left_ty != IrType::U128) || widenable {
+                    Ok(())
+                } else {
+                    Err(format!("unsupported arithmetic operand types {:?} and {:?}", left_ty, right_ty))
+                }
+            }
+            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                if (types_match && left_ty != IrType::U128) || widenable {
+                    Ok(())
+                } else {
+                    Err(format!("unsupported ordering operand types {:?} and {:?}", left_ty, right_ty))
+                }
+            }
+            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::And | BinaryOp::Or => Ok(()),
+        }
+    }
+
+    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => self.operand_type(left),
+            BinaryOp::Add | BinaryOp::Sub if self.operand_type(left) == IrType::U128 || self.operand_type(right) == IrType::U128 => {
+                IrType::U128
+            }
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty == right_ty {
+                    return left_ty;
+                }
+                // Return the wider type for mixed-width operands.
+                let lw = Self::ir_numeric_width(&left_ty);
+                let rw = Self::ir_numeric_width(&right_ty);
+                match (lw, rw) {
+                    (Some(lw), Some(rw)) if lw >= rw => left_ty,
+                    (Some(_), Some(_)) => right_ty,
+                    _ => left_ty,
+                }
+            }
             BinaryOp::And | BinaryOp::Or => IrType::Bool,
         }
     }
@@ -3499,30 +3651,35 @@ impl IrGenerator {
             (IrConst::Bool(b), IrType::U16) => Some(IrConst::U16(*b as u16)),
             (IrConst::Bool(b), IrType::U32) => Some(IrConst::U32(*b as u32)),
             (IrConst::Bool(b), IrType::U64) => Some(IrConst::U64(*b as u64)),
+            (IrConst::U8(n), IrType::Bool) => (*n <= 1).then_some(IrConst::Bool(*n == 1)),
             (IrConst::U8(n), IrType::U8) => Some(IrConst::U8(*n)),
             (IrConst::U8(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
             (IrConst::U8(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
             (IrConst::U8(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
             (IrConst::U8(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
-            (IrConst::U16(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
+            (IrConst::U16(n), IrType::Bool) => (*n <= 1).then_some(IrConst::Bool(*n == 1)),
+            (IrConst::U16(n), IrType::U8) => u8::try_from(*n).ok().map(IrConst::U8),
             (IrConst::U16(n), IrType::U16) => Some(IrConst::U16(*n)),
             (IrConst::U16(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
             (IrConst::U16(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
             (IrConst::U16(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
-            (IrConst::U32(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
-            (IrConst::U32(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
+            (IrConst::U32(n), IrType::Bool) => (*n <= 1).then_some(IrConst::Bool(*n == 1)),
+            (IrConst::U32(n), IrType::U8) => u8::try_from(*n).ok().map(IrConst::U8),
+            (IrConst::U32(n), IrType::U16) => u16::try_from(*n).ok().map(IrConst::U16),
             (IrConst::U32(n), IrType::U32) => Some(IrConst::U32(*n)),
             (IrConst::U32(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
             (IrConst::U32(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
-            (IrConst::U64(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
-            (IrConst::U64(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
-            (IrConst::U64(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
+            (IrConst::U64(n), IrType::Bool) => (*n <= 1).then_some(IrConst::Bool(*n == 1)),
+            (IrConst::U64(n), IrType::U8) => u8::try_from(*n).ok().map(IrConst::U8),
+            (IrConst::U64(n), IrType::U16) => u16::try_from(*n).ok().map(IrConst::U16),
+            (IrConst::U64(n), IrType::U32) => u32::try_from(*n).ok().map(IrConst::U32),
             (IrConst::U64(n), IrType::U64) => Some(IrConst::U64(*n)),
             (IrConst::U64(n), IrType::U128) => Some(IrConst::U128(*n as u128)),
-            (IrConst::U128(n), IrType::U8) => Some(IrConst::U8(*n as u8)),
-            (IrConst::U128(n), IrType::U16) => Some(IrConst::U16(*n as u16)),
-            (IrConst::U128(n), IrType::U32) => Some(IrConst::U32(*n as u32)),
-            (IrConst::U128(n), IrType::U64) => Some(IrConst::U64(*n as u64)),
+            (IrConst::U128(n), IrType::Bool) => (*n <= 1).then_some(IrConst::Bool(*n == 1)),
+            (IrConst::U128(n), IrType::U8) => u8::try_from(*n).ok().map(IrConst::U8),
+            (IrConst::U128(n), IrType::U16) => u16::try_from(*n).ok().map(IrConst::U16),
+            (IrConst::U128(n), IrType::U32) => u32::try_from(*n).ok().map(IrConst::U32),
+            (IrConst::U128(n), IrType::U64) => u64::try_from(*n).ok().map(IrConst::U64),
             (IrConst::U128(n), IrType::U128) => Some(IrConst::U128(*n)),
             (IrConst::Address(a), IrType::Address) => Some(IrConst::Address(*a)),
             (IrConst::Hash(h), IrType::Hash) => Some(IrConst::Hash(*h)),
@@ -4758,7 +4915,16 @@ impl IrGenerator {
     fn lower_flow_state_name(&self, name: &str) -> Option<IrOperand> {
         let (type_name, _) = name.rsplit_once("::")?;
         let index = self.flow_state_index(type_name, name)?;
-        Some(IrOperand::Const(IrConst::U64(index as u64)))
+        let field_ty = self
+            .flow_state_fields
+            .get(type_name)
+            .and_then(|field_name| self.type_fields.get(type_name).and_then(|fields| fields.get(field_name)));
+        let value = if let Some(field_ty) = field_ty {
+            Self::integer_const_for_ir_type(index as u64, field_ty)?
+        } else {
+            IrConst::U64(index as u64)
+        };
+        Some(IrOperand::Const(value))
     }
 
     fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
@@ -5325,6 +5491,7 @@ fn ast_type_to_ir(ty: &Type) -> IrType {
         Type::Hash => IrType::Hash,
         Type::Array(elem, size) => IrType::Array(Box::new(ast_type_to_ir(elem)), *size),
         Type::Tuple(types) => IrType::Tuple(types.iter().map(ast_type_to_ir).collect()),
+        Type::Named(name) if name == "usize" || name == "isize" => IrType::U64,
         Type::Named(name) => IrType::Named(name.clone()),
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir(inner))),
@@ -5678,6 +5845,7 @@ fn ast_type_to_ir_type(ty: &Type) -> IrType {
         Type::Hash => IrType::Hash,
         Type::Array(inner, size) => IrType::Array(Box::new(ast_type_to_ir_type(inner)), *size),
         Type::Tuple(items) => IrType::Tuple(items.iter().map(ast_type_to_ir_type).collect()),
+        Type::Named(name) if name == "usize" || name == "isize" => IrType::U64,
         Type::Named(name) => IrType::Named(name.clone()),
         Type::Ref(inner) => IrType::Ref(Box::new(ast_type_to_ir_type(inner))),
         Type::MutRef(inner) => IrType::MutRef(Box::new(ast_type_to_ir_type(inner))),
@@ -6017,6 +6185,76 @@ where
             .expect("expected lowered add instruction");
 
         assert_eq!(binary_dest.ty, IrType::U8);
+    }
+
+    #[test]
+    fn contextual_integer_binary_operands_lower_to_peer_width() {
+        let ir = parse_and_lower(
+            r#"
+module ir::contextual_integer_binary
+
+action check(x: u8) -> u8
+where
+    return x + 1
+"#,
+        );
+
+        let right = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) => action.body.blocks.iter().flat_map(|block| &block.instructions).find_map(|instruction| {
+                    if let IrInstruction::Binary { op: BinaryOp::Add, right, .. } = instruction {
+                        Some(right)
+                    } else {
+                        None
+                    }
+                }),
+                _ => None,
+            })
+            .expect("expected add right operand");
+
+        assert!(matches!(right, IrOperand::Const(IrConst::U8(1))));
+    }
+
+    #[test]
+    fn runtime_narrowing_cast_lowers_as_cast_instruction() {
+        let ir = parse_and_lower(
+            r#"
+module ir::runtime_cast
+
+action check(x: u64) -> u8
+where
+    return x as u8
+"#,
+        );
+
+        let cast_dest = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) => action.body.blocks.iter().flat_map(|block| &block.instructions).find_map(|instruction| {
+                    if let IrInstruction::Cast { dest, .. } = instruction {
+                        Some(dest)
+                    } else {
+                        None
+                    }
+                }),
+                _ => None,
+            })
+            .expect("expected cast instruction");
+
+        assert_eq!(cast_dest.ty, IrType::U8);
+    }
+
+    #[test]
+    fn constant_cast_rejects_out_of_range_u128_narrowing() {
+        assert!(matches!(IrGenerator::cast_const(&IrConst::U128(u128::from(u64::MAX)), &IrType::U64), Some(IrConst::U64(u64::MAX))));
+        assert!(IrGenerator::cast_const(&IrConst::U128(u128::from(u64::MAX) + 1), &IrType::U64).is_none());
+        assert!(matches!(IrGenerator::cast_const(&IrConst::U128(255), &IrType::U8), Some(IrConst::U8(255))));
+        assert!(IrGenerator::cast_const(&IrConst::U128(256), &IrType::U8).is_none());
+        assert!(matches!(IrGenerator::cast_const(&IrConst::U128(1), &IrType::Bool), Some(IrConst::Bool(true))));
+        assert!(IrGenerator::cast_const(&IrConst::U128(2), &IrType::Bool).is_none());
     }
 
     #[test]

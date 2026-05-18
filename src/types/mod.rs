@@ -1761,6 +1761,15 @@ impl<'a> TypeChecker<'a> {
                 span,
             ));
         }
+        if matches!(return_type, Type::U128) {
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' cannot return u128; the current callable ABI only supports u128 as fixed-byte fields and locals",
+                    callable_kind, callable_name
+                ),
+                span,
+            ));
+        }
         if callable_kind == "function" && self.type_contains_cell_backed_value(return_type) {
             return Err(CompileError::new(
                 format!(
@@ -2643,6 +2652,7 @@ impl<'a> TypeChecker<'a> {
             Type::U16 => value <= u16::MAX as u64,
             Type::U32 => value <= u32::MAX as u64,
             Type::U64 | Type::U128 => true,
+            Type::Named(name) if name == "usize" || name == "isize" => true,
             _ => return Ok(Type::U64),
         };
 
@@ -2737,14 +2747,28 @@ impl<'a> TypeChecker<'a> {
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
             Expr::Binary(bin) => {
                 let left_ty = self.infer_expr(env, &bin.left)?;
-                let right_ty = self.infer_expr(env, &bin.right)?;
+                let right_ty = if matches!(bin.right.as_ref(), Expr::Integer(_)) {
+                    let expected = self.contextual_integer_type_for_binary_right(bin.op, &left_ty);
+                    self.infer_expr_with_expected_type(env, &bin.right, &expected, bin.span)?
+                } else {
+                    self.infer_expr(env, &bin.right)?
+                };
+                let left_ty = if matches!(bin.left.as_ref(), Expr::Integer(_)) {
+                    let expected = self.contextual_integer_type_for_binary_left(bin.op, &right_ty);
+                    self.infer_expr_with_expected_type(env, &bin.left, &expected, bin.span)?
+                } else {
+                    left_ty
+                };
 
                 match bin.op {
                     BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("arithmetic operations require numeric types", bin.span));
                         }
-                        Ok(left_ty)
+                        if matches!(bin.op, BinaryOp::Div | BinaryOp::Mod) && self.const_integer_value(&bin.right) == Some(0) {
+                            return Err(CompileError::new("division or modulo by zero is not allowed", bin.span));
+                        }
+                        self.validate_numeric_binary_types(bin.op, &left_ty, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
                         if !self.types_equal(&left_ty, &right_ty) {
@@ -2755,6 +2779,12 @@ impl<'a> TypeChecker<'a> {
                     BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("ordering comparison requires numeric types", bin.span));
+                        }
+                        if !self.numeric_types_equal(&left_ty, &right_ty) && Self::widen_to(&left_ty, &right_ty).is_none() {
+                            return Err(CompileError::new("ordering comparison requires matching numeric types", bin.span));
+                        }
+                        if matches!(left_ty, Type::U128) {
+                            return Err(CompileError::new("ordering comparison is not supported for u128", bin.span));
                         }
                         Ok(Type::Bool)
                     }
@@ -3004,7 +3034,9 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Cast(cast) => {
-                self.infer_expr(env, &cast.expr)?;
+                self.validate_type(&cast.ty)?;
+                let source_ty = self.infer_expr(env, &cast.expr)?;
+                self.validate_cast(&source_ty, &cast.ty, cast.expr.as_ref(), cast.span)?;
                 Ok(cast.ty.clone())
             }
             Expr::Range(range) => {
@@ -4162,6 +4194,7 @@ impl<'a> TypeChecker<'a> {
                         if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
                             return Err(CompileError::new("'+=' requires numeric types", assign.span));
                         }
+                        self.validate_numeric_binary_types(BinaryOp::Add, &target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -4203,6 +4236,7 @@ impl<'a> TypeChecker<'a> {
                         if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
                             return Err(CompileError::new("'+=' requires numeric types", assign.span));
                         }
+                        self.validate_numeric_binary_types(BinaryOp::Add, &target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -4989,6 +5023,161 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn contextual_integer_type_for_binary_right(&self, op: BinaryOp, left_ty: &Type) -> Type {
+        if matches!(left_ty, Type::U128) && matches!(op, BinaryOp::Add | BinaryOp::Sub) {
+            Type::U64
+        } else {
+            left_ty.clone()
+        }
+    }
+
+    fn contextual_integer_type_for_binary_left(&self, op: BinaryOp, right_ty: &Type) -> Type {
+        if matches!(right_ty, Type::U128) && matches!(op, BinaryOp::Add) {
+            Type::U64
+        } else {
+            right_ty.clone()
+        }
+    }
+
+    fn numeric_width(ty: &Type) -> Option<u32> {
+        match ty {
+            Type::U8 => Some(8),
+            Type::U16 => Some(16),
+            Type::U32 => Some(32),
+            Type::U64 => Some(64),
+            Type::U128 => Some(128),
+            _ => None,
+        }
+    }
+
+    fn widen_to(left_ty: &Type, right_ty: &Type) -> Option<Type> {
+        let lw = Self::numeric_width(left_ty)?;
+        let rw = Self::numeric_width(right_ty)?;
+        if lw >= rw {
+            Some(left_ty.clone())
+        } else {
+            Some(right_ty.clone())
+        }
+    }
+
+    fn validate_numeric_binary_types(&self, op: BinaryOp, left_ty: &Type, right_ty: &Type, span: Span) -> Result<Type> {
+        if self.numeric_types_equal(left_ty, right_ty) {
+            if matches!(left_ty, Type::U128) {
+                return Err(CompileError::new(
+                    "generic u128 arithmetic is not supported; only u128 +/- u64 deltas are supported",
+                    span,
+                ));
+            }
+            return Ok(left_ty.clone());
+        }
+
+        // u128 +/- u64 delta is explicitly allowed.
+        let allowed_u128_delta = match op {
+            BinaryOp::Add => {
+                (matches!(left_ty, Type::U128) && matches!(right_ty, Type::U64))
+                    || (matches!(left_ty, Type::U64) && matches!(right_ty, Type::U128))
+            }
+            BinaryOp::Sub => matches!(left_ty, Type::U128) && matches!(right_ty, Type::U64),
+            _ => false,
+        };
+        if allowed_u128_delta {
+            return Ok(Type::U128);
+        }
+
+        // Implicit integer widening: u8/u16/u32 operands are promoted to the
+        // wider type so that mixed-width arithmetic like `u64 * u16` compiles.
+        if let Some(promoted) = Self::widen_to(left_ty, right_ty) {
+            if matches!(promoted, Type::U128) {
+                return Err(CompileError::new(
+                    "generic u128 arithmetic is not supported; only u128 +/- u64 deltas are supported",
+                    span,
+                ));
+            }
+            return Ok(promoted);
+        }
+
+        Err(CompileError::new("arithmetic operations require matching numeric types", span))
+    }
+
+    fn validate_cast(&self, source_ty: &Type, target_ty: &Type, source_expr: &Expr, span: Span) -> Result<()> {
+        if self.types_equal(source_ty, target_ty) {
+            return Ok(());
+        }
+        match (source_ty, target_ty) {
+            (Type::Bool, Type::U8 | Type::U16 | Type::U32 | Type::U64) => Ok(()),
+            (Type::Bool, Type::U128) => Err(CompileError::new("non-constant casts to u128 are not supported", span)),
+            (source, Type::Bool) if self.is_numeric_type(source) => {
+                if let Some(value) = self.const_integer_value(source_expr) {
+                    if value > 1 {
+                        return Err(CompileError::new("constant cast value is out of range for bool", span));
+                    }
+                }
+                Ok(())
+            }
+            (source, target) if self.is_numeric_type(source) && self.is_numeric_type(target) => {
+                if matches!(target, Type::U128) && !self.expr_is_constant_scalar(source_expr) {
+                    return Err(CompileError::new("cast to u128 from a non-constant expression is not yet supported", span));
+                }
+                if let Some(value) = self.const_integer_value(source_expr) {
+                    if !Self::integer_value_fits_type(value, target) {
+                        return Err(CompileError::new(
+                            format!("constant cast value {} is out of range for {}", value, type_repr(target)),
+                            span,
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(CompileError::new(
+                format!("cast from {} to {} is not supported", type_repr(source_ty), type_repr(target_ty)),
+                span,
+            )),
+        }
+    }
+
+    fn expr_is_constant_scalar(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Integer(_) | Expr::Bool(_) => true,
+            Expr::Identifier(name) => self.constants.contains_key(name) || self.resolve_constant(name).is_some(),
+            Expr::Cast(cast) => self.expr_is_constant_scalar(&cast.expr),
+            _ => false,
+        }
+    }
+
+    fn const_integer_value(&self, expr: &Expr) -> Option<u128> {
+        match expr {
+            Expr::Integer(value) => Some(*value as u128),
+            Expr::Bool(value) => Some(u128::from(*value)),
+            Expr::Identifier(name) => {
+                if let Some(constant) = self.constants.get(name) {
+                    self.const_integer_value(&constant.value)
+                } else if let Some(constant) = self.resolve_constant(name) {
+                    self.const_integer_value(&constant.value)
+                } else {
+                    None
+                }
+            }
+            Expr::Cast(cast) => {
+                let value = self.const_integer_value(&cast.expr)?;
+                Self::integer_value_fits_type(value, &cast.ty).then_some(value)
+            }
+            _ => None,
+        }
+    }
+
+    fn integer_value_fits_type(value: u128, ty: &Type) -> bool {
+        match ty {
+            Type::Bool => value <= 1,
+            Type::U8 => value <= u8::MAX as u128,
+            Type::U16 => value <= u16::MAX as u128,
+            Type::U32 => value <= u32::MAX as u128,
+            Type::U64 => value <= u64::MAX as u128,
+            Type::U128 => true,
+            Type::Named(name) if name == "usize" || name == "isize" => value <= u64::MAX as u128,
+            _ => false,
+        }
+    }
+
     fn validate_named_type(&self, name: &str) -> Result<()> {
         let base_name = name.split('<').next().unwrap_or(name);
         match base_name {
@@ -5074,8 +5263,20 @@ impl<'a> TypeChecker<'a> {
             Type::U32 => Some(32),
             Type::U64 => Some(64),
             Type::U128 => Some(128),
+            Type::Named(name) if name == "usize" || name == "isize" => Some(64),
             _ => None,
         }
+    }
+
+    fn numeric_types_equal(&self, a: &Type, b: &Type) -> bool {
+        self.types_equal(a, b)
+            || matches!(
+                (a, b),
+                (Type::U64, Type::Named(name))
+                    | (Type::Named(name), Type::U64)
+                    | (Type::Named(name), Type::Named(_))
+                    if name == "usize" || name == "isize"
+            )
     }
 
     fn base_type_name(ty: &Type) -> Option<&str> {
@@ -5909,6 +6110,196 @@ where
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("unary negation is not supported for unsigned integer types"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mixed_width_arithmetic_and_ordering_are_rejected() {
+        // u8 + u64 now widens to u64 (implicit lossless widening).
+        let ok_sources = [
+            r#"
+module types::mixed_u8_u64
+action ok(x: u8, y: u64) -> u64
+where
+    return x + y
+"#,
+            r#"
+module types::mixed_u64_u8
+action ok(x: u64, y: u8) -> u64
+where
+    return x + y
+"#,
+            r#"
+module types::mixed_u8_mul_u16
+action ok(x: u8, y: u16) -> u16
+where
+    return x * y
+"#,
+            r#"
+module types::mixed_u64_mul_u16
+action ok(x: u64, y: u16) -> u64
+where
+    return x * y
+"#,
+        ];
+        for source in &ok_sources {
+            check(&source_module(source)).expect("widening should succeed");
+        }
+
+        // u32 + u128 is still rejected: generic u128 arithmetic is not supported.
+        let err = check(&source_module(
+            r#"
+module types::mixed_u32_u128
+action bad(x: u32, y: u128) -> u32
+where
+    return x + y
+"#,
+        )).unwrap_err();
+        assert!(
+            err.message.contains("u128") || err.message.contains("matching numeric types"),
+            "unexpected error: {}",
+            err.message
+        );
+
+        // u8 < u64 is now allowed with implicit widening (ordering comparison).
+        check(&source_module(
+            r#"
+module types::mixed_order
+action ok(x: u8, y: u64) -> bool
+where
+    return x < y
+"#,
+        )).expect("ordering with widening should succeed");
+
+        // Return type mismatch: u8 + u64 widens to u64, but declared return is u8.
+        // This must still be rejected: assignment/return boundary does not narrow.
+        let err = check(&source_module(
+            r#"
+module types::mismatch_return
+action bad(x: u8, y: u64) -> u8
+where
+    return x + y
+"#,
+        )).unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("type mismatch"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn contextual_integer_literals_fit_declared_widths() {
+        let module = source_module(
+            r#"
+module types::contextual_literals
+
+action good(x: u8) -> u8
+where
+    let y: u8 = x + 1
+    return y
+"#,
+        );
+        check(&module).unwrap();
+
+        let err = check(&source_module(
+            r#"
+module types::contextual_literal_oob
+
+action bad(x: u8) -> u8
+where
+    return x + 256
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("out of range for u8"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn unsupported_u128_arithmetic_is_rejected() {
+        for source in [
+            r#"
+module types::u128_add
+action bad(x: u128, y: u128) -> bool
+where
+    let z: u128 = x + y
+    return z == x
+"#,
+            r#"
+module types::u128_sub
+action bad(x: u128, y: u128) -> bool
+where
+    let z: u128 = x - y
+    return z == x
+"#,
+            r#"
+module types::u128_mul
+action bad(x: u128, y: u64) -> bool
+where
+    let z: u128 = x * y
+    return z == x
+"#,
+            r#"
+module types::u128_order
+action bad(x: u128, y: u128) -> bool
+where
+    return x < y
+"#,
+        ] {
+            let err = check(&source_module(source)).unwrap_err();
+            assert!(
+                err.message.contains("u128") || err.message.contains("matching numeric types"),
+                "unexpected error: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn constant_narrowing_casts_must_fit() {
+        for source in [
+            r#"
+module types::cast_u8
+action bad() -> u8
+where
+    return 256 as u8
+"#,
+            r#"
+module types::cast_u16
+action bad() -> u16
+where
+    return 65536 as u16
+"#,
+            r#"
+module types::cast_u32
+const BIG: u64 = 18446744073709551615
+action bad() -> u32
+where
+    return BIG as u32
+"#,
+            r#"
+module types::cast_bool
+action bad() -> bool
+where
+    return 2 as bool
+"#,
+        ] {
+            let err = check(&source_module(source)).unwrap_err();
+            assert!(err.message.contains("out of range"), "unexpected error: {}", err.message);
+        }
+    }
+
+    #[test]
+    fn statically_visible_division_by_zero_is_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::div_zero
+action bad(x: u64) -> u64
+where
+    return x / 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("division or modulo by zero"), "unexpected error: {}", err.message);
     }
 
     #[test]
