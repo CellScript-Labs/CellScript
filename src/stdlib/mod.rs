@@ -293,7 +293,7 @@ impl StdLib {
         asm.push_str(".global __math_min\n");
         asm.push_str("__math_min:\n");
         asm.push_str("    # a0 = a, a1 = b\n");
-        asm.push_str("    blt a0, a1, .Lmin_ret_a\n");
+        asm.push_str("    bltu a0, a1, .Lmin_ret_a\n");
         asm.push_str("    mv a0, a1\n");
         asm.push_str(".Lmin_ret_a:\n");
         asm.push_str("    ret\n\n");
@@ -303,7 +303,7 @@ impl StdLib {
         asm.push_str(".global __math_max\n");
         asm.push_str("__math_max:\n");
         asm.push_str("    # a0 = a, a1 = b\n");
-        asm.push_str("    bgt a0, a1, .Lmax_ret_a\n");
+        asm.push_str("    bltu a1, a0, .Lmax_ret_a\n");
         asm.push_str("    mv a0, a1\n");
         asm.push_str(".Lmax_ret_a:\n");
         asm.push_str("    ret\n\n");
@@ -321,9 +321,9 @@ impl StdLib {
         asm.push_str("    srli s1, a0, 1\n");
         asm.push_str("    addi s1, s1, 1     # y = (x + 1) / 2\n");
         asm.push_str(".Lisqrt_loop:\n");
-        asm.push_str("    bge s1, s0, .Lisqrt_ret\n");
+        asm.push_str("    bgeu s1, s0, .Lisqrt_ret\n");
         asm.push_str("    mv s0, s1          # x = y\n");
-        asm.push_str("    div t0, a0, s0\n");
+        asm.push_str("    divu t0, a0, s0\n");
         asm.push_str("    add s1, s0, t0\n");
         asm.push_str("    srli s1, s1, 1     # y = (x + n/x) / 2\n");
         asm.push_str("    j .Lisqrt_loop\n");

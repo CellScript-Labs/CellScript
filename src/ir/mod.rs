@@ -2092,18 +2092,10 @@ impl IrGenerator {
         }
     }
 
-    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
+    fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, _right: &IrOperand) -> IrType {
         match op {
             BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => IrType::Bool,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                let left_ty = self.operand_type(left);
-                let right_ty = self.operand_type(right);
-                if left_ty == IrType::U128 || right_ty == IrType::U128 {
-                    IrType::U128
-                } else {
-                    IrType::U64
-                }
-            }
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => self.operand_type(left),
             BinaryOp::And | BinaryOp::Or => IrType::Bool,
         }
     }
@@ -2111,7 +2103,7 @@ impl IrGenerator {
     fn unary_result_type(&self, op: UnaryOp, operand: &IrOperand) -> IrType {
         match op {
             UnaryOp::Not => IrType::Bool,
-            UnaryOp::Neg => IrType::U64,
+            UnaryOp::Neg => self.operand_type(operand),
             UnaryOp::Ref | UnaryOp::Deref => match operand {
                 IrOperand::Var(var) => var.ty.clone(),
                 IrOperand::Const(value) => self.const_type(value),
@@ -5994,6 +5986,37 @@ mod tests {
         crate::types::check(&ast).unwrap();
         crate::flow::check(&ast).unwrap();
         generate(&ast).unwrap()
+    }
+
+    #[test]
+    fn binary_arithmetic_result_type_preserves_left_operand_width() {
+        let ir = parse_and_lower(
+            r#"
+module ir::narrow_arithmetic
+
+action check(x: u8, y: u8) -> u8
+where
+    let z: u8 = x + y
+    return z
+"#,
+        );
+
+        let binary_dest = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) => action.body.blocks.iter().flat_map(|block| &block.instructions).find_map(|instruction| {
+                    if let IrInstruction::Binary { dest, op: BinaryOp::Add, .. } = instruction {
+                        Some(dest)
+                    } else {
+                        None
+                    }
+                }),
+                _ => None,
+            })
+            .expect("expected lowered add instruction");
+
+        assert_eq!(binary_dest.ty, IrType::U8);
     }
 
     #[test]

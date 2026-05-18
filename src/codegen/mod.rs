@@ -5748,7 +5748,7 @@ impl CodeGenerator {
                     BinaryOp::Add => self.emit("add t1, t3, t1"),
                     BinaryOp::Sub => self.emit("sub t1, t3, t1"),
                     BinaryOp::Mul => self.emit("mul t1, t3, t1"),
-                    BinaryOp::Div => self.emit("div t1, t3, t1"),
+                    BinaryOp::Div => self.emit("divu t1, t3, t1"),
                     _ => unreachable!("prelude u64 binary source only supports add/sub/mul/div"),
                 }
             }
@@ -5763,7 +5763,7 @@ impl CodeGenerator {
                 self.emit_stack_store("t1", temp_offset);
                 self.emit_prelude_u64_operand_source_to_t1_at_depth(right, _depth + 1);
                 self.emit_stack_load("t3", temp_offset);
-                self.emit("slt t2, t3, t1");
+                self.emit("sltu t2, t3, t1");
                 let right_ok_label = self.fresh_label("prelude_min_right_ok");
                 self.emit(format!("beqz t2, {}", right_ok_label));
                 self.emit("add t1, t3, zero");
@@ -6819,8 +6819,8 @@ impl CodeGenerator {
             BinaryOp::Add => self.emit("add t0, t0, t1"),
             BinaryOp::Sub => self.emit("sub t0, t0, t1"),
             BinaryOp::Mul => self.emit("mul t0, t0, t1"),
-            BinaryOp::Div => self.emit("div t0, t0, t1"),
-            BinaryOp::Mod => self.emit("rem t0, t0, t1"),
+            BinaryOp::Div => self.emit("divu t0, t0, t1"),
+            BinaryOp::Mod => self.emit("remu t0, t0, t1"),
             BinaryOp::Eq => {
                 self.emit("sub t0, t0, t1");
                 self.emit("seqz t0, t0");
@@ -6829,14 +6829,14 @@ impl CodeGenerator {
                 self.emit("sub t0, t0, t1");
                 self.emit("snez t0, t0");
             }
-            BinaryOp::Lt => self.emit("slt t0, t0, t1"),
+            BinaryOp::Lt => self.emit("sltu t0, t0, t1"),
             BinaryOp::Le => {
-                self.emit("sgt t0, t0, t1");
+                self.emit("sgtu t0, t0, t1");
                 self.emit("xori t0, t0, 1");
             }
-            BinaryOp::Gt => self.emit("sgt t0, t0, t1"),
+            BinaryOp::Gt => self.emit("sgtu t0, t0, t1"),
             BinaryOp::Ge => {
-                self.emit("slt t0, t0, t1");
+                self.emit("sltu t0, t0, t1");
                 self.emit("xori t0, t0, 1");
             }
             BinaryOp::And => self.emit("and t0, t0, t1"),
@@ -6894,7 +6894,9 @@ impl CodeGenerator {
         self.emit_operand_to_register("t0", operand);
 
         match op {
-            UnaryOp::Neg => self.emit("neg t0, t0"),
+            UnaryOp::Neg => {
+                return Err(CompileError::new("unary negation is not supported for unsigned integers", crate::error::Span::default()));
+            }
             UnaryOp::Not => self.emit("xori t0, t0, 1"),
             UnaryOp::Ref | UnaryOp::Deref => self.emit("# reference conversion (no-op in asm backend)"),
         }
@@ -7306,7 +7308,7 @@ impl CodeGenerator {
         // Bounds check: index < len
         let bounds_ok = self.fresh_label("idx_bounds_ok");
         self.emit(format!("li t2, {}", len));
-        self.emit("slt t3, t1, t2");
+        self.emit("sltu t3, t1, t2");
         self.emit(format!("bnez t3, {}", bounds_ok));
         self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
         self.emit_label(&bounds_ok);
@@ -9706,7 +9708,7 @@ impl CodeGenerator {
         self.emit_global("__cellscript_require_min_size");
         self.emit_label("__cellscript_require_min_size");
         self.emit("# cellscript abi: returns a0=0 when actual size a0 is at least required size a1");
-        self.emit("slt a0, a0, a1");
+        self.emit("sltu a0, a0, a1");
         self.emit("ret");
 
         self.emit_global("__cellscript_require_exact_size");
@@ -10028,10 +10030,13 @@ enum Instruction {
     Xor { rd: u8, rs1: u8, rs2: u8 },
     Mul { rd: u8, rs1: u8, rs2: u8 },
     Div { rd: u8, rs1: u8, rs2: u8 },
+    Divu { rd: u8, rs1: u8, rs2: u8 },
     Rem { rd: u8, rs1: u8, rs2: u8 },
+    Remu { rd: u8, rs1: u8, rs2: u8 },
     Slt { rd: u8, rs1: u8, rs2: u8 },
     Sltu { rd: u8, rs1: u8, rs2: u8 },
     Sgt { rd: u8, rs1: u8, rs2: u8 },
+    Sgtu { rd: u8, rs1: u8, rs2: u8 },
     Xori { rd: u8, rs1: u8, imm: i64 },
     Seqz { rd: u8, rs: u8 },
     Snez { rd: u8, rs: u8 },
@@ -11033,7 +11038,17 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
         }),
+        "divu" => Ok(Instruction::Divu {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
         "rem" => Ok(Instruction::Rem {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
+        "remu" => Ok(Instruction::Remu {
             rd: parse_register(arg(&args, 0)?)?,
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
@@ -11049,6 +11064,11 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs2: parse_register(arg(&args, 2)?)?,
         }),
         "sgt" => Ok(Instruction::Sgt {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
+        "sgtu" => Ok(Instruction::Sgtu {
             rd: parse_register(arg(&args, 0)?)?,
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
@@ -11208,8 +11228,14 @@ fn encode_instruction(
         Instruction::Div { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b100, *rs1, *rs2, 0b0000001).to_le_bytes())
         }
+        Instruction::Divu { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b101, *rs1, *rs2, 0b0000001).to_le_bytes())
+        }
         Instruction::Rem { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b110, *rs1, *rs2, 0b0000001).to_le_bytes())
+        }
+        Instruction::Remu { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b111, *rs1, *rs2, 0b0000001).to_le_bytes())
         }
         Instruction::Slt { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b010, *rs1, *rs2, 0b0000000).to_le_bytes())
@@ -11219,6 +11245,9 @@ fn encode_instruction(
         }
         Instruction::Sgt { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b010, *rs2, *rs1, 0b0000000).to_le_bytes())
+        }
+        Instruction::Sgtu { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b011, *rs2, *rs1, 0b0000000).to_le_bytes())
         }
         Instruction::Xori { rd, rs1, imm } => out.extend_from_slice(&encode_i_type(0x13, *rd, 0b100, *rs1, *imm)?.to_le_bytes()),
         Instruction::Seqz { rd, rs } => out.extend_from_slice(&encode_i_type(0x13, *rd, 0b011, *rs, 1)?.to_le_bytes()),
@@ -11757,6 +11786,7 @@ mod tests {
         ("beqz", "beqz a0, branch_target"),
         ("call", "call helper"),
         ("div", "div t5, a0, a1"),
+        ("divu", "divu t5, a0, a1"),
         ("ecall", "ecall"),
         ("j", "j done"),
         ("la", "la t3, data_label"),
@@ -11768,11 +11798,13 @@ mod tests {
         ("neg", "neg s6, a0"),
         ("or", "or t3, a0, a1"),
         ("rem", "rem t6, a0, a1"),
+        ("remu", "remu t6, a0, a1"),
         ("ret", "ret"),
         ("sb", "sb t1, 8(sp)"),
         ("sd", "sd t0, 0(sp)"),
         ("seqz", "seqz s4, a0"),
         ("sgt", "sgt s2, a0, a1"),
+        ("sgtu", "sgtu s2, a0, a1"),
         ("sh", "sh t1, 10(sp)"),
         ("slli", "slli s7, a0, 3"),
         ("slt", "slt s0, a1, a0"),
@@ -11966,7 +11998,7 @@ where
         let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
 
         assert!(
-            assembly.contains("li t1, 10\n    sgt t0, t0, t1"),
+            assembly.contains("li t1, 10\n    sgtu t0, t0, t1"),
             "binary comparison should materialize the u8 constant value instead of falling back to zero:\n{}",
             assembly
         );

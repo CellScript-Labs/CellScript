@@ -511,7 +511,9 @@ impl SimulateInterpreter {
 
     fn eval_unary(&self, op: &UnaryOp, value: &SimValue) -> Result<SimValue, SimulateError> {
         match (op, value) {
-            (UnaryOp::Neg, SimValue::Integer(n)) => Ok(SimValue::Integer(n.wrapping_neg())),
+            (UnaryOp::Neg, SimValue::Integer(_)) => Err(SimulateError::Unsupported {
+                description: "unary negation is not supported for unsigned integer types".to_string(),
+            }),
             (UnaryOp::Not, SimValue::Bool(b)) => Ok(SimValue::Bool(!b)),
             (UnaryOp::Not, SimValue::Integer(n)) => Ok(SimValue::Bool(*n == 0)),
             _ => Ok(SimValue::Simulated { ty: "unary".to_string(), description: format!("{:?} {:?}", op, value) }),

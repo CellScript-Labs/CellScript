@@ -334,7 +334,7 @@ impl Collections {
         asm.push_str("    mv s1, a1          # value to push\n");
         asm.push_str("    ld t0, 0(s0)       # capacity\n");
         asm.push_str("    ld t1, 8(s0)       # length\n");
-        asm.push_str("    bge t1, t0, .Lvec_push_grow\n");
+        asm.push_str("    bgeu t1, t0, .Lvec_push_grow\n");
         asm.push_str(".Lvec_push_insert:\n");
         asm.push_str("    ld t2, 16(s0)      # data pointer\n");
         asm.push_str("    slli t3, t1, 3     # offset = length * 8\n");
@@ -408,7 +408,7 @@ impl Collections {
         asm.push_str("    mv s2, a2          # value\n");
         asm.push_str("    # Compute hash (simplified: key % bucket_count)\n");
         asm.push_str("    ld t0, 0(s0)       # bucket_count\n");
-        asm.push_str("    rem s3, s1, t0     # hash = key % bucket_count\n");
+        asm.push_str("    remu s3, s1, t0    # hash = key % bucket_count\n");
         asm.push_str("    # Insert entry...\n");
         asm.push_str("    ld ra, 40(sp)\n");
         asm.push_str("    ld s0, 32(sp)\n");

@@ -2770,10 +2770,10 @@ impl<'a> TypeChecker<'a> {
                 let expr_ty = self.infer_expr(env, &unary.expr)?;
                 match unary.op {
                     UnaryOp::Neg => {
-                        if !self.is_numeric_type(&expr_ty) {
-                            return Err(CompileError::new("negation requires numeric type", unary.span));
+                        if self.is_numeric_type(&expr_ty) {
+                            return Err(CompileError::new("unary negation is not supported for unsigned integer types", unary.span));
                         }
-                        Ok(expr_ty)
+                        Err(CompileError::new("negation requires numeric type", unary.span))
                     }
                     UnaryOp::Not => {
                         if !self.is_bool_type(&expr_ty) {
@@ -5893,6 +5893,22 @@ mod tests {
         assert!(!checker.types_equal(&Type::Array(Box::new(Type::U8), 1), &Type::Array(Box::new(Type::U64), 1)));
         assert!(checker.numeric_widening_compatible(&Type::U64, &Type::U8));
         assert!(!checker.numeric_widening_compatible(&Type::U8, &Type::U64));
+    }
+
+    #[test]
+    fn unsigned_integer_negation_is_rejected() {
+        let module = source_module(
+            r#"
+module types::unsigned_neg
+
+action bad(x: u64) -> u64
+where
+    return -x
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("unary negation is not supported for unsigned integer types"), "unexpected error: {err}");
     }
 
     #[test]

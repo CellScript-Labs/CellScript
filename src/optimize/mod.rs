@@ -449,7 +449,7 @@ fn fold_binary(op: BinaryOp, left: &ConstValue, right: &ConstValue) -> Option<Co
 fn fold_unary(op: UnaryOp, value: &ConstValue) -> Option<ConstValue> {
     match (op, value) {
         (UnaryOp::Not, ConstValue::Bool(value)) => Some(ConstValue::Bool(!value)),
-        (UnaryOp::Neg, ConstValue::U64(value)) => Some(ConstValue::U64(value.wrapping_neg())),
+        (UnaryOp::Neg, ConstValue::U64(_)) => None,
         _ => None,
     }
 }

@@ -17186,7 +17186,7 @@ where
         assert!(asm.contains(".Lvisit_block_1:"), "missing for-loop condition block:\n{}", asm);
         assert!(asm.contains(".Lvisit_block_2:"), "missing for-loop body block:\n{}", asm);
         assert!(asm.contains(".Lvisit_block_3:"), "missing for-loop exit block:\n{}", asm);
-        assert!(asm.contains("slt t0, t0, t1"), "missing range bound comparison:\n{}", asm);
+        assert!(asm.contains("sltu t0, t0, t1"), "missing range bound comparison:\n{}", asm);
         assert!(asm.contains("li t1, 1"), "missing range increment constant:\n{}", asm);
         assert!(asm.contains("j .Lvisit_block_1"), "missing for-loop back edge:\n{}", asm);
     }
