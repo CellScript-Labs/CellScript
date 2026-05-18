@@ -58,13 +58,13 @@ pub struct CompileOptions {
 impl CompileOptions {
     /// Returns true when running in v0.15 strict primitive mode.
     pub fn is_primitive_strict(&self) -> bool {
-        matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16" | "0.17" | "0.18"))
+        matches!(self.primitive_compat.as_deref(), Some("0.15"))
     }
 
     /// Returns true when running in v0.14 compat mode (the default when
     /// no explicit flag is given, or when `--primitive-compat=0.14` is set).
     pub fn is_primitive_compat_014(&self) -> bool {
-        self.primitive_compat.as_deref() != Some("0.15")
+        matches!(self.primitive_compat.as_deref(), None | Some("0.14"))
     }
 }
 
@@ -99,7 +99,7 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
                 let diag = if *cap == ast::Capability::Transfer { MigrationDiagnostic::Cs0150 } else { MigrationDiagnostic::Cs0151 };
                 return Err(CompileError::new(
                     format!(
-                        "{}: type '{}' declares legacy capability '{}', which is not allowed in --primitive-strict=0.15 mode; use kernel effects '{}'",
+                        "{}: type '{}' declares legacy capability '{}', which is not allowed in strict primitive mode; use kernel effects '{}'",
                         diag.full_message(),
                         type_name,
                         strict_capability_name(*cap),
@@ -976,12 +976,13 @@ fn constraints_metadata(
         .collect();
 
     let max_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).max().unwrap_or(0);
+    let min_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).min().unwrap_or(0);
     let estimated_cycles = metadata.actions.iter().map(|action| action.estimated_cycles).chain(metadata.locks.iter().map(|_| 0)).max();
     let ckb = (target_profile == TargetProfile::Ckb).then(|| {
         warnings.push(
             "CKB cycles and transaction size are not measured by the compiler; require builder dry-run for production".to_string(),
         );
-        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, estimated_cycles);
+        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, min_entry_witness_bytes, estimated_cycles);
         if ckb.uses_input_since || ckb.uses_header_epoch {
             warnings.push(format!(
                 "CKB timelock-related runtime features are in use (input_since={}, header_epoch={}); declarative DSL policy surface is not yet first-class",
@@ -1116,11 +1117,21 @@ fn ckb_constraints(
     metadata: &CompileMetadata,
     artifact_size_bytes: usize,
     max_entry_witness_bytes: usize,
+    min_entry_witness_bytes: usize,
     estimated_cycles: Option<u64>,
 ) -> CkbConstraintsMetadata {
     let max_tx_verify_cycles = env_u64("CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES").unwrap_or(CKB_DEFAULT_MAX_TX_VERIFY_CYCLES);
     let max_block_cycles = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_CYCLES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_CYCLES);
     let max_block_bytes = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_BYTES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_BYTES);
+
+    // Sanity-check environment overrides: zero or absurdly large values would
+    // produce meaningless constraint metadata.
+    if max_tx_verify_cycles == 0 || max_block_cycles == 0 || max_block_bytes == 0 {
+        log::warn!(
+            "CKB limit env override produced zero: max_tx_verify_cycles={}, max_block_cycles={}, max_block_bytes={}; using defaults",
+            max_tx_verify_cycles, max_block_cycles, max_block_bytes
+        );
+    }
     let min_code_cell_data_capacity_shannons = (artifact_size_bytes as u64 + 8) * CKB_SHANNONS_PER_CKB;
     let recommended_code_cell_capacity_shannons = (artifact_size_bytes as u64 + 1_000) * CKB_SHANNONS_PER_CKB;
     let ckb_runtime_features = metadata.runtime.ckb_runtime_features.clone();
@@ -1200,7 +1211,7 @@ fn ckb_constraints(
         cycles_status: "not-measured-by-compiler".to_string(),
         min_code_cell_data_capacity_shannons,
         recommended_code_cell_capacity_shannons,
-        min_witness_bytes: ENTRY_WITNESS_ABI_MAGIC.len(),
+        min_witness_bytes: min_entry_witness_bytes,
         max_entry_witness_bytes,
         dry_run_required_for_production: true,
         tx_size_bytes: None,
@@ -3933,8 +3944,13 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
 }
 
 /// Check incremental compilation cache for a previous compile result.
-/// Returns `Some(result)` if the cache is valid and the source has not changed.
+/// Currently returns `None` because the incremental cache only tracks whether
+/// recompilation is needed, not the full `CompileResult`. The `needs_recompile`
+/// check is still performed so that the cache file is maintained, but the
+/// actual result must be produced by a full recompile.
 fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOptions) -> Option<CompileResult> {
+    // Maintain the incremental cache file so that record_compilation timestamps
+    // stay up to date, even though we cannot return a cached CompileResult yet.
     let cache_dir = path.parent()?.join(".cell/build/cache");
     let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
     let _ = compiler.load_cache();
@@ -3945,14 +3961,10 @@ fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOption
         debug: options.debug,
     };
 
-    if !compiler.needs_recompile(path.as_std_path(), &inc_options) {
-        // Cache hit — recompile not needed, but we still need to recompile
-        // from source because we do not cache the full CompileResult.
-        // A full incremental cache would serialize CompileResult to disk.
-        None
-    } else {
-        None
-    }
+    // We must recompile from source because the incremental cache does not
+    // serialize the full CompileResult. A future improvement could cache it.
+    let _ = compiler.needs_recompile(path.as_std_path(), &inc_options);
+    None
 }
 
 /// Store compile result metadata to incremental cache after a successful compile.
@@ -11477,7 +11489,10 @@ fn metadata_tuple_return_field_type(ty: &ir::IrType, field: &str) -> Option<ir::
         return None;
     };
     let index = field.parse::<usize>().ok()?;
-    (index < 8).then(|| items.get(index).cloned()).flatten()
+    // ABI register limit is 8 (a0-a7); fields beyond index 7 cannot be
+    // returned via registers, but we still report their type in metadata
+    // so the manifest is complete.
+    items.get(index).cloned()
 }
 
 fn const_usize_operand(operand: &ir::IrOperand) -> Option<usize> {

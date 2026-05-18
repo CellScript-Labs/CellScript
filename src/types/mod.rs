@@ -2724,7 +2724,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Integer(_) => Ok(Type::U64),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::String(_) => Ok(Type::Named("String".to_string())),
-            Expr::ByteString(_) => Ok(Type::Array(Box::new(Type::U8), 0)),
+            Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
             Expr::Identifier(name) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     Ok(ty)
@@ -3425,8 +3425,14 @@ impl<'a> TypeChecker<'a> {
         let mut seen = HashSet::new();
         let mut has_wildcard = false;
 
-        for arm in &match_expr.arms {
+        for (index, arm) in match_expr.arms.iter().enumerate() {
             if arm.pattern == "_" {
+                if index + 1 < match_expr.arms.len() {
+                    return Err(CompileError::new(
+                        "wildcard pattern '_' must be the last match arm; subsequent arms are unreachable",
+                        arm.span,
+                    ));
+                }
                 has_wildcard = true;
                 continue;
             }
@@ -5270,10 +5276,13 @@ impl<'a> TypeChecker<'a> {
         self.types_equal(a, b)
             || matches!(
                 (a, b),
-                (Type::U64, Type::Named(name))
-                    | (Type::Named(name), Type::U64)
-                    | (Type::Named(name), Type::Named(_))
+                (Type::U64, Type::Named(name)) | (Type::Named(name), Type::U64)
                     if name == "usize" || name == "isize"
+            )
+            || matches!(
+                (a, b),
+                (Type::Named(name), Type::Named(name2))
+                    if (name == "usize" || name == "isize") && (name2 == "usize" || name2 == "isize")
             )
     }
 
