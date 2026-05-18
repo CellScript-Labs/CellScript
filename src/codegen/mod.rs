@@ -5941,6 +5941,8 @@ impl CodeGenerator {
         }
         for (field, value) in &pattern.fields {
             let Some(layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(field)).cloned() else {
+                self.emit(format!("# cellscript abi: fail closed because create output field {}.{} has no layout", pattern.ty, field));
+                self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                 continue;
             };
             if layout_fixed_byte_width(&layout).is_some() {
@@ -6271,19 +6273,41 @@ impl CodeGenerator {
             return;
         };
         let Some(input_size_offset) = self.cell_buffer_size_offsets.get(&consumed_var_id).copied() else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because state transition input size offset for {} is unavailable",
+                pattern.ty
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because state transition input buffer offset for {} is unavailable",
+                pattern.ty
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let state_field = self.flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| FLOW_STATE_FIELD_NAME.to_string());
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because state transition field {}.{} has no layout",
+                pattern.ty, state_field
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because state transition field {}.{} is not a fixed-width scalar",
+                pattern.ty, state_field
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() else {
+            self.emit(format!("# cellscript abi: fail closed because state transition type {} has no fixed size", pattern.ty));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
 
@@ -6385,22 +6409,37 @@ impl CodeGenerator {
         }
         let final_state = states.len() - 1;
         let Some(consumed_var_id) = self.consumed_var_for_type(&pattern.ty) else {
+            self.emit(format!("# cellscript abi: fail closed because settle consumed var for {} is unavailable", pattern.ty));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(input_size_offset) = self.cell_buffer_size_offsets.get(&consumed_var_id).copied() else {
+            self.emit(format!("# cellscript abi: fail closed because settle input size offset for {} is unavailable", pattern.ty));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(input_buffer_offset) = self.cell_buffer_offsets.get(&consumed_var_id).copied() else {
+            self.emit(format!("# cellscript abi: fail closed because settle input buffer offset for {} is unavailable", pattern.ty));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let state_field = self.flow_state_fields.get(&pattern.ty).cloned().unwrap_or_else(|| FLOW_STATE_FIELD_NAME.to_string());
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
+            self.emit(format!("# cellscript abi: fail closed because settle field {}.{} has no layout", pattern.ty, state_field));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(width) = layout_fixed_scalar_width(&state_layout) else {
+            self.emit(format!(
+                "# cellscript abi: fail closed because settle field {}.{} is not a fixed-width scalar",
+                pattern.ty, state_field
+            ));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
         let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() else {
+            self.emit(format!("# cellscript abi: fail closed because settle type {} has no fixed size", pattern.ty));
+            self.emit_fail(CellScriptRuntimeError::AssertionFailed);
             return;
         };
 
