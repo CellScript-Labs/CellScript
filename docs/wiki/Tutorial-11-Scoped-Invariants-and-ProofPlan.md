@@ -243,6 +243,25 @@ When some related action origins still lack matching evidence, ProofPlan reports
 `declared(unmatched_related_action_obligation_count:...)` so reviewers do not
 mistake one matching action for exhaustive action coverage.
 
+## Numeric Boundary Evidence
+
+ProofPlan and release review should treat integer width changes at verifier
+boundaries as explicit evidence. The language rule is expression-local unsigned
+widening: `u8`, `u16`, `u32`, `u64`, and `u128` values may widen inside
+arithmetic and numeric comparison, but not across assignment, return, ABI,
+witness, layout, struct field initialization, or serialization boundaries.
+
+For boundary values, the source should show intent:
+
+```cellscript
+receipt.amount = value as u64
+```
+
+Do not read acceptance of mixed-width arithmetic as acceptance of implicit
+numeric coercions throughout the language. Non-literal boundary conversions
+must stay explicit so reviewers can see which transaction fields, witness
+values, and serialized layouts changed width.
+
 ## JSON Output
 
 For tooling, use:

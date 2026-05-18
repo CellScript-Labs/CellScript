@@ -94,6 +94,39 @@ Hash
 Use fixed-size byte arrays when a value must live in a predictable persistent
 schema or CKB data layout.
 
+### Expression-local Unsigned Widening
+
+CellScript supports expression-local primitive unsigned integer widening for
+arithmetic and numeric comparison:
+
+```cellscript
+let total: u64 = amount_u64 + fee_u16
+let under_limit: bool = fee_u16 < amount_u64
+```
+
+The chain is `u8 -> u16 -> u32 -> u64 -> u128`, but the widening is local to
+the expression being evaluated. It does not cross assignment, return, ABI,
+witness, `create` layout, struct field initialization, or serialization
+boundaries.
+
+Integer literals may be context-typed by an expected primitive integer type:
+
+```cellscript
+let byte: u8 = 1
+```
+
+Non-literal numeric values must keep their actual width at boundaries:
+
+```cellscript
+let amount64: u64 = amount16        // rejected
+let explicit: u64 = amount16 as u64 // accepted
+```
+
+Compound assignment is a write boundary. `target += rhs` is valid only when
+`rhs` is the same width as, or narrower than, `target`. Generic `u128`
+arithmetic and ordering remain unsupported except for explicitly implemented
+`u128` delta or equality paths.
+
 `Signature` is not a built-in scalar. If a contract needs to carry a signature,
 model it explicitly:
 

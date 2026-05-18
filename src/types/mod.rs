@@ -6554,6 +6554,116 @@ where
     }
 
     #[test]
+    fn expected_type_does_not_widen_non_literal_let_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_let_no_widen
+
+action bad(x: u16) -> u64
+where
+    let y: u64 = x
+    return y
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_return_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_return_no_widen
+
+action bad(x: u16) -> u64
+where
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_abi_arg_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_abi_no_widen
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action bad(x: u16) -> u64
+where
+    return takes_u64(x)
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("argument 1 type mismatch"),
+            "ABI argument expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_field_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_field_no_widen
+
+struct Holder {
+    value: u64,
+}
+
+action bad(x: u16) -> u64
+where
+    let holder = Holder { value: x }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch"),
+            "field expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn explicit_cast_can_cross_integer_width_boundary() {
+        check(&source_module(
+            r#"
+module types::explicit_cast_boundary
+
+struct Holder {
+    value: u64,
+}
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action good(x: u16) -> u64
+where
+    let y: u64 = x as u64
+    let holder = Holder { value: x as u64 }
+    return takes_u64(y) + holder.value
+"#,
+        ))
+        .expect("explicit casts should be accepted across integer width boundaries");
+    }
+
+    #[test]
     fn contextual_integer_literals_fit_declared_widths() {
         let module = source_module(
             r#"

@@ -25,6 +25,10 @@
 - Allow direct lifecycle operations to be authorized by kernel-effect
   equivalents: `transfer` accepts `replace + relock`, and `destroy` accepts
   `consume + burn`.
+- Define expression-local unsigned widening: primitive unsigned integers may
+  widen inside arithmetic and numeric comparison only; integer literals may be
+  context-typed, but non-literal values do not widen across assignment, return,
+  ABI, witness, layout, field initialization, or serialization boundaries.
 - Convert canonical bundled examples, language examples, README examples, wiki
   tutorials, and release gates to strict 0.15 kernel-effect capabilities.
 - Extend strict acceptance and syntax-combination gates so bundled examples
