@@ -89,7 +89,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
         "timelock.cell",
         AssemblyShapeBudget {
             max_lines: 16_000,
-            max_fail_handlers: 68,
+            max_fail_handlers: 72,
             max_shared_epilogues: 22,
             max_text_bytes: 64 * 1024,
             max_relaxed_branches: 4,
@@ -114,14 +114,14 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
             max_call_edges: 110,
-            max_unreachable_machine_blocks: 230,
+            max_unreachable_machine_blocks: 237,
         },
     ),
     (
         "vesting.cell",
         AssemblyShapeBudget {
             max_lines: 4_600,
-            max_fail_handlers: 28,
+            max_fail_handlers: 30,
             max_shared_epilogues: 6,
             max_text_bytes: 17 * 1024,
             max_relaxed_branches: 4,

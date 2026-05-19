@@ -273,7 +273,7 @@ pub(crate) fn tuple_return_field_type(ty: &IrType, field: &str) -> Option<IrType
         return None;
     };
     let index = field.parse::<usize>().ok()?;
-    (index < 8).then(|| items.get(index).cloned()).flatten()
+    items.get(index).cloned()
 }
 
 pub(crate) fn named_type_name(ty: &IrType) -> Option<&str> {

@@ -11488,7 +11488,7 @@ fn metadata_tuple_return_field_type(ty: &ir::IrType, field: &str) -> Option<ir::
         return None;
     };
     let index = field.parse::<usize>().ok()?;
-    (index < 8).then(|| items.get(index).cloned()).flatten()
+    items.get(index).cloned()
 }
 
 fn const_usize_operand(operand: &ir::IrOperand) -> Option<usize> {
@@ -18929,6 +18929,82 @@ where
     }
 
     #[test]
+    fn compile_preserves_if_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let pair = if flag { (1, 2) } else { (3, 4) }
+    return pair.0
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .0 (unresolved)"), "if tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "if tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if tuple then field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if tuple else field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_match_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+enum Flag {
+    Off,
+    On,
+}
+
+action pick(flag: Flag) -> u64
+where
+    let pair = match flag {
+        Flag::Off => { (1, 2) },
+        _ => { (3, 4) },
+    }
+    return pair.1
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .1 (unresolved)"), "match tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "match tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 2"), "match tuple first arm field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 4"), "match tuple wildcard arm field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_if_array_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let values = if flag { [1, 2] } else { [3, 4] }
+    return values[0]
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# index access"), "if fixed-array projection fell back to runtime indexing:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if array then element was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if array else element was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_byte_string_literals_with_expected_array_type() {
+        let source = r#"
+module test
+
+action symbol() -> [u8; 4]
+where
+    return b"TEST"
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn compile_lowers_match_expression_into_branch_cfg() {
         let result = compile(MATCH_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -22903,6 +22979,56 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
+    fn compile_package_import_alias_emits_matching_external_callable() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src", "shared"]
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("shared/math.cell"),
+            r#"
+module demo::math
+
+fn inc(value: u64) -> u64 {
+    return value + 1
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/main.cell"),
+            r#"
+module demo::main
+
+use demo::math::inc as plus_one
+
+action run() -> u64
+where
+    return plus_one(41)
+"#,
+        )
+        .unwrap();
+
+        let result = compile_path(root, CompileOptions::default()).unwrap();
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn ir_summary_captures_cell_runtime_accesses() {
         let tokens = lexer::lex(SUMMARY_PROGRAM).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -25430,6 +25556,78 @@ where
     }
 
     #[test]
+    fn entry_witness_bool_params_are_canonicalized() {
+        let program = r#"
+module vm::entry_bool
+
+lock gate(flag: witness bool) -> bool {
+    return flag
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(asm.contains("entry_bool_canonical_ok"), "entry wrapper should reject non-canonical bool payload bytes:\n{}", asm);
+        assert!(asm.contains("lock_predicate_true"), "lock return path should still lower through the predicate check:\n{}", asm);
+    }
+
+    #[test]
+    fn v014_runtime_helpers_fail_closed_when_not_executable() {
+        let program = r#"
+module vm::v014_runtime_fail_closed
+
+action timed() -> u64
+where
+    require_maturity(100)
+    return 0
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("__ckb_require_maturity")
+                && asm.contains("helper is not executable yet; fail closed instead of returning a forged success value"),
+            "unimplemented v0.14 runtime helper should not return forged success:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn ckb_u64_syscall_helpers_check_return_code_and_size() {
+        let program = r#"
+module vm::ckb_syscall_checks
+
+action epoch() -> u64
+where
+    return ckb::header_epoch_number()
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("runtime_header_field_fail") && asm.contains("bne t0, t1,"),
+            "header field helper should check syscall success and exact u64 size:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn tuple_return_abi_rejects_more_than_eight_fields() {
+        let program = r#"
+module vm::wide_tuple_return
+
+action wide() -> (u64, u64, u64, u64, u64, u64, u64, u64, u64)
+where
+    return (0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let err = compile(program, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("tuple return ABI supports at most 8 fields"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn entry_witness_encoder_matches_u64_wrapper_abi() {
         let program = r#"
 module vm::entry_abi
@@ -25476,6 +25674,74 @@ where
     }
 
     #[test]
+    fn internal_calls_keep_outgoing_stack_area_abi_aligned() {
+        let program = r#"
+module vm::call_stack_align
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript abi: reserve 16 bytes for outgoing stack call arguments"),
+            "internal calls must keep sp 16-byte aligned at RISC-V call boundaries:\n{}",
+            asm
+        );
+        assert!(asm.contains("sd t0, -16(sp)"), "internal call did not stage arg8 in the aligned outgoing area:\n{}", asm);
+    }
+
+    #[test]
+    fn generated_outgoing_stack_reservations_are_psabi_aligned() {
+        let program = r#"
+module vm::call_stack_align_matrix
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+fn tenth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64) -> u64 {
+    return a8 + a9
+}
+
+fn eleventh(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64, a10: u64) -> u64 {
+    return a8 + a9 + a10
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8) + tenth(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) + eleventh(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let reservations = asm
+            .lines()
+            .filter_map(|line| {
+                let marker = "reserve ";
+                let start = line.find(marker)? + marker.len();
+                let rest = &line[start..];
+                let value = rest.split_whitespace().next()?.parse::<usize>().ok()?;
+                line.contains("outgoing stack call arguments").then_some(value)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(reservations, vec![16, 16, 32], "unexpected outgoing stack reservations:\n{}", asm);
+        assert!(
+            reservations.iter().all(|bytes| bytes % 16 == 0),
+            "all outgoing call stack reservations must preserve RISC-V psABI sp alignment:\n{}",
+            asm
+        );
+    }
+
+    #[test]
     fn entry_witness_wrapper_supports_scalar_stack_args() {
         let program = r#"
 module vm::entry_abi
@@ -25508,12 +25774,12 @@ where
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
-                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript entry abi: reserve 16 bytes for outgoing stack call arguments"),
             "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -16(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];

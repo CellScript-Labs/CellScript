@@ -633,6 +633,12 @@ impl ParsedAssembly {
                     if !signed_bits_fit(relative_offset(pc, target)?, 13) {
                         relaxed.insert(index);
                     }
+                } else if let Instruction::Jump { label } = inst {
+                    let pc = layout.text_user_base + offset as u64;
+                    let target = self.symbol_address(label, layout)?;
+                    if !signed_bits_fit(relative_offset(pc, target)?, 21) {
+                        relaxed.insert(index);
+                    }
                 }
             }
             offset += op_size(op, offset, SectionKind::Text, index, BranchSizeMode::Conservative);
@@ -1417,7 +1423,11 @@ fn encode_instruction(
         }
         Instruction::Jump { label } => {
             let target = parsed.symbol_address(label, layout)?;
-            out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc, target)?)?.to_le_bytes());
+            if relaxed_branch {
+                encode_long_jump_sequence(out, pc, target)?;
+            } else {
+                out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc, target)?)?.to_le_bytes());
+            }
         }
         Instruction::Beq { .. }
         | Instruction::Bne { .. }
@@ -1430,8 +1440,8 @@ fn encode_instruction(
             let (rs1, rs2, label, funct3) = conditional_branch_parts(inst).expect("conditional branch parts");
             let target = parsed.symbol_address(label, layout)?;
             if relaxed_branch {
-                out.extend_from_slice(&encode_b_type(0x63, inverse_branch_funct3(funct3), rs1, rs2, 8)?.to_le_bytes());
-                out.extend_from_slice(&encode_j_type(0x6f, 0, relative_offset(pc + 4, target)?)?.to_le_bytes());
+                out.extend_from_slice(&encode_b_type(0x63, inverse_branch_funct3(funct3), rs1, rs2, 12)?.to_le_bytes());
+                encode_long_jump_sequence(out, pc + 4, target)?;
             } else {
                 out.extend_from_slice(&encode_b_type(0x63, funct3, rs1, rs2, relative_offset(pc, target)?)?.to_le_bytes());
             }
@@ -1493,12 +1503,29 @@ fn encode_call_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
     Ok(())
 }
 
+fn encode_long_jump_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
+    let scratch = 31;
+    let offset = relative_offset(pc, target)?;
+    if offset % 2 != 0 {
+        return Err(CompileError::new("jump target is not 2-byte aligned", crate::error::Span::default()));
+    }
+    let (hi, lo) = split_hi_lo(offset)?;
+    out.extend_from_slice(&encode_u_type(0x17, scratch, hi).to_le_bytes());
+    out.extend_from_slice(&encode_i_type(0x67, 0, 0b000, scratch, lo)?.to_le_bytes());
+    Ok(())
+}
+
 fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: usize, branch_size_mode: BranchSizeMode<'_>) -> usize {
     match op {
         AsmOp::Label(_) => 0,
         AsmOp::Instruction(Instruction::Li { imm, .. }) => li_sequence_size(*imm),
         AsmOp::Instruction(Instruction::La { .. }) => 8,
         AsmOp::Instruction(Instruction::Call { .. }) => 8,
+        AsmOp::Instruction(Instruction::Jump { .. }) => match branch_size_mode {
+            BranchSizeMode::Conservative => 8,
+            BranchSizeMode::Exact(relaxed) if section == SectionKind::Text && relaxed.contains(&op_index) => 8,
+            BranchSizeMode::Exact(_) => 4,
+        },
         AsmOp::Instruction(
             Instruction::Beq { .. }
             | Instruction::Bne { .. }
@@ -1509,8 +1536,8 @@ fn op_size(op: &AsmOp, current_offset: usize, section: SectionKind, op_index: us
             | Instruction::Beqz { .. }
             | Instruction::Bnez { .. },
         ) => match branch_size_mode {
-            BranchSizeMode::Conservative => 8,
-            BranchSizeMode::Exact(relaxed) if section == SectionKind::Text && relaxed.contains(&op_index) => 8,
+            BranchSizeMode::Conservative => 12,
+            BranchSizeMode::Exact(relaxed) if section == SectionKind::Text && relaxed.contains(&op_index) => 12,
             BranchSizeMode::Exact(_) => 4,
         },
         AsmOp::Instruction(_) => 4,

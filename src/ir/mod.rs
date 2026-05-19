@@ -2058,10 +2058,10 @@ impl IrGenerator {
                 self.record_error("string literals are only supported in metadata positions such as assert messages", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
-            Expr::ByteString(_) => {
-                self.record_error("byte string literals require an explicit lowered byte-array context", Span::default());
-                LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
-            }
+            Expr::ByteString(bytes) => LoweredExpr {
+                operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
+                current: Some(current),
+            },
             Expr::Range(_) => {
                 self.record_error("range expressions are only supported as for-loop iterables", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -2110,7 +2110,9 @@ impl IrGenerator {
             IrConst::Bool(_) => IrType::Bool,
             IrConst::Address(_) => IrType::Address,
             IrConst::Hash(_) => IrType::Hash,
-            IrConst::Array(_) => IrType::Array(Box::new(IrType::U8), 0),
+            IrConst::Array(items) => {
+                IrType::Array(Box::new(items.first().map(|item| self.const_type(item)).unwrap_or(IrType::U8)), items.len())
+            }
         }
     }
 
@@ -2330,6 +2332,114 @@ impl IrGenerator {
         Some(join)
     }
 
+    fn ensure_join_aggregate_slots(&mut self, dest: &IrVar, branch_values: &[&IrOperand]) {
+        match &dest.ty {
+            IrType::Tuple(items) => {
+                if self.aggregate_fields.contains_key(&dest.id) {
+                    return;
+                }
+                let mut slots = HashMap::new();
+                for (index, ty) in items.iter().enumerate() {
+                    let field = index.to_string();
+                    slots.insert(field.clone(), self.new_var(format!("{}_{}", dest.name, field), ty.clone()));
+                }
+                self.aggregate_fields.insert(dest.id, slots);
+            }
+            IrType::Named(name) => {
+                if self.aggregate_fields.contains_key(&dest.id) {
+                    return;
+                }
+                let Some(fields) = self.type_fields.get(name).cloned() else {
+                    return;
+                };
+                let has_aggregate_source = branch_values
+                    .iter()
+                    .any(|operand| matches!(operand, IrOperand::Var(var) if self.aggregate_fields.contains_key(&var.id)));
+                if !has_aggregate_source {
+                    return;
+                }
+                let mut slots = HashMap::new();
+                for (field, ty) in fields {
+                    slots.insert(field.clone(), self.new_var(format!("{}_{}", dest.name, field), ty));
+                }
+                self.aggregate_fields.insert(dest.id, slots);
+            }
+            IrType::Array(inner, len) => {
+                if self.aggregate_elements.contains_key(&dest.id) {
+                    return;
+                }
+                let has_aggregate_source = branch_values
+                    .iter()
+                    .any(|operand| matches!(operand, IrOperand::Var(var) if self.aggregate_elements.contains_key(&var.id)));
+                if !has_aggregate_source {
+                    return;
+                }
+                let elements =
+                    (0..*len).map(|index| self.new_var(format!("{}_{}", dest.name, index), (**inner).clone())).collect::<Vec<_>>();
+                self.aggregate_elements.insert(dest.id, elements);
+            }
+            _ => {}
+        }
+    }
+
+    fn aggregate_field_operand(&self, source: &IrOperand, field: &str) -> Option<IrOperand> {
+        let IrOperand::Var(var) = source else {
+            return None;
+        };
+        self.aggregate_fields.get(&var.id).and_then(|fields| fields.get(field)).cloned().map(IrOperand::Var)
+    }
+
+    fn lower_join_value_into_dest(&mut self, dest: &IrVar, src: IrOperand, block_id: BlockId, blocks: &mut Vec<IrBlock>) {
+        self.block_mut(blocks, block_id).instructions.push(IrInstruction::Move { dest: dest.clone(), src: src.clone() });
+
+        if let Some(fields) = self.aggregate_fields.get(&dest.id).cloned() {
+            let mut ordered_fields = fields.into_iter().collect::<Vec<_>>();
+            ordered_fields.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (field, field_dest) in ordered_fields {
+                if let Some(field_src) = self.aggregate_field_operand(&src, &field) {
+                    self.block_mut(blocks, block_id)
+                        .instructions
+                        .push(IrInstruction::Move { dest: field_dest.clone(), src: field_src.clone() });
+                    self.copy_aggregate_metadata(&field_src, field_dest.id);
+                } else if let IrOperand::Var(src_var) = &src {
+                    self.block_mut(blocks, block_id).instructions.push(IrInstruction::FieldAccess {
+                        dest: field_dest,
+                        obj: IrOperand::Var(src_var.clone()),
+                        field,
+                    });
+                }
+            }
+            if matches!(dest.ty, IrType::Tuple(_)) {
+                let mut fields = self.aggregate_fields.get(&dest.id).cloned().unwrap_or_default().into_iter().collect::<Vec<_>>();
+                fields.sort_by_key(|(field, _)| field.parse::<usize>().unwrap_or(usize::MAX));
+                let fields = fields.into_iter().map(|(_, var)| IrOperand::Var(var)).collect::<Vec<_>>();
+                self.block_mut(blocks, block_id).instructions.push(IrInstruction::Tuple { dest: dest.clone(), fields });
+            }
+        }
+
+        if let Some(elements) = self.aggregate_elements.get(&dest.id).cloned() {
+            for (index, element_dest) in elements.into_iter().enumerate() {
+                if let Some(element_src) = match &src {
+                    IrOperand::Var(src_var) => {
+                        self.aggregate_elements.get(&src_var.id).and_then(|elements| elements.get(index)).cloned().map(IrOperand::Var)
+                    }
+                    IrOperand::Const(_) => None,
+                } {
+                    self.block_mut(blocks, block_id)
+                        .instructions
+                        .push(IrInstruction::Move { dest: element_dest.clone(), src: element_src.clone() });
+                    self.copy_aggregate_metadata(&element_src, element_dest.id);
+                } else {
+                    self.block_mut(blocks, block_id).instructions.push(IrInstruction::Index {
+                        dest: element_dest,
+                        arr: src.clone(),
+                        idx: IrOperand::Const(IrConst::U64(index as u64)),
+                    });
+                }
+            }
+        }
+    }
+
     fn lower_if_stmt_value(
         &mut self,
         if_stmt: &IfStmt,
@@ -2367,17 +2477,23 @@ impl IrGenerator {
         };
         let dest = self.new_var("if_tmp", result_ty);
         let join = self.push_block(blocks);
+        let branch_values = [
+            then_lowered.current.as_ref().map(|_| &then_lowered.operand),
+            else_lowered.current.as_ref().map(|_| &else_lowered.operand),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        self.ensure_join_aggregate_slots(&dest, &branch_values);
 
         if let Some(exit) = then_lowered.current {
-            let block = self.block_mut(blocks, exit);
-            block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: then_lowered.operand });
-            block.terminator = IrTerminator::Jump(join);
+            self.lower_join_value_into_dest(&dest, then_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
         }
 
         if let Some(exit) = else_lowered.current {
-            let block = self.block_mut(blocks, exit);
-            block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: else_lowered.operand });
-            block.terminator = IrTerminator::Jump(join);
+            self.lower_join_value_into_dest(&dest, else_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
         }
 
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(join) }
@@ -3592,6 +3708,23 @@ impl IrGenerator {
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             },
+            Expr::ByteString(bytes) => match expected_ty {
+                IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) && *len == bytes.len() => LoweredExpr {
+                    operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
+                    current: Some(current),
+                },
+                IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => {
+                    self.record_error(
+                        format!("byte string literal has length {}, expected fixed byte array length {}", bytes.len(), len),
+                        Span::default(),
+                    );
+                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                }
+                _ => {
+                    self.record_error("byte string literals require an expected [u8; N] type", Span::default());
+                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                }
+            },
             Expr::Array(items) if collection_item_ir_type(expected_ty).is_some() => {
                 self.lower_vec_literal_expr(items, expected_ty.clone(), current, blocks, vars)
             }
@@ -3653,6 +3786,9 @@ impl IrGenerator {
             (IrConst::U128(n), IrType::U128) => Some(IrConst::U128(*n)),
             (IrConst::Address(a), IrType::Address) => Some(IrConst::Address(*a)),
             (IrConst::Hash(h), IrType::Hash) => Some(IrConst::Hash(*h)),
+            (IrConst::Array(items), IrType::Array(inner, len)) if matches!(inner.as_ref(), IrType::U8) && items.len() == *len => {
+                Some(IrConst::Array(items.clone()))
+            }
             (value, IrType::Named(name)) if name == "usize" || name == "isize" => Self::cast_const(value, &IrType::U64),
             _ => None,
         }
@@ -4075,17 +4211,23 @@ impl IrGenerator {
         };
         let dest = self.new_var("if_tmp", result_ty);
         let join = self.push_block(blocks);
+        let branch_values = [
+            then_lowered.current.as_ref().map(|_| &then_lowered.operand),
+            else_lowered.current.as_ref().map(|_| &else_lowered.operand),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        self.ensure_join_aggregate_slots(&dest, &branch_values);
 
         if let Some(exit) = then_lowered.current {
-            let block = self.block_mut(blocks, exit);
-            block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: then_lowered.operand });
-            block.terminator = IrTerminator::Jump(join);
+            self.lower_join_value_into_dest(&dest, then_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
         }
 
         if let Some(exit) = else_lowered.current {
-            let block = self.block_mut(blocks, exit);
-            block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: else_lowered.operand });
-            block.terminator = IrTerminator::Jump(join);
+            self.lower_join_value_into_dest(&dest, else_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
         }
 
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(join) }
@@ -4129,9 +4271,9 @@ impl IrGenerator {
                     result_dest = Some(self.new_var("match_tmp", ty));
                 }
                 let dest = result_dest.as_ref().expect("match result destination must be initialized");
-                let block = self.block_mut(blocks, arm_exit);
-                block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered_value.operand });
-                block.terminator = IrTerminator::Jump(join);
+                self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
+                self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
+                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
                 break;
             } else {
                 let Some(pattern_operand) = self.lower_match_pattern_operand(&arm.pattern, arm.span) else {
@@ -4172,9 +4314,9 @@ impl IrGenerator {
                 result_dest = Some(self.new_var("match_tmp", ty));
             }
             let dest = result_dest.as_ref().expect("match result destination must be initialized");
-            let block = self.block_mut(blocks, arm_exit);
-            block.instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered_value.operand });
-            block.terminator = IrTerminator::Jump(join);
+            self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
+            self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
+            self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
         }
 
         let Some(dest) = result_dest else {
@@ -5163,7 +5305,7 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
             continue;
         }
 
-        let Some((owner_module, _)) = resolver.resolve_function_with_module(module_name, &call_name) else {
+        let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &call_name) else {
             continue;
         };
         let import_key = format!("{}::{}", owner_module, symbol);
@@ -5181,7 +5323,11 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
             ir.enum_fixed_sizes.entry(name).or_insert(size);
         }
 
-        if let Some(item) = external_ir.items.into_iter().find(|item| ir_item_callable_name(item).is_some_and(|name| name == symbol)) {
+        let target_symbol = function_def_name(&function);
+        if let Some(item) =
+            external_ir.items.into_iter().find(|item| ir_item_callable_name(item).is_some_and(|name| name == target_symbol))
+        {
+            let item = rename_ir_callable_item(item, symbol.clone());
             if known_callables.insert(symbol) {
                 collect_ir_item_call_names(&item, &mut pending);
                 ir.items.push(item);
@@ -5203,6 +5349,24 @@ fn ir_item_callable_name(item: &IrItem) -> Option<&str> {
         IrItem::Lock(lock) => Some(&lock.name),
         IrItem::TypeDef(_) | IrItem::Invariant(_) => None,
     }
+}
+
+fn function_def_name(function: &FunctionDef) -> &str {
+    match function {
+        FunctionDef::Action(action) => &action.name,
+        FunctionDef::Function(function) => &function.name,
+        FunctionDef::Lock(lock) => &lock.name,
+    }
+}
+
+fn rename_ir_callable_item(mut item: IrItem, name: String) -> IrItem {
+    match &mut item {
+        IrItem::Action(action) => action.name = name,
+        IrItem::PureFn(function) => function.name = name,
+        IrItem::Lock(lock) => lock.name = name,
+        IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
+    }
+    item
 }
 
 fn merge_external_type_defs(ir: &mut IrModule, external_ir: &IrModule) {

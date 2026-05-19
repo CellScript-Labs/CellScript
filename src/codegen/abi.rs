@@ -12,6 +12,7 @@ use crate::error::Result;
 use crate::ir::*;
 use crate::ENTRY_WITNESS_ABI_MAGIC;
 
+use super::assembler::align_up;
 use super::{
     fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width, named_type_name, type_static_length,
     CellScriptRuntimeError, CodeGenerator,
@@ -78,6 +79,15 @@ pub(crate) fn entry_abi_arg_count(params: &[IrParam], abi: Option<&CallableAbi>)
         .enumerate()
         .map(|(index, param)| call_param_abi_arg_count(param, type_hash_param_indices.is_some_and(|indices| indices.contains(&index))))
         .sum()
+}
+
+pub(crate) fn outgoing_stack_arg_bytes(abi_arg_count: usize) -> usize {
+    let bytes = abi_arg_count.saturating_sub(8) * 8;
+    if bytes == 0 {
+        0
+    } else {
+        align_up(bytes, 16)
+    }
 }
 
 pub(crate) fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -> usize {
@@ -211,7 +221,7 @@ impl CodeGenerator {
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
-        let outgoing_stack_arg_bytes = entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()));
         let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
@@ -388,9 +398,15 @@ impl CodeGenerator {
                     self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
                     if abi_index < 8 {
                         self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", abi_index), "t0", width);
+                        if param.ty == IrType::Bool {
+                            self.emit_entry_bool_canonical_check(&format!("a{}", abi_index), &fail_label);
+                        }
                     } else {
                         let caller_stack_offset = (abi_index - 8) * 8;
                         self.emit_entry_witness_scalar_load_from_reg("t3", "t0", width);
+                        if param.ty == IrType::Bool {
+                            self.emit_entry_bool_canonical_check("t3", &fail_label);
+                        }
                         self.emit(format!(
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
@@ -480,9 +496,15 @@ impl CodeGenerator {
                     let stack_offset = ENTRY_WITNESS_BUFFER_OFFSET + ENTRY_WITNESS_HEADER_SIZE + payload_cursor;
                     if abi_index < 8 {
                         self.emit_entry_witness_scalar_load(&format!("a{}", abi_index), stack_offset, width);
+                        if param.ty == IrType::Bool {
+                            self.emit_entry_bool_canonical_check(&format!("a{}", abi_index), &fail_label);
+                        }
                     } else {
                         let caller_stack_offset = (abi_index - 8) * 8;
                         self.emit_entry_witness_scalar_load("t3", stack_offset, width);
+                        if param.ty == IrType::Bool {
+                            self.emit_entry_bool_canonical_check("t3", &fail_label);
+                        }
                         self.emit(format!(
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
@@ -604,6 +626,17 @@ impl CodeGenerator {
             }
             self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
         }
+    }
+
+    fn emit_entry_bool_canonical_check(&mut self, register: &str, fail_label: &str) {
+        let zero_ok = self.fresh_label("entry_bool_zero_ok");
+        let bool_ok = self.fresh_label("entry_bool_canonical_ok");
+        self.emit(format!("beqz {}, {}", register, zero_ok));
+        self.emit("li t2, 1");
+        self.emit(format!("beq {}, t2, {}", register, bool_ok));
+        self.emit(format!("j {}", fail_label));
+        self.emit_label(&zero_ok);
+        self.emit_label(&bool_ok);
     }
 
     fn emit_entry_load_u32_from_stack(&mut self, dest_reg: &str, stack_offset: usize) {
@@ -729,9 +762,15 @@ impl CodeGenerator {
             *abi_index += 2;
         } else if *abi_index < 8 {
             self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", *abi_index), "t0", width);
+            if param.ty == IrType::Bool {
+                self.emit_entry_bool_canonical_check(&format!("a{}", *abi_index), fail_label);
+            }
             *abi_index += 1;
         } else {
             self.emit_entry_witness_scalar_load_from_reg("t4", "t0", width);
+            if param.ty == IrType::Bool {
+                self.emit_entry_bool_canonical_check("t4", fail_label);
+            }
             self.emit_entry_abi_reg_arg(*abi_index, "t4", outgoing_stack_arg_bytes);
             *abi_index += 1;
         }

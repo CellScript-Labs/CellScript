@@ -9,7 +9,7 @@ use crate::error::{CompileError, Result};
 use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
 
-use super::abi::{abi_arg_label, call_abi_arg_count, CallLengthKind};
+use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
 use super::assembler::{scratch_register_avoiding, small_signed_immediate};
 use super::runtime::is_ckb_fixed_hash_helper;
 use super::schema::{fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
@@ -71,7 +71,7 @@ impl CodeGenerator {
         self.emit(format!("# call {}", func));
 
         let abi = self.callable_abis.get(func).cloned();
-        let outgoing_stack_arg_bytes = call_abi_arg_count(abi.as_ref(), args).saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(call_abi_arg_count(abi.as_ref(), args));
         let mut abi_index = 0usize;
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi {

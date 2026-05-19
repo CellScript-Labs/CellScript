@@ -58,7 +58,7 @@
 
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::codegen::cell_ops::consumed_operand_var;
-use crate::error::Result;
+use crate::error::{CompileError, Result};
 
 use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
@@ -1807,7 +1807,27 @@ impl CodeGenerator {
             }
             IrTerminator::Return(Some(operand)) => {
                 if let IrOperand::Var(v) = operand {
+                    if let IrType::Tuple(items) = &v.ty {
+                        if items.len() > 8 {
+                            return Err(CompileError::new(
+                                format!("tuple return ABI supports at most 8 fields, but return value has {} fields", items.len()),
+                                crate::error::Span::default(),
+                            ));
+                        }
+                        if !self.tuple_aggregate_fields.contains_key(&v.id) {
+                            return Err(CompileError::new(
+                                "tuple return ABI requires a directly materialized tuple aggregate",
+                                crate::error::Span::default(),
+                            ));
+                        }
+                    }
                     if let Some(fields) = self.tuple_aggregate_fields.get(&v.id).cloned() {
+                        if fields.len() > 8 {
+                            return Err(CompileError::new(
+                                format!("tuple return ABI supports at most 8 fields, but return value has {} fields", fields.len()),
+                                crate::error::Span::default(),
+                            ));
+                        }
                         self.emit(format!("# cellscript abi: return tuple aggregate var{} fields={}", v.id, fields.len()));
                         if fields.is_empty() {
                             self.emit("li a0, 0");
@@ -2412,6 +2432,35 @@ mod tests {
     ];
 
     #[test]
+    fn outgoing_stack_arg_area_is_16_byte_aligned_at_call_boundaries() {
+        let cases = [(0, 0), (1, 0), (8, 0), (9, 16), (10, 16), (11, 32), (12, 32), (13, 48), (16, 64)];
+
+        for (abi_arg_count, expected_bytes) in cases {
+            let bytes = super::abi::outgoing_stack_arg_bytes(abi_arg_count);
+            assert_eq!(bytes, expected_bytes, "unexpected outgoing stack size for {} ABI args", abi_arg_count);
+            if bytes > 0 {
+                assert_eq!(bytes % 16, 0, "outgoing stack area must preserve RISC-V psABI sp alignment");
+            }
+        }
+    }
+
+    #[test]
+    fn internal_assembler_keeps_near_unconditional_jump_compact() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "j done".to_string(),
+            "done:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let plan = MachineLayoutPlan::build(&lines).expect("near unconditional jump should assemble");
+        assert_eq!(plan.metrics.text_size, 8, "near j should remain a compact 4-byte jal x0 sequence");
+        assert_eq!(plan.metrics.relaxed_branch_count, 0, "near j should not be marked as a relaxed long jump");
+    }
+
+    #[test]
     fn internal_assembler_relaxes_out_of_range_conditional_branch() {
         let mut lines = vec![
             ".section .text".to_string(),
@@ -2427,6 +2476,39 @@ mod tests {
         lines.push("ret".to_string());
 
         let elf = assemble_elf_internal(&lines).expect("internal assembler should relax long conditional branches");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn internal_assembler_encodes_far_unconditional_jump() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "j far_target".to_string(),
+            format!(".ascii \"{}\"", "x".repeat(1_100_000)),
+            "far_target:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should encode far unconditional jumps");
+        assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn internal_assembler_relaxes_far_conditional_branch_with_long_jump() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "li a0, 0".to_string(),
+            "beqz a0, far_target".to_string(),
+            format!(".ascii \"{}\"", "x".repeat(1_100_000)),
+            "far_target:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should relax far conditional branches through long jumps");
         assert!(elf.starts_with(b"\x7fELF"));
     }
 
