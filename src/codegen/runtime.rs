@@ -55,7 +55,7 @@ pub(crate) fn runtime_syscall_abi(profile: TargetProfile) -> RuntimeSyscallAbi {
 // v0.14 runtime helper analysis
 // ---------------------------------------------------------------------------
 
-pub(crate) fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
+fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
     let mut helpers = BTreeSet::new();
     for item in &ir.items {
         let body = match item {
@@ -81,7 +81,7 @@ pub(crate) fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String>
     helpers
 }
 
-pub(crate) fn is_v014_runtime_helper(func: &str) -> bool {
+fn is_v014_runtime_helper(func: &str) -> bool {
     matches!(
         func,
         "__ckb_spawn"

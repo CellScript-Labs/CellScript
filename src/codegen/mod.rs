@@ -1,3 +1,27 @@
+//! CellScript RISC-V64 code generator.
+//!
+//! This module lowers CellScript IR to RISC-V assembly and ELF binaries for
+//! the CKB-VM. The code generator is organised into four files:
+//!
+//! - **`mod.rs`** (this file): orchestration layer. Contains the
+//!   `CodeGenerator` struct, `generate()` entry point, and all IR-to-assembly
+//!   lowering for type definitions, actions, locks, pure functions, cell
+//!   operations, schema field access, collection operations, and control flow.
+//!
+//! - **`assembler.rs`**: RISC-V machine code assembler and ELF emitter.
+//!   Parses textual assembly, builds machine CFGs, performs branch relaxation,
+//!   and emits position-independent ELF binaries. Also contains external
+//!   toolchain support (GCC/LD) when available.
+//!
+//! - **`runtime.rs`**: runtime support emission. Generates built-in helper
+//!   functions (`memcmp`, `memzero`, size guards), Blake2b-256 hash, CKB
+//!   syscall wrappers (header field, input field), and v0.14 surface helpers.
+//!
+//! - **`abi.rs`**: calling convention and entry witness envelope. Contains the
+//!   `CallableAbi` registry, entry witness frame layout, parameter marshalling,
+//!   and the witness wrapper that validates and deserialises ABI arguments
+//!   before tail-calling the user action/lock function.
+
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::error::{CompileError, Result};
 use crate::flow::FLOW_STATE_FIELD_NAME;
@@ -8899,6 +8923,7 @@ pub(crate) use abi::{
     ENTRY_SCRIPT_BUFFER_OFFSET, ENTRY_SCRIPT_BUFFER_SIZE, ENTRY_SCRIPT_SIZE_OFFSET,
 };
 pub(crate) use runtime::{is_ckb_fixed_hash_helper, runtime_syscall_abi, RuntimeSyscallAbi};
+// Note: referenced_v014_runtime_helpers and is_v014_runtime_helper are private to runtime.rs
 #[allow(unused_imports)] // Many items are used only by the #[cfg(test)] module below
 pub(crate) use assembler::{
     assemble_elf, assemble_elf_internal, BackendLayoutMetrics,

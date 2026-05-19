@@ -116,3 +116,29 @@ where practical and must not make the implicit backend contracts more implicit.
   instruction surface and at least one compile-through `riscv64-elf` path.
 - Prefer focused tests during development, then broaden validation before
   completion.
+
+### Backend Refactor: Behaviour-Preserving Emitter Extraction
+
+When extracting `&mut self` emitter methods from `codegen/mod.rs` into a
+sub-module (e.g. `assembler.rs`, `runtime.rs`, `abi.rs`):
+
+1. **Use exact source movement.** Extract the original code verbatim with
+   `git show` or equivalent. Never manually reconstruct emitter logic from
+   memory. A single wrong register, label, or branch in a reconstructed
+   method will silently change generated assembly and break on-chain contracts.
+
+2. **Verify generated assembly is unchanged.** Run the full test suite after
+   each extraction. The codegen tests include end-to-end assembly assertions
+   that catch transcription errors.
+
+3. **Prefer `pub(crate)` temporarily.** Cross-module `impl` blocks on the same
+   struct need method visibility to match call sites. Use `pub(crate)` for
+   methods called from other modules within the crate. Fields of types shared
+   across module boundaries also need `pub(crate)`.
+
+4. **Delete from back to front.** When removing code by line number with `sed`,
+   delete later ranges first to keep earlier line numbers stable.
+
+5. **Brace-count after every deletion.** Use `python3 -c` to verify brace
+   balance before attempting compilation. Off-by-one `sed` ranges can leave
+   orphaned lines or eat closing braces.
