@@ -137,7 +137,6 @@ fn entry_witness_register_param_width(ty: &IrType) -> Option<usize> {
 // CodeGenerator ABI methods
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 impl CodeGenerator {
     pub(crate) fn register_callable_abis(&mut self, ir: &IrModule) {
         self.callable_abis.clear();
