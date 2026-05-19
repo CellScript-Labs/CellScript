@@ -13,8 +13,8 @@ use crate::ir::*;
 use crate::ENTRY_WITNESS_ABI_MAGIC;
 
 use super::{
-    fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width,
-    named_type_name, type_static_length, CellScriptRuntimeError, CodeGenerator,
+    fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width, named_type_name, type_static_length,
+    CellScriptRuntimeError, CodeGenerator,
 };
 pub(crate) const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 pub(crate) const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
@@ -89,7 +89,10 @@ pub(crate) fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -
     }
     1
 }
-pub(crate) fn entry_witness_payload_layout(params: &[IrParam], runtime_bound_param_indices: &BTreeSet<usize>) -> Vec<EntryWitnessPayloadArg> {
+pub(crate) fn entry_witness_payload_layout(
+    params: &[IrParam],
+    runtime_bound_param_indices: &BTreeSet<usize>,
+) -> Vec<EntryWitnessPayloadArg> {
     params
         .iter()
         .enumerate()

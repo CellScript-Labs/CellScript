@@ -658,7 +658,13 @@ impl ParsedAssembly {
         })
     }
 
-    pub(crate) fn encode_section(&self, section: SectionKind, out: &mut Vec<u8>, layout: &SectionLayout, base_bias: usize) -> Result<()> {
+    pub(crate) fn encode_section(
+        &self,
+        section: SectionKind,
+        out: &mut Vec<u8>,
+        layout: &SectionLayout,
+        base_bias: usize,
+    ) -> Result<()> {
         let ops = match section {
             SectionKind::Text => &self.text_ops,
             SectionKind::Rodata => &self.rodata_ops,
@@ -1895,4 +1901,3 @@ fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
     let pad = padding_for(out.len(), align);
     out.resize(out.len() + pad, 0);
 }
-

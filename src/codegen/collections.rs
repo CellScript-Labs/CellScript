@@ -8,9 +8,9 @@ use crate::error::Result;
 use crate::ir::*;
 
 use super::{
-    const_usize_operand, fixed_scalar_operand_width, fixed_scalar_width,
-    molecule_vector_element_fixed_width, operand_fixed_byte_width, type_static_length,
-    CellScriptRuntimeError, CodeGenerator, RUNTIME_COLLECTION_BUFFER_SIZE, RUNTIME_EXPR_TEMP_SLOTS,
+    const_usize_operand, fixed_scalar_operand_width, fixed_scalar_width, molecule_vector_element_fixed_width,
+    operand_fixed_byte_width, type_static_length, CellScriptRuntimeError, CodeGenerator, RUNTIME_COLLECTION_BUFFER_SIZE,
+    RUNTIME_EXPR_TEMP_SLOTS,
 };
 
 impl CodeGenerator {
