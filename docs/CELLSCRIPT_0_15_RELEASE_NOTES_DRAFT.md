@@ -1,8 +1,8 @@
 # CellScript 0.15 Release Notes Draft
 
-**Status**: Release-gate draft for the `cellscript-0.15` implementation branch.
+**Status**: Release gate passed on the `nightly-0.15` implementation branch.
 
-**Updated**: 2026-05-18.
+**Updated**: 2026-05-20.
 
 CellScript 0.15 is the scoped-invariant and Covenant ProofPlan milestone. It
 makes verifier triggers, scope, coverage, builder assumptions, and enforcement
@@ -398,6 +398,27 @@ Full release gate:
 
 ```bash
 ./scripts/cellscript_gate.sh release
+```
+
+Latest recorded release evidence, generated on 2026-05-20:
+
+- Release gate status: passed.
+- Production evidence status: `status: "passed"`, `production_ready: true`.
+- CKB production scope: 7 bundled examples, 43/43 scoped action runs, 17/17
+  scoped lock entries, 17 valid-spend and 17 invalid-spend lock cases.
+- Stateful evidence: 27 local CKB stateful scenario runs.
+- Final production hardening gate: `status: "passed"`, `ready: true`.
+- Strict backend CI audit: passed; the CI audit covers compiler-layer IR,
+  codegen, RISC-V, syntax-combination, and regression contracts, while the
+  full release acceptance covers the stateful CKB evidence boundary.
+
+Report paths:
+
+```text
+target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json
+target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json
+target/cellscript-backend-shape/backend-shape-report-release.json
+target/cellscript-schema-manifest/schema-manifest-report-release.json
 ```
 
 ## Summary

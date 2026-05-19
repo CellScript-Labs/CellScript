@@ -1,8 +1,8 @@
 # CellScript 0.15 发布前全面审计与生产验收严格加固方案
 
-**版本**: 0.15.0  
-**状态**: 发布门控草案  
-**更新日期**: 2026-05-17
+**版本**: 0.15.0
+**状态**: release gate 已通过
+**更新日期**: 2026-05-20
 
 ---
 
@@ -226,7 +226,7 @@ done
 
 ```bash
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/report.json
+  target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json
 ```
 
 **Prompt**：
@@ -249,6 +249,23 @@ python3 scripts/validate_ckb_cellscript_production_evidence.py \
 > - `ckb_business_coverage.expected_fail_closed_lock_count` == 0
 > - 每个 `ACTION_RUN_KEYS` 中的动作列表与预期完全一致，无重复。
 > - Lock spend 矩阵覆盖所有预期锁：`multisig`、`nft`、`timelock`、`vesting`。
+
+**2026-05-20 recorded result**：
+
+- `./scripts/cellscript_gate.sh release` passed.
+- Production evidence report:
+  `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json`.
+- Strict backend CI report:
+  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json`.
+- Backend shape report:
+  `target/cellscript-backend-shape/backend-shape-report-release.json`.
+- Molecule schema manifest report:
+  `target/cellscript-schema-manifest/schema-manifest-report-release.json`.
+- Production evidence validator reported `status: "passed"` and
+  `production_ready: true`.
+- Coverage: 7 bundled examples, 43/43 scoped actions, 17/17 scoped locks,
+  17 valid-spend and 17 invalid-spend lock cases, and 27 local CKB stateful
+  scenario runs.
 
 ### 3.4 ProofPlan 元数据审计
 

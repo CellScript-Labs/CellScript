@@ -1,6 +1,6 @@
 # CellScript 0.15 Roadmap
 
-**Updated**: 2026-05-15
+**Updated**: 2026-05-20
 
 0.15 is the scoped-invariant and Covenant ProofPlan track. It builds on the
 0.14 CKB semantic surface by making verifier trigger, scope, reads, coverage,
@@ -43,6 +43,7 @@ which declarations remain unmatched.
 | Internal `type_hash` renaming | Implemented | Metadata fields renamed: `type_hash-absence` → `ckb_type_script_hash-absence`, `type_hash-preservation` → `ckb_type_script_hash-preservation`, `lock_hash-preservation` → `ckb_lock_script_hash-preservation`. |
 | Compatibility and migration infrastructure | Implemented | `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags. CS0150–CS0160 migration diagnostic codes. `check_primitive_strict_015()` gate rejects protocol verbs in strict mode. |
 | Documentation and tests | Implemented | README, docgen, CLI tests, parser tests, metadata tests, identity policy tests (5 new), and aggregate invariant tests cover the new surface. |
+| Release gate evidence | Passed | `./scripts/cellscript_gate.sh release` passed on 2026-05-20. The recorded CKB production report is `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json` with `status: "passed"` and `production_ready: true`. |
 
 ## Boundaries
 
@@ -103,4 +104,19 @@ Full gate before closing the branch:
 ./scripts/cellscript_gate.sh dev
 ./scripts/cellscript_gate.sh ci
 ./scripts/cellscript_gate.sh backend
+./scripts/cellscript_gate.sh release
 ```
+
+Latest recorded release evidence:
+
+- CKB production acceptance report:
+  `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json`.
+- Strict backend CI audit report:
+  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json`.
+- Backend shape report:
+  `target/cellscript-backend-shape/backend-shape-report-release.json`.
+- Molecule schema manifest report:
+  `target/cellscript-schema-manifest/schema-manifest-report-release.json`.
+- Production result: 7 bundled examples, 43/43 scoped actions, 17/17 scoped
+  locks, 17 valid-spend and 17 invalid-spend lock cases, 27 stateful local CKB
+  scenario runs, and final production hardening gate `passed`.
