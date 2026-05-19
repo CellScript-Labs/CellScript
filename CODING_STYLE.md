@@ -23,10 +23,13 @@ project contract.
 
 ## Backend And Codegen Rules
 
-`src/codegen/mod.rs` is currently a legacy monolith covering layout planning,
-CKB syscall lowering, verifier pattern emission, RISC-V assembly generation, the
-internal ELF assembler, and backend-shape tests. New code should reduce coupling
-where practical and must not make the implicit backend contracts more implicit.
+`src/codegen/mod.rs` is the orchestration layer of a multi-file backend.
+Sub-modules handle separate concerns: `schema.rs` (layout data model and
+type-width helpers), `assembler.rs` (RISC-V machine code and ELF),
+`runtime.rs` (helper functions and CKB syscall wrappers), `abi.rs` (calling
+convention and entry witness envelope), and `collections.rs` (collection
+lowering). New code should respect these boundaries and must not make the
+implicit backend contracts more implicit.
 
 - Treat emitted assembly as a compiler contract. Any new mnemonic or pseudo-op
   emitted by codegen, stdlib, or collection helpers must be supported by the
@@ -142,3 +145,22 @@ sub-module (e.g. `assembler.rs`, `runtime.rs`, `abi.rs`):
 5. **Brace-count after every deletion.** Use `python3 -c` to verify brace
    balance before attempting compilation. Off-by-one `sed` ranges can leave
    orphaned lines or eat closing braces.
+
+### Module Boundary: Schema vs Cell Operations
+
+`schema.rs` owns layout computation and field access helpers. It must **not**
+absorb cell operation policy or state-transition verification. Specifically:
+
+- **Schema module may contain**: type-width helpers (`fixed_scalar_width`,
+  `fixed_byte_width`, `type_static_length`, etc.), aggregate/tuple layout
+  computation, Molecule table field bounds/span helpers, fixed-byte comparison
+  and loading, prelude u64 value resolution, and field access dispatch.
+- **Schema module must not contain**: destruction policy, identity/field
+  uniqueness checks, create-output field verification, state-transition edge
+  matching, consume/destroy/replace/transfer/settle lowering, mutate
+  replacement transition checks, or any code that decides *whether* a cell
+  operation is valid.
+
+If a helper is shared by schema access code and cell operation code, it should
+stay in `mod.rs` until the cell operations module is extracted. Cross-module
+call dependencies are acceptable; semantic ownership boundaries are not.

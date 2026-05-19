@@ -1,23 +1,325 @@
 //! Schema field access and type-layout helpers for CellScript codegen.
 //!
-//! Contains schema field access lowering, Molecule table helpers,
-//! fixed-byte comparison and loading, prelude u64 value resolution,
-//! and field access dispatch.
+//! Contains the schema data model (`SchemaFieldLayout`, `SchemaFieldValueSource`,
+//! `ExpectedFixedByteSource`, `SourcePointer`), layout width computation,
+//! Molecule table helpers, fixed-byte comparison and loading, prelude u64
+//! value resolution, and field access dispatch.
+
+use std::collections::HashMap;
 
 use crate::ast::BinaryOp;
-use crate::codegen::fixed_byte_const_bytes;
 use crate::error::Result;
 use crate::ir::*;
 
 use super::{
-    aggregate_field_layout, aggregate_type_label, ckb_source_name, fixed_byte_width, fixed_scalar_width, layout_fixed_byte_width,
-    layout_fixed_scalar_width, molecule_vector_element_fixed_width, named_type_name, operand_fixed_byte_width, type_static_length,
-    CellScriptRuntimeError, CodeGenerator, ExpectedFixedByteSource, PreludeU64OperandSource, PreludeU64ValueSource, SchemaFieldLayout,
-    SchemaFieldValueSource, SourcePointer, CKB_CELL_FIELD_CAPACITY, CKB_CELL_FIELD_LOCK_HASH, CKB_CELL_FIELD_TYPE_HASH,
-    CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, RUNTIME_EXPR_TEMP_SLOTS, RUNTIME_SCRATCH_BUFFER_SIZE,
+    ckb_source_name, CellScriptRuntimeError, CodeGenerator, PreludeU64OperandSource, PreludeU64ValueSource, CKB_CELL_FIELD_CAPACITY,
+    CKB_CELL_FIELD_LOCK_HASH, CKB_CELL_FIELD_TYPE_HASH, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, RUNTIME_EXPR_TEMP_SLOTS,
+    RUNTIME_SCRATCH_BUFFER_SIZE,
 };
 
+#[derive(Debug, Clone)]
+pub(crate) struct SchemaFieldLayout {
+    pub(crate) index: usize,
+    pub(crate) offset: usize,
+    pub(crate) ty: IrType,
+    pub(crate) fixed_size: Option<usize>,
+    pub(crate) fixed_enum_size: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SchemaFieldValueSource {
+    pub(crate) obj_var_id: usize,
+    pub(crate) type_name: String,
+    pub(crate) field: String,
+    pub(crate) layout: SchemaFieldLayout,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AggregatePointerSource {
+    pub(crate) ty: IrType,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ExpectedFixedByteSource {
+    SchemaField(SchemaFieldValueSource),
+    Const(Vec<u8>),
+    StackSlot { var_id: usize, width: usize },
+    PointerBytes { var_id: usize, width: usize },
+    ParamBytes { var_id: usize, size_offset: usize, width: usize },
+    LoadedBytes { var_id: usize, size_offset: usize, width: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SourcePointer {
+    LoadedStackPointer { var_id: usize, offset: usize },
+    StackAddress { offset: usize },
+}
+
+pub(crate) fn fixed_scalar_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
+    match (ty, fixed_size) {
+        (IrType::Bool | IrType::U8, Some(1)) => Some(1),
+        (IrType::U16, Some(2)) => Some(2),
+        (IrType::U32, Some(4)) => Some(4),
+        (IrType::U64, Some(8)) => Some(8),
+        _ => None,
+    }
+}
+
+pub(crate) fn fixed_register_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
+    let w = fixed_scalar_width(ty, fixed_size)?;
+    (w <= 8).then_some(w)
+}
+
+pub(crate) fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
+    if let Some(width) = fixed_scalar_width(ty, fixed_size) {
+        return Some(width);
+    }
+    match (ty, fixed_size) {
+        (IrType::Address | IrType::Hash, Some(32)) => Some(32),
+        (IrType::U128, Some(16)) => Some(16),
+        (IrType::Array(inner, len), Some(size)) if matches!(inner.as_ref(), IrType::U8) && *len == size => Some(size),
+        (IrType::Ref(inner) | IrType::MutRef(inner), _) => fixed_byte_width(inner, type_static_length(inner)),
+        _ => None,
+    }
+}
+
+pub(crate) fn molecule_vector_element_fixed_width(
+    ty: &IrType,
+    type_fixed_sizes: &HashMap<String, usize>,
+    enum_fixed_sizes: &HashMap<String, usize>,
+) -> Option<usize> {
+    let IrType::Named(name) = ty else {
+        return None;
+    };
+    if name == "String" {
+        return Some(1);
+    }
+    let inner = name.strip_prefix("Vec<")?.strip_suffix('>')?;
+    molecule_inline_type_fixed_width(inner, type_fixed_sizes, enum_fixed_sizes)
+}
+
+pub(crate) fn molecule_inline_type_fixed_width(
+    ty: &str,
+    type_fixed_sizes: &HashMap<String, usize>,
+    enum_fixed_sizes: &HashMap<String, usize>,
+) -> Option<usize> {
+    match ty.trim() {
+        "bool" | "u8" => Some(1),
+        "u16" => Some(2),
+        "u32" => Some(4),
+        "u64" => Some(8),
+        "u128" => Some(16),
+        "Address" | "Hash" => Some(32),
+        other => type_fixed_sizes.get(other).copied().or_else(|| enum_fixed_sizes.get(other).copied()),
+    }
+}
+
+pub(crate) fn layout_fixed_scalar_width(layout: &SchemaFieldLayout) -> Option<usize> {
+    fixed_scalar_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+}
+
+pub(crate) fn layout_fixed_byte_width(layout: &SchemaFieldLayout) -> Option<usize> {
+    fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+}
+
+pub(crate) fn type_static_length(ty: &IrType) -> Option<usize> {
+    match ty {
+        IrType::Bool | IrType::U8 => Some(1),
+        IrType::U16 => Some(2),
+        IrType::U32 => Some(4),
+        IrType::U64 => Some(8),
+        IrType::U128 => Some(16),
+        IrType::Address | IrType::Hash => Some(32),
+        IrType::Array(inner, len) => type_static_length(inner).map(|inner_len| inner_len * len),
+        IrType::Tuple(items) => items.iter().try_fold(0usize, |acc, item| type_static_length(item).map(|len| acc + len)),
+        IrType::Unit => Some(0),
+        IrType::Ref(inner) | IrType::MutRef(inner) => type_static_length(inner),
+        IrType::Named(_) => None,
+    }
+}
+
+pub(crate) fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
+    let ty = match operand {
+        IrOperand::Const(IrConst::Address(_)) | IrOperand::Const(IrConst::Hash(_)) => return Some(32),
+        IrOperand::Const(IrConst::Array(values)) => return Some(values.len()),
+        IrOperand::Const(IrConst::U128(_)) => return Some(16),
+        IrOperand::Var(var) => &var.ty,
+        _ => return None,
+    };
+    match ty {
+        IrType::Address | IrType::Hash => Some(32),
+        IrType::U128 => Some(16),
+        IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
+        _ => None,
+    }
+}
+
+pub(crate) fn constructed_byte_vector_part_width(operand: &IrOperand) -> Option<usize> {
+    operand_fixed_byte_width(operand).or_else(|| match operand {
+        IrOperand::Var(var) => fixed_scalar_width(&var.ty, type_static_length(&var.ty)),
+        IrOperand::Const(IrConst::Bool(_)) | IrOperand::Const(IrConst::U8(_)) => Some(1),
+        IrOperand::Const(IrConst::U16(_)) => Some(2),
+        IrOperand::Const(IrConst::U32(_)) => Some(4),
+        IrOperand::Const(IrConst::U64(_)) => Some(8),
+        _ => None,
+    })
+}
+
+pub(crate) fn fixed_scalar_operand_width(operand: &IrOperand) -> Option<usize> {
+    match operand {
+        IrOperand::Var(var) => fixed_scalar_width(&var.ty, type_static_length(&var.ty)),
+        IrOperand::Const(IrConst::Bool(_)) | IrOperand::Const(IrConst::U8(_)) => Some(1),
+        IrOperand::Const(IrConst::U16(_)) => Some(2),
+        IrOperand::Const(IrConst::U32(_)) => Some(4),
+        IrOperand::Const(IrConst::U64(_)) => Some(8),
+        _ => None,
+    }
+}
+
+pub(crate) fn fixed_byte_pointer_param_width(ty: &IrType) -> Option<usize> {
+    fixed_byte_width(ty, type_static_length(ty)).filter(|width| *width > 8)
+}
+
+pub(crate) fn fixed_aggregate_pointer_param_width(ty: &IrType) -> Option<usize> {
+    match ty {
+        IrType::Array(_, _) | IrType::Tuple(_) => type_static_length(ty).filter(|width| *width > 8),
+        _ => None,
+    }
+}
+
+pub(crate) fn fixed_byte_const_bytes(value: &IrConst) -> Option<Vec<u8>> {
+    match value {
+        IrConst::Address(bytes) | IrConst::Hash(bytes) => Some(bytes.to_vec()),
+        IrConst::U128(value) => Some(value.to_le_bytes().to_vec()),
+        IrConst::Array(values) => values
+            .iter()
+            .map(|value| match value {
+                IrConst::U8(byte) => Some(*byte),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+pub(crate) fn fixed_scalar_const_value(value: &IrConst) -> Option<u64> {
+    match value {
+        IrConst::Bool(value) => Some(u64::from(*value)),
+        IrConst::U8(value) => Some((*value).into()),
+        IrConst::U16(value) => Some((*value).into()),
+        IrConst::U32(value) => Some((*value).into()),
+        IrConst::U64(value) => Some(*value),
+        _ => None,
+    }
+}
+
+pub(crate) fn const_ir_type(value: &IrConst) -> IrType {
+    match value {
+        IrConst::Unit => IrType::Unit,
+        IrConst::U8(_) => IrType::U8,
+        IrConst::U16(_) => IrType::U16,
+        IrConst::U32(_) => IrType::U32,
+        IrConst::U64(_) => IrType::U64,
+        IrConst::U128(_) => IrType::U128,
+        IrConst::Bool(_) => IrType::Bool,
+        IrConst::Address(_) => IrType::Address,
+        IrConst::Hash(_) => IrType::Hash,
+        IrConst::Array(values) => IrType::Array(Box::new(values.first().map(const_ir_type).unwrap_or(IrType::U8)), values.len()),
+    }
+}
+
+pub(crate) fn const_usize_operand(operand: &IrOperand) -> Option<usize> {
+    match operand {
+        IrOperand::Const(IrConst::U8(value)) => Some((*value).into()),
+        IrOperand::Const(IrConst::U16(value)) => Some((*value).into()),
+        IrOperand::Const(IrConst::U32(value)) => Some(*value as usize),
+        IrOperand::Const(IrConst::U64(value)) => usize::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
+pub(crate) fn aggregate_type_label(ty: &IrType) -> String {
+    match ty {
+        IrType::Tuple(_) => "tuple".to_string(),
+        IrType::Array(_, len) => format!("array{}", len),
+        IrType::Address => "Address".to_string(),
+        IrType::Hash => "Hash".to_string(),
+        other => format!("{:?}", other),
+    }
+}
+
+pub(crate) fn aggregate_field_layout(ty: &IrType, field: &str) -> Option<SchemaFieldLayout> {
+    match ty {
+        IrType::Tuple(items) => {
+            let index = field.parse::<usize>().ok()?;
+            let field_ty = items.get(index)?.clone();
+            let offset = items.iter().take(index).try_fold(0usize, |acc, item| type_static_length(item).map(|size| acc + size))?;
+            let fixed_size = type_static_length(&field_ty);
+            Some(SchemaFieldLayout { index, offset, ty: field_ty, fixed_size, fixed_enum_size: None })
+        }
+        IrType::Address | IrType::Hash if field == "0" => Some(SchemaFieldLayout {
+            index: 0,
+            offset: 0,
+            ty: IrType::Array(Box::new(IrType::U8), 32),
+            fixed_size: Some(32),
+            fixed_enum_size: None,
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn tuple_return_field_type(ty: &IrType, field: &str) -> Option<IrType> {
+    let IrType::Tuple(items) = ty else {
+        return None;
+    };
+    let index = field.parse::<usize>().ok()?;
+    (index < 8).then(|| items.get(index).cloned()).flatten()
+}
+
+pub(crate) fn named_type_name(ty: &IrType) -> Option<&str> {
+    match ty {
+        IrType::Named(name) => Some(name.as_str()),
+        IrType::Ref(inner) | IrType::MutRef(inner) => named_type_name(inner),
+        _ => None,
+    }
+}
+
 impl CodeGenerator {
+    pub(crate) fn fixed_named_type_width(&self, ty: &IrType) -> Option<usize> {
+        match ty {
+            IrType::Named(name) => self.type_fixed_sizes.get(name).copied().or_else(|| self.enum_fixed_sizes.get(name).copied()),
+            IrType::Ref(inner) | IrType::MutRef(inner) => self.fixed_named_type_width(inner),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn fixed_byte_like_width(&self, ty: &IrType) -> Option<usize> {
+        fixed_byte_width(ty, type_static_length(ty)).or_else(|| self.fixed_named_type_width(ty))
+    }
+
+    pub(crate) fn constructed_byte_vector_part_width(&self, operand: &IrOperand) -> Option<usize> {
+        constructed_byte_vector_part_width(operand).or_else(|| match operand {
+            IrOperand::Var(var) => self.fixed_named_type_width(&var.ty),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn static_length(&self, operand: &IrOperand) -> Option<usize> {
+        match operand {
+            IrOperand::Var(var) => Self::static_length_from_type(&var.ty),
+            IrOperand::Const(IrConst::Array(items)) => Some(items.len()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn static_length_from_type(ty: &IrType) -> Option<usize> {
+        match ty {
+            IrType::Array(_, size) => Some(*size),
+            IrType::Ref(inner) | IrType::MutRef(inner) => Self::static_length_from_type(inner),
+            _ => None,
+        }
+    }
+
     pub(crate) fn emit_loaded_schema_bounds_check(&mut self, size_offset: usize, required_size: usize, context: &str) {
         self.emit(format!("# cellscript abi: bounds check {} required={}", context, required_size));
         let ok_label = self.fresh_label("schema_bounds_ok");
