@@ -289,6 +289,7 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [线性所有权](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 - [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
 - [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Unified gate policy](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_GATE_POLICY.md)
 - [标准库](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
 - [CKB hashing workflow 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
 - [Collections matrix 示例](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)

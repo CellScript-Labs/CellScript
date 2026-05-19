@@ -193,15 +193,9 @@ helpers, `ckb::*`, and `env::sighash_all`.
 Targeted 0.14 gate:
 
 ```bash
-cargo fmt --all
-cargo check --locked -p cellscript
-cargo test --locked -p cellscript --test v0_14 -- --test-threads=1
-cargo test --locked -p cellscript --test examples -- --test-threads=1
-cargo test --locked -p cellscript --test cli cellc_explain_profile_reports_ckb_v0_14_contract -- --test-threads=1
-cargo test --locked -p cellscript --lib lsp -- --test-threads=1
+./scripts/cellscript_gate.sh ci
 ./scripts/cellscript_0_14_scope_audit.sh
 cd editors/vscode-cellscript && npm run validate
-git diff --check
 ```
 
 Roadmap example gate:

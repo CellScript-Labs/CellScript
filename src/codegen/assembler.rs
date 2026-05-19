@@ -1928,3 +1928,79 @@ fn pad_to_alignment(out: &mut Vec<u8>, align: usize) {
     let pad = padding_for(out.len(), align);
     out.resize(out.len() + pad, 0);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u64_le(bytes: &[u8], start: usize) -> u64 {
+        u64::from_le_bytes(bytes[start..start + 8].try_into().expect("u64 field"))
+    }
+
+    fn u32_le(bytes: &[u8], start: usize) -> u32 {
+        u32::from_le_bytes(bytes[start..start + 4].try_into().expect("u32 field"))
+    }
+
+    #[test]
+    fn strict_audit_internal_assembler_oracle_for_core_instruction_bytes() {
+        assert_eq!(encode_i_type(0x13, 10, 0b000, 0, 1).unwrap().to_le_bytes(), [0x13, 0x05, 0x10, 0x00]);
+        assert_eq!(encode_i_type(0x67, 0, 0b000, 1, 0).unwrap().to_le_bytes(), [0x67, 0x80, 0x00, 0x00]);
+        assert_eq!(encode_ecall().to_le_bytes(), [0x73, 0x00, 0x00, 0x00]);
+        assert_eq!(encode_j_type(0x6f, 0, 8).unwrap().to_le_bytes(), [0x6f, 0x00, 0x80, 0x00]);
+        assert_eq!(encode_b_type(0x63, 0b000, 0, 0, 8).unwrap().to_le_bytes(), [0x63, 0x04, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn strict_audit_riscv_immediate_boundaries_are_enforced() {
+        assert!(encode_i_type(0x13, 1, 0, 0, -2048).is_ok());
+        assert!(encode_i_type(0x13, 1, 0, 0, 2047).is_ok());
+        assert!(encode_i_type(0x13, 1, 0, 0, -2049).is_err());
+        assert!(encode_i_type(0x13, 1, 0, 0, 2048).is_err());
+
+        assert!(encode_b_type(0x63, 0, 0, 0, -4096).is_ok());
+        assert!(encode_b_type(0x63, 0, 0, 0, 4094).is_ok());
+        assert!(encode_b_type(0x63, 0, 0, 0, -4098).is_err());
+        assert!(encode_b_type(0x63, 0, 0, 0, 4096).is_err());
+        assert!(encode_b_type(0x63, 0, 0, 0, 3).is_err());
+
+        assert!(encode_j_type(0x6f, 0, -1_048_576).is_ok());
+        assert!(encode_j_type(0x6f, 0, 1_048_574).is_ok());
+        assert!(encode_j_type(0x6f, 0, -1_048_578).is_err());
+        assert!(encode_j_type(0x6f, 0, 1_048_576).is_err());
+        assert!(encode_j_type(0x6f, 0, 3).is_err());
+    }
+
+    #[test]
+    fn strict_audit_elf_header_and_segments_are_internally_consistent() {
+        let lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "li a0, 0".to_string(),
+            "ret".to_string(),
+            ".section .rodata".to_string(),
+            ".align 3".to_string(),
+            "payload:".to_string(),
+            ".byte 1".to_string(),
+        ];
+
+        let elf = assemble_elf_internal(&lines).expect("minimal ELF should assemble");
+        assert_eq!(&elf[..4], b"\x7fELF");
+        assert_eq!(u64_le(&elf, 24), ELF_BASE_ADDR);
+        assert_eq!(u64_le(&elf, 32), ELF_HEADER_SIZE as u64);
+
+        let ph = ELF_HEADER_SIZE;
+        assert_eq!(u32_le(&elf, ph), 1, "single load program header");
+        assert_eq!(u32_le(&elf, ph + 4), 5, "load segment must be RX");
+        let file_offset = u64_le(&elf, ph + 8) as usize;
+        let file_size = u64_le(&elf, ph + 32) as usize;
+        assert_eq!(file_offset, 0);
+        assert_eq!(file_size, elf.len());
+
+        let plan = MachineLayoutPlan::build(&lines).unwrap();
+        let segment_file_offset = align_up(ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE, ELF_SEGMENT_ALIGN);
+        let rodata_start = segment_file_offset + plan.layout.rodata_offset().unwrap();
+        assert!(rodata_start < elf.len(), "rodata should be inside the load segment");
+        assert_eq!(elf[rodata_start], 1);
+    }
+}

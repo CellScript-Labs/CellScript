@@ -100,9 +100,7 @@ cargo run --locked -p cellscript -- explain-proof examples/token.cell --target-p
 Full gate before closing the branch:
 
 ```bash
-cargo fmt --all
-cargo check --locked -p cellscript --all-targets
-cargo test --locked -p cellscript
-cargo clippy --locked -p cellscript --all-targets -- -D warnings
-git diff --check
+./scripts/cellscript_gate.sh dev
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_gate.sh backend
 ```

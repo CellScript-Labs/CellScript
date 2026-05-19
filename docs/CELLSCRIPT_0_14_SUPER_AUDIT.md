@@ -676,6 +676,9 @@ for profile in ckb portable; do
 done
 
 If release gate script exists:
+./scripts/cellscript_gate.sh release
+
+Legacy compatibility:
 ./scripts/cellscript_ckb_release_gate.sh full
 
 Record:
@@ -854,9 +857,13 @@ Those claims were downgraded in `roadmap/CELLSCRIPT_0_14_ROADMAP.md` and
 | Transaction Builder integration | P2 | Not implemented as 0.14 language feature | Existing production builder acceptance is regression evidence, not new 0.14 Action Builder | G | Builder-facing metadata only. | Action Builder shipped; CCC integration; automatic transaction construction. |
 | Advanced CellDep/DepGroup patterns | P2 | Metadata obligations and manifest parsing only | Metadata/script-reference tests | F/D | Script-reference and CellDep obligations are visible; full registry-backed DepGroup resolution is deferred. | Transitive dep graph, dynamic DepGroup composition, or full dep registry linkage shipped. |
 | Surface ergonomics backlog | P2 | Not promoted | Unsupported forms remain outside 0.14 release claims | G | Deferred candidates requiring full parser/typechecker/lowering/codegen/LSP/docs coverage before promotion. | Transfer sugar, `create_each`, named tuple returns, `Option`/`Result`, or `#[default_hash_type]` shipped. |
-| v0.12/v0.13 regression baseline | P0 regression | Release gate scripts and compiler tests | `./scripts/cellscript_ckb_release_gate.sh full`; `quick`; targeted example and v0_14 tests | A | Existing production actions/examples/stateful evidence remain regression baseline. | Treating v0.12/v0.13 deliverables as new 0.14 scope. |
+| v0.12/v0.13 regression baseline | P0 regression | Release gate scripts and compiler tests | `./scripts/cellscript_gate.sh release`; legacy `./scripts/cellscript_ckb_release_gate.sh full`; targeted example and v0_14 tests | A | Existing production actions/examples/stateful evidence remain regression baseline. | Treating v0.12/v0.13 deliverables as new 0.14 scope. |
 
 ## Strict Gate Evidence Recorded
+
+The recorded command names below are historical evidence labels from the 0.14
+audit run. On the current branch, use `./scripts/cellscript_gate.sh release`;
+the old CKB release wrapper remains supported and delegates to the unified gate.
 
 | Command | Result | Notes |
 |---|---|---|

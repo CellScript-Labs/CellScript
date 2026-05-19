@@ -35,7 +35,7 @@ For the broader plan, see [CellScript Roadmap](../../roadmap/CELLSCRIPT_ROADMAP.
 | Stdlib lifecycle and Cell metadata patterns | Done | `std::lifecycle::transfer`, `std::receipt::claim`, `std::lifecycle::settle`, `std::cell::same_lock`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity` lower to explicit verifier obligations. |
 | Syntax-combination audit | Done | Quick and CI matrices exercise parser, formatter, type, lowering, metadata, codegen, and negative obsolete-syntax oracles. |
 | Stateful business-flow acceptance | Done | The production CKB gate can run stateful scenarios that commit live outputs from earlier actions into later actions, then fill remaining action branches so all production acceptance actions appear in the stateful report. |
-| Release gate wrapper | Done | `./scripts/cellscript_ckb_release_gate.sh full` is the release-facing gate and includes the syntax-combination CI matrix, builder-backed CKB acceptance, and stateful action coverage. |
+| Release gate wrapper | Done | `./scripts/cellscript_gate.sh release` is the release-facing gate and includes compiler/backend evidence, the syntax-combination CI matrix, builder-backed CKB acceptance, and stateful action coverage. `./scripts/cellscript_ckb_release_gate.sh full` remains a compatibility wrapper. |
 | Explicit sighash verification | Deferred | Requires digest mode, script group scope, witness layout, and replay assumptions. |
 | First-class signer values | Deferred | Must wait for explicit verification primitives. |
 | Generic maps / cell-backed collections | Out of scope | Remain fail-closed until ownership semantics are executable. |
@@ -143,8 +143,9 @@ Removed boundary:
 Automated audit:
 
 - [Syntax-combination audit methodology](../CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
-- `./scripts/cellscript_syntax_combo_audit.sh quick`
-- `./scripts/cellscript_syntax_combo_audit.sh ci`
+- `./scripts/cellscript_gate.sh dev`
+- `./scripts/cellscript_gate.sh ci`
+- `./scripts/cellscript_syntax_combo_audit.sh quick|ci` for focused component debugging
 
 ## Lock Boundary Surface
 
@@ -254,21 +255,24 @@ should be exposed as stable source syntax.
 For normal pre-push checks:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh quick
+./scripts/cellscript_gate.sh dev
 ```
 
 For release-facing evidence:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
-The full gate includes the compiler/tooling checks, syntax-combination CI
-matrix, VS Code validation, docs boundary checks, builder-backed local CKB
-acceptance, and stateful scenario/action coverage. The component commands
-remain useful for focused debugging:
+The release gate includes the compiler/tooling checks, strict backend audit,
+syntax-combination CI matrix, VS Code validation, docs boundary checks,
+builder-backed local CKB acceptance, and stateful scenario/action coverage. The
+legacy `./scripts/cellscript_ckb_release_gate.sh full` command delegates to this
+gate. Component commands remain useful for focused debugging:
 
 ```bash
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_gate.sh backend
 ./scripts/cellscript_syntax_combo_audit.sh ci
 cargo fmt --all --check
 cargo clippy --locked -p cellscript --all-targets -- -D warnings

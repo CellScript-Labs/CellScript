@@ -386,24 +386,18 @@ invariant no_duplicate_nft {
 Targeted 0.15 gate:
 
 ```bash
-cargo fmt --all
-cargo check --locked -p cellscript
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_gate.sh backend
 cargo test --locked -p cellscript proof_plan --lib -- --test-threads=1
 cargo test --locked -p cellscript aggregate_invariant --lib -- --test-threads=1
 cargo test --locked -p cellscript identity --lib -- --test-threads=1
 cargo test --locked -p cellscript --test cli cellc_explain_proof -- --test-threads=1
-cargo test --locked -p cellscript --test examples -- --test-threads=1
-cargo test --locked -p cellscript --test v0_14 -- --test-threads=1
-cargo clippy --locked -p cellscript --all-targets -- -D warnings
-cd editors/vscode-cellscript && npm run validate
-git diff --check
 ```
 
 Full release gate:
 
 ```bash
-bash scripts/cellscript_ckb_release_gate.sh
-bash scripts/ckb_cellscript_acceptance.sh
+./scripts/cellscript_gate.sh release
 ```
 
 ## Summary

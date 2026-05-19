@@ -195,11 +195,12 @@ cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-pr
 For release-facing CKB evidence, run the CellScript acceptance gate:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
-This wrapper runs the syntax-combination CI preflight before the builder-backed
-CKB acceptance script, so bundled examples cannot become release evidence if a
+This wrapper runs compiler/backend evidence and the syntax-combination CI
+preflight before the builder-backed CKB acceptance script, so bundled examples
+cannot become release evidence if a
 new syntax/lowering combination is failing.
 
 Do not use compile-only or bounded diagnostic runs as production release

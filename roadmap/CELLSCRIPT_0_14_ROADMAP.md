@@ -661,7 +661,7 @@ v0.14 **extends** the 0.13.2 production plan:
 
 ```bash
 # Run all CellScript tests
-cargo test -p cellscript -- --test-threads=1
+./scripts/cellscript_gate.sh ci
 
 # Compile all examples through the CKB top-level file workflow
 for file in examples/*.cell; do

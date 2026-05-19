@@ -790,8 +790,13 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let (params, body) =
-            self.lower_signature_and_body(&function.params, &[], &function.body, function.return_type.is_some(), &HashSet::new());
+        let (params, body) = self.lower_signature_and_body(
+            &function.params,
+            &[],
+            &function.body,
+            function.return_type.as_ref().map(Self::convert_type),
+            &HashSet::new(),
+        );
 
         IrPureFn { name: function.name.clone(), params, return_type: function.return_type.as_ref().map(Self::convert_type), body }
     }
@@ -864,7 +869,7 @@ impl IrGenerator {
             &action.params,
             &action.outputs,
             &action.body,
-            action.return_type.is_some(),
+            action.return_type.as_ref().map(Self::convert_type),
             &core_input_bindings,
         );
 
@@ -973,7 +978,7 @@ impl IrGenerator {
         self.transition_coverable_value_ids.clear();
         let previous_lock_entry = self.lowering_lock_entry;
         self.lowering_lock_entry = true;
-        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, true, &HashSet::new());
+        let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, Some(IrType::Bool), &HashSet::new());
         self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
@@ -1246,7 +1251,7 @@ impl IrGenerator {
         params: &[Param],
         outputs: &[crate::ast::ActionOutput],
         stmts: &[Stmt],
-        tail_expr_returns: bool,
+        tail_return_type: Option<IrType>,
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
         let mut vars = HashMap::new();
@@ -1282,7 +1287,7 @@ impl IrGenerator {
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
-        let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_expr_returns);
+        let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_return_type.as_ref());
         let consume_set = self.collect_consume_patterns(&blocks, &ir_params, core_input_bindings);
         let mut read_refs = self.collect_read_ref_param_patterns(&ir_params);
         read_refs.extend(self.collect_read_ref_patterns(&blocks));
@@ -1688,21 +1693,21 @@ impl IrGenerator {
         mut current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
-        tail_expr_returns: bool,
+        tail_return_type: Option<&IrType>,
     ) -> Option<BlockId> {
         for (index, stmt) in stmts.iter().enumerate() {
-            if tail_expr_returns && index + 1 == stmts.len() {
+            if let Some(expected_ty) = tail_return_type.filter(|_| index + 1 == stmts.len()) {
                 if let Stmt::Expr(expr) = stmt {
-                    let lowered = self.lower_expr(expr, current, blocks, vars);
+                    let lowered = self.lower_expr_with_expected_type(expr, expected_ty, current, blocks, vars);
                     let active = lowered.current?;
                     self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
                     return None;
                 }
                 if let Stmt::If(if_stmt) = stmt {
-                    return self.lower_if_stmt(if_stmt, current, blocks, vars, true);
+                    return self.lower_if_stmt(if_stmt, current, blocks, vars, Some(expected_ty));
                 }
             }
-            let next = self.lower_stmt(stmt, current, blocks, vars)?;
+            let next = self.lower_stmt(stmt, current, blocks, vars, tail_return_type)?;
             current = next;
         }
 
@@ -1715,6 +1720,7 @@ impl IrGenerator {
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
+        expected_return_type: Option<&IrType>,
     ) -> Option<BlockId> {
         match stmt {
             Stmt::Let(let_stmt) => {
@@ -1767,12 +1773,16 @@ impl IrGenerator {
                 None
             }
             Stmt::Return(Some(expr)) => {
-                let lowered = self.lower_expr(expr, current, blocks, vars);
+                let lowered = if let Some(expected_ty) = expected_return_type {
+                    self.lower_expr_with_expected_type(expr, expected_ty, current, blocks, vars)
+                } else {
+                    self.lower_expr(expr, current, blocks, vars)
+                };
                 let active = lowered.current?;
                 self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
                 None
             }
-            Stmt::If(if_stmt) => self.lower_if_stmt(if_stmt, current, blocks, vars, false),
+            Stmt::If(if_stmt) => self.lower_if_stmt(if_stmt, current, blocks, vars, None),
             Stmt::For(for_stmt) => self.lower_for_stmt(for_stmt, current, blocks, vars),
             Stmt::While(while_stmt) => self.lower_while_stmt(while_stmt, current, blocks, vars),
         }
@@ -2019,7 +2029,7 @@ impl IrGenerator {
             Expr::StructInit(init) => self.lower_struct_init(init, current, blocks, vars),
             Expr::FieldAccess(field) => self.lower_field_access(field, current, blocks, vars),
             Expr::Index(index) => self.lower_index_expr(index, current, blocks, vars),
-            Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars),
+            Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars, None),
             Expr::If(if_expr) => self.lower_if_expr(if_expr, current, blocks, vars),
             Expr::Match(match_expr) => self.lower_match_expr(match_expr, current, blocks, vars),
             Expr::Cast(cast) => {
@@ -2076,6 +2086,7 @@ impl IrGenerator {
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
+        expected_ty: Option<&IrType>,
     ) -> LoweredExpr {
         let Some((last, prefix)) = stmts.split_last() else {
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(current) };
@@ -2083,17 +2094,23 @@ impl IrGenerator {
 
         let mut active = current;
         for stmt in prefix {
-            let Some(next) = self.lower_stmt(stmt, active, blocks, vars) else {
+            let Some(next) = self.lower_stmt(stmt, active, blocks, vars, expected_ty) else {
                 return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None };
             };
             active = next;
         }
 
         match last {
-            Stmt::Expr(expr) => self.lower_expr(expr, active, blocks, vars),
-            Stmt::If(if_stmt) if if_stmt.else_branch.is_some() => self.lower_if_stmt_value(if_stmt, active, blocks, vars),
+            Stmt::Expr(expr) => {
+                if let Some(expected_ty) = expected_ty {
+                    self.lower_expr_with_expected_type(expr, expected_ty, active, blocks, vars)
+                } else {
+                    self.lower_expr(expr, active, blocks, vars)
+                }
+            }
+            Stmt::If(if_stmt) if if_stmt.else_branch.is_some() => self.lower_if_stmt_value(if_stmt, active, blocks, vars, expected_ty),
             stmt => {
-                let next = self.lower_stmt(stmt, active, blocks, vars);
+                let next = self.lower_stmt(stmt, active, blocks, vars, expected_ty);
                 LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: next }
             }
         }
@@ -2298,7 +2315,7 @@ impl IrGenerator {
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
-        tail_expr_returns: bool,
+        tail_return_type: Option<&IrType>,
     ) -> Option<BlockId> {
         let lowered_cond = self.lower_expr(&if_stmt.condition, current, blocks, vars);
         let cond = lowered_cond.operand;
@@ -2309,11 +2326,11 @@ impl IrGenerator {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
-        let then_exit = self.lower_stmts(&if_stmt.then_branch, then_block, blocks, &mut then_vars, tail_expr_returns);
+        let then_exit = self.lower_stmts(&if_stmt.then_branch, then_block, blocks, &mut then_vars, tail_return_type);
 
         let mut else_vars = vars.clone();
         let else_exit = if let Some(else_branch) = &if_stmt.else_branch {
-            self.lower_stmts(else_branch, else_block, blocks, &mut else_vars, tail_expr_returns)
+            self.lower_stmts(else_branch, else_block, blocks, &mut else_vars, tail_return_type)
         } else {
             Some(else_block)
         };
@@ -2446,6 +2463,7 @@ impl IrGenerator {
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
+        expected_ty: Option<&IrType>,
     ) -> LoweredExpr {
         let lowered_cond = self.lower_expr(&if_stmt.condition, current, blocks, vars);
         let cond = lowered_cond.operand;
@@ -2453,7 +2471,7 @@ impl IrGenerator {
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None };
         };
         let Some(else_branch) = &if_stmt.else_branch else {
-            let next = self.lower_if_stmt(if_stmt, current, blocks, vars, false);
+            let next = self.lower_if_stmt(if_stmt, current, blocks, vars, None);
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: next };
         };
 
@@ -2462,18 +2480,19 @@ impl IrGenerator {
         self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
 
         let mut then_vars = vars.clone();
-        let then_lowered = self.lower_tail_block_value(&if_stmt.then_branch, then_block, blocks, &mut then_vars);
+        let then_lowered = self.lower_tail_block_value(&if_stmt.then_branch, then_block, blocks, &mut then_vars, expected_ty);
         let mut else_vars = vars.clone();
-        let else_lowered = self.lower_tail_block_value(else_branch, else_block, blocks, &mut else_vars);
+        let else_lowered = self.lower_tail_block_value(else_branch, else_block, blocks, &mut else_vars, expected_ty);
 
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None };
         }
 
-        let result_ty = match (then_lowered.current.is_some(), else_lowered.current.is_some()) {
-            (true, _) => self.operand_type(&then_lowered.operand),
-            (false, true) => self.operand_type(&else_lowered.operand),
-            (false, false) => return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None },
+        let result_ty = match (expected_ty, then_lowered.current.is_some(), else_lowered.current.is_some()) {
+            (Some(expected_ty), _, _) => expected_ty.clone(),
+            (None, true, _) => self.operand_type(&then_lowered.operand),
+            (None, false, true) => self.operand_type(&else_lowered.operand),
+            (None, false, false) => return LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: None },
         };
         let dest = self.new_var("if_tmp", result_ty);
         let join = self.push_block(blocks);
@@ -2518,7 +2537,7 @@ impl IrGenerator {
         self.block_mut(blocks, cond_exit).terminator = IrTerminator::Branch { cond, then_block: body_block, else_block: exit_block };
 
         let mut body_vars = vars.clone();
-        let body_exit = self.lower_stmts(&while_stmt.body, body_block, blocks, &mut body_vars, false);
+        let body_exit = self.lower_stmts(&while_stmt.body, body_block, blocks, &mut body_vars, None);
         if let Some(exit) = body_exit {
             self.block_mut(blocks, exit).terminator = IrTerminator::Jump(cond_entry);
         }
@@ -2602,7 +2621,7 @@ impl IrGenerator {
 
         let mut body_vars = vars.clone();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, body_block), &mut body_vars);
-        let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, false);
+        let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, None);
         if let Some(exit) = body_exit {
             let next_index = self.new_var("iter_next", IrType::U64);
             let block = self.block_mut(blocks, exit);
@@ -2643,7 +2662,7 @@ impl IrGenerator {
 
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
-            current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, false)?;
+            current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, None)?;
         }
 
         Some(current)
@@ -2666,7 +2685,7 @@ impl IrGenerator {
 
             let mut body_vars = vars.clone();
             self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
-            current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, false)?;
+            current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, None)?;
         }
 
         Some(current)
@@ -2717,7 +2736,7 @@ impl IrGenerator {
 
         let mut body_vars = vars.clone();
         self.bind_pattern(&for_stmt.pattern, IrOperand::Var(index_var.clone()), self.block_mut(blocks, body_block), &mut body_vars);
-        let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, false);
+        let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, None);
         if let Some(exit) = body_exit {
             let next_index = self.new_var("for_next", IrType::U64);
             let block = self.block_mut(blocks, exit);
@@ -3731,8 +3750,61 @@ impl IrGenerator {
             Expr::Array(items) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
                 self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), current, blocks)
             }
+            Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars, Some(expected_ty)),
+            Expr::If(if_expr) => self.lower_if_expr_with_expected_type(if_expr, expected_ty, current, blocks, vars),
             _ => self.lower_expr(expr, current, blocks, vars),
         }
+    }
+
+    fn lower_if_expr_with_expected_type(
+        &mut self,
+        if_expr: &IfExpr,
+        expected_ty: &IrType,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let lowered_cond = self.lower_expr(&if_expr.condition, current, blocks, vars);
+        let cond = lowered_cond.operand;
+        let Some(current) = lowered_cond.current else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+
+        let then_block = self.push_block(blocks);
+        let else_block = self.push_block(blocks);
+        self.block_mut(blocks, current).terminator = IrTerminator::Branch { cond, then_block, else_block };
+
+        let mut then_vars = vars.clone();
+        let then_lowered = self.lower_expr_with_expected_type(&if_expr.then_branch, expected_ty, then_block, blocks, &mut then_vars);
+        let mut else_vars = vars.clone();
+        let else_lowered = self.lower_expr_with_expected_type(&if_expr.else_branch, expected_ty, else_block, blocks, &mut else_vars);
+
+        if then_lowered.current.is_none() && else_lowered.current.is_none() {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        }
+
+        let dest = self.new_var("if_tmp", expected_ty.clone());
+        let join = self.push_block(blocks);
+        let branch_values = [
+            then_lowered.current.as_ref().map(|_| &then_lowered.operand),
+            else_lowered.current.as_ref().map(|_| &else_lowered.operand),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        self.ensure_join_aggregate_slots(&dest, &branch_values);
+
+        if let Some(exit) = then_lowered.current {
+            self.lower_join_value_into_dest(&dest, then_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+        }
+
+        if let Some(exit) = else_lowered.current {
+            self.lower_join_value_into_dest(&dest, else_lowered.operand, exit, blocks);
+            self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+        }
+
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(join) }
     }
 
     fn integer_const_for_ir_type(value: u64, expected_ty: &IrType) -> Option<IrConst> {
@@ -3947,7 +4019,9 @@ impl IrGenerator {
         if let IrOperand::Var(base_var) = &lowered_base.operand {
             if let Some(fields) = self.aggregate_fields.get(&base_var.id) {
                 if let Some(field_var) = fields.get(&field.field) {
-                    return LoweredExpr { operand: IrOperand::Var(field_var.clone()), current: Some(active) };
+                    if !self.schema_field_roots.contains_key(&field_var.id) || self.block_defines_var(blocks, active, field_var.id) {
+                        return LoweredExpr { operand: IrOperand::Var(field_var.clone()), current: Some(active) };
+                    }
                 }
             }
 
@@ -3958,6 +4032,12 @@ impl IrGenerator {
 
         self.record_error(format!("field access '.{}' has no lowered schema-backed representation", field.field), field.span);
         LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) }
+    }
+
+    fn block_defines_var(&self, blocks: &[IrBlock], block_id: BlockId, var_id: usize) -> bool {
+        blocks.get(block_id.0).is_some_and(|block| {
+            block.instructions.iter().any(|instruction| instruction_dest(instruction).is_some_and(|dest| dest.id == var_id))
+        })
     }
 
     fn lower_field_assign(
@@ -5209,6 +5289,493 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
     }
 }
 
+pub fn verify_module(module: &IrModule) -> Result<()> {
+    let mut callable_returns = HashMap::new();
+    let mut callable_params = HashMap::new();
+
+    for item in &module.items {
+        match item {
+            IrItem::Action(action) => {
+                callable_returns.insert(action.name.clone(), action.return_type.clone());
+                callable_params.insert(action.name.clone(), action.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>());
+            }
+            IrItem::PureFn(function) => {
+                callable_returns.insert(function.name.clone(), function.return_type.clone());
+                callable_params
+                    .insert(function.name.clone(), function.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>());
+            }
+            IrItem::Lock(lock) => {
+                callable_params.insert(lock.name.clone(), lock.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>());
+            }
+            IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
+        }
+    }
+    for abi in &module.external_callable_abis {
+        callable_params.insert(abi.name.clone(), abi.params.iter().map(|param| param.ty.clone()).collect::<Vec<_>>());
+    }
+
+    for item in &module.items {
+        match item {
+            IrItem::Action(action) => verify_body(
+                &format!("action '{}'", action.name),
+                &action.body,
+                &action.params,
+                None,
+                &callable_returns,
+                &callable_params,
+            )?,
+            IrItem::PureFn(function) => verify_body(
+                &format!("function '{}'", function.name),
+                &function.body,
+                &function.params,
+                function.return_type.as_ref(),
+                &callable_returns,
+                &callable_params,
+            )?,
+            IrItem::Lock(lock) => {
+                verify_body(&format!("lock '{}'", lock.name), &lock.body, &lock.params, None, &callable_returns, &callable_params)?
+            }
+            IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_body(
+    label: &str,
+    body: &IrBody,
+    params: &[IrParam],
+    return_type: Option<&IrType>,
+    callable_returns: &HashMap<String, Option<IrType>>,
+    callable_params: &HashMap<String, Vec<IrType>>,
+) -> Result<()> {
+    if body.blocks.is_empty() {
+        return Err(ir_verify_error(format!("{label} has no IR blocks")));
+    }
+
+    let mut block_ids = HashSet::new();
+    for (index, block) in body.blocks.iter().enumerate() {
+        if !block_ids.insert(block.id) {
+            return Err(ir_verify_error(format!("{label} has duplicate block id {}", block.id.0)));
+        }
+        if block.id.0 != index {
+            return Err(ir_verify_error(format!(
+                "{label} block id {} is stored at index {}; IR block ids must remain index-addressable",
+                block.id.0, index
+            )));
+        }
+    }
+
+    let mut predecessors: HashMap<BlockId, Vec<BlockId>> = body.blocks.iter().map(|block| (block.id, Vec::new())).collect();
+    for block in &body.blocks {
+        for target in terminator_targets(&block.terminator) {
+            if !block_ids.contains(&target) {
+                return Err(ir_verify_error(format!("{label} block {} terminates to missing block {}", block.id.0, target.0)));
+            }
+            predecessors.entry(target).or_default().push(block.id);
+        }
+    }
+
+    let entry = body.blocks[0].id;
+    let mut reachable = HashSet::new();
+    let mut stack = vec![entry];
+    while let Some(block_id) = stack.pop() {
+        if !reachable.insert(block_id) {
+            continue;
+        }
+        stack.extend(terminator_targets(&body.blocks[block_id.0].terminator));
+    }
+    for block in &body.blocks {
+        if block.id != entry && !reachable.contains(&block.id) {
+            return Err(ir_verify_error(format!("{label} contains unreachable block {}", block.id.0)));
+        }
+    }
+
+    let all_var_types = collect_body_var_types(body, params)?;
+    let all_defs = all_var_types.keys().copied().collect::<HashSet<_>>();
+    let param_defs = params.iter().map(|param| param.binding.id).collect::<HashSet<_>>();
+    let mut in_defs = body.blocks.iter().map(|block| (block.id, HashSet::new())).collect::<HashMap<_, _>>();
+    let mut out_defs = body
+        .blocks
+        .iter()
+        .map(|block| {
+            let defs = if block.id == entry { HashSet::new() } else { all_defs.clone() };
+            (block.id, defs)
+        })
+        .collect::<HashMap<_, _>>();
+    in_defs.insert(entry, param_defs.clone());
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for block in &body.blocks {
+            let input = if block.id == entry {
+                param_defs.clone()
+            } else {
+                let preds = predecessors.get(&block.id).cloned().unwrap_or_default();
+                let mut iter = preds.into_iter().map(|pred| out_defs.get(&pred).cloned().unwrap_or_default());
+                if let Some(mut intersection) = iter.next() {
+                    for defs in iter {
+                        intersection.retain(|id| defs.contains(id));
+                    }
+                    intersection
+                } else {
+                    HashSet::new()
+                }
+            };
+            if in_defs.get(&block.id) != Some(&input) {
+                in_defs.insert(block.id, input.clone());
+                changed = true;
+            }
+
+            let mut output = input;
+            for instruction in &block.instructions {
+                if let Some(dest) = instruction_dest(instruction) {
+                    output.insert(dest.id);
+                }
+            }
+            if out_defs.get(&block.id) != Some(&output) {
+                out_defs.insert(block.id, output);
+                changed = true;
+            }
+        }
+    }
+
+    for block in &body.blocks {
+        let mut defs = in_defs.get(&block.id).cloned().unwrap_or_default();
+        for instruction in &block.instructions {
+            verify_instruction_operands(label, block.id, instruction, &defs, &all_var_types)?;
+            verify_instruction_abi(label, block.id, instruction, callable_returns, callable_params)?;
+            if let Some(dest) = instruction_dest(instruction) {
+                defs.insert(dest.id);
+            }
+        }
+        verify_terminator(label, block.id, &block.terminator, return_type, &defs, &all_var_types)?;
+    }
+
+    Ok(())
+}
+
+fn collect_body_var_types(body: &IrBody, params: &[IrParam]) -> Result<HashMap<usize, IrType>> {
+    let mut types = HashMap::new();
+    for param in params {
+        insert_var_type(&mut types, &param.binding)?;
+    }
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            for var in instruction_vars(instruction) {
+                insert_var_type(&mut types, var)?;
+            }
+        }
+        for var in terminator_vars(&block.terminator) {
+            insert_var_type(&mut types, var)?;
+        }
+    }
+    Ok(types)
+}
+
+fn insert_var_type(types: &mut HashMap<usize, IrType>, var: &IrVar) -> Result<()> {
+    if let Some(existing) = types.get(&var.id) {
+        if !ir_type_compatible_with_abi(existing, &var.ty) && !ir_type_compatible_with_abi(&var.ty, existing) {
+            return Err(ir_verify_error(format!("IR var{} has inconsistent types {:?} and {:?}", var.id, existing, var.ty)));
+        }
+    } else {
+        types.insert(var.id, var.ty.clone());
+    }
+    Ok(())
+}
+
+fn verify_instruction_operands(
+    label: &str,
+    block_id: BlockId,
+    instruction: &IrInstruction,
+    defs: &HashSet<usize>,
+    all_var_types: &HashMap<usize, IrType>,
+) -> Result<()> {
+    for operand in instruction_operands(instruction) {
+        verify_operand_defined(label, block_id, operand, defs, all_var_types).map_err(|err| {
+            let message = err.message.strip_prefix("IR verifier failed: ").unwrap_or(&err.message);
+            ir_verify_error(format!("{message} while checking instruction {instruction:?}"))
+        })?;
+    }
+    Ok(())
+}
+
+fn verify_instruction_abi(
+    label: &str,
+    block_id: BlockId,
+    instruction: &IrInstruction,
+    callable_returns: &HashMap<String, Option<IrType>>,
+    callable_params: &HashMap<String, Vec<IrType>>,
+) -> Result<()> {
+    let IrInstruction::Call { dest, func, args } = instruction else {
+        return Ok(());
+    };
+    if func.starts_with("__") {
+        return Ok(());
+    }
+    if let Some(params) = callable_params.get(func) {
+        if params.len() != args.len() {
+            return Err(ir_verify_error(format!(
+                "{label} block {} calls '{}' with {} args but ABI expects {}",
+                block_id.0,
+                func,
+                args.len(),
+                params.len()
+            )));
+        }
+        for (index, (arg, expected)) in args.iter().zip(params).enumerate() {
+            let actual = operand_ir_type(arg);
+            if !ir_type_compatible_with_abi(&actual, expected) {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' arg {} has type {:?}, expected {:?}",
+                    block_id.0, func, index, actual, expected
+                )));
+            }
+        }
+    }
+    if let Some(expected_return) = callable_returns.get(func) {
+        match (dest, expected_return) {
+            (Some(dest), Some(expected)) if &dest.ty != expected => {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' destination has type {:?}, expected {:?}",
+                    block_id.0, func, dest.ty, expected
+                )));
+            }
+            (Some(_), None) => {
+                return Err(ir_verify_error(format!("{label} block {} call '{}' stores a unit return", block_id.0, func)))
+            }
+            (None, Some(expected)) => {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' drops non-unit return {:?}",
+                    block_id.0, func, expected
+                )));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn verify_terminator(
+    label: &str,
+    block_id: BlockId,
+    terminator: &IrTerminator,
+    expected_return: Option<&IrType>,
+    defs: &HashSet<usize>,
+    all_var_types: &HashMap<usize, IrType>,
+) -> Result<()> {
+    match terminator {
+        IrTerminator::Return(Some(operand)) => {
+            verify_operand_defined(label, block_id, operand, defs, all_var_types)?;
+            if let Some(expected) = expected_return {
+                let actual = operand_ir_type(operand);
+                if &actual != expected {
+                    return Err(ir_verify_error(format!(
+                        "{label} block {} returns type {:?}, expected {:?}",
+                        block_id.0, actual, expected
+                    )));
+                }
+            }
+        }
+        IrTerminator::Return(None) => {
+            if let Some(expected) = expected_return {
+                return Err(ir_verify_error(format!("{label} block {} returns unit, expected {:?}", block_id.0, expected)));
+            }
+        }
+        IrTerminator::Branch { cond, .. } => {
+            verify_operand_defined(label, block_id, cond, defs, all_var_types)?;
+        }
+        IrTerminator::Jump(_) => {}
+    }
+    Ok(())
+}
+
+fn verify_operand_defined(
+    label: &str,
+    block_id: BlockId,
+    operand: &IrOperand,
+    defs: &HashSet<usize>,
+    all_var_types: &HashMap<usize, IrType>,
+) -> Result<()> {
+    let IrOperand::Var(var) = operand else {
+        return Ok(());
+    };
+    if !all_var_types.contains_key(&var.id) {
+        return Err(ir_verify_error(format!("{label} block {} references unknown var{}", block_id.0, var.id)));
+    }
+    if !defs.contains(&var.id) {
+        let mut available = defs.iter().copied().collect::<Vec<_>>();
+        available.sort_unstable();
+        return Err(ir_verify_error(format!(
+            "{label} block {} uses var{} before it is defined on all incoming paths; available vars: {:?}",
+            block_id.0, var.id, available
+        )));
+    }
+    Ok(())
+}
+
+fn terminator_targets(terminator: &IrTerminator) -> Vec<BlockId> {
+    match terminator {
+        IrTerminator::Jump(target) => vec![*target],
+        IrTerminator::Branch { then_block, else_block, .. } => vec![*then_block, *else_block],
+        IrTerminator::Return(_) => Vec::new(),
+    }
+}
+
+fn instruction_dest(instruction: &IrInstruction) -> Option<&IrVar> {
+    match instruction {
+        IrInstruction::LoadConst { dest, .. }
+        | IrInstruction::LoadVar { dest, .. }
+        | IrInstruction::Binary { dest, .. }
+        | IrInstruction::Unary { dest, .. }
+        | IrInstruction::FieldAccess { dest, .. }
+        | IrInstruction::Index { dest, .. }
+        | IrInstruction::Length { dest, .. }
+        | IrInstruction::TypeHash { dest, .. }
+        | IrInstruction::CollectionNew { dest, .. }
+        | IrInstruction::CollectionCapacity { dest, .. }
+        | IrInstruction::CollectionContains { dest, .. }
+        | IrInstruction::CollectionRemove { dest, .. }
+        | IrInstruction::CollectionPop { dest, .. }
+        | IrInstruction::ReadRef { dest, .. }
+        | IrInstruction::Move { dest, .. }
+        | IrInstruction::Cast { dest, .. }
+        | IrInstruction::Tuple { dest, .. }
+        | IrInstruction::Create { dest, .. }
+        | IrInstruction::Transfer { dest, .. }
+        | IrInstruction::Claim { dest, .. }
+        | IrInstruction::Settle { dest, .. }
+        | IrInstruction::CreateUnique { dest, .. }
+        | IrInstruction::ReplaceUnique { dest, .. } => Some(dest),
+        IrInstruction::Call { dest, .. } => dest.as_ref(),
+        IrInstruction::StoreVar { .. }
+        | IrInstruction::CollectionPush { .. }
+        | IrInstruction::CollectionExtend { .. }
+        | IrInstruction::CollectionClear { .. }
+        | IrInstruction::CollectionInsert { .. }
+        | IrInstruction::CollectionSet { .. }
+        | IrInstruction::CollectionReverse { .. }
+        | IrInstruction::CollectionTruncate { .. }
+        | IrInstruction::CollectionSwap { .. }
+        | IrInstruction::Consume { .. }
+        | IrInstruction::Destroy { .. }
+        | IrInstruction::CellMetadataEquality { .. } => None,
+    }
+}
+
+fn instruction_operands(instruction: &IrInstruction) -> Vec<&IrOperand> {
+    match instruction {
+        IrInstruction::LoadConst { .. } | IrInstruction::LoadVar { .. } | IrInstruction::ReadRef { .. } => Vec::new(),
+        IrInstruction::StoreVar { src, .. }
+        | IrInstruction::Unary { operand: src, .. }
+        | IrInstruction::Length { operand: src, .. }
+        | IrInstruction::TypeHash { operand: src, .. }
+        | IrInstruction::CollectionCapacity { collection: src, .. }
+        | IrInstruction::CollectionClear { collection: src }
+        | IrInstruction::CollectionReverse { collection: src }
+        | IrInstruction::CollectionPop { collection: src, .. }
+        | IrInstruction::Move { src, .. }
+        | IrInstruction::Cast { src, .. }
+        | IrInstruction::Consume { operand: src }
+        | IrInstruction::Destroy { operand: src, .. }
+        | IrInstruction::Claim { receipt: src, .. }
+        | IrInstruction::Settle { operand: src, .. } => vec![src],
+        IrInstruction::Binary { left, right, .. }
+        | IrInstruction::Index { arr: left, idx: right, .. }
+        | IrInstruction::CollectionExtend { collection: left, slice: right }
+        | IrInstruction::CollectionContains { collection: left, value: right, .. }
+        | IrInstruction::CollectionRemove { collection: left, index: right, .. }
+        | IrInstruction::CollectionTruncate { collection: left, len: right }
+        | IrInstruction::Transfer { operand: left, to: right, .. }
+        | IrInstruction::CellMetadataEquality { left, right, .. } => vec![left, right],
+        IrInstruction::FieldAccess { obj, .. } => vec![obj],
+        IrInstruction::CollectionNew { capacity, .. } => capacity.iter().collect(),
+        IrInstruction::CollectionPush { collection, value } => vec![collection, value],
+        IrInstruction::CollectionInsert { collection, index, value } | IrInstruction::CollectionSet { collection, index, value } => {
+            vec![collection, index, value]
+        }
+        IrInstruction::CollectionSwap { collection, left, right } => vec![collection, left, right],
+        IrInstruction::Call { args, .. } | IrInstruction::Tuple { fields: args, .. } => args.iter().collect(),
+        IrInstruction::Create { pattern, .. } | IrInstruction::CreateUnique { pattern, .. } => create_pattern_operands(pattern),
+        IrInstruction::ReplaceUnique { operand, pattern, .. } => {
+            let mut operands = vec![operand];
+            operands.extend(create_pattern_operands(pattern));
+            operands
+        }
+    }
+}
+
+fn instruction_vars(instruction: &IrInstruction) -> Vec<&IrVar> {
+    let mut vars = instruction_operands(instruction)
+        .into_iter()
+        .filter_map(|operand| match operand {
+            IrOperand::Var(var) => Some(var),
+            IrOperand::Const(_) => None,
+        })
+        .collect::<Vec<_>>();
+    if let Some(dest) = instruction_dest(instruction) {
+        vars.push(dest);
+    }
+    vars
+}
+
+fn terminator_vars(terminator: &IrTerminator) -> Vec<&IrVar> {
+    match terminator {
+        IrTerminator::Return(Some(IrOperand::Var(var))) | IrTerminator::Branch { cond: IrOperand::Var(var), .. } => vec![var],
+        IrTerminator::Return(_) | IrTerminator::Branch { .. } | IrTerminator::Jump(_) => Vec::new(),
+    }
+}
+
+fn create_pattern_operands(pattern: &CreatePattern) -> Vec<&IrOperand> {
+    let mut operands = pattern.fields.iter().map(|(_, operand)| operand).collect::<Vec<_>>();
+    if let Some(lock) = &pattern.lock {
+        operands.push(lock);
+    }
+    operands
+}
+
+fn operand_ir_type(operand: &IrOperand) -> IrType {
+    match operand {
+        IrOperand::Var(var) => var.ty.clone(),
+        IrOperand::Const(value) => const_ir_type(value),
+    }
+}
+
+fn ir_type_compatible_with_abi(actual: &IrType, expected: &IrType) -> bool {
+    if actual == expected {
+        return true;
+    }
+    match expected {
+        IrType::Ref(inner) | IrType::MutRef(inner) => actual == inner.as_ref(),
+        IrType::Named(expected) if expected == "Vec" => {
+            matches!(actual, IrType::Named(actual) if actual == "Vec" || actual.starts_with("Vec<"))
+        }
+        IrType::Named(expected) if expected.starts_with("Vec<") => matches!(actual, IrType::Named(actual) if actual == "Vec"),
+        _ => false,
+    }
+}
+
+fn const_ir_type(value: &IrConst) -> IrType {
+    match value {
+        IrConst::Unit => IrType::Unit,
+        IrConst::U8(_) => IrType::U8,
+        IrConst::U16(_) => IrType::U16,
+        IrConst::U32(_) => IrType::U32,
+        IrConst::U64(_) => IrType::U64,
+        IrConst::U128(_) => IrType::U128,
+        IrConst::Bool(_) => IrType::Bool,
+        IrConst::Address(_) => IrType::Address,
+        IrConst::Hash(_) => IrType::Hash,
+        IrConst::Array(items) => IrType::Array(Box::new(items.first().map(const_ir_type).unwrap_or(IrType::U8)), items.len()),
+    }
+}
+
+fn ir_verify_error(message: impl Into<String>) -> CompileError {
+    CompileError::without_span(format!("IR verifier failed: {}", message.into()))
+}
+
 pub fn generate(ast: &Module) -> Result<IrModule> {
     let generator = IrGenerator::new(ast.name.clone());
     generator.generate(ast)
@@ -6301,7 +6868,137 @@ mod tests {
         let ast = parse(&tokens).unwrap();
         crate::types::check(&ast).unwrap();
         crate::flow::check(&ast).unwrap();
-        generate(&ast).unwrap()
+        let ir = generate(&ast).unwrap();
+        verify_module(&ir).unwrap();
+        ir
+    }
+
+    fn first_action_body_mut(ir: &mut IrModule) -> &mut IrBody {
+        ir.items
+            .iter_mut()
+            .find_map(|item| match item {
+                IrItem::Action(action) => Some(&mut action.body),
+                _ => None,
+            })
+            .expect("expected action body")
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_missing_terminator_target() {
+        let mut ir = parse_and_lower(
+            r#"
+module ir::bad_target
+
+action run(x: u64) -> u64
+where
+    return x
+"#,
+        );
+        first_action_body_mut(&mut ir).blocks[0].terminator = IrTerminator::Jump(BlockId(999));
+
+        let err = verify_module(&ir).unwrap_err();
+        assert!(err.message.contains("terminates to missing block 999"), "unexpected verifier error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_use_not_defined_on_all_paths() {
+        let cond = IrVar { id: 0, name: "cond".to_string(), ty: IrType::Bool };
+        let branch_value = IrVar { id: 1, name: "branch_value".to_string(), ty: IrType::U64 };
+        let body = IrBody {
+            consume_set: Vec::new(),
+            read_refs: Vec::new(),
+            create_set: Vec::new(),
+            mutate_set: Vec::new(),
+            write_intents: Vec::new(),
+            blocks: vec![
+                IrBlock {
+                    id: BlockId(0),
+                    instructions: Vec::new(),
+                    terminator: IrTerminator::Branch {
+                        cond: IrOperand::Var(cond.clone()),
+                        then_block: BlockId(1),
+                        else_block: BlockId(2),
+                    },
+                },
+                IrBlock {
+                    id: BlockId(1),
+                    instructions: vec![IrInstruction::LoadConst { dest: branch_value.clone(), value: IrConst::U64(7) }],
+                    terminator: IrTerminator::Jump(BlockId(3)),
+                },
+                IrBlock { id: BlockId(2), instructions: Vec::new(), terminator: IrTerminator::Jump(BlockId(3)) },
+                IrBlock {
+                    id: BlockId(3),
+                    instructions: Vec::new(),
+                    terminator: IrTerminator::Return(Some(IrOperand::Var(branch_value))),
+                },
+            ],
+        };
+        let module = IrModule {
+            name: "ir::audit".to_string(),
+            items: vec![IrItem::Action(IrAction {
+                name: "run".to_string(),
+                params: vec![IrParam {
+                    name: "cond".to_string(),
+                    ty: IrType::Bool,
+                    is_mut: false,
+                    is_ref: false,
+                    is_read_ref: false,
+                    source: ParamSource::Default,
+                    binding: cond,
+                }],
+                return_type: Some(IrType::U64),
+                state_transition_edges: Vec::new(),
+                body,
+                effect_class: EffectClass::Pure,
+                scheduler_hints: SchedulerHints::default(),
+            })],
+            external_type_defs: Vec::new(),
+            external_callable_abis: Vec::new(),
+            enum_fixed_sizes: HashMap::new(),
+        };
+
+        let err = verify_module(&module).unwrap_err();
+        assert!(
+            err.message.contains("uses var1 before it is defined on all incoming paths"),
+            "unexpected verifier error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn strict_audit_schema_field_accesses_are_rematerialized_per_cfg_path() {
+        let ir = parse_and_lower(
+            r#"
+module ir::schema_field_paths
+
+struct Grant {
+    amount: u64
+}
+
+action claim(grant: Grant, flag: bool) -> u64
+where
+    let vested = if flag { grant.amount } else { grant.amount * 2 }
+    return vested
+"#,
+        );
+
+        let field_access_count = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) if action.name == "claim" => Some(
+                    action
+                        .body
+                        .blocks
+                        .iter()
+                        .flat_map(|block| &block.instructions)
+                        .filter(|instruction| matches!(instruction, IrInstruction::FieldAccess { field, .. } if field == "amount"))
+                        .count(),
+                ),
+                _ => None,
+            })
+            .expect("expected claim action");
+        assert!(field_access_count >= 2, "schema field must be materialized independently in both if-expression paths");
     }
 
     #[test]

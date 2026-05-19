@@ -2433,7 +2433,21 @@ mod tests {
 
     #[test]
     fn outgoing_stack_arg_area_is_16_byte_aligned_at_call_boundaries() {
-        let cases = [(0, 0), (1, 0), (8, 0), (9, 16), (10, 16), (11, 32), (12, 32), (13, 48), (16, 64)];
+        let cases = [
+            (0, 0),
+            (1, 0),
+            (8, 0),
+            (9, 16),
+            (10, 16),
+            (11, 32),
+            (12, 32),
+            (13, 48),
+            (16, 64),
+            (17, 80),
+            (18, 80),
+            (19, 96),
+            (20, 96),
+        ];
 
         for (abi_arg_count, expected_bytes) in cases {
             let bytes = super::abi::outgoing_stack_arg_bytes(abi_arg_count);

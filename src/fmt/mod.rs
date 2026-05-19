@@ -419,6 +419,30 @@ impl Formatter {
         self.push_line("}");
     }
 
+    fn format_block_expr_body(&self, stmts: &[Stmt]) -> String {
+        stmts
+            .iter()
+            .map(|stmt| match stmt {
+                Stmt::Let(_) | Stmt::If(_) | Stmt::For(_) | Stmt::While(_) => {
+                    let mut formatter = Formatter::new(self.config.clone());
+                    formatter.format_stmt(stmt);
+                    formatter.output.trim_end().to_string()
+                }
+                Stmt::Expr(expr) => self.format_expr(expr),
+                Stmt::Return(None) => "return".to_string(),
+                Stmt::Return(Some(expr)) => format!("return {}", self.format_expr(expr)),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn format_expr_as_block_body(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Block(stmts) => self.format_block_expr_body(stmts),
+            _ => self.format_expr(expr),
+        }
+    }
+
     fn format_for_stmt(&mut self, for_stmt: &ForStmt) {
         self.push_line(&format!("for {} in {} {{", format_binding_pattern(&for_stmt.pattern), self.format_expr(&for_stmt.iterable)));
         self.indent_level += 1;
@@ -571,8 +595,8 @@ impl Formatter {
             Expr::If(if_expr) => format!(
                 "if {} {{ {} }} else {{ {} }}",
                 self.format_expr(&if_expr.condition),
-                self.format_expr(&if_expr.then_branch),
-                self.format_expr(&if_expr.else_branch)
+                self.format_expr_as_block_body(&if_expr.then_branch),
+                self.format_expr_as_block_body(&if_expr.else_branch)
             ),
             Expr::Cast(cast) => format!("{} as {}", self.format_expr(&cast.expr), format_type(&cast.ty)),
             Expr::Range(range) => format!("{}..{}", self.format_expr(&range.start), self.format_expr(&range.end)),
@@ -1010,6 +1034,19 @@ where
         let module2 = parser::parse(&tokens2).unwrap();
         let formatted2 = format_default(&module2).unwrap();
         assert_eq!(formatted, formatted2, "formatter round-trip failed for expression block");
+    }
+
+    #[test]
+    fn format_round_trips_inline_if_tuple_expression() {
+        let source = r#"
+module demo
+
+action choose(flag: bool) -> u64
+where
+    let pair = if flag { (1, 2) } else { (3, 4) }
+    return pair.0
+"#;
+        verify_idempotent(source, FormatConfig::default()).unwrap();
     }
 
     #[test]

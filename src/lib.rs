@@ -3810,6 +3810,7 @@ fn compile_ast_with_build(
         None => None,
     };
     let ir = scoped_ir.as_ref().unwrap_or(&ir);
+    ir::verify_module(ir)?;
 
     let mut metadata = compile_metadata_from_ir(ir, artifact_format, target_profile);
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
@@ -25737,6 +25738,46 @@ where
         assert!(
             reservations.iter().all(|bytes| bytes % 16 == 0),
             "all outgoing call stack reservations must preserve RISC-V psABI sp alignment:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn strict_audit_codegen_emits_only_aligned_stack_pointer_deltas() {
+        let program = r#"
+module vm::sp_delta_contract
+
+fn wide(
+    a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64,
+    a8: u64, a9: u64, a10: u64, a11: u64, a12: u64, a13: u64, a14: u64, a15: u64,
+    a16: u64, a17: u64, a18: u64, a19: u64
+) -> u64 {
+    return a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19
+}
+
+action run() -> u64
+where
+    return wide(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let sp_deltas = asm
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("addi sp, sp, "))
+            .filter_map(|value| value.parse::<i64>().ok())
+            .collect::<Vec<_>>();
+
+        assert!(!sp_deltas.is_empty(), "expected stack pointer adjustments:\n{}", asm);
+        assert!(
+            sp_deltas.iter().all(|delta| delta % 16 == 0),
+            "every emitted sp delta must preserve RISC-V psABI alignment; got {:?}\n{}",
+            sp_deltas,
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: reserve 96 bytes for outgoing stack call arguments"),
+            "20 ABI args require a 96-byte aligned outgoing area:\n{}",
             asm
         );
     }

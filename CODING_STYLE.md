@@ -15,11 +15,15 @@ project contract.
 - Use enums and typed fields when the concept already has a structured
   representation.
 - Error messages should name the rejected boundary and the next valid action.
-- Run `cargo fmt --all` before committing Rust changes.
-- Run `cargo check --locked -p cellscript --all-targets`,
-  `cargo test --locked -p cellscript`, and `git diff --check` before completing
-  compiler work. For broad Rust changes, also run
-  `cargo clippy --locked -p cellscript --all-targets -- -D warnings`.
+- Run `./scripts/cellscript_gate.sh dev` before committing routine compiler or
+  documentation changes.
+- Run `./scripts/cellscript_gate.sh ci` before merge-readiness claims.
+- Run `./scripts/cellscript_gate.sh backend` for IR, codegen, assembler, ABI,
+  ELF, or RISC-V changes.
+- Focused commands such as `cargo check --locked -p cellscript --all-targets`,
+  `cargo test --locked -p cellscript`, clippy with `-D warnings`, and
+  `git diff --check` remain useful while debugging, but passing one component
+  does not replace the matching gate.
 
 ## Backend And Codegen Rules
 
