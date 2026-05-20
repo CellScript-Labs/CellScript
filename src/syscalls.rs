@@ -655,9 +655,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn every_raw_stdlib_syscall_wrapper_is_spec_driven() {
+    fn every_low_level_syscall_spec_is_inventoried() {
         for spec in stdlib_syscall_specs(TargetProfile::Ckb) {
-            let entry = helper_inventory_entry(spec.symbol, TargetProfile::Ckb).expect("syscall wrapper must be inventoried");
+            let entry = helper_inventory_entry(spec.symbol, TargetProfile::Ckb).expect("low-level syscall spec must be inventoried");
             assert_eq!(entry.coverage, HelperCoverageKind::SpecDriven, "{entry:?}");
         }
     }

@@ -1,6 +1,5 @@
 pub mod collections;
 
-use crate::syscalls::stdlib_syscall_specs;
 use crate::{ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
 
 pub struct StdLib;
@@ -8,80 +7,6 @@ pub struct StdLib;
 impl StdLib {
     pub fn functions() -> Vec<StdFunction> {
         vec![
-            StdFunction { name: "syscall_load_tx_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
-            StdFunction { name: "syscall_load_script_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
-            StdFunction {
-                name: "syscall_load_cell".to_string(),
-                params: vec![
-                    ("index".to_string(), IrType::U64),
-                    ("source".to_string(), IrType::U64),
-                    ("field".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_header".to_string(),
-                params: vec![
-                    ("buffer".to_string(), IrType::U64),
-                    ("size".to_string(), IrType::U64),
-                    ("offset".to_string(), IrType::U64),
-                    ("index".to_string(), IrType::U64),
-                    ("source".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_input".to_string(),
-                params: vec![
-                    ("index".to_string(), IrType::U64),
-                    ("source".to_string(), IrType::U64),
-                    ("field".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_script".to_string(),
-                params: vec![
-                    ("buffer".to_string(), IrType::U64),
-                    ("size".to_string(), IrType::U64),
-                    ("offset".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_cell_by_field".to_string(),
-                params: vec![
-                    ("buffer".to_string(), IrType::U64),
-                    ("size".to_string(), IrType::U64),
-                    ("offset".to_string(), IrType::U64),
-                    ("index".to_string(), IrType::U64),
-                    ("source".to_string(), IrType::U64),
-                    ("field".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_cell_data".to_string(),
-                params: vec![
-                    ("buffer".to_string(), IrType::U64),
-                    ("size".to_string(), IrType::U64),
-                    ("offset".to_string(), IrType::U64),
-                    ("index".to_string(), IrType::U64),
-                    ("source".to_string(), IrType::U64),
-                ],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction {
-                name: "syscall_load_witness".to_string(),
-                params: vec![("index".to_string(), IrType::U64), ("source".to_string(), IrType::U64)],
-                return_type: Some(IrType::U64),
-            },
-            StdFunction { name: "syscall_current_cycles".to_string(), params: vec![], return_type: Some(IrType::U64) },
-            StdFunction {
-                name: "syscall_debug_print".to_string(),
-                params: vec![("msg".to_string(), IrType::Array(Box::new(IrType::U8), 0))],
-                return_type: None,
-            },
             StdFunction {
                 name: "math_min".to_string(),
                 params: vec![("a".to_string(), IrType::U64), ("b".to_string(), IrType::U64)],
@@ -129,33 +54,9 @@ impl StdLib {
         asm.push_str("# CellScript Standard Library\n\n");
         asm.push_str(".section .text\n\n");
 
-        asm.push_str(&Self::generate_syscalls(target_profile));
-
         asm.push_str(&Self::generate_math());
 
         asm.push_str(&Self::generate_env(target_profile));
-
-        asm
-    }
-
-    fn generate_syscalls(target_profile: TargetProfile) -> String {
-        let mut asm = String::new();
-
-        for spec in stdlib_syscall_specs(target_profile) {
-            asm.push_str(&format!("# Syscall: {} ({})\n", spec.detail, spec.number));
-            asm.push_str(&format!(".global {}\n", spec.symbol));
-            asm.push_str(&format!("{}:\n", spec.symbol));
-            asm.push_str("    addi sp, sp, -16\n");
-            asm.push_str("    sd ra, 8(sp)\n");
-            asm.push_str(&format!("    li a7, {}\n", spec.number));
-            if !spec.arg_comment.is_empty() {
-                asm.push_str(&format!("    # {}\n", spec.arg_comment));
-            }
-            asm.push_str("    ecall\n");
-            asm.push_str("    ld ra, 8(sp)\n");
-            asm.push_str("    addi sp, sp, 16\n");
-            asm.push_str("    ret\n\n");
-        }
 
         asm
     }
@@ -519,11 +420,13 @@ mod tests {
     fn test_std_functions() {
         let funcs = StdLib::functions();
         assert!(!funcs.is_empty());
-        assert!(StdLib::is_std_function("syscall_load_cell"));
-        assert!(StdLib::is_std_function("syscall_load_script"));
-        assert!(StdLib::is_std_function("syscall_load_cell_by_field"));
-        assert!(StdLib::is_std_function("syscall_load_cell_data"));
+        assert!(!StdLib::is_std_function("syscall_load_cell"));
+        assert!(!StdLib::is_std_function("syscall_load_script"));
+        assert!(!StdLib::is_std_function("syscall_load_cell_by_field"));
+        assert!(!StdLib::is_std_function("syscall_load_cell_data"));
+        assert!(!StdLib::is_std_function("syscall_current_cycles"));
         assert!(StdLib::is_std_function("math_isqrt"));
+        assert!(StdLib::is_std_function("env_current_timepoint"));
     }
 
     #[test]
@@ -537,25 +440,23 @@ mod tests {
     #[test]
     fn test_generate_assembly() {
         let asm = StdLib::generate_assembly();
-        assert!(asm.contains("__syscall_load_cell"));
-        assert!(asm.contains("__syscall_load_script:\n"));
-        assert!(asm.contains("__syscall_load_cell_by_field:\n"));
-        assert!(asm.contains("__syscall_load_cell_data:\n"));
-        // Default is now CKB profile which uses 2052 for load_script
-        assert!(asm.contains("li a7, 2052"));
-        assert!(asm.contains("li a7, 2081"));
-        assert!(asm.contains("li a7, 2092"));
+        assert!(!asm.contains(".global __syscall_"));
+        assert!(!asm.contains("__syscall_load_cell"));
+        assert!(!asm.contains("__syscall_load_script:\n"));
+        assert!(!asm.contains("__syscall_load_cell_by_field:\n"));
+        assert!(!asm.contains("__syscall_load_cell_data:\n"));
         assert!(!asm.contains("__hash"));
         assert!(!asm.contains("3001"));
         assert!(!asm.contains("li a7, 2100"));
         assert!(asm.contains("__math_isqrt"));
+        assert!(asm.contains("__env_current_timepoint"));
     }
 
     #[test]
-    fn test_generate_ckb_assembly_uses_ckb_load_script_syscall() {
+    fn test_generate_ckb_assembly_uses_checked_env_helpers() {
         let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
-        assert!(asm.contains("# Syscall: load_script (2052)"));
-        assert!(asm.contains("li a7, 2052"));
+        assert!(!asm.contains("# Syscall: load_script (2052)"));
+        assert!(!asm.contains("li a7, 2052"));
         assert!(!asm.contains("li a7, 2075"));
         assert!(asm.contains("current_timepoint"));
         assert!(asm.contains("__ckb_input_since"));
@@ -573,31 +474,22 @@ mod tests {
     }
 
     #[test]
-    fn generated_syscall_wrappers_match_shared_syscall_spec() {
+    fn generated_stdlib_omits_raw_syscall_wrappers() {
         let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
-
-        for spec in crate::syscalls::stdlib_syscall_specs(TargetProfile::Ckb) {
-            assert!(asm.contains(&format!("# Syscall: {} ({})", spec.detail, spec.number)), "missing syscall comment for {spec:?}");
-            assert!(asm.contains(&format!(".global {}", spec.symbol)), "missing global symbol for {spec:?}");
-            assert!(asm.contains(&format!("{}:\n", spec.symbol)), "missing label for {spec:?}");
-            assert!(asm.contains(&format!("li a7, {}", spec.number)), "missing syscall number for {spec:?}");
-        }
+        assert!(!asm.contains(".global __syscall_"), "generated stdlib must not expose raw syscall wrappers:\n{}", asm);
+        assert!(!asm.contains("# Syscall:"), "generated stdlib must not duplicate raw syscall ABI comments:\n{}", asm);
     }
 
     #[test]
-    fn generated_stdlib_syscall_wrapper_set_exactly_matches_shared_spec() {
+    fn generated_stdlib_has_no_raw_syscall_wrapper_symbols() {
         let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
         let generated = asm
             .lines()
             .filter_map(|line| line.strip_prefix(".global "))
             .filter(|symbol| symbol.starts_with("__syscall_"))
             .collect::<std::collections::BTreeSet<_>>();
-        let expected = crate::syscalls::stdlib_syscall_specs(TargetProfile::Ckb)
-            .into_iter()
-            .map(|spec| spec.symbol)
-            .collect::<std::collections::BTreeSet<_>>();
 
-        assert_eq!(generated, expected, "generated stdlib raw syscall wrappers must be spec-driven only");
+        assert!(generated.is_empty(), "generated stdlib must not emit raw syscall wrappers: {generated:?}");
     }
 
     #[test]
