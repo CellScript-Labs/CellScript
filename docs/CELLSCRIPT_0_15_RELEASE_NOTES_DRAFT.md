@@ -482,8 +482,8 @@ Latest recorded release evidence, generated on 2026-05-20:
 Report paths:
 
 ```text
-target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json
-target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json
+target/ckb-cellscript-acceptance/20260520-215759-25169/ckb-cellscript-acceptance-report.json
+target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-215735.json
 target/cellscript-backend-shape/backend-shape-report-release.json
 target/cellscript-schema-manifest/schema-manifest-report-release.json
 ```

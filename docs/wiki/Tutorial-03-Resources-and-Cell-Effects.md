@@ -311,7 +311,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+[Action Model and 0.13 Syntax](https://github.com/a19q3/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
 for a deeper walkthrough of signature-direction actions, then use
-[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes)
+[Cookbook Recipes](https://github.com/a19q3/CellScript/wiki/Cookbook-Recipes)
 for small copyable patterns.

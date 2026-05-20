@@ -1,6 +1,6 @@
 # CellScript Collections Support Matrix
 
-**Status**: production boundary document for CellScript 0.13.
+**Status**: production boundary document for the current CellScript 0.15 CKB profile.
 
 CellScript supports dynamic data in several different layers. These layers must
 not be collapsed into one generic "collections are supported" claim.
@@ -14,16 +14,20 @@ not be collapsed into one generic "collections are supported" claim.
 | `Vec<Address>` | Yes | Targeted | Fixed-element vector verification | Supported where metadata marks a Molecule dynamic field |
 | `Vec<Hash>` | Yes | Targeted | Fixed-element vector verification | Supported where metadata marks a Molecule dynamic field |
 | Fixed byte arrays | Yes | Yes | Exact-size verification | Supported |
-| Stack-backed local `Vec<T: FixedWidth>` | Local-only | Yes | Bounded helper lowering | Supported for verifier-local scalar, fixed-byte, and fixed-width named values |
+| Stack-backed local `Vec<T: FixedWidth>` | Local-only | Yes | Codegen stack-backed lowering | Supported for verifier-local scalar, fixed-byte, and fixed-width named values |
 | `Vec<Vec<u8>>` | Boundary | Boundary | No generic helper | Must fail closed unless a concrete lowering is added |
-| `HashMap<u64, u64>` | Limited | Limited | No production helper surface | Experimental/internal; not a production contract |
+| Generated allocation-backed collection helpers | No | No | Fail-closed entry symbols | Not a production allocator ABI |
+| `HashMap<u64, u64>` | Limited | Limited | No production helper surface | Unsupported/fail-closed for production contracts |
 | `HashMap<Hash, Token>` | No | No | No | Unsupported; must fail closed |
+| `HashSet<T>` | Limited | Limited | No production helper surface | Unsupported/fail-closed for production contracts |
 | Cell-backed resource collections | No executable ownership model | No | No | Unsupported until a linear collection ownership primitive exists |
 
 ## Stack-Backed Local Vec Rule
 
-0.13 supports bounded local `Vec<T>` helpers only when `T` has a known fixed
-width and the vector is verifier-local. The supported helper surface is:
+The current backend supports bounded local `Vec<T>` operations only when `T`
+has a known fixed width and the vector is verifier-local. These operations are
+compiler-recognized stack-backed codegen lowering, not calls into a production
+allocator ABI. The supported helper surface is:
 
 ```text
 new, with_capacity, capacity, push, extend_from_slice, len, is_empty,
@@ -35,6 +39,11 @@ swap, clear
 (`256 / element_width`), not the requested `Vec::with_capacity(n)` argument.
 `cellc explain-generics` exposes each checked instantiation, including element
 type, element width, backing model, helper set, and constructor provenance.
+
+Generated public collection symbols in `src/stdlib/collections.rs` are kept as
+fail-closed stubs unless a concrete checked runtime ABI exists. Do not document
+or use those symbols as production allocation-backed `Vec`, `HashMap`, or
+`HashSet` helpers.
 
 `examples/registry.cell`, `examples/language/registry.cell`, and
 `examples/language/order_book.cell` are

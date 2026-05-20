@@ -198,7 +198,7 @@ outputs remain visible.
 
 ## Bounded Collection Helpers
 
-The collection library supports verifier-local stack-backed `Vec<T>` helpers for
+The compiler recognizes verifier-local stack-backed `Vec<T>` operations for
 fixed-width values. This is useful for small lists such as signers, hashes,
 fixed payload values, and local membership checks.
 
@@ -234,6 +234,9 @@ input Cells as `Vec<Cell<T>>`, a generic `HashMap`, or a hidden order book. Use
 explicit action parameters and named output bindings until a verifier-backed
 collection ownership primitive exists.
 
+Generated allocation-backed collection symbols are fail-closed in the current
+stdlib assembly and are not a production allocator ABI.
+
 ## Runtime And CKB Helpers
 
 The backend standard library also contains lower-level helpers used by generated
@@ -266,6 +269,7 @@ The current standard library does not provide:
   receipt names;
 - hidden sighash verification;
 - full generic `HashMap<K, V>` or `HashSet<T>`;
+- allocation-backed `Vec`, `HashMap`, or `HashSet` runtime helpers;
 - `Vec<Cell<T>>` or other hidden Cell-backed ownership collections;
 - automatic capacity planning or change-output generation;
 - arbitrary dynamic Blake2b policy;

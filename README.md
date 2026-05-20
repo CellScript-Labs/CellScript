@@ -4,13 +4,13 @@
   <img src="assets/cellscript-logo.png" alt="CellScript" width="560">
 </p>
 
-[![CellScript CI](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml)
+[![CellScript CI](https://github.com/a19q3/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/a19q3/CellScript/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
 [![Package Workflow: Local First](https://img.shields.io/badge/package%20workflow-local%20first-2f6f4e.svg)](#package-workflow)
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
-[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/tsukifune-kosei/CellScript/wiki)
+[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
 
 [English](README.md) | [Chinese](README_CH.md)
 
@@ -390,31 +390,31 @@ CellScript includes production-style local language tooling for early users:
   `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
   CI gates.
 
-- [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
-- [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
-- [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
-- [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [Historical signature-direction execution plan](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
-- [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
-- [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
-- [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
-- [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
-- [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [Unified gate policy](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_GATE_POLICY.md)
-- [Standard library](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
-- [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
-- [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
-- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
-- [Mutate append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/mutate_append.md)
-- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
-- [0.14 community update](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
-- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
+- [VS Code extension](https://github.com/a19q3/CellScript/tree/main/editors/vscode-cellscript)
+- [Runtime error codes](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
+- [Entry witness ABI](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [Collections support matrix](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Output bindings](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
+- [Historical signature-direction execution plan](https://github.com/a19q3/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
+- [CKB target profile tutorial](https://github.com/a19q3/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
+- [CKB deployment manifest](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
+- [Capacity and builder contract](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Linear ownership](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
+- [Scheduler hints](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
+- [Metadata verification and production gates](https://github.com/a19q3/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Unified gate policy](https://github.com/a19q3/CellScript/blob/main/docs/CELLSCRIPT_GATE_POLICY.md)
+- [Standard library](https://github.com/a19q3/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
+- [CKB hashing workflow example](https://github.com/a19q3/CellScript/blob/main/docs/examples/ckb_hashing.md)
+- [Collections matrix example](https://github.com/a19q3/CellScript/blob/main/docs/examples/collections_matrix.md)
+- [Deployment manifest example](https://github.com/a19q3/CellScript/blob/main/docs/examples/deployment_manifest.md)
+- [Output append example](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
+- [Roadmap overview](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [Mutate append example](https://github.com/a19q3/CellScript/blob/main/docs/examples/mutate_append.md)
+- [0.14 roadmap](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes draft](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.14 community update](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
+- [0.15 roadmap](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
 
 ---
 
@@ -504,7 +504,7 @@ CKB cycle/capacity estimates.
 | Module | What it does |
 |---|---|
 | **Stdlib** (`stdlib/`) | Built-in functions and compiler-recognized patterns that lower to explicit verifier effects: lifecycle helpers such as `std::lifecycle::transfer`, `std::receipt::claim`, and `std::lifecycle::settle`; cell metadata helpers such as `std::cell::preserve_type`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity`; plus ckb-vm syscall/runtime helpers. Module-injected, not linked separately. |
-| **Collections** (`stdlib/collections.rs`) | Bounded stack-backed `Vec<T: FixedWidth>` helpers for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Cell-backed collection ownership remains unsupported. |
+| **Collections** (`stdlib/collections.rs`) | Compiler-recognized stack-backed `Vec<T: FixedWidth>` lowering remains supported for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Generated allocation-backed collection symbols are fail-closed and are not a production allocator ABI. Cell-backed collection ownership remains unsupported. |
 
 ### Tooling Surface
 

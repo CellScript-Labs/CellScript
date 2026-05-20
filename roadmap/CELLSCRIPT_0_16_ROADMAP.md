@@ -65,6 +65,9 @@ soundness-checked, compatibility-tested production behavior:
   action-coverage cross-reference
 - macro-only protocol lowering, with no protocol-name recognizers in core/codegen
 - covenant helper stdlib
+- collection runtime boundary closure: generated allocation-backed collection
+  symbols must either derive from a checked allocator/runtime ABI or remain
+  fail-closed and undocumented as production helpers
 - `Address` / `LockScript` / `LockHash` type separation
 - explicit `#[entry(lock)]` / `#[entry(type)]` role declarations
 - versioned data-layout preserve/migrate policies
@@ -587,7 +590,54 @@ Rules:
 
 ## P2
 
-### 15. Advanced Linear Collections
+### 15. Collection Runtime and Allocator ABI Boundary
+
+**Problem**
+
+v0.15 supports verifier-local fixed-width `Vec<T>` through compiler/codegen
+stack-backed lowering. It deliberately does not ship a production allocator ABI:
+generated allocation-backed `Vec`, `HashMap`, and `HashSet` symbols remain
+fail-closed so they cannot be mistaken for checked runtime helpers.
+
+**Change**
+
+Define the 0.16 collection runtime boundary before enabling any allocation-backed
+helper:
+
+```text
+CollectionRuntimeSpec
+  -> checked allocation/growth ABI
+  -> fail-closed helper wrappers
+  -> bounds/size/status validation
+  -> VM negative coverage
+```
+
+Rules:
+
+- stack-backed local `Vec<T: FixedWidth>` remains compiler/codegen lowering, not
+  a heap allocator API
+- generated allocation-backed helper symbols stay fail-closed unless their ABI,
+  status handling, bounds checks, and failure behavior are specified and tested
+- no helper may dereference or store through an allocation pointer before
+  allocation/runtime success is validated
+- `HashMap` and `HashSet` remain unsupported for production until their layout,
+  hashing, iteration bounds, and failure behavior are specified
+
+**Acceptance**
+
+- `docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md` distinguishes stack-backed
+  lowering, schema/ABI vectors, allocation-backed runtime helpers, and
+  cell-backed ownership collections
+- generated collection assembly is derived from the runtime spec or remains
+  fail-closed
+- negative tests reject raw pointer use before allocation success, raw `ecall`,
+  unchecked growth, unchecked length/capacity, and unsupported map/set helpers
+- VM or semantic negative tests prove allocation/runtime failure cannot become a
+  valid collection value
+
+---
+
+### 16. Advanced Linear Collections
 
 **Problem**
 
@@ -618,7 +668,7 @@ Constraints:
 
 ---
 
-### 16. Formal Verification Backend Exploration
+### 17. Formal Verification Backend Exploration
 
 **Problem**
 

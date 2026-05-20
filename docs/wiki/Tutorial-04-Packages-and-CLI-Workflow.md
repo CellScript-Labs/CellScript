@@ -218,4 +218,4 @@ supported as lockfile helpers for local path dependency workflows.
 ## Next
 
 With a repeatable package workflow in place, continue with
-[CKB Target Profiles](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).
+[CKB Target Profiles](https://github.com/a19q3/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).

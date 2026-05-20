@@ -56,7 +56,7 @@ source-to-runtime ProofPlan coverage linking are 0.16 work.
 | Internal `type_hash` renaming | Implemented | Metadata fields renamed: `type_hash-absence` → `ckb_type_script_hash-absence`, `type_hash-preservation` → `ckb_type_script_hash-preservation`, `lock_hash-preservation` → `ckb_lock_script_hash-preservation`. |
 | Compatibility and migration infrastructure | Implemented | `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags. CS0150–CS0160 migration diagnostic codes. `check_primitive_strict_015()` gate rejects protocol verbs in strict mode. |
 | Documentation and tests | Implemented | README, docgen, CLI tests, parser tests, metadata tests, identity policy tests (5 new), and aggregate invariant tests cover the new surface. |
-| Release gate evidence | Passed | `./scripts/cellscript_gate.sh release` passed on 2026-05-20. The recorded CKB production report is `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json` with `status: "passed"` and `production_ready: true`. |
+| Release gate evidence | Passed | `./scripts/cellscript_gate.sh release` passed on 2026-05-20. The recorded CKB production report is `target/ckb-cellscript-acceptance/20260520-215759-25169/ckb-cellscript-acceptance-report.json` with `status: "passed"` and `production_ready: true`. |
 
 ## Boundaries
 
@@ -172,9 +172,9 @@ Full gate before closing the branch:
 Latest recorded release evidence:
 
 - CKB production acceptance report:
-  `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json`.
+  `target/ckb-cellscript-acceptance/20260520-215759-25169/ckb-cellscript-acceptance-report.json`.
 - Strict backend CI audit report:
-  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json`.
+  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-215735.json`.
 - Backend shape report:
   `target/cellscript-backend-shape/backend-shape-report-release.json`.
 - Molecule schema manifest report:
