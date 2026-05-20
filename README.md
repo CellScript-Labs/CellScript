@@ -402,6 +402,7 @@ CellScript includes production-style local language tooling for early users:
 - [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 - [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
 - [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Unified gate policy](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_GATE_POLICY.md)
 - [Standard library](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
 - [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
 - [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)

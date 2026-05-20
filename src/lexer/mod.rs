@@ -151,9 +151,11 @@ impl<'a> Lexer<'a> {
         self.advance();
 
         let mut content = String::new();
+        let mut closed = false;
         while let Some(c) = self.peek() {
             if c == quote {
                 self.advance();
+                closed = true;
                 break;
             } else if c == '\\' {
                 self.advance();
@@ -188,12 +190,21 @@ impl<'a> Lexer<'a> {
                             Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
-                    None => break,
+                    None => {
+                        return Err(CompileError::new(
+                            "unterminated string literal",
+                            Span::new(start, self.position, start_line, start_col),
+                        ));
+                    }
                 }
             } else {
                 content.push(c);
                 self.advance();
             }
+        }
+
+        if !closed {
+            return Err(CompileError::new("unterminated string literal", Span::new(start, self.position, start_line, start_col)));
         }
 
         let span = Span::new(start, self.position, start_line, start_col);
@@ -209,9 +220,11 @@ impl<'a> Lexer<'a> {
         self.advance(); // "
 
         let mut bytes = Vec::new();
+        let mut closed = false;
         while let Some(c) = self.peek() {
             if c == '"' {
                 self.advance();
+                closed = true;
                 break;
             } else if c == '\\' {
                 self.advance();
@@ -285,7 +298,12 @@ impl<'a> Lexer<'a> {
                             Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
-                    None => break,
+                    None => {
+                        return Err(CompileError::new(
+                            "unterminated byte string literal",
+                            Span::new(start, self.position, start_line, start_col),
+                        ));
+                    }
                 }
             } else if c.is_ascii() {
                 bytes.push(c as u8);
@@ -296,6 +314,10 @@ impl<'a> Lexer<'a> {
                     Span::new(self.position, self.position + 1, self.line, self.column),
                 ));
             }
+        }
+
+        if !closed {
+            return Err(CompileError::new("unterminated byte string literal", Span::new(start, self.position, start_line, start_col)));
         }
 
         let span = Span::new(start, self.position, start_line, start_col);
@@ -530,10 +552,24 @@ mod tests {
     }
 
     #[test]
+    fn test_unterminated_string_errors() {
+        let error = lex("\"unterminated\n").unwrap_err();
+
+        assert!(error.message.contains("unterminated string literal"), "{}", error.message);
+    }
+
+    #[test]
     fn test_byte_string() {
         let input = r#"b"hello" b"\x00\xFF""#;
         let tokens = lex(input).unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::ByteString(ref b) if b == b"hello"));
+    }
+
+    #[test]
+    fn test_unterminated_byte_string_errors() {
+        let error = lex("b\"unterminated").unwrap_err();
+
+        assert!(error.message.contains("unterminated byte string literal"), "{}", error.message);
     }
 
     #[test]

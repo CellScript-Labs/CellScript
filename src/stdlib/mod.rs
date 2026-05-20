@@ -1,5 +1,6 @@
 pub mod collections;
 
+use crate::syscalls::stdlib_syscall_specs;
 use crate::{ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
 
 pub struct StdLib;
@@ -140,147 +141,21 @@ impl StdLib {
     fn generate_syscalls(target_profile: TargetProfile) -> String {
         let mut asm = String::new();
 
-        // syscall_load_tx_hash (2061)
-        asm.push_str("# Syscall: load_tx_hash (2061)\n");
-        asm.push_str(".global __syscall_load_tx_hash\n");
-        asm.push_str("__syscall_load_tx_hash:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2061\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_script_hash (2062)
-        asm.push_str("# Syscall: load_script_hash (2062)\n");
-        asm.push_str(".global __syscall_load_script_hash\n");
-        asm.push_str("__syscall_load_script_hash:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2062\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_cell (2071)
-        asm.push_str("# Syscall: load_cell (2071)\n");
-        asm.push_str(".global __syscall_load_cell\n");
-        asm.push_str("__syscall_load_cell:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2071\n");
-        asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_header (2072)
-        asm.push_str("# Syscall: load_header (2072)\n");
-        asm.push_str(".global __syscall_load_header\n");
-        asm.push_str("__syscall_load_header:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2072\n");
-        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_input (2073)
-        asm.push_str("# Syscall: load_input (2073)\n");
-        asm.push_str(".global __syscall_load_input\n");
-        asm.push_str("__syscall_load_input:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2073\n");
-        asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_witness (2074)
-        asm.push_str("# Syscall: load_witness (2074)\n");
-        asm.push_str(".global __syscall_load_witness\n");
-        asm.push_str("__syscall_load_witness:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2074\n");
-        asm.push_str("    # a0 = index, a1 = source\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        let load_script_syscall = match target_profile {
-            TargetProfile::Ckb => 2052,
-        };
-        asm.push_str(&format!("# Syscall: load_script ({})\n", load_script_syscall));
-        asm.push_str(".global __syscall_load_script\n");
-        asm.push_str("__syscall_load_script:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str(&format!("    li a7, {}\n", load_script_syscall));
-        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_cell_by_field (2081)
-        asm.push_str("# Syscall: load_cell_by_field (2081)\n");
-        asm.push_str(".global __syscall_load_cell_by_field\n");
-        asm.push_str("__syscall_load_cell_by_field:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2081\n");
-        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source, a5 = field\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_load_cell_data (2092)
-        asm.push_str("# Syscall: load_cell_data (2092)\n");
-        asm.push_str(".global __syscall_load_cell_data\n");
-        asm.push_str("__syscall_load_cell_data:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2092\n");
-        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_current_cycles (2042)
-        asm.push_str("# Syscall: current_cycles (2042)\n");
-        asm.push_str(".global __syscall_current_cycles\n");
-        asm.push_str("__syscall_current_cycles:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2042\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
-
-        // syscall_debug_print (2177)
-        asm.push_str("# Syscall: debug_print (2177)\n");
-        asm.push_str(".global __syscall_debug_print\n");
-        asm.push_str("__syscall_debug_print:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2177\n");
-        asm.push_str("    # a0 = msg pointer, a1 = msg length\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
+        for spec in stdlib_syscall_specs(target_profile) {
+            asm.push_str(&format!("# Syscall: {} ({})\n", spec.detail, spec.number));
+            asm.push_str(&format!(".global {}\n", spec.symbol));
+            asm.push_str(&format!("{}:\n", spec.symbol));
+            asm.push_str("    addi sp, sp, -16\n");
+            asm.push_str("    sd ra, 8(sp)\n");
+            asm.push_str(&format!("    li a7, {}\n", spec.number));
+            if !spec.arg_comment.is_empty() {
+                asm.push_str(&format!("    # {}\n", spec.arg_comment));
+            }
+            asm.push_str("    ecall\n");
+            asm.push_str("    ld ra, 8(sp)\n");
+            asm.push_str("    addi sp, sp, 16\n");
+            asm.push_str("    ret\n\n");
+        }
 
         asm
     }
@@ -354,19 +229,7 @@ impl StdLib {
         let mut asm = String::new();
 
         asm.push_str("# Env: current_timepoint (CKB epoch number, not Unix timestamp)\n");
-        asm.push_str(".global __env_current_timepoint\n");
-        asm.push_str("__env_current_timepoint:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        // All profiles use CKB epoch number.
-        asm.push_str("    # Load CKB epoch number from header dep\n");
-        asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
-        asm.push_str("    li a0, 0     # header index\n");
-        asm.push_str("    li a1, 0     # field = epoch number\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    ret\n\n");
+        Self::push_ckb_header_epoch_helper(&mut asm, "__env_current_timepoint", "ckb_epoch_number", 0, true);
 
         Self::push_ckb_header_epoch_helper(
             &mut asm,
@@ -420,10 +283,12 @@ impl StdLib {
                 CellScriptRuntimeError::ConsumeInvalidOperand.code(),
                 CellScriptRuntimeError::ConsumeInvalidOperand.name()
             ));
-            asm.push_str(&format!("    li a0, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            asm.push_str("    li a0, 0\n");
+            asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             asm.push_str("    ret\n\n");
             return;
         }
+        let fail_label = format!(".L{}_fail", symbol.trim_start_matches("__"));
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");
         asm.push_str("    # Load from CKB header dep\n");
@@ -437,7 +302,23 @@ impl StdLib {
         asm.push_str(&format!("    li a5, {}     # field = {}\n", field_id, field_name));
         asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
         asm.push_str("    ecall\n");
+        asm.push_str(&format!("    bnez a0, {}\n", fail_label));
+        asm.push_str("    ld t0, 8(sp)\n");
+        asm.push_str("    li t1, 8\n");
+        asm.push_str(&format!("    bne t0, t1, {}\n", fail_label));
         asm.push_str("    ld a0, 16(sp)\n");
+        asm.push_str("    li a1, 0\n");
+        asm.push_str("    ld ra, 24(sp)\n");
+        asm.push_str("    addi sp, sp, 32\n");
+        asm.push_str("    ret\n");
+        asm.push_str(&format!("{}:\n", fail_label));
+        asm.push_str(&format!(
+            "    # cellscript runtime error {} {}\n",
+            CellScriptRuntimeError::SyscallFailed.code(),
+            CellScriptRuntimeError::SyscallFailed.name()
+        ));
+        asm.push_str("    li a0, 0\n");
+        asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::SyscallFailed.code()));
         asm.push_str("    ld ra, 24(sp)\n");
         asm.push_str("    addi sp, sp, 32\n");
         asm.push_str("    ret\n\n");
@@ -454,10 +335,12 @@ impl StdLib {
                 CellScriptRuntimeError::ConsumeInvalidOperand.code(),
                 CellScriptRuntimeError::ConsumeInvalidOperand.name()
             ));
-            asm.push_str(&format!("    li a0, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            asm.push_str("    li a0, 0\n");
+            asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             asm.push_str("    ret\n\n");
             return;
         }
+        let fail_label = ".Lckb_input_since_fail";
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");
         asm.push_str("    # Load CKB input since from current script group\n");
@@ -471,7 +354,23 @@ impl StdLib {
         asm.push_str("    li a5, 1     # field = Since\n");
         asm.push_str("    li a7, 2083  # LOAD_INPUT_BY_FIELD\n");
         asm.push_str("    ecall\n");
+        asm.push_str(&format!("    bnez a0, {}\n", fail_label));
+        asm.push_str("    ld t0, 8(sp)\n");
+        asm.push_str("    li t1, 8\n");
+        asm.push_str(&format!("    bne t0, t1, {}\n", fail_label));
         asm.push_str("    ld a0, 16(sp)\n");
+        asm.push_str("    li a1, 0\n");
+        asm.push_str("    ld ra, 24(sp)\n");
+        asm.push_str("    addi sp, sp, 32\n");
+        asm.push_str("    ret\n");
+        asm.push_str(&format!("{}:\n", fail_label));
+        asm.push_str(&format!(
+            "    # cellscript runtime error {} {}\n",
+            CellScriptRuntimeError::SyscallFailed.code(),
+            CellScriptRuntimeError::SyscallFailed.name()
+        ));
+        asm.push_str("    li a0, 0\n");
+        asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::SyscallFailed.code()));
         asm.push_str("    ld ra, 24(sp)\n");
         asm.push_str("    addi sp, sp, 32\n");
         asm.push_str("    ret\n\n");
@@ -662,6 +561,43 @@ mod tests {
         assert!(asm.contains("__ckb_input_since"));
         assert!(asm.contains("li a7, 2083  # LOAD_INPUT_BY_FIELD"));
         assert!(asm.contains("Source::GroupInput"));
+        assert!(asm.contains("addi a0, sp, 16"));
+        assert!(asm.contains("addi a1, sp, 8"));
+        assert!(asm.contains("bnez a0, .Lenv_current_timepoint_fail"));
+        assert!(asm.contains("li a1, 0"));
+        assert!(
+            asm.contains("# cellscript runtime error 1 syscall-failed\n    li a0, 0\n    li a1, 1"),
+            "generated stdlib helpers must return failure via status a1 instead of forging data:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn generated_syscall_wrappers_match_shared_syscall_spec() {
+        let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
+
+        for spec in crate::syscalls::stdlib_syscall_specs(TargetProfile::Ckb) {
+            assert!(asm.contains(&format!("# Syscall: {} ({})", spec.detail, spec.number)), "missing syscall comment for {spec:?}");
+            assert!(asm.contains(&format!(".global {}", spec.symbol)), "missing global symbol for {spec:?}");
+            assert!(asm.contains(&format!("{}:\n", spec.symbol)), "missing label for {spec:?}");
+            assert!(asm.contains(&format!("li a7, {}", spec.number)), "missing syscall number for {spec:?}");
+        }
+    }
+
+    #[test]
+    fn generated_stdlib_syscall_wrapper_set_exactly_matches_shared_spec() {
+        let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
+        let generated = asm
+            .lines()
+            .filter_map(|line| line.strip_prefix(".global "))
+            .filter(|symbol| symbol.starts_with("__syscall_"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = crate::syscalls::stdlib_syscall_specs(TargetProfile::Ckb)
+            .into_iter()
+            .map(|spec| spec.symbol)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(generated, expected, "generated stdlib raw syscall wrappers must be spec-driven only");
     }
 
     #[test]

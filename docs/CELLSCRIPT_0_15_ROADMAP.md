@@ -1,13 +1,19 @@
 # CellScript 0.15 Roadmap
 
-**Updated**: 2026-05-15
+**Updated**: 2026-05-20
 
-0.15 is the scoped-invariant and Covenant ProofPlan track. It builds on the
-0.14 CKB semantic surface by making verifier trigger, scope, reads, coverage,
-builder assumptions, and enforcement gaps explicit in source and metadata.
-It also records bounded invariant/action coverage links so auditors can see
-which checked action obligations satisfy a declared aggregate invariant and
-which declarations remain unmatched.
+0.15 is the scoped-invariant, Covenant ProofPlan, and soundness hardening
+preview track. It builds on the 0.14 CKB semantic surface by making verifier
+trigger, scope, reads, coverage, builder assumptions, and enforcement gaps
+explicit in source and metadata. It also records bounded invariant/action
+coverage links so auditors can see which checked action obligations satisfy a
+declared aggregate invariant and which declarations remain unmatched.
+
+The release target is deliberately narrow: close known fail-open and semantic
+boundary bugs, add negative regression coverage, and establish the boundary
+scaffolding for 0.16. Full type-enforced status/value separation, complete
+SyscallSpec migration, CFG lifecycle merging, hard schema API gates, and
+source-to-runtime ProofPlan coverage linking are 0.16 work.
 
 ## Goals
 
@@ -22,6 +28,10 @@ which declarations remain unmatched.
 7. Reset resource capability vocabulary from protocol verbs to kernel effects.
 8. Add explicit destruction policies while keeping bare `destroy` as the default compatibility form.
 9. Provide a compat/strict migration path from v0.14 to v0.15.
+10. Close known fail-open verifier paths and semantic-boundary leaks without
+    broad late-cycle refactors.
+11. Clearly distinguish enforced 0.15 behavior from scaffolded 0.16
+    architecture.
 
 ## Implemented In This Branch
 
@@ -34,6 +44,9 @@ which declarations remain unmatched.
 | `cellc explain-proof` | Implemented | The CLI emits human-readable and JSON ProofPlan output for packages and single `.cell` files. |
 | Invariant/action coverage cross-reference | Implemented | Declared aggregate invariants are matched against checked action obligations where the type, field, relation, and runtime coverage line up. Unmatched declarations are marked with `declared(no_checked_action_obligation_matches:...)` and warning diagnostics. |
 | Runtime-obligation policy gate | Implemented | `cellc check --deny-runtime-obligations` rejects runtime-required ProofPlan gaps, including declared invariants whose coverage is still metadata-only or whose action coverage is unmatched. |
+| Production checked-runtime evidence gate | Implemented | Production and strict checks reject ProofPlan records that claim checked runtime coverage without executable evidence. Static details such as `checked-static` remain metadata/static evidence and do not populate executable runtime evidence. |
+| Semantic-boundary hardening | Implemented as 0.15 hardening | Known fail-open returns, helper/syscall status leaks, non-canonical lock truthiness, malformed Molecule field access, branch-local or duplicate lifecycle effects, package path escapes, and non-const const initializers are either fail-closed or rejected. |
+| Boundary architecture scaffold | Implemented as scaffold | 0.15 introduces the initial SyscallSpec inventory, IR status-boundary checks, validated schema planning objects, ResourceEffectSummary scaffold, and ProofPlan executable-evidence metadata. These make the release safer but are not yet the final type-enforced architecture. |
 | Lock-group transaction risk diagnostics | Implemented | ProofPlan records warn when a `lock_group` verifier scans transaction-wide views, because only inputs sharing that lock trigger the verifier. |
 | Protocol macro provenance | Implemented | ProofPlan coverage records include macro provenance for selected compiler-recognized flows such as `transfer`, `create`, `claim`, `settle`, `consume`, `destroy`, and pool protocol metadata. |
 | Cell identity and TYPE_ID lifecycle | Implemented with executable local verifier boundary | `IdentityPolicy` enum (`none`, `ckb_type_id`, `field(path)`, `script_args`, `singleton_type`) is a first-class type metadata primitive. `TypeMetadata.identity_policy` exposes the policy in compiled JSON metadata. `create_unique<T>(identity = ...)` and `replace_unique<T>(identity = ...)` lower through identity-aware IR/codegen records. `replace_unique` preserves field, script-args/lock-hash, and singleton/type-hash identity on chain. `create_unique` anchors the declared identity to the created output and reports global uniqueness, including TYPE_ID builder-plan completion, as runtime-required. |
@@ -43,6 +56,7 @@ which declarations remain unmatched.
 | Internal `type_hash` renaming | Implemented | Metadata fields renamed: `type_hash-absence` → `ckb_type_script_hash-absence`, `type_hash-preservation` → `ckb_type_script_hash-preservation`, `lock_hash-preservation` → `ckb_lock_script_hash-preservation`. |
 | Compatibility and migration infrastructure | Implemented | `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags. CS0150–CS0160 migration diagnostic codes. `check_primitive_strict_015()` gate rejects protocol verbs in strict mode. |
 | Documentation and tests | Implemented | README, docgen, CLI tests, parser tests, metadata tests, identity policy tests (5 new), and aggregate invariant tests cover the new surface. |
+| Release gate evidence | Passed | `./scripts/cellscript_gate.sh release` passed on 2026-05-20. The recorded CKB production report is `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json` with `status: "passed"` and `production_ready: true`. |
 
 ## Boundaries
 
@@ -53,6 +67,23 @@ which declarations remain unmatched.
   matching checked action obligation already exists, ProofPlan records that
   bounded action coverage separately; unmatched invariants remain visible and
   gateable.
+- 0.15 is a hardening release, not a full boundary-architecture rewrite. It
+  blocks known dangerous paths and documents remaining gaps instead of
+  broadening behavior late in the cycle.
+- SyscallSpec is an inventory and generation foundation, but not every runtime,
+  env, header, input, hash, Molecule, memory, or internal helper is fully
+  spec-derived in 0.15.
+- IR status checks prevent known status/helper values from becoming ordinary
+  DSL values, but full first-class `Bool` / `DomainU64` / `ErrorCode` /
+  `ExitStatus` / `SyscallStatus` / `HelperStatus` typing is deferred.
+- Validated schema planning objects gate the known semantic access paths, but
+  the complete hard Rust API boundary that makes raw span bypass impossible is
+  0.16 scope.
+- Lifecycle effects remain conservatively rejected in ambiguous branch-local or
+  duplicate cases. Safe CFG-aware merging of mutually exclusive lifecycle paths
+  is not part of 0.15.
+- ProofPlan executable evidence is initial runtime/codegen evidence metadata,
+  not a complete source obligation to runtime proof linker.
 - `assert_delta` accepts literal deltas, or non-literal deltas that are bound
   through `reads` to `witness.*` or `lock_args.*`. Bare names and cell reads are
   rejected so the ProofPlan cannot contain an untraceable runtime value.
@@ -85,6 +116,38 @@ which declarations remain unmatched.
   cardinality forms, full `cellc explain-macro` source maps, or moving `shared`
   entirely into a scheduler policy library.
 
+## Future Direction: 0.16 Enforced Boundary Architecture
+
+In 0.15, invariants are declared ProofPlan obligations rather than implicitly
+executed verifier functions. This is intentional: an invariant is only sound
+when its trigger, scope, reads, and CKB script boundary are explicit.
+
+The next step is invariant satisfaction checking. A declared invariant should be
+considered production-satisfied only if one of the following holds:
+
+1. it has been lowered into executable verifier code;
+2. it is matched by a checked action obligation with compatible trigger, scope,
+   type, field, and relation coverage;
+3. it is rejected by strict or production gates as runtime-required.
+
+Aggregate primitives such as `assert_sum`, `assert_conserved`, `assert_delta`,
+`assert_distinct`, and `assert_singleton` are the first candidates for
+executable lowering, because their fixed-width field restrictions already
+provide a bounded ABI and scanner shape.
+
+0.16 should turn the 0.15 scaffolding into harder architectural boundaries:
+
+1. derive all runtime, stdlib, and helper wrappers from a complete SyscallSpec;
+2. make status-like values first-class internal IR classes that cannot flow into
+   domain returns, locals, tuples, or arguments;
+3. make semantic Molecule field access consume validated table and field objects
+   instead of raw spans;
+4. replace flat lifecycle collectors with CFG-aware ResourceEffectSummary
+   merging;
+5. link ProofPlan records from source obligation to IR obligation,
+   codegen/runtime check, and evidence ID;
+6. add more VM-level malformed Molecule and syscall-failure negative tests.
+
 ## Verification
 
 Focused 0.15 checks:
@@ -100,9 +163,22 @@ cargo run --locked -p cellscript -- explain-proof examples/token.cell --target-p
 Full gate before closing the branch:
 
 ```bash
-cargo fmt --all
-cargo check --locked -p cellscript --all-targets
-cargo test --locked -p cellscript
-cargo clippy --locked -p cellscript --all-targets -- -D warnings
-git diff --check
+./scripts/cellscript_gate.sh dev
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_gate.sh backend
+./scripts/cellscript_gate.sh release
 ```
+
+Latest recorded release evidence:
+
+- CKB production acceptance report:
+  `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json`.
+- Strict backend CI audit report:
+  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json`.
+- Backend shape report:
+  `target/cellscript-backend-shape/backend-shape-report-release.json`.
+- Molecule schema manifest report:
+  `target/cellscript-schema-manifest/schema-manifest-report-release.json`.
+- Production result: 7 bundled examples, 43/43 scoped actions, 17/17 scoped
+  locks, 17 valid-spend and 17 invalid-spend lock cases, 27 stateful local CKB
+  scenario runs, and final production hardening gate `passed`.

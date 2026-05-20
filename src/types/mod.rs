@@ -28,6 +28,43 @@ struct FlowSpec {
 }
 
 #[derive(Debug, Clone)]
+struct ResourceEffectOccurrence {
+    span: Span,
+    label: &'static str,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ResourceEffectPath {
+    bindings: HashMap<String, ResourceEffectOccurrence>,
+}
+
+#[derive(Debug, Clone)]
+struct ResourceEffectSummary {
+    paths: Vec<ResourceEffectPath>,
+}
+
+impl ResourceEffectSummary {
+    fn single_path() -> Self {
+        Self { paths: vec![ResourceEffectPath::default()] }
+    }
+
+    fn record_effect(&mut self, key: String, occurrence: ResourceEffectOccurrence) -> Result<()> {
+        for path in &mut self.paths {
+            if let Some(previous) = path.bindings.insert(key.clone(), occurrence.clone()) {
+                return Err(CompileError::new(
+                    format!(
+                        "duplicate lifecycle binding '{}' is rejected until resource effects are CFG-aware; previous '{}' binding starts at byte {}",
+                        key, previous.label, previous.span.start
+                    ),
+                    occurrence.span,
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ActionOutputBinding {
     type_name: String,
 }
@@ -1087,6 +1124,18 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
+        if self.type_contains_cell_backed_value(&const_def.ty) {
+            return Err(CompileError::new(
+                format!(
+                    "const '{}' cannot have Cell-backed linear type {}; Cell lifecycle values must be produced inside actions",
+                    const_def.name,
+                    type_repr(&const_def.ty)
+                ),
+                const_def.span,
+            ));
+        }
+        self.validate_const_initializer(&const_def.name, &const_def.value)?;
+
         let mut env = self.env.clone();
         let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
@@ -1096,6 +1145,62 @@ impl<'a> TypeChecker<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn validate_const_initializer(&self, const_name: &str, expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => Ok(()),
+            Expr::Identifier(name) => {
+                if self.resolve_constant(name).is_some() || self.enum_variant_expr_type(name, expr_span(expr))?.is_some() {
+                    Ok(())
+                } else {
+                    Err(CompileError::new(
+                        format!("runtime variable '{}' is not allowed in const initializer '{}'", name, const_name),
+                        expr_span(expr),
+                    ))
+                }
+            }
+            Expr::Array(elems) | Expr::Tuple(elems) => {
+                for elem in elems {
+                    self.validate_const_initializer(const_name, elem)?;
+                }
+                Ok(())
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_const_initializer(const_name, value)?;
+                }
+                Ok(())
+            }
+            Expr::Create(_)
+            | Expr::Consume(_)
+            | Expr::Transfer(_)
+            | Expr::Destroy(_)
+            | Expr::ReadRef(_)
+            | Expr::Claim(_)
+            | Expr::Settle(_)
+            | Expr::CreateUnique(_)
+            | Expr::ReplaceUnique(_)
+            | Expr::Require(_)
+            | Expr::RequireBlock(_)
+            | Expr::Preserve(_) => {
+                Err(CompileError::new("cell lifecycle expression is not allowed in const initializer", expr_span(expr)))
+            }
+            Expr::Call(_) | Expr::StdlibCall(_) => {
+                Err(CompileError::new("function or runtime call is not allowed in const initializer", expr_span(expr)))
+            }
+            Expr::Assign(_)
+            | Expr::Binary(_)
+            | Expr::Unary(_)
+            | Expr::FieldAccess(_)
+            | Expr::Index(_)
+            | Expr::Assert(_)
+            | Expr::Block(_)
+            | Expr::If(_)
+            | Expr::Cast(_)
+            | Expr::Range(_)
+            | Expr::Match(_) => Err(CompileError::new("computed expressions are not const-evaluable yet", expr_span(expr))),
+        }
     }
 
     fn check_action(&mut self, action: &ActionDef) -> Result<()> {
@@ -1110,6 +1215,7 @@ impl<'a> TypeChecker<'a> {
             self.validate_action_state_edges(action, &env)?;
             self.validate_action_create_targets(action)?;
             self.validate_action_branch_obligations(action)?;
+            self.validate_action_lifecycle_effects(action)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -1184,6 +1290,173 @@ impl<'a> TypeChecker<'a> {
 
         self.validate_branch_obligations_in_stmts(&action.body, &outputs, HashSet::new())?;
         Ok(())
+    }
+
+    fn validate_action_lifecycle_effects(&self, action: &ActionDef) -> Result<()> {
+        let mut summary = ResourceEffectSummary::single_path();
+        self.validate_lifecycle_effects_in_stmts(&action.body, false, &mut summary)
+    }
+
+    fn validate_lifecycle_effects_in_stmts(
+        &self,
+        stmts: &[Stmt],
+        branch_local: bool,
+        summary: &mut ResourceEffectSummary,
+    ) -> Result<()> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => self.validate_lifecycle_effects_in_expr(&let_stmt.value, branch_local, summary)?,
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                    self.validate_lifecycle_effects_in_expr(expr, branch_local, summary)?;
+                }
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&if_stmt.condition, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&if_stmt.then_branch, true, summary)?;
+                    if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_lifecycle_effects_in_stmts(else_branch, true, summary)?;
+                    }
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&for_stmt.iterable, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&for_stmt.body, true, summary)?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&while_stmt.condition, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&while_stmt.body, true, summary)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_lifecycle_effects_in_expr(&self, expr: &Expr, branch_local: bool, summary: &mut ResourceEffectSummary) -> Result<()> {
+        for (key, span, label) in lifecycle_effect_keys(expr) {
+            if branch_local {
+                return Err(CompileError::new(
+                    format!("branch-local lifecycle operation '{}' is rejected until resource effects are CFG-aware", label),
+                    span,
+                ));
+            }
+            summary.record_effect(key, ResourceEffectOccurrence { span, label })?;
+        }
+
+        match expr {
+            Expr::Assign(assign) => {
+                self.validate_lifecycle_effects_in_expr(&assign.target, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&assign.value, branch_local, summary)
+            }
+            Expr::Binary(binary) => {
+                self.validate_lifecycle_effects_in_expr(&binary.left, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&binary.right, branch_local, summary)
+            }
+            Expr::Unary(unary) => self.validate_lifecycle_effects_in_expr(&unary.expr, branch_local, summary),
+            Expr::Call(call) => {
+                self.validate_lifecycle_effects_in_expr(&call.func, branch_local, summary)?;
+                for arg in &call.args {
+                    self.validate_lifecycle_effects_in_expr(arg, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::FieldAccess(field) => self.validate_lifecycle_effects_in_expr(&field.expr, branch_local, summary),
+            Expr::Index(index) => {
+                self.validate_lifecycle_effects_in_expr(&index.expr, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&index.index, branch_local, summary)
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_lifecycle_effects_in_expr(lock, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Consume(consume) => self.validate_lifecycle_effects_in_expr(&consume.expr, branch_local, summary),
+            Expr::Transfer(transfer) => {
+                self.validate_lifecycle_effects_in_expr(&transfer.expr, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&transfer.to, branch_local, summary)
+            }
+            Expr::Destroy(destroy) => self.validate_lifecycle_effects_in_expr(&destroy.expr, branch_local, summary),
+            Expr::Claim(claim) => self.validate_lifecycle_effects_in_expr(&claim.receipt, branch_local, summary),
+            Expr::Settle(settle) => self.validate_lifecycle_effects_in_expr(&settle.expr, branch_local, summary),
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_lifecycle_effects_in_expr(lock, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_lifecycle_effects_in_expr(&replace.expr, branch_local, summary)?;
+                for (_, value) in &replace.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Assert(assert_expr) => {
+                self.validate_lifecycle_effects_in_expr(&assert_expr.condition, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&assert_expr.message, branch_local, summary)
+            }
+            Expr::Require(require_expr) => {
+                self.validate_lifecycle_effects_in_expr(&require_expr.condition, branch_local, summary)?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_lifecycle_effects_in_expr(message, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.validate_lifecycle_effects_in_expr(expr, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Block(stmts) => self.validate_lifecycle_effects_in_stmts(stmts, branch_local, summary),
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    self.validate_lifecycle_effects_in_expr(item, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::If(if_expr) => {
+                self.validate_lifecycle_effects_in_expr(&if_expr.condition, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&if_expr.then_branch, true, summary)?;
+                self.validate_lifecycle_effects_in_expr(&if_expr.else_branch, true, summary)
+            }
+            Expr::Cast(cast) => self.validate_lifecycle_effects_in_expr(&cast.expr, branch_local, summary),
+            Expr::Range(range) => {
+                self.validate_lifecycle_effects_in_expr(&range.start, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&range.end, branch_local, summary)
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Match(match_expr) => {
+                self.validate_lifecycle_effects_in_expr(&match_expr.expr, branch_local, summary)?;
+                for arm in &match_expr.arms {
+                    self.validate_lifecycle_effects_in_expr(&arm.value, true, summary)?;
+                }
+                Ok(())
+            }
+            Expr::StdlibCall(call) => {
+                for arg in &call.args {
+                    self.validate_lifecycle_effects_in_expr(arg, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Integer(_)
+            | Expr::Bool(_)
+            | Expr::String(_)
+            | Expr::ByteString(_)
+            | Expr::Identifier(_)
+            | Expr::ReadRef(_)
+            | Expr::Preserve(_) => Ok(()),
+        }
     }
 
     fn validate_branch_obligations_in_stmts(
@@ -4472,13 +4745,20 @@ impl<'a> TypeChecker<'a> {
                         self.validate_static_spawn_target_expr(&call.args[0], call.span)?;
                         return Ok(Type::U64);
                     }
-                    "wait" | "process_id" | "pipe_read" | "inherited_fd" | "close" => {
+                    "wait" | "process_id" | "pipe_read" | "inherited_fd" => {
                         let expected = if matches!(name.as_str(), "wait" | "process_id") { 0 } else { 1 };
                         self.validate_builtin_arity(name, expected, arg_types, call.span)?;
                         if expected == 1 && arg_types[0] != Type::U64 {
                             return Err(CompileError::new(format!("{} expects a u64 file descriptor or index", name), call.span));
                         }
                         return Ok(Type::U64);
+                    }
+                    "close" => {
+                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                        if arg_types[0] != Type::U64 {
+                            return Err(CompileError::new("close expects a u64 file descriptor", call.span));
+                        }
+                        return Ok(Type::Unit);
                     }
                     "pipe" => {
                         self.validate_builtin_arity(name, 0, arg_types, call.span)?;
@@ -4489,7 +4769,7 @@ impl<'a> TypeChecker<'a> {
                         if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
                             return Err(CompileError::new("pipe_write expects (fd: u64, value: u64)", call.span));
                         }
-                        return Ok(Type::U64);
+                        return Ok(Type::Unit);
                     }
                     "require_maturity" | "require_time" => {
                         self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -5470,6 +5750,55 @@ fn expr_span(expr: &Expr) -> Span {
     }
 }
 
+pub(crate) fn lifecycle_effect_keys(expr: &Expr) -> Vec<(String, Span, &'static str)> {
+    match expr {
+        Expr::Create(create) => {
+            let binding = create.target.clone().unwrap_or_else(|| format!("create_{}", create.ty));
+            vec![(format!("output:{}", binding), create.span, "create")]
+        }
+        Expr::CreateUnique(create) => {
+            vec![(format!("output:create_unique_{}", create.ty), create.span, "create_unique")]
+        }
+        Expr::Consume(consume) => lifecycle_input_key(&consume.expr, consume.span, "consume"),
+        Expr::Transfer(transfer) => lifecycle_input_key(&transfer.expr, transfer.span, "transfer"),
+        Expr::Destroy(destroy) => lifecycle_input_key(&destroy.expr, destroy.span, "destroy"),
+        Expr::Claim(claim) => lifecycle_input_key(&claim.receipt, claim.span, "claim"),
+        Expr::Settle(settle) => lifecycle_input_key(&settle.expr, settle.span, "settle"),
+        Expr::ReplaceUnique(replace) => lifecycle_input_key(&replace.expr, replace.span, "replace_unique"),
+        Expr::StdlibCall(call) => {
+            let qualified = format!("std::{}::{}", call.namespace, call.name);
+            match qualified.as_str() {
+                "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                    let mut keys = Vec::new();
+                    if let Some(input) = call.args.first().and_then(lifecycle_operand_root) {
+                        keys.push((format!("input:{}", input), call.span, "stdlib lifecycle input"));
+                    }
+                    if let Some(output) = call.args.get(1).and_then(lifecycle_operand_root) {
+                        keys.push((format!("output:{}", output), call.span, "stdlib lifecycle output"));
+                    }
+                    keys
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn lifecycle_input_key(expr: &Expr, span: Span, label: &'static str) -> Vec<(String, Span, &'static str)> {
+    let binding = lifecycle_operand_root(expr).unwrap_or("<dynamic>");
+    vec![(format!("input:{}", binding), span, label)]
+}
+
+pub(crate) fn lifecycle_operand_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::FieldAccess(field) => lifecycle_operand_root(&field.expr),
+        Expr::Index(index) => lifecycle_operand_root(&index.expr),
+        _ => None,
+    }
+}
+
 fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
     if let Some(field) = output_field_constraint(expr, outputs) {
         fields.insert(field);
@@ -6101,6 +6430,21 @@ mod tests {
         assert!(!checker.types_equal(&Type::Array(Box::new(Type::U8), 1), &Type::Array(Box::new(Type::U64), 1)));
         assert_eq!(TypeChecker::widen_to(&Type::U64, &Type::U8), Some(Type::U64));
         assert_eq!(TypeChecker::widen_to(&Type::U8, &Type::U64), Some(Type::U64));
+    }
+
+    #[test]
+    fn numeric_named_type_equality_is_commutative() {
+        let checker = TypeChecker::new();
+        let usize_ty = Type::Named("usize".to_string());
+        let isize_ty = Type::Named("isize".to_string());
+        let other_ty = Type::Named("foo".to_string());
+
+        assert!(checker.numeric_types_equal(&Type::U64, &usize_ty));
+        assert!(checker.numeric_types_equal(&usize_ty, &Type::U64));
+        assert!(checker.numeric_types_equal(&usize_ty, &isize_ty));
+        assert!(checker.numeric_types_equal(&isize_ty, &usize_ty));
+        assert!(!checker.numeric_types_equal(&isize_ty, &other_ty));
+        assert!(!checker.numeric_types_equal(&other_ty, &isize_ty));
     }
 
     #[test]
@@ -6785,6 +7129,168 @@ where
         ))
         .unwrap_err();
         assert!(err.message.contains("division or modulo by zero"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn byte_string_literal_type_uses_actual_length() {
+        check(&source_module(
+            r#"
+module types::byte_string_len
+
+action ok() -> [u8; 4]
+where
+    return b"TEST"
+"#,
+        ))
+        .unwrap();
+
+        let err = check(&source_module(
+            r#"
+module types::byte_string_len_mismatch
+
+action bad() -> [u8; 3]
+where
+    return b"TEST"
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_cell_lifecycle_expressions() {
+        let err = check(&source_module(
+            r#"
+module types::const_lifecycle
+
+resource Token {
+    amount: u64
+}
+
+const BAD: u64 = create Token { amount: 1 }
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cell lifecycle expression is not allowed in const initializer"), "{}", err.message);
+    }
+
+    #[test]
+    fn branch_local_create_is_rejected_until_lifecycle_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::branch_create
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(flag: bool) -> Token
+where
+    if flag {
+        return create Token { amount: 1 }
+    } else {
+        return create Token { amount: 2 }
+    }
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("branch-local lifecycle operation 'create'"), "{}", err.message);
+    }
+
+    #[test]
+    fn branch_local_consume_is_rejected_until_lifecycle_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::branch_consume
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(flag: bool, left: Token, right: Token) -> bool
+where
+    if flag {
+        consume left
+    } else {
+        consume right
+    }
+    return true
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("branch-local lifecycle operation 'consume'"), "{}", err.message);
+    }
+
+    #[test]
+    fn duplicate_lifecycle_binding_is_rejected_until_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::duplicate_consume
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(token: Token) -> bool
+where
+    consume token
+    consume token
+    return true
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("duplicate lifecycle binding 'input:token'"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_cell_backed_types() {
+        let err = check(&source_module(
+            r#"
+module types::const_cell_type
+
+resource Token {
+    amount: u64
+}
+
+const BAD: Token = 0
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cannot have Cell-backed linear type"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_computed_expressions() {
+        let err = check(&source_module(
+            r#"
+module types::const_computed
+
+const BAD: u64 = 1 + 2
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("computed expressions are not const-evaluable yet"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_allow_supported_literals() {
+        check(&source_module(
+            r#"
+module types::const_literals
+
+const COUNT: u8 = 7
+const ENABLED: bool = true
+const TAG: [u8; 2] = b"OK"
+const SCRIPT: String = "worker"
+"#,
+        ))
+        .unwrap();
     }
 
     #[test]

@@ -2408,6 +2408,15 @@ fn invariant_unmatched_action_coverage_summaries(proof_plan: &[ProofPlanMetadata
         .collect()
 }
 
+fn checked_runtime_proof_plan_evidence_gap_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
+    proof_plan
+        .iter()
+        .filter(|plan| plan.status == "checked-runtime" || plan.on_chain_checked)
+        .filter(|plan| plan.executable_evidence.is_empty() || plan.codegen_coverage_status.starts_with("gap:"))
+        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+        .collect()
+}
+
 fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     let summary = proof_plan_summary_json(proof_plan);
     println!("  Summary:");
@@ -2782,6 +2791,13 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
 
     if args.deny_ckb_runtime && metadata.runtime.ckb_runtime_required {
         violations.push(format!("CKB runtime features: {}", metadata.runtime.ckb_runtime_features.join(", ")));
+    }
+
+    if args.production || args.deny_runtime_obligations {
+        let checked_runtime_evidence_gaps = checked_runtime_proof_plan_evidence_gap_summaries(&metadata.runtime.proof_plan);
+        if !checked_runtime_evidence_gaps.is_empty() {
+            violations.push(format!("evidence-missing checked-runtime ProofPlan gaps: {}", checked_runtime_evidence_gaps.join(", ")));
+        }
     }
 
     if args.deny_runtime_obligations {
@@ -4470,8 +4486,55 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 mod tests {
     use super::*;
 
+    fn proof_plan_record(status: &str, coverage: &str, evidence: Vec<crate::ProofPlanEvidenceMetadata>) -> ProofPlanMetadata {
+        ProofPlanMetadata {
+            name: "test".to_string(),
+            origin: "action:test".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            source_span: None,
+            trigger: "action".to_string(),
+            scope: "group".to_string(),
+            reads: Vec::new(),
+            coverage: Vec::new(),
+            input_output_relation_checks: Vec::new(),
+            group_cardinality: "single".to_string(),
+            identity_lifecycle_policy: "none".to_string(),
+            preserved_fields: Vec::new(),
+            witness_fields: Vec::new(),
+            lock_args_fields: Vec::new(),
+            on_chain_checked: status == "checked-runtime",
+            on_chain_checked_obligations: Vec::new(),
+            executable_evidence: evidence,
+            builder_assumptions: Vec::new(),
+            codegen_coverage_status: coverage.to_string(),
+            status: status.to_string(),
+            detail: "test detail".to_string(),
+            diagnostics: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn production_policy_finds_evidence_less_checked_runtime_proof_plan_gap() {
+        let proof_plan = vec![proof_plan_record("checked-runtime", "gap:evidence-missing", Vec::new())];
+
+        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
+
+        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
+    }
+
+    #[test]
+    fn production_policy_finds_evidence_less_on_chain_checked_proof_plan_gap() {
+        let mut proof_plan = vec![proof_plan_record("metadata-only", "gap:evidence-missing", Vec::new())];
+        proof_plan[0].on_chain_checked = true;
+
+        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
+
+        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
     }
 }

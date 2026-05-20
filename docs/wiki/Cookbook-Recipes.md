@@ -226,7 +226,7 @@ This is a compiler/package gate. Use it before asking for deeper CKB evidence.
 Use this only from the CellScript repository root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 This is the boundary where compiler evidence becomes builder-backed local CKB

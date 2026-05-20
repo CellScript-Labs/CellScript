@@ -4,9 +4,9 @@
 
 [mode.quick]
 budget = 64
-min_cases = 17
-min_accept = 8
-min_reject = 9
+min_cases = 22
+min_accept = 11
+min_reject = 11
 required_origins = [
     "generated",
     "tests/syntax_combo/seeds/legacy-transfer-capability.cell",
@@ -16,11 +16,14 @@ description = "Local smoke: deterministic generated cases plus regression seeds.
 
 [mode.ci]
 budget = 1000
-min_cases = 37
-min_accept = 22
-min_reject = 15
+min_cases = 42
+min_accept = 25
+min_reject = 17
 required_origins = [
     "generated",
+    "matrix:edge/bytestring-length",
+    "matrix:edge/tuple-projection",
+    "matrix:edge/wildcard-match-order",
     "matrix:continuity/std-cell",
     "matrix:lifecycle/proof/control-flow",
     "matrix:lifecycle/proof/local-binding",
@@ -39,11 +42,14 @@ description = "PR gate: pairwise generated cases plus regression seeds."
 
 [mode.deep]
 budget = 5000
-min_cases = 40
-min_accept = 22
-min_reject = 18
+min_cases = 45
+min_accept = 25
+min_reject = 20
 required_origins = [
     "generated",
+    "matrix:edge/bytestring-length",
+    "matrix:edge/tuple-projection",
+    "matrix:edge/wildcard-match-order",
     "matrix:continuity/std-cell",
     "matrix:deep/reject/proof-purity",
     "matrix:deep/reject/source-qualifier",

@@ -38,6 +38,7 @@ High-value active references include:
 
 - `releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md` for the final 0.13 syntax
   governance summary
+- `CELLSCRIPT_GATE_POLICY.md`
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
 - `CELLSCRIPT_CKB_LANGUAGE_AUDIT.md`
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`

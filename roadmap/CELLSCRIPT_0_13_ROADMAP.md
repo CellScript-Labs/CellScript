@@ -18,7 +18,7 @@ The 0.13 implementation scope is closed for the stable `v0.13.2` line. The
 final release gate is:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 That gate now includes:
@@ -756,7 +756,7 @@ All audit findings integrated into v0.13 roadmap:
 
 ```bash
 # Run all tests
-cargo test -p cellscript -- --test-threads=1
+./scripts/cellscript_gate.sh ci
 
 # Compile all examples through the top-level file workflow
 for file in examples/*.cell; do

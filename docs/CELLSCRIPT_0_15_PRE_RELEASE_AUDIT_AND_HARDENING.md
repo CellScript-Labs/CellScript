@@ -1,8 +1,8 @@
 # CellScript 0.15 发布前全面审计与生产验收严格加固方案
 
-**版本**: 0.15.0  
-**状态**: 发布门控草案  
-**更新日期**: 2026-05-17
+**版本**: 0.15.0
+**状态**: release gate 已通过
+**更新日期**: 2026-05-20
 
 ---
 
@@ -35,15 +35,11 @@
 ### 1.1 Rust 工程健康检查
 
 ```bash
-# 格式化检查
-cargo fmt --all -- --check
+# 统一本地快速门控
+./scripts/cellscript_gate.sh dev
 
-# 无警告编译
-cargo check --locked -p cellscript --all-targets
-cargo clippy --locked -p cellscript --all-targets -- -D warnings
-
-# 差异检查
-git diff --check
+# PR/merge 级门控
+./scripts/cellscript_gate.sh ci
 ```
 
 **Prompt**：
@@ -56,10 +52,10 @@ git diff --check
 ### 1.2 单元测试与集成测试
 
 ```bash
-# 核心库测试
-cargo test --locked -p cellscript
+# 核心库与集成测试通过统一 CI gate 运行
+./scripts/cellscript_gate.sh ci
 
-# 0.15 专属聚焦测试
+# 0.15 专属聚焦测试仍可用于定位失败
 cargo test --locked -p cellscript proof_plan --lib
 cargo test --locked -p cellscript aggregate_invariant --lib
 cargo test --locked -p cellscript --lib -- compile_identity compile_unique
@@ -114,12 +110,12 @@ cargo run --locked -p cellscript -- \
 ### 2.1 快速门控（本地预推送）
 
 ```bash
-./scripts/cellscript_syntax_combo_audit.sh quick
+./scripts/cellscript_gate.sh dev
 ```
 
 **Prompt**：
-> 作为语法组合审计员，运行 quick 模式并验证：
-> - 生成案例数 ≥ 17，接受数 ≥ 8，拒绝数 ≥ 9。
+> 作为语法组合审计员，运行统一 dev gate；如需定位语法组合问题，可单独运行 `./scripts/cellscript_syntax_combo_audit.sh quick` 并验证：
+> - 生成案例数 ≥ 22，接受数 ≥ 11，拒绝数 ≥ 11。
 > - 必须覆盖以下 regression seeds：
 >   - `tests/syntax_combo/seeds/legacy-transfer-capability.cell`
 >   - `tests/syntax_combo/seeds/require-block-lifecycle.cell`
@@ -129,13 +125,16 @@ cargo run --locked -p cellscript -- \
 ### 2.2 CI 门控（PR 合并前）
 
 ```bash
-./scripts/cellscript_syntax_combo_audit.sh ci
+./scripts/cellscript_gate.sh ci
 ```
 
 **Prompt**：
-> 作为 CI 审计员，运行 ci 模式并验证：
-> - 生成案例数 ≥ 37，接受数 ≥ 22，拒绝数 ≥ 15。
+> 作为 CI 审计员，运行统一 ci gate；如需定位语法组合问题，可单独运行 `./scripts/cellscript_syntax_combo_audit.sh ci` 并验证：
+> - 生成案例数 ≥ 42，接受数 ≥ 25，拒绝数 ≥ 17。
 > - 必须覆盖 `matrix.toml` 中列出的所有 required origins：
+>   - `matrix:edge/bytestring-length`
+>   - `matrix:edge/tuple-projection`
+>   - `matrix:edge/wildcard-match-order`
 >   - `matrix:continuity/std-cell`
 >   - `matrix:lifecycle/proof/control-flow`
 >   - `matrix:lifecycle/proof/local-binding`
@@ -153,6 +152,7 @@ cargo run --locked -p cellscript -- \
 ### 2.3 深度门控（发布前最终验证）
 
 ```bash
+./scripts/cellscript_gate.sh backend
 ./scripts/cellscript_syntax_combo_audit.sh deep
 ```
 
@@ -203,15 +203,15 @@ done
 
 ```bash
 # 快速门控（开发循环）
-./scripts/cellscript_ckb_release_gate.sh
+./scripts/cellscript_gate.sh dev
 
 # 完整门控（发布前最终验证）
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 **Prompt**：
 > 作为 CKB 发布门控审计员，运行 `full` 模式并验证：
-> - 脚本首先运行 syntax-combination CI preflight，且 preflight 通过。
+> - 统一 release gate 首先运行 CI/backend/syntax evidence，且全部通过。
 > - 所有捆绑示例都在 CKB  profile 下以 `--primitive-strict=0.15` 编译。
 > - 存在 builder-backed 的 action runs（有效交易 dry-run）。
 > - 存在 builder-backed 的 lock valid-spend 和 invalid-spend 矩阵。
@@ -226,7 +226,7 @@ done
 
 ```bash
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/report.json
+  target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json
 ```
 
 **Prompt**：
@@ -249,6 +249,23 @@ python3 scripts/validate_ckb_cellscript_production_evidence.py \
 > - `ckb_business_coverage.expected_fail_closed_lock_count` == 0
 > - 每个 `ACTION_RUN_KEYS` 中的动作列表与预期完全一致，无重复。
 > - Lock spend 矩阵覆盖所有预期锁：`multisig`、`nft`、`timelock`、`vesting`。
+
+**2026-05-20 recorded result**：
+
+- `./scripts/cellscript_gate.sh release` passed.
+- Production evidence report:
+  `target/ckb-cellscript-acceptance/20260520-004852-44752/ckb-cellscript-acceptance-report.json`.
+- Strict backend CI report:
+  `target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-004824.json`.
+- Backend shape report:
+  `target/cellscript-backend-shape/backend-shape-report-release.json`.
+- Molecule schema manifest report:
+  `target/cellscript-schema-manifest/schema-manifest-report-release.json`.
+- Production evidence validator reported `status: "passed"` and
+  `production_ready: true`.
+- Coverage: 7 bundled examples, 43/43 scoped actions, 17/17 scoped locks,
+  17 valid-spend and 17 invalid-spend lock cases, and 27 local CKB stateful
+  scenario runs.
 
 ### 3.4 ProofPlan 元数据审计
 
@@ -406,10 +423,8 @@ cargo run --locked -p cellscript -- \
 
 | 检查项 | 命令/方法 | 通过标准 |
 |---|---|---|
-| 格式化零差异 | `cargo fmt --all -- --check` | 零差异 |
-| 零警告编译 | `cargo clippy --locked -p cellscript --all-targets -- -D warnings` | 零警告 |
-| 全量测试通过 | `cargo test --locked -p cellscript` | 全部通过 |
-| 语法组合预飞行 | `./scripts/cellscript_syntax_combo_audit.sh ci` | 生成 ≥37 案例，接受 ≥22，拒绝 ≥15 |
+| 统一 CI 门控 | `./scripts/cellscript_gate.sh ci` | fmt、全量测试、clippy、strict backend CI、syntax-combo CI、package 验证全部通过 |
+| 后端合约门控 | `./scripts/cellscript_gate.sh backend` | IR/codegen/RISC-V 合约、assembler oracle、stateful backend audit 全部通过 |
 | 工具链边界验证 | `python3 scripts/validate_cellscript_tooling_release.py` | 输出 "valid CellScript tooling release boundary" |
 | 版本一致性 | 手动检查 | `Cargo.toml` == `Cargo.lock` == `package.json` == `CHANGELOG.md` == `src/lib.rs` |
 
@@ -426,8 +441,8 @@ cargo run --locked -p cellscript -- \
 |---|---|---|
 | 捆绑示例 ELF 编译 | `cellc examples/*.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15` | 7 个全部成功 |
 | Artifact 验证 | `cellc verify-artifact ... --expect-target-profile ckb --verify-sources --production` | 全部通过 |
-| 动作运行矩阵 | `./scripts/cellscript_ckb_release_gate.sh full` | 43 个 scoped actions 全部有 dry-run 证据 |
-| 锁支出矩阵 | `./scripts/cellscript_ckb_release_gate.sh full` | 每个锁都有 valid-spend + invalid-spend 证据 |
+| 动作运行矩阵 | `./scripts/cellscript_gate.sh release` | 43 个 scoped actions 全部有 dry-run 证据 |
+| 锁支出矩阵 | `./scripts/cellscript_gate.sh release` | 每个锁都有 valid-spend + invalid-spend 证据 |
 | 容量证据 | 检查报告 | occupied-capacity 测量值 ≥ 声明的 capacity floor |
 | 交易尺寸证据 | 检查报告 | serialized tx size 在 CKB 限制内 |
 | Cycles 测量 | 检查报告 | 每个动作/锁的 cycles 被记录 |
@@ -457,39 +472,16 @@ cargo run --locked -p cellscript -- \
 ### 加固执行脚本（一键运行）
 
 ```bash
-#!/usr/bin/env bash
-# cellscript-0.15-full-hardening.sh
-# 0.15 发布前全面硬化脚本
+./scripts/cellscript_gate.sh release
 
-set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-echo "=== Layer 1: Compiler Evidence ==="
-cargo fmt --all -- --check
-cargo check --locked -p cellscript --all-targets
-cargo clippy --locked -p cellscript --all-targets -- -D warnings
-cargo test --locked -p cellscript
-python3 scripts/validate_cellscript_tooling_release.py
-
-echo "=== Layer 2: Syntax Combo Preflight ==="
-./scripts/cellscript_syntax_combo_audit.sh ci
-
-echo "=== Layer 3: CKB Release Gate ==="
-./scripts/cellscript_ckb_release_gate.sh full
-
-echo "=== Layer 4: Production Evidence Validation ==="
 python3 scripts/validate_ckb_cellscript_production_evidence.py \
   target/ckb-cellscript-acceptance/report.json
 
-echo "=== Layer 5: ProofPlan Audit ==="
 for f in examples/*.cell; do
   cargo run --locked -p cellscript -- explain-proof "$f" \
     --target riscv64-elf --target-profile ckb --json \
     > "/tmp/proof-plan-$(basename "$f" .cell).json"
 done
-
-echo "=== All Hardening Layers Passed ==="
 ```
 
 ---

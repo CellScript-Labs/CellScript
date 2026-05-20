@@ -21,6 +21,13 @@ pub struct ProofPlanDiagnosticMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProofPlanEvidenceMetadata {
+    pub layer: String,
+    pub id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofPlanMetadata {
     pub name: String,
     pub origin: String,
@@ -45,6 +52,8 @@ pub struct ProofPlanMetadata {
     pub on_chain_checked: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub on_chain_checked_obligations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executable_evidence: Vec<ProofPlanEvidenceMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builder_assumptions: Vec<String>,
     pub codegen_coverage_status: String,
@@ -279,6 +288,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
+        executable_evidence: Vec::new(),
         builder_assumptions,
         codegen_coverage_status: "gap:metadata-only".to_string(),
         status: "runtime-required".to_string(),
@@ -346,6 +356,7 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
+        executable_evidence: Vec::new(),
         builder_assumptions,
         codegen_coverage_status: "gap:metadata-only".to_string(),
         status: "runtime-required".to_string(),
@@ -376,6 +387,9 @@ fn plan_from_obligation(
     let input_output_relation_checks = input_output_relation_checks(obligation, pool_primitives);
     let on_chain_checked_obligations =
         if on_chain_checked { checked_obligation_labels(obligation, &input_output_relation_checks) } else { Vec::new() };
+    let executable_evidence = executable_evidence_for_obligation(obligation, on_chain_checked, &input_output_relation_checks);
+    let codegen_coverage_status =
+        codegen_coverage_status(&obligation.status, on_chain_checked, !executable_evidence.is_empty()).to_string();
     let builder_assumptions = builder_assumptions(obligation, &trigger, &scope, on_chain_checked);
     let diagnostics = diagnostics_for_plan(&trigger, &scope, obligation, &builder_assumptions);
 
@@ -397,11 +411,79 @@ fn plan_from_obligation(
         lock_args_fields: lock_args_fields.to_vec(),
         on_chain_checked,
         on_chain_checked_obligations,
+        executable_evidence,
         builder_assumptions,
-        codegen_coverage_status: codegen_coverage_status(&obligation.status, on_chain_checked).to_string(),
+        codegen_coverage_status,
         status: obligation.status.clone(),
         detail: obligation.detail.clone(),
         diagnostics,
+    }
+}
+
+fn executable_evidence_for_obligation(
+    obligation: &VerifierObligationMetadata,
+    on_chain_checked: bool,
+    input_output_relation_checks: &[String],
+) -> Vec<ProofPlanEvidenceMetadata> {
+    if !on_chain_checked {
+        return Vec::new();
+    }
+    let mut concrete_checks = checked_runtime_subconditions(&obligation.detail);
+    for relation in input_output_relation_checks {
+        if relation.contains("=runtime-required") || relation.contains("=metadata-only") {
+            continue;
+        }
+        concrete_checks.push(relation.clone());
+    }
+    dedup(&mut concrete_checks);
+    if concrete_checks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut evidence = vec![
+        ProofPlanEvidenceMetadata {
+            layer: "ir".to_string(),
+            id: format!("ir-obligation:{}:{}", obligation.category, obligation.feature),
+            status: obligation.status.clone(),
+        },
+        ProofPlanEvidenceMetadata {
+            layer: "codegen".to_string(),
+            id: codegen_evidence_id(obligation),
+            status: codegen_coverage_status(&obligation.status, true, true).to_string(),
+        },
+    ];
+    for relation in concrete_checks {
+        evidence.push(ProofPlanEvidenceMetadata {
+            layer: "runtime".to_string(),
+            id: format!("runtime-relation-check:{relation}"),
+            status: "checked-runtime".to_string(),
+        });
+    }
+    evidence
+}
+
+fn codegen_evidence_id(obligation: &VerifierObligationMetadata) -> String {
+    if obligation.feature.starts_with("resource-conservation:") {
+        "codegen:resource-conservation-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-output:") {
+        "codegen:create-output-runtime-check".to_string()
+    } else if obligation.feature.starts_with("consume-input:")
+        || obligation.feature.starts_with("destroy-input:")
+        || obligation.feature.starts_with("claim-input:")
+        || obligation.feature.starts_with("settle-input:")
+        || obligation.feature.starts_with("replace-input:")
+    {
+        "codegen:input-lifecycle-runtime-check".to_string()
+    } else if obligation.feature.starts_with("destroy-output-scan:") {
+        "codegen:destroy-output-scan-runtime-check".to_string()
+    } else if obligation.feature.starts_with("read-ref:") {
+        "codegen:read-ref-runtime-check".to_string()
+    } else if obligation.feature.starts_with("cell-metadata-equality:") {
+        "codegen:cell-metadata-equality-runtime-check".to_string()
+    } else if obligation.category == "state-transition" {
+        "codegen:state-transition-runtime-check".to_string()
+    } else {
+        format!("codegen:{}:{}", obligation.category, obligation.feature)
     }
 }
 
@@ -616,7 +698,7 @@ fn lock_args_fields(params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccess
 }
 
 fn on_chain_checked(status: &str) -> bool {
-    matches!(status, "checked-runtime" | "ckb-runtime")
+    status == "checked-runtime"
 }
 
 fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_primitives: &[PoolPrimitiveMetadata]) -> Vec<String> {
@@ -674,12 +756,6 @@ fn checked_runtime_subconditions(detail: &str) -> Vec<String> {
     for segment in detail.split([',', ';']) {
         let trimmed = segment.trim();
         if let Some((prefix, _)) = trimmed.split_once("=checked-runtime") {
-            let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
-            if !label.is_empty() {
-                out.push(label.to_string());
-            }
-        }
-        if let Some((prefix, _)) = trimmed.split_once("=checked-static") {
             let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
             if !label.is_empty() {
                 out.push(label.to_string());
@@ -789,9 +865,13 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
     }
 }
 
-fn codegen_coverage_status(status: &str, on_chain_checked: bool) -> &str {
+fn codegen_coverage_status(status: &str, on_chain_checked: bool, has_executable_evidence: bool) -> &str {
     if on_chain_checked {
-        "covered"
+        if has_executable_evidence {
+            "covered"
+        } else {
+            "gap:evidence-missing"
+        }
     } else if status == "runtime-required" {
         "gap:runtime-required"
     } else if status == "checked-partial" {
@@ -1161,4 +1241,101 @@ fn declared_lock_args_fields(reads: &[String]) -> Vec<String> {
 fn dedup(values: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     values.retain(|value| seen.insert(value.clone()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Span;
+
+    fn empty_body() -> ir::IrBody {
+        ir::IrBody {
+            consume_set: Vec::new(),
+            read_refs: Vec::new(),
+            create_set: Vec::new(),
+            mutate_set: Vec::new(),
+            write_intents: Vec::new(),
+            blocks: vec![ir::IrBlock { id: ir::BlockId(0), instructions: Vec::new(), terminator: ir::IrTerminator::Return(None) }],
+        }
+    }
+
+    #[test]
+    fn checked_runtime_proof_plan_claims_include_executable_evidence() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "create-output-fields=checked-runtime; create-output-lock=checked-runtime".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.iter().any(|evidence| evidence.layer == "ir"), "{:?}", plan.executable_evidence);
+        assert!(
+            plan.executable_evidence
+                .iter()
+                .any(|evidence| evidence.layer == "codegen" && evidence.id == "codegen:create-output-runtime-check"),
+            "{:?}",
+            plan.executable_evidence
+        );
+    }
+
+    #[test]
+    fn checked_runtime_without_concrete_evidence_is_not_marked_covered() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "category-level runtime status without executable lowering detail".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
+    }
+
+    #[test]
+    fn checked_static_detail_does_not_create_executable_runtime_evidence() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "identity".to_string(),
+            feature: "identity-anchor:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "identity-anchor=checked-static".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
+    }
+
+    #[test]
+    fn metadata_only_invariant_proof_plan_has_no_executable_evidence() {
+        let invariant = ir::IrInvariant {
+            name: "declared_only".to_string(),
+            trigger: Some("type_group".to_string()),
+            scope: Some("group".to_string()),
+            reads: vec!["group_inputs<Token>.amount".to_string()],
+            aggregates: Vec::new(),
+            assert_count: 1,
+            span: Span { start: 1, end: 2, line: 1, column: 1 },
+        };
+
+        let plans = build_for_invariant(&invariant);
+        let plan = plans.iter().find(|plan| plan.category == "declared-invariant").expect("declared invariant plan");
+
+        assert_eq!(plan.codegen_coverage_status, "gap:metadata-only");
+        assert!(!plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+    }
 }

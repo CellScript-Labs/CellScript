@@ -171,6 +171,22 @@ For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
 before builder-backed CKB acceptance. A direct CKB acceptance run does not
 replace this preflight because it only proves selected concrete transactions.
 
+## Unified Gate Entry Points
+
+For repository work, use the unified gate wrapper instead of hand-picking
+component scripts:
+
+```bash
+./scripts/cellscript_gate.sh dev
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_gate.sh backend
+./scripts/cellscript_gate.sh release
+```
+
+`dev` is the local fast path. `ci` is the pull-request gate. `backend` is for
+IR/codegen/RISC-V changes. `release` is the production CKB evidence gate. See
+`docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
+
 ## CKB Release Evidence Gate
 
 When you are ready to make a CKB production claim, move from compiler evidence
@@ -178,19 +194,24 @@ to chain evidence. Run the CKB acceptance gate from the CellScript repository
 root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
-For pre-push checks, the quick gate runs the compiler/tooling suite and
-compile-only production acceptance:
+For pre-push checks, the development gate runs the compiler checks, strict
+backend quick audit, syntax-combination quick audit, and diff checks:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh
+./scripts/cellscript_gate.sh dev
 ```
 
-The quick gate is useful development evidence. The production mode is the
-release-facing gate because it first runs the syntax-combination CI preflight
-and then runs builder-backed local CKB transactions.
+If you specifically need the old compile-only production acceptance pass,
+`./scripts/cellscript_ckb_release_gate.sh quick` remains supported and delegates
+to `./scripts/cellscript_gate.sh release-quick`. The legacy
+`./scripts/cellscript_ckb_release_gate.sh full` command is also supported as a
+compatibility wrapper for `./scripts/cellscript_gate.sh release`. The production
+mode is the release-facing gate because it first runs compiler and
+backend-contract evidence, then runs builder-backed local CKB transactions and
+stateful scenario/action coverage.
 
 The CKB validator requires primitive-strict original bundled-example coverage,
 scoped action and lock compile coverage, builder-backed action runs,

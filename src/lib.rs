@@ -24,12 +24,13 @@ pub mod resolve;
 pub mod runtime_errors;
 pub mod simulate;
 pub mod stdlib;
+pub(crate) mod syscalls;
 pub mod types;
 pub mod wasm;
 
-pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
+pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanEvidenceMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use error::{CompileError, Result};
 use resolve::ModuleResolver;
 use serde::{Deserialize, Serialize};
@@ -342,7 +343,7 @@ pub struct MoleculeSchemaManifestEntryMetadata {
     pub type_name: String,
     pub kind: String,
     pub layout: String,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub encoded_size: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
@@ -691,39 +692,37 @@ const MOLECULE_VM_ABI_VERSION: u16 = 0x8001;
 
 /// Strip CellScript's fixed VM ABI trailer before directly loading an ELF into CKB-VM.
 pub fn strip_vm_abi_trailer(bytes: &[u8]) -> &[u8] {
-    if has_vm_abi_trailer_magic(bytes) {
+    if vm_abi_trailer(bytes).is_some() {
         &bytes[..bytes.len() - VM_ABI_TRAILER_LEN]
     } else {
         bytes
     }
 }
 
-fn has_vm_abi_trailer_magic(bytes: &[u8]) -> bool {
+fn vm_abi_trailer(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.len() < VM_ABI_TRAILER_LEN {
-        return false;
+        return None;
     }
     let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    &bytes[trailer_start..trailer_start + VM_ABI_TRAILER_MAGIC.len()] == VM_ABI_TRAILER_MAGIC
+    let trailer = &bytes[trailer_start..];
+    if &trailer[..VM_ABI_TRAILER_MAGIC.len()] != VM_ABI_TRAILER_MAGIC {
+        return None;
+    }
+    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
+    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
+    (flags == 0 && reserved == 0).then_some(trailer)
 }
 
 fn vm_abi_trailer_version(bytes: &[u8]) -> Result<Option<u16>> {
-    if !has_vm_abi_trailer_magic(bytes) {
+    let Some(trailer) = vm_abi_trailer(bytes) else {
         return Ok(None);
-    }
-
-    let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    let trailer = &bytes[trailer_start..];
+    };
     let version = u16::from_le_bytes([trailer[8], trailer[9]]);
-    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
-    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
-    if flags != 0 || reserved != 0 {
-        return Err(CompileError::without_span("invalid VM ABI trailer: flags/reserved bytes must be zero"));
-    }
     Ok(Some(version))
 }
 
 fn append_vm_abi_trailer(mut artifact: Vec<u8>, abi_version: u16) -> Vec<u8> {
-    if strip_vm_abi_trailer(&artifact).len() != artifact.len() {
+    if vm_abi_trailer(&artifact).is_some() {
         artifact.truncate(artifact.len() - VM_ABI_TRAILER_LEN);
     }
     artifact.extend_from_slice(VM_ABI_TRAILER_MAGIC);
@@ -1124,12 +1123,14 @@ fn ckb_constraints(
     let max_block_cycles = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_CYCLES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_CYCLES);
     let max_block_bytes = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_BYTES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_BYTES);
 
-    // Sanity-check environment overrides: zero or absurdly large values would
-    // produce meaningless constraint metadata.
+    // Surface obviously invalid environment overrides without changing the
+    // explicit metadata value the caller requested.
     if max_tx_verify_cycles == 0 || max_block_cycles == 0 || max_block_bytes == 0 {
         log::warn!(
-            "CKB limit env override produced zero: max_tx_verify_cycles={}, max_block_cycles={}, max_block_bytes={}; using defaults",
-            max_tx_verify_cycles, max_block_cycles, max_block_bytes
+            "CKB limit env override produced zero: max_tx_verify_cycles={}, max_block_cycles={}, max_block_bytes={}",
+            max_tx_verify_cycles,
+            max_block_cycles,
+            max_block_bytes
         );
     }
     let min_code_cell_data_capacity_shannons = (artifact_size_bytes as u64 + 8) * CKB_SHANNONS_PER_CKB;
@@ -2511,17 +2512,17 @@ fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
         }
         match schema.layout.as_str() {
             "fixed-struct-v1" => {
-                if ty.encoded_size != Some(schema.fixed_size) {
+                if ty.encoded_size != schema.fixed_size {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} does not match encoded_size {:?}",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} does not match encoded_size {:?}",
                         ty.name, schema.fixed_size, ty.encoded_size
                     )));
                 }
             }
             "molecule-table-v1" => {
-                if schema.fixed_size != 0 {
+                if schema.fixed_size.is_some() {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} must be 0 for molecule-table-v1",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} must be null for molecule-table-v1",
                         ty.name, schema.fixed_size
                     )));
                 }
@@ -2972,7 +2973,7 @@ pub struct MoleculeSchemaMetadata {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub schema_hash: String,
     pub schema: String,
 }
@@ -3810,6 +3811,7 @@ fn compile_ast_with_build(
         None => None,
     };
     let ir = scoped_ir.as_ref().unwrap_or(&ir);
+    ir::verify_module(ir)?;
 
     let mut metadata = compile_metadata_from_ir(ir, artifact_format, target_profile);
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
@@ -3999,10 +4001,13 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut source_paths = BTreeSet::new();
     let package_root = find_package_root(&entry_path)?;
+    let mut dependency_roots = BTreeSet::new();
 
     if let Some(package_root) = &package_root {
         let mut visited_roots = HashSet::new();
         collect_package_source_paths_recursive(package_root, &mut visited_roots, &mut source_paths)?;
+        let mut visited_dependency_roots = HashSet::new();
+        collect_package_dependency_roots_recursive(package_root, &mut visited_dependency_roots, &mut dependency_roots)?;
     } else if let Some(parent) = entry_path.parent() {
         for source_path in collect_cell_files(parent)? {
             source_paths.insert(source_path);
@@ -4015,6 +4020,8 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
         .map(|source_path| {
             let role = if source_path == entry_path {
                 "entry"
+            } else if dependency_roots.iter().any(|root| source_path.starts_with(root)) {
+                "dependency"
             } else if package_root.as_ref().is_some_and(|root| source_path.starts_with(root)) {
                 "package"
             } else {
@@ -4023,6 +4030,24 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
             source_unit_from_file(&source_path, role)
         })
         .collect()
+}
+
+fn collect_package_dependency_roots_recursive(
+    package_root: &Utf8Path,
+    visited_roots: &mut HashSet<Utf8PathBuf>,
+    dependency_roots: &mut BTreeSet<Utf8PathBuf>,
+) -> Result<()> {
+    let package_root = canonical_utf8_path(package_root)?;
+    if !visited_roots.insert(package_root.clone()) {
+        return Ok(());
+    }
+
+    for dep_root in local_dependency_roots(&package_root)? {
+        dependency_roots.insert(dep_root.clone());
+        collect_package_dependency_roots_recursive(&dep_root, visited_roots, dependency_roots)?;
+    }
+
+    Ok(())
 }
 
 fn collect_package_source_paths_recursive(
@@ -4237,7 +4262,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 };
 
-                let dep_root = package_root.join(path);
+                let dep_root = canonical_package_child_path(package_root, path, &format!("dependency '{}' path", name))?;
                 let dep_manifest = dep_root.join("Cell.toml");
                 if !dep_manifest.exists() {
                     return Err(CompileError::new(
@@ -4246,7 +4271,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 }
 
-                roots.push(canonical_utf8_path(&dep_root)?);
+                roots.push(dep_root);
             }
         }
     }
@@ -4283,12 +4308,7 @@ fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let manifest = load_manifest(package_root)?;
 
     let entry = manifest.package.as_ref().and_then(|package| package.entry.clone()).unwrap_or_else(default_package_entry);
-    let entry_path = package_root.join(entry);
-    if !entry_path.exists() {
-        return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-    }
-
-    canonical_utf8_path(&entry_path)
+    canonical_package_child_path(package_root, &entry, "package entry")
 }
 
 fn default_output_path_from_input(
@@ -4310,7 +4330,7 @@ fn default_output_path_from_input(
         })?;
         let manifest = load_manifest(&package_root)?;
         let out_dir = manifest.build.out_dir.as_deref().unwrap_or("build");
-        return Ok(package_root.join(out_dir).join(format!("{}.{}", stem, artifact_format.file_extension())));
+        return Ok(package_output_dir_path(&package_root, out_dir)?.join(format!("{}.{}", stem, artifact_format.file_extension())));
     }
 
     Ok(resolved_input.with_extension(artifact_format.file_extension()))
@@ -4859,7 +4879,7 @@ fn collect_body_scope(body: &ir::IrBody, used_types: &mut BTreeSet<String>, pend
             ir::IrTerminator::Return(Some(operand)) | ir::IrTerminator::Branch { cond: operand, .. } => {
                 collect_operand_named_types(operand, used_types);
             }
-            ir::IrTerminator::Return(None) | ir::IrTerminator::Jump(_) => {}
+            ir::IrTerminator::Return(None) | ir::IrTerminator::Abort(_) | ir::IrTerminator::Jump(_) => {}
         }
     }
 }
@@ -6554,7 +6574,8 @@ fn body_resource_conservation_obligations(
                     }
                 }
                 ir::IrInstruction::Create { pattern, .. }
-                    if pattern.operation == "create" && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
+                    if matches!(pattern.operation.as_str(), "create" | "output")
+                        && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
                 {
                     created_outputs.entry(pattern.ty.clone()).or_default().push(pattern.clone());
                 }
@@ -6895,9 +6916,11 @@ fn canonical_metadata_field_equality(
 }
 
 fn block_returns_error(body: &ir::IrBody, block_id: ir::BlockId) -> bool {
-    body.blocks.iter().find(|block| block.id == block_id).is_some_and(
-        |block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code != 0),
-    )
+    body.blocks.iter().find(|block| block.id == block_id).is_some_and(|block| match &block.terminator {
+        ir::IrTerminator::Abort(_) => true,
+        ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code != 0,
+        _ => false,
+    })
 }
 
 fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlias> {
@@ -8326,11 +8349,10 @@ fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str,
     let assert_fail_blocks = body
         .blocks
         .iter()
-        .filter(|block| {
-            matches!(
-                block.terminator,
-                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-            )
+        .filter(|block| match &block.terminator {
+            ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+            ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+            _ => false,
         })
         .map(|block| block.id)
         .collect::<HashSet<_>>();
@@ -9828,11 +9850,10 @@ fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
             let ir::IrTerminator::Branch { else_block, .. } = &block.terminator else {
                 return false;
             };
-            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| {
-                matches!(
-                    candidate.terminator,
-                    ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-                )
+            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| match &candidate.terminator {
+                ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+                _ => false,
             })
         })
         .count()
@@ -9932,7 +9953,7 @@ fn body_state_transition_checks(
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier; state-transition=checked-runtime; state-output-field-verifier=checked-runtime".to_string(),
             });
         } else {
             checks.push(StateTransitionCheck {
@@ -12231,7 +12252,6 @@ fn type_molecule_schema_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
 ) -> Option<MoleculeSchemaMetadata> {
     let encoded_size = type_encoded_size(type_def, type_defs);
-    let fixed_size = encoded_size.unwrap_or(0);
     let mut aliases = BTreeMap::new();
     let mut structs = Vec::new();
     let mut emitted = BTreeSet::new();
@@ -12261,7 +12281,7 @@ fn type_molecule_schema_metadata(
         layout: if encoded_size.is_some() { "fixed-struct-v1" } else { "molecule-table-v1" }.to_string(),
         name: type_def.name.clone(),
         dynamic_fields: if encoded_size.is_some() { Vec::new() } else { molecule_dynamic_fields(type_def, type_defs) },
-        fixed_size,
+        fixed_size: encoded_size,
         schema_hash,
         schema,
     })
@@ -12307,7 +12327,7 @@ fn molecule_schema_manifest_metadata(types: &[TypeMetadata], target_profile: Tar
         canonical.push('|');
         canonical.push_str(&entry.layout);
         canonical.push('|');
-        canonical.push_str(&entry.fixed_size.to_string());
+        canonical.push_str(&entry.fixed_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
         canonical.push_str(&entry.encoded_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
@@ -13337,20 +13357,15 @@ fn hex_bytes(bytes: &[u8]) -> String {
 }
 
 fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(package_root)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let manifest = load_manifest(&package_root)?;
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
     if let Some(package) = &manifest.package {
         if !package.source_roots.is_empty() {
             for source_root in &package.source_roots {
-                let root = package_root.join(source_root);
-                if !root.exists() {
-                    return Err(CompileError::new(
-                        format!("configured source root '{}' does not exist", root),
-                        error::Span::default(),
-                    ));
-                }
+                let root = canonical_package_child_path(&package_root, source_root, "configured source root")?;
                 if !root.is_dir() {
                     return Err(CompileError::new(
                         format!("configured source root '{}' is not a directory", root),
@@ -13358,7 +13373,6 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
                     ));
                 }
 
-                let root = canonical_utf8_path(&root)?;
                 if seen_roots.insert(root.clone()) {
                     roots.push(root);
                 }
@@ -13378,11 +13392,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
 
     let mut explicit_entry = None;
     if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.clone()) {
-        let entry_path = package_root.join(entry);
-        if !entry_path.exists() {
-            return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-        }
-        let entry_path = canonical_utf8_path(&entry_path)?;
+        let entry_path = canonical_package_child_path(&package_root, &entry, "package entry")?;
         if let Some(entry_parent) = entry_path.parent() {
             let entry_parent = canonical_utf8_path(entry_parent)?;
             if seen_roots.insert(entry_parent.clone()) {
@@ -13463,6 +13473,74 @@ fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map_err(|e| CompileError::new(format!("failed to canonicalize '{}': {}", path, e), error::Span::default()))?;
     Utf8PathBuf::from_path_buf(canonical)
         .map_err(|non_utf8| CompileError::new(format!("path is not valid UTF-8: {}", non_utf8.display()), error::Span::default()))
+}
+
+fn canonical_package_child_path(package_root: &Utf8Path, raw_path: &str, label: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, label)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+    if !candidate.exists() {
+        return Err(CompileError::new(format!("{} '{}' does not exist", label, candidate), error::Span::default()));
+    }
+    let canonical = canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("{} '{}' resolves outside package root '{}'", label, raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn package_output_dir_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, "build output directory")?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+
+    let existing_anchor = if candidate.exists() {
+        candidate.clone()
+    } else {
+        let mut anchor = candidate.as_path();
+        while !anchor.exists() {
+            anchor = anchor.parent().ok_or_else(|| {
+                CompileError::new(
+                    format!("build output directory '{}' has no existing package-root ancestor", raw_path),
+                    error::Span::default(),
+                )
+            })?;
+        }
+        anchor.to_path_buf()
+    };
+
+    let canonical_anchor = canonical_utf8_path(&existing_anchor)?;
+    if !canonical_anchor.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("build output directory '{}' resolves outside package root '{}'", raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+
+    Ok(candidate)
+}
+
+fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
+    let path = Utf8Path::new(raw_path);
+    if path.as_str().is_empty() {
+        return Err(CompileError::new(format!("{} path must not be empty", label), error::Span::default()));
+    }
+    if path.is_absolute() {
+        return Err(CompileError::new(
+            format!("{} '{}' must be relative to the package root", label, raw_path),
+            error::Span::default(),
+        ));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Utf8Component::ParentDir | Utf8Component::Prefix(_) | Utf8Component::RootDir))
+    {
+        return Err(CompileError::new(format!("{} '{}' must stay inside the package root", label, raw_path), error::Span::default()));
+    }
+    Ok(())
 }
 
 fn default_package_entry() -> String {
@@ -15703,18 +15781,17 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token)
+action split(token: Token, fee: u64) -> (change: Token, paid_fee: Token)
 where
     let amount = token.amount
     let remaining = amount - fee
     consume token
-    let change = create Token {
+    create change = Token {
         amount: remaining
     }
-    let paid_fee = create Token {
+    create paid_fee = Token {
         amount: fee
     }
-    return (change, paid_fee)
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -16132,6 +16209,22 @@ action select(flag: Flag) -> u64
 where
     return match flag {
         Flag::On => { 1 }
+    }
+"#;
+
+    const WILDCARD_NON_LAST_MATCH_PROGRAM: &str = r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action select(flag: Flag) -> u64
+where
+    return match flag {
+        _ => { 1 }
+        Flag::Off => { 2 }
     }
 "#;
 
@@ -17219,21 +17312,29 @@ where
 
     #[test]
     fn compile_rejects_linear_state_changes_hidden_inside_loops() {
-        compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap();
+        let local = compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(local.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", local.message);
 
         let dropped = compile(LOOP_DROPPED_LOCAL_LINEAR_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(dropped.message.contains("linear resource 'out' was not consumed"), "unexpected error: {}", dropped.message);
+        assert!(
+            dropped.message.contains("branch-local lifecycle operation 'create'")
+                || dropped.message.contains("linear resource 'out' was not consumed"),
+            "unexpected error: {}",
+            dropped.message
+        );
 
         let for_err = compile(FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            for_err.message.contains("branch-local lifecycle operation")
+                || for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             for_err.message
         );
 
         let while_err = compile(WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            while_err.message.contains("branch-local lifecycle operation")
+                || while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             while_err.message
         );
@@ -17566,8 +17667,41 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
-        assert!(asm.contains("li a0, 5"), "assert failure path did not return assertion-failed code:\n{}", asm);
+        assert!(
+            asm.contains("cellscript runtime error 5 assertion-failed"),
+            "assert failure path lost its runtime error code:\n{}",
+            asm
+        );
         assert!(!asm.contains("assert_invariant"), "assert was not lowered out of source form:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_pure_function_assert_failure_to_abort() {
+        let result = compile(
+            r#"
+module test
+
+fn checked(value: u64) -> u64 {
+    assert_invariant(value > 0, "positive")
+    return value
+}
+
+action run(value: u64) -> bool
+where
+    checked(value) > 0
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(asm.contains(".global checked"), "missing checked helper:\n{}", asm);
+        assert!(asm.contains("cellscript runtime error 5 assertion-failed"), "assert failure lost its error code:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript abi: abort to entry failure context"),
+            "pure helper assert failure must abort instead of returning ordinary u64:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -17668,7 +17802,9 @@ where
         let owner = lock.params.iter().find(|param| param.name == "owner").expect("owner param");
         assert_eq!(owner.source, "lock_args");
         assert!(owner.lock_args_data_source);
-        assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
+        let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
+        assert_eq!(ckb_constraints.min_witness_bytes, 0);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, 0);
     }
 
     #[test]
@@ -17943,18 +18079,21 @@ where
 
     #[test]
     fn compile_merges_if_branch_linear_states_conservatively() {
-        compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap();
+        let both = compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(both.message.contains("branch-local lifecycle operation 'consume'"), "unexpected error: {}", both.message);
 
         let partial = compile(IF_PARTIAL_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            partial.message.contains("branch-local lifecycle operation 'consume'")
+                || partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             partial.message
         );
 
         let mismatched = compile(IF_MISMATCHED_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            mismatched.message.contains("branch-local lifecycle operation 'consume'")
+                || mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             mismatched.message
         );
@@ -18916,6 +19055,82 @@ where
     }
 
     #[test]
+    fn compile_preserves_if_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let pair = if flag { (1, 2) } else { (3, 4) }
+    return pair.0
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .0 (unresolved)"), "if tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "if tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if tuple then field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if tuple else field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_match_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+enum Flag {
+    Off,
+    On,
+}
+
+action pick(flag: Flag) -> u64
+where
+    let pair = match flag {
+        Flag::Off => { (1, 2) },
+        _ => { (3, 4) },
+    }
+    return pair.1
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .1 (unresolved)"), "match tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "match tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 2"), "match tuple first arm field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 4"), "match tuple wildcard arm field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_if_array_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let values = if flag { [1, 2] } else { [3, 4] }
+    return values[0]
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# index access"), "if fixed-array projection fell back to runtime indexing:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if array then element was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if array else element was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_byte_string_literals_with_expected_array_type() {
+        let source = r#"
+module test
+
+action symbol() -> [u8; 4]
+where
+    return b"TEST"
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn compile_lowers_match_expression_into_branch_cfg() {
         let result = compile(MATCH_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -18931,13 +19146,22 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("seqz t0, t0"), "exhaustive match lowering missing equality check:\n{}", asm);
-        assert!(asm.contains("li a0, 8"), "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript runtime error 20 numeric-or-discriminant-invalid") && asm.contains("li a0, 20"),
+            "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}",
+            asm
+        );
     }
 
     #[test]
     fn compile_merges_linear_transfers_inside_match_expressions() {
         compile(LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful_arms = compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            stateful_arms.message.contains("branch-local lifecycle operation 'destroy'"),
+            "unexpected error: {}",
+            stateful_arms.message
+        );
 
         let moved_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -18949,7 +19173,8 @@ where
 
         let stateful_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
+            stateful_err.message.contains("branch-local lifecycle operation 'destroy'")
+                || stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
             "unexpected error: {}",
             stateful_err.message
         );
@@ -18974,6 +19199,13 @@ where
             non_exhaustive.message
         );
         assert!(non_exhaustive.message.contains("Off"), "unexpected error: {}", non_exhaustive.message);
+
+        let wildcard_non_last = compile(WILDCARD_NON_LAST_MATCH_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            wildcard_non_last.message.contains("wildcard pattern '_' must be the last match arm"),
+            "unexpected error: {}",
+            wildcard_non_last.message
+        );
     }
 
     #[test]
@@ -20920,6 +21152,8 @@ where
 
         assert_eq!(ckb_constraints.created_output_count, 1, "ckb constraints must count created outputs");
         assert_eq!(ckb_constraints.mutated_output_count, 0, "create-only action must not report mutated outputs");
+        assert_eq!(ckb_constraints.min_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
         assert!(ckb_constraints.capacity_planning_required, "create outputs must mark capacity planning as required");
         assert!(
             ckb_constraints.occupied_capacity_measurement_required,
@@ -21241,8 +21475,14 @@ where
         .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(asm.contains("# cellscript entry abi: _cellscript_entry tail-calls no-arg main"), "missing entry wrapper:\n{}", asm);
-        assert!(asm.contains("    j main"), "entry wrapper must tail-call main without clobbering ra:\n{}", asm);
+        assert!(asm.contains("# cellscript entry abi: _cellscript_entry calls no-arg main"), "missing entry wrapper:\n{}", asm);
+        assert!(asm.contains("    mv s10, sp"), "entry wrapper must stage the direct-wrapper stack base:\n{}", asm);
+        assert!(
+            asm.contains("    la s11, .Lentry_direct_done_"),
+            "entry wrapper must stage the direct-wrapper return label:\n{}",
+            asm
+        );
+        assert!(asm.contains("    call main"), "entry wrapper must call main through the direct wrapper:\n{}", asm);
         assert!(
             asm.find("_cellscript_entry:").unwrap() < asm.find("needs_arg:").unwrap(),
             "entry wrapper must precede actions:\n{}",
@@ -21356,6 +21596,25 @@ where
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn vm_abi_trailer_detection_requires_complete_zero_reserved_trailer() {
+        let mut artifact = b"\x7fELFpayload".to_vec();
+        artifact.extend_from_slice(crate::VM_ABI_TRAILER_MAGIC);
+        artifact.extend_from_slice(&crate::MOLECULE_VM_ABI_VERSION.to_le_bytes());
+        artifact.extend_from_slice(&1u16.to_le_bytes());
+        artifact.extend_from_slice(&0u32.to_le_bytes());
+
+        assert_eq!(crate::strip_vm_abi_trailer(&artifact).len(), artifact.len());
+        assert_eq!(crate::vm_abi_trailer_version(&artifact).unwrap(), None);
+
+        let appended = crate::append_vm_abi_trailer(artifact.clone(), crate::MOLECULE_VM_ABI_VERSION);
+        assert_eq!(appended.len(), artifact.len() + crate::VM_ABI_TRAILER_LEN);
+        assert_eq!(&appended[..artifact.len()], artifact.as_slice());
+
+        let stripped = crate::strip_vm_abi_trailer(&appended);
+        assert_eq!(stripped, artifact.as_slice());
     }
 
     #[test]
@@ -21798,7 +22057,8 @@ where
 
         let err = compile(LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            err.message.contains("branch-local lifecycle operation 'consume'")
+                || err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             err.message
         );
@@ -21820,7 +22080,8 @@ where
     #[test]
     fn compile_merges_linear_transfers_inside_if_expressions() {
         compile(LINEAR_IF_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful = compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(stateful.message.contains("branch-local lifecycle operation 'destroy'"), "unexpected error: {}", stateful.message);
 
         let err = compile(LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -22041,6 +22302,19 @@ where
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
+        let state_transition_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.category == "state-transition" && plan.feature == "Ticket.state")
+            .expect("state transition ProofPlan record");
+        assert_eq!(state_transition_plan.codegen_coverage_status, "covered");
+        assert!(
+            state_transition_plan.executable_evidence.iter().any(|evidence| evidence.layer == "runtime"),
+            "{:?}",
+            state_transition_plan.executable_evidence
+        );
         assert!(asm.contains("state_count=2"), "qualified flow state names should preserve verifier metadata:\n{}", asm);
     }
 
@@ -22859,6 +23133,56 @@ source_roots = ["src", "shared"]
 
         let modules = load_modules_for_input(root).unwrap();
         assert_eq!(modules.len(), 2);
+    }
+
+    #[test]
+    fn compile_package_import_alias_emits_matching_external_callable() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src", "shared"]
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("shared/math.cell"),
+            r#"
+module demo::math
+
+fn inc(value: u64) -> u64 {
+    return value + 1
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/main.cell"),
+            r#"
+module demo::main
+
+use demo::math::inc as plus_one
+
+action run() -> u64
+where
+    return plus_one(41)
+"#,
+        )
+        .unwrap();
+
+        let result = compile_path(root, CompileOptions::default()).unwrap();
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
     }
 
     #[test]
@@ -23738,6 +24062,25 @@ where
     }
 
     #[test]
+    fn primitive_compat_predicates_match_validator_modes() {
+        let default_options = CompileOptions::default();
+        assert!(default_options.is_primitive_compat_014());
+        assert!(!default_options.is_primitive_strict());
+
+        let compat_options = CompileOptions { primitive_compat: Some("0.14".to_string()), ..Default::default() };
+        assert!(compat_options.is_primitive_compat_014());
+        assert!(!compat_options.is_primitive_strict());
+
+        let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() };
+        assert!(!strict_options.is_primitive_compat_014());
+        assert!(strict_options.is_primitive_strict());
+
+        let unsupported_options = CompileOptions { primitive_compat: Some("0.16".to_string()), ..Default::default() };
+        assert!(!unsupported_options.is_primitive_compat_014());
+        assert!(!unsupported_options.is_primitive_strict());
+    }
+
+    #[test]
     fn compile_accepts_kernel_effect_capabilities_for_destroy() {
         let source = r#"
 module test
@@ -24062,7 +24405,7 @@ where
         metadata_hash: metadata_hashes[0],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250,
-    }
+    } with_lock(recipients[0])
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24082,6 +24425,11 @@ where
             "prelude must not compare against recipients[0] before body temporaries are assigned:\n{}",
             asm
         );
+        assert!(
+            !prelude.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "prelude must not compare output locks against recipients[0] before body temporaries are assigned:\n{}",
+            asm
+        );
         assert!(ordered_create > body_start, "named output create check should stay in body order:\n{}", asm);
         assert!(
             ordered_section.contains("# cellscript abi: verify output bytes field NFT.owner")
@@ -24089,10 +24437,15 @@ where
             "ordered create constraint must verify dynamic indexed expected byte fields after body lowering:\n{}",
             asm
         );
+        assert!(
+            ordered_section.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "ordered create constraint must verify dynamic indexed output locks after body lowering:\n{}",
+            asm
+        );
     }
 
     #[test]
-    fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
+    fn branch_local_anonymous_creates_are_rejected_until_effects_are_cfg_aware() {
         let source = r#"
 module test
 
@@ -24130,26 +24483,9 @@ where
     create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
 "#;
 
-        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes).unwrap();
-
-        assert!(
-            asm.contains("LOAD_CELL_DATA reason=create source=Output index=3")
-                && asm.contains("LOAD_CELL_DATA reason=create source=Output index=4"),
-            "distinct anonymous creates after three named outputs must bind Output#3 and Output#4:\n{}",
-            asm
-        );
-        assert_eq!(
-            asm.matches("LOAD_CELL_DATA reason=create source=Output index=3").count(),
-            1,
-            "anonymous creates must not all collapse to the first anonymous output index:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=1 field=5"),
-            "type_hash() of named output `pool` must read the signature-bound Pool output index:\n{}",
-            asm
-        );
+        let err =
+            compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24167,10 +24503,19 @@ where
         let molecule_schema = snapshot.molecule_schema.as_ref().expect("Snapshot molecule schema metadata");
         assert_eq!(molecule_schema.abi, "molecule");
         assert_eq!(molecule_schema.layout, "fixed-struct-v1");
-        assert_eq!(molecule_schema.fixed_size, 8);
+        assert_eq!(molecule_schema.fixed_size, Some(8));
         assert!(molecule_schema.schema.contains("struct Snapshot"));
         assert!(molecule_schema.schema.contains("amount: CellScriptUint64"));
         assert_eq!(molecule_schema.schema_hash, crate::hex_encode(&crate::ckb_blake2b256(molecule_schema.schema.as_bytes())));
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Snapshot")
+            .expect("Snapshot manifest entry");
+        assert_eq!(manifest_entry.fixed_size, Some(8));
+        assert_eq!(manifest_entry.encoded_size, Some(8));
         let amount = snapshot.fields.iter().find(|field| field.name == "amount").expect("amount field metadata");
         assert_eq!(amount.ty, "u64");
         assert_eq!(amount.offset, 0);
@@ -24367,7 +24712,7 @@ where
         assert_eq!(lock_type.encoded_size, Some(1));
         let schema = time_lock.molecule_schema.as_ref().expect("TimeLock molecule schema");
         assert_eq!(schema.layout, "fixed-struct-v1");
-        assert_eq!(schema.fixed_size, 41);
+        assert_eq!(schema.fixed_size, Some(41));
         assert!(schema.schema.contains("array CellScriptEnumTag [byte; 1];"));
         assert!(schema.schema.contains("lock_type: CellScriptEnumTag"));
     }
@@ -24456,8 +24801,17 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
         let schema = collection.molecule_schema.as_ref().expect("dynamic Collection molecule schema");
         assert_eq!(collection.encoded_size, None);
         assert_eq!(schema.layout, "molecule-table-v1");
-        assert_eq!(schema.fixed_size, 0);
+        assert_eq!(schema.fixed_size, None);
         assert_eq!(schema.dynamic_fields, vec!["name".to_string()]);
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Collection")
+            .expect("Collection manifest entry");
+        assert_eq!(manifest_entry.fixed_size, None);
+        assert_eq!(manifest_entry.encoded_size, None);
         assert!(schema.schema.contains("vector CellScriptString <byte>;"));
         assert!(schema.schema.contains("table Collection"));
         assert!(schema.schema.contains("name: CellScriptString"));
@@ -24649,7 +25003,7 @@ where
         assert_eq!(amount_field.encoded_size, Some(8));
 
         let molecule_schema = token.molecule_schema.as_ref().expect("Token molecule schema metadata");
-        assert_eq!(molecule_schema.fixed_size, 168);
+        assert_eq!(molecule_schema.fixed_size, Some(168));
         assert!(molecule_schema.schema.contains("struct Owner"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenPair"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenCheckpoints"));
@@ -25352,6 +25706,78 @@ where
     }
 
     #[test]
+    fn entry_witness_bool_params_are_canonicalized() {
+        let program = r#"
+module vm::entry_bool
+
+lock gate(flag: witness bool) -> bool {
+    return flag
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(asm.contains("entry_bool_canonical_ok"), "entry wrapper should reject non-canonical bool payload bytes:\n{}", asm);
+        assert!(asm.contains("lock_predicate_true"), "lock return path should still lower through the predicate check:\n{}", asm);
+    }
+
+    #[test]
+    fn v014_runtime_helpers_fail_closed_when_not_executable() {
+        let program = r#"
+module vm::v014_runtime_fail_closed
+
+action timed() -> u64
+where
+    require_maturity(100)
+    return 0
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("__ckb_require_maturity")
+                && asm.contains("helper is not executable yet; fail closed instead of returning a forged success value"),
+            "unimplemented v0.14 runtime helper should not return forged success:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn ckb_u64_syscall_helpers_check_return_code_and_size() {
+        let program = r#"
+module vm::ckb_syscall_checks
+
+action epoch() -> u64
+where
+    return ckb::header_epoch_number()
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("runtime_header_field_fail") && asm.contains("bne t0, t1,"),
+            "header field helper should check syscall success and exact u64 size:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn tuple_return_abi_rejects_more_than_eight_fields() {
+        let program = r#"
+module vm::wide_tuple_return
+
+action wide() -> (u64, u64, u64, u64, u64, u64, u64, u64, u64)
+where
+    return (0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let err = compile(program, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("tuple return ABI supports at most 8 fields"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn entry_witness_encoder_matches_u64_wrapper_abi() {
         let program = r#"
 module vm::entry_abi
@@ -25398,6 +25824,114 @@ where
     }
 
     #[test]
+    fn internal_calls_keep_outgoing_stack_area_abi_aligned() {
+        let program = r#"
+module vm::call_stack_align
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript abi: reserve 16 bytes for outgoing stack call arguments"),
+            "internal calls must keep sp 16-byte aligned at RISC-V call boundaries:\n{}",
+            asm
+        );
+        assert!(asm.contains("sd t0, -16(sp)"), "internal call did not stage arg8 in the aligned outgoing area:\n{}", asm);
+    }
+
+    #[test]
+    fn generated_outgoing_stack_reservations_are_psabi_aligned() {
+        let program = r#"
+module vm::call_stack_align_matrix
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+fn tenth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64) -> u64 {
+    return a8 + a9
+}
+
+fn eleventh(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64, a10: u64) -> u64 {
+    return a8 + a9 + a10
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8) + tenth(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) + eleventh(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let reservations = asm
+            .lines()
+            .filter_map(|line| {
+                let marker = "reserve ";
+                let start = line.find(marker)? + marker.len();
+                let rest = &line[start..];
+                let value = rest.split_whitespace().next()?.parse::<usize>().ok()?;
+                line.contains("outgoing stack call arguments").then_some(value)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(reservations, vec![16, 16, 32], "unexpected outgoing stack reservations:\n{}", asm);
+        assert!(
+            reservations.iter().all(|bytes| bytes % 16 == 0),
+            "all outgoing call stack reservations must preserve RISC-V psABI sp alignment:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn strict_audit_codegen_emits_only_aligned_stack_pointer_deltas() {
+        let program = r#"
+module vm::sp_delta_contract
+
+fn wide(
+    a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64,
+    a8: u64, a9: u64, a10: u64, a11: u64, a12: u64, a13: u64, a14: u64, a15: u64,
+    a16: u64, a17: u64, a18: u64, a19: u64
+) -> u64 {
+    return a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19
+}
+
+action run() -> u64
+where
+    return wide(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let sp_deltas = asm
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("addi sp, sp, "))
+            .filter_map(|value| value.parse::<i64>().ok())
+            .collect::<Vec<_>>();
+
+        assert!(!sp_deltas.is_empty(), "expected stack pointer adjustments:\n{}", asm);
+        assert!(
+            sp_deltas.iter().all(|delta| delta % 16 == 0),
+            "every emitted sp delta must preserve RISC-V psABI alignment; got {:?}\n{}",
+            sp_deltas,
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: reserve 96 bytes for outgoing stack call arguments"),
+            "20 ABI args require a 96-byte aligned outgoing area:\n{}",
+            asm
+        );
+    }
+
+    #[test]
     fn entry_witness_wrapper_supports_scalar_stack_args() {
         let program = r#"
 module vm::entry_abi
@@ -25430,12 +25964,12 @@ where
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
-                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript entry abi: reserve 16 bytes for outgoing stack call arguments"),
             "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -16(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];
@@ -25512,8 +26046,8 @@ where
     fn compile_file_loads_local_path_dependencies_from_cell_manifest() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -25547,7 +26081,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -25872,7 +26406,7 @@ name = "demo"
 version = "0.1.0"
 
 [dependencies]
-token_std = { path = "../missing_dep" }
+token_std = { path = "missing_dep" }
 "#,
         )
         .unwrap();
@@ -25889,8 +26423,54 @@ where
         .unwrap();
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("expected manifest"));
+        assert!(err.message.contains("does not exist"));
         assert!(err.message.contains("token_std"));
+    }
+
+    #[test]
+    fn compile_path_rejects_path_dependency_traversal() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        let outside = root.join("outside");
+        let app = root.join("app");
+
+        std::fs::create_dir_all(outside.join("src")).unwrap();
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+outside = { path = "../outside" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("src").join("main.cell"),
+            r#"
+module app::main
+
+action ping() -> u64
+where
+    1
+"#,
+        )
+        .unwrap();
+
+        let err = compile_path(app, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -25977,8 +26557,8 @@ where
     fn compile_path_rejects_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -25991,7 +26571,7 @@ name = "dep_pkg"
 version = "0.1.0"
 
 [dependencies]
-app_pkg = { path = "../app_pkg" }
+app_pkg = { path = "../.." }
 "#,
         )
         .unwrap();
@@ -26015,7 +26595,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -26032,7 +26612,7 @@ where
         .unwrap();
 
         let err = compile_path(app_root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("path dependency cycle detected"));
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -26115,6 +26695,88 @@ where
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("configured source root"));
         assert!(err.message.contains("shared"));
+    }
+
+    #[test]
+    fn package_entry_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "../outside/main.cell"
+"#,
+        )
+        .unwrap();
+        std::fs::write(outside.join("main.cell"), "module outside\n").unwrap();
+
+        let err = resolve_input_path(&root).unwrap_err();
+
+        assert!(err.message.contains("package entry"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_source_roots_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["../outside"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+        std::fs::write(outside.join("leak.cell"), "module outside\n").unwrap();
+
+        let err = load_modules_for_input(&root).unwrap_err();
+
+        assert!(err.message.contains("configured source root"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_out_dir_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+out_dir = "../outside"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+
+        let resolved = resolve_input_path(root).unwrap();
+        let err = default_output_path_for_input(root, &resolved, ArtifactFormat::RiscvAssembly).unwrap_err();
+
+        assert!(err.message.contains("build output directory"));
+        assert!(err.message.contains("package root"));
     }
 
     #[test]

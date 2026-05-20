@@ -445,8 +445,12 @@ fn static_integer_value(expr: &Expr, context: &ActionStateContext) -> Option<u64
 fn static_flow_state_value(expr: &Expr, context: &ActionStateContext, _type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
         Expr::Identifier(name) => {
-            let state_name = if let Some((qualified_type, state_name)) = name.rsplit_once("::") {
-                let _ = qualified_type;
+            let state_name = if let Some((_qualified_type, state_name)) = name.rsplit_once("::") {
+                // The qualified prefix is the enum namespace (e.g. OfferState in
+                // OfferState::Filled), not the flow type name (e.g. Offer).
+                // The type checker already validates that the enum type matches
+                // the state field's declared type, so stripping the prefix here
+                // is safe: a mismatched qualifier would have been rejected earlier.
                 state_name
             } else {
                 name.as_str()

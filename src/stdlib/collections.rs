@@ -1,4 +1,4 @@
-use crate::ir::IrType;
+use crate::{ir::IrType, runtime_errors::CellScriptRuntimeError};
 
 pub struct Collections;
 
@@ -299,6 +299,7 @@ impl Collections {
 
         asm.push_str("# CellScript Collections Library\n\n");
         asm.push_str(".section .text\n\n");
+        asm.push_str(&Self::generate_fail_closed_helper());
 
         asm.push_str(&Self::generate_vec_impl());
 
@@ -309,23 +310,36 @@ impl Collections {
         asm
     }
 
+    fn generate_fail_closed_helper() -> String {
+        let mut asm = String::new();
+        let error = CellScriptRuntimeError::CollectionBoundsInvalid;
+
+        asm.push_str("# Collection runtime allocation is not part of the verifier ABI yet.\n");
+        asm.push_str(".global __cellscript_collection_runtime_unavailable\n");
+        asm.push_str("__cellscript_collection_runtime_unavailable:\n");
+        asm.push_str(&format!("    # cellscript runtime error {} {}\n", error.code(), error.name()));
+        asm.push_str(&format!("    li a0, {}\n", error.code()));
+        asm.push_str(".Lcellscript_collection_runtime_unavailable:\n");
+        asm.push_str("    j .Lcellscript_collection_runtime_unavailable\n\n");
+
+        asm
+    }
+
     fn generate_vec_impl() -> String {
         let mut asm = String::new();
 
         asm.push_str("# Vec::new\n");
         asm.push_str(".global __vec_new\n");
         asm.push_str("__vec_new:\n");
-        asm.push_str("    li a0, 24          # sizeof(Vec) = 24 bytes\n");
-        asm.push_str("    li a7, 2101        # alloc syscall\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    sd zero, 0(a0)     # capacity = 0\n");
-        asm.push_str("    sd zero, 8(a0)     # length = 0\n");
-        asm.push_str("    sd zero, 16(a0)    # data = null\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# Vec::push\n");
         asm.push_str(".global __vec_push\n");
         asm.push_str("__vec_push:\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
+
+        asm.push_str("# Vec::push unchecked body retained as non-entry documentation only\n");
+        asm.push_str(".Lvec_push_unreachable_body:\n");
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");
         asm.push_str("    sd s0, 16(sp)\n");
@@ -357,23 +371,19 @@ impl Collections {
         asm.push_str(".Lvec_push_alloc:\n");
         asm.push_str("    sd t0, 0(s0)       # update capacity\n");
         asm.push_str("    slli a0, t0, 3     # new_size = capacity * 8\n");
-        asm.push_str("    li a7, 2101        # alloc\n");
-        asm.push_str("    ecall\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n");
         asm.push_str("    sd a0, 16(s0)      # update data pointer\n");
         asm.push_str("    j .Lvec_push_insert\n\n");
 
         asm.push_str("# Vec::len\n");
         asm.push_str(".global __vec_len\n");
         asm.push_str("__vec_len:\n");
-        asm.push_str("    ld a0, 8(a0)       # return length\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# Vec::is_empty\n");
         asm.push_str(".global __vec_is_empty\n");
         asm.push_str("__vec_is_empty:\n");
-        asm.push_str("    ld t0, 8(a0)       # length\n");
-        asm.push_str("    seqz a0, t0        # return length == 0\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm
     }
@@ -384,51 +394,22 @@ impl Collections {
         asm.push_str("# HashMap::new\n");
         asm.push_str(".global __hashmap_new\n");
         asm.push_str("__hashmap_new:\n");
-        asm.push_str("    li a0, 32          # sizeof(HashMap)\n");
-        asm.push_str("    li a7, 2101        # alloc\n");
-        asm.push_str("    ecall\n");
-        asm.push_str("    li t0, 16          # default bucket count\n");
-        asm.push_str("    sd t0, 0(a0)       # bucket_count\n");
-        asm.push_str("    sd zero, 8(a0)     # entry_count\n");
-        asm.push_str("    sd zero, 16(a0)    # buckets\n");
-        asm.push_str("    sd zero, 24(a0)    # hasher state\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# HashMap::insert\n");
         asm.push_str(".global __hashmap_insert\n");
         asm.push_str("__hashmap_insert:\n");
-        asm.push_str("    addi sp, sp, -48\n");
-        asm.push_str("    sd ra, 40(sp)\n");
-        asm.push_str("    sd s0, 32(sp)\n");
-        asm.push_str("    sd s1, 24(sp)\n");
-        asm.push_str("    sd s2, 16(sp)\n");
-        asm.push_str("    sd s3, 8(sp)\n");
-        asm.push_str("    mv s0, a0          # map\n");
-        asm.push_str("    mv s1, a1          # key\n");
-        asm.push_str("    mv s2, a2          # value\n");
-        asm.push_str("    # Compute hash (simplified: key % bucket_count)\n");
-        asm.push_str("    ld t0, 0(s0)       # bucket_count\n");
-        asm.push_str("    remu s3, s1, t0    # hash = key % bucket_count\n");
-        asm.push_str("    # Insert entry...\n");
-        asm.push_str("    ld ra, 40(sp)\n");
-        asm.push_str("    ld s0, 32(sp)\n");
-        asm.push_str("    ld s1, 24(sp)\n");
-        asm.push_str("    ld s2, 16(sp)\n");
-        asm.push_str("    ld s3, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 48\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# HashMap::get\n");
         asm.push_str(".global __hashmap_get\n");
         asm.push_str("__hashmap_get:\n");
-        asm.push_str("    li a0, 0           # simplified None / not found\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# HashMap::len\n");
         asm.push_str(".global __hashmap_len\n");
         asm.push_str("__hashmap_len:\n");
-        asm.push_str("    ld a0, 8(a0)       # return entry_count\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm
     }
@@ -450,13 +431,7 @@ impl Collections {
         asm.push_str("# HashSet::contains\n");
         asm.push_str(".global __hashset_contains\n");
         asm.push_str("__hashset_contains:\n");
-        asm.push_str("    addi sp, sp, -16\n");
-        asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    call __hashmap_get\n");
-        asm.push_str("    ld ra, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 16\n");
-        asm.push_str("    # Check if result is Some\n");
-        asm.push_str("    ret\n\n");
+        asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm
     }
@@ -505,6 +480,52 @@ mod tests {
             if let Some(target) = instruction.strip_prefix("call ") {
                 let target = target.trim();
                 assert!(labels.contains(target), "generated collection assembly calls missing label {target}");
+            }
+        }
+    }
+
+    #[test]
+    fn collection_assembly_has_no_raw_syscalls_or_unclassified_helpers() {
+        let asm = Collections::generate_assembly();
+        assert!(!asm.lines().any(|line| line.split('#').next().unwrap_or_default().trim() == "ecall"), "{asm}");
+
+        for symbol in asm.lines().filter_map(|line| line.strip_prefix(".global ")) {
+            assert!(
+                crate::syscalls::helper_inventory_entry(symbol, crate::TargetProfile::Ckb).is_some(),
+                "generated collection helper {symbol} must be classified"
+            );
+        }
+    }
+
+    #[test]
+    fn collection_public_helpers_do_not_dereference_raw_a0_handles() {
+        let asm = Collections::generate_assembly();
+        let mut pending_global = None::<&str>;
+        let mut current_global = None::<&str>;
+
+        for line in asm.lines() {
+            let trimmed = line.trim();
+            if let Some(symbol) = trimmed.strip_prefix(".global ") {
+                pending_global = Some(symbol);
+                current_global = None;
+                continue;
+            }
+            if let Some(label) = trimmed.strip_suffix(':') {
+                if !label.starts_with(".L") {
+                    current_global = if pending_global == Some(label) { pending_global } else { None };
+                    pending_global = None;
+                }
+                continue;
+            }
+
+            let instruction = trimmed.split('#').next().unwrap_or_default().trim();
+            if current_global.is_some() {
+                assert!(
+                    !instruction.contains("(a0)"),
+                    "public collection helper {} must not dereference an unchecked raw a0 handle: {}",
+                    current_global.unwrap_or("<unknown>"),
+                    instruction
+                );
             }
         }
     }

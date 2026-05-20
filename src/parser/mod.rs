@@ -483,7 +483,7 @@ impl<'a> Parser<'a> {
                                 self.advance();
                                 Some(a)
                             }
-                            _ => None,
+                            _ => return Err(CompileError::new("expected import alias after 'as'", self.current().span)),
                         }
                     }
                     _ => None,
@@ -502,7 +502,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             Some(a)
                         }
-                        _ => None,
+                        _ => return Err(CompileError::new("expected import alias after 'as'", self.current().span)),
                     }
                 }
                 _ => None,
@@ -3431,6 +3431,19 @@ use cellscript::fungible_token::{Token, MintAuthority}
         assert_eq!(use_stmt.imports.len(), 2);
         assert_eq!(use_stmt.imports[0].name, "Token");
         assert_eq!(use_stmt.imports[1].name, "MintAuthority");
+    }
+
+    #[test]
+    fn test_rejects_use_as_without_alias() {
+        let input = r#"
+module test
+
+use demo::types::Token as
+"#;
+        let tokens = lex(input).unwrap();
+        let error = parse(&tokens).unwrap_err();
+
+        assert!(error.message.contains("expected import alias after 'as'"), "{}", error.message);
     }
 
     #[test]
