@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompileError, Span};
-use crate::lexer::token::{keyword_or_identifier, TokenKind};
+use crate::lexer::token::TokenKind;
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1208,18 +1208,8 @@ impl LspServer {
     }
 
     pub fn rename(&self, uri: &str, position: Position, new_name: String) -> HashMap<String, Vec<TextEdit>> {
-        let mut changes = HashMap::new();
-        if !is_valid_rename_identifier(&new_name) {
-            return changes;
-        }
-        let refs = self.find_references(uri, position);
-        if refs.is_empty() {
-            return changes;
-        }
-        for location in refs {
-            changes.entry(location.uri).or_insert_with(Vec::new).push(TextEdit { range: location.range, new_text: new_name.clone() });
-        }
-        changes
+        let _ = (uri, position, new_name);
+        HashMap::new()
     }
 
     pub fn code_action(&self, uri: &str, range: Range) -> Vec<CodeAction> {
@@ -2156,20 +2146,6 @@ fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     std::fs::canonicalize(&candidate).ok().and_then(|path| Utf8PathBuf::from_path_buf(path).ok()).or(Some(candidate))
 }
 
-fn is_valid_rename_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_alphabetic() || first == '_') {
-        return false;
-    }
-    if !chars.all(|ch| ch.is_alphanumeric() || ch == '_') {
-        return false;
-    }
-    matches!(keyword_or_identifier(name), TokenKind::Identifier(_))
-}
-
 fn utf8_path_to_file_uri(path: &camino::Utf8Path) -> String {
     format!("file://{}", path)
 }
@@ -2690,105 +2666,14 @@ where
     }
 
     #[test]
-    fn test_workspace_rename_groups_edits_by_file() {
-        let temp = tempdir().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
-        let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
-        let types_path = root.join("src/types.cell");
-        std::fs::write(&types_path, types_source).unwrap();
-        let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
-        let main_path = root.join("src/main.cell");
-        std::fs::write(&main_path, main_source).unwrap();
-
-        let mut server = LspServer::new();
-        let types_uri = utf8_path_to_file_uri(&types_path);
-        server.open_document(types_uri.clone(), types_source.to_string());
-
-        let changes = server.rename(&types_uri, Position { line: 2, character: 10 }, "Asset".to_string());
-
-        let type_uri =
-            changes.keys().find(|uri| uri.ends_with("/src/types.cell")).expect("rename should edit the defining file").clone();
-        let main_uri = changes
-            .keys()
-            .find(|uri| uri.ends_with("/src/main.cell"))
-            .expect("rename should edit referencing files separately")
-            .clone();
-        let type_edits = changes.get(&type_uri).expect("defining file edits should be present");
-        let main_edits = changes.get(&main_uri).expect("referencing file edits should be present");
-        assert_eq!(changes.len(), 2);
-        assert_eq!(type_edits.len(), 1);
-        assert!(main_edits.len() >= 2, "main file should include the import and parameter references: {:?}", main_edits);
-        assert!(changes.values().flatten().all(|edit| edit.new_text == "Asset"));
-    }
-
-    #[test]
-    fn test_workspace_rename_rejects_invalid_new_names() {
+    fn test_workspace_rename_is_disabled_until_symbol_scoped() {
         let mut server = LspServer::new();
         let uri = "file:///rename.cell".to_string();
         let source = "module demo\n\nresource Token {\n    amount: u64,\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
-        for new_name in ["", "123Token", "Token-V2", "resource", "Address"] {
-            let changes = server.rename(&uri, Position { line: 2, character: 10 }, new_name.to_string());
-            assert!(changes.is_empty(), "rename should fail closed for invalid new name `{new_name}`");
-        }
-    }
+        let changes = server.rename(&uri, Position { line: 2, character: 10 }, "Asset".to_string());
 
-    #[test]
-    fn test_workspace_rename_respects_unicode_identifier_boundaries() {
-        let mut server = LspServer::new();
-        let uri = "file:///unicode_rename.cell".to_string();
-        let source = r#"module unicode_rename
-
-resource βToken {
-    amount: u64,
-}
-
-resource Token {
-    amount: u64,
-}
-
-action inspect(token: Token) -> u64
-where
-    token.amount
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let changes = server.rename(&uri, Position { line: 6, character: 10 }, "Asset".to_string());
-        let edits = changes.get(&uri).expect("rename should edit the current document");
-
-        assert!(edits.iter().all(|edit| edit.range.start.line != 2), "rename must not edit the suffix of βToken: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 6), "definition should be renamed: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 10), "type reference should be renamed: {edits:?}");
-    }
-
-    #[test]
-    fn test_workspace_rename_skips_comments_and_strings() {
-        let mut server = LspServer::new();
-        let uri = "file:///rename_text.cell".to_string();
-        let source = r#"module rename_text
-
-// Token in a comment must not be edited.
-resource Token {
-    amount: u64,
-}
-
-action inspect(token: Token) -> u64
-where
-    let label = "Token"
-    token.amount
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let changes = server.rename(&uri, Position { line: 3, character: 10 }, "Asset".to_string());
-        let edits = changes.get(&uri).expect("rename should edit identifiers in the current document");
-
-        assert!(edits.iter().all(|edit| edit.range.start.line != 2), "rename must not edit comments: {edits:?}");
-        assert!(edits.iter().all(|edit| edit.range.start.line != 8), "rename must not edit string literals: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 3), "definition should be renamed: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 7), "type reference should be renamed: {edits:?}");
+        assert!(changes.is_empty(), "rename must fail closed until symbol-scoped edits are implemented");
     }
 }

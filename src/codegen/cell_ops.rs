@@ -940,10 +940,11 @@ impl CodeGenerator {
                 continue;
             };
             self.emit_sp_addi("t4", input_buffer_offset);
-            self.emit_molecule_table_field_bounds_to_t5(
+            self.emit_validated_molecule_table_field_bounds_to_t5(
                 "t4",
                 input_size_offset,
                 layout.index,
+                field_count,
                 width,
                 &format!("{} input.{}", pattern.ty, transition.field),
             );
@@ -964,10 +965,11 @@ impl CodeGenerator {
             self.emit("# cellscript abi: preserve mutate table expected scalar across output field load");
             self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
-            self.emit_molecule_table_field_bounds_to_t5(
+            self.emit_validated_molecule_table_field_bounds_to_t5(
                 "t4",
                 output_size_offset,
                 layout.index,
+                field_count,
                 width,
                 &format!("{} output.{}", pattern.ty, transition.field),
             );
@@ -980,7 +982,6 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
             self.emit_label(&ok_label);
         }
-        let _ = field_count;
         true
     }
 

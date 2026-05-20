@@ -1,7 +1,7 @@
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
@@ -361,7 +361,7 @@ dist/
     }
 
     fn resolve_from_path_at(&self, name: &str, path: &str, base_root: &Path) -> Result<(ResolvedPackage, PackageManifest)> {
-        let package_path = base_root.join(path);
+        let package_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
         let manifest_path = package_path.join("Cell.toml");
 
         if !manifest_path.exists() {
@@ -404,16 +404,21 @@ dist/
         std::fs::create_dir_all(&cache_dir).map_err(|e| {
             CompileError::without_span(format!("failed to create git cache directory '{}': {}", cache_dir.display(), e))
         })?;
+        let cache_dir = std::fs::canonicalize(&cache_dir).map_err(|e| {
+            CompileError::without_span(format!("failed to canonicalize git cache directory '{}': {}", cache_dir.display(), e))
+        })?;
 
         let requested_ref = detailed.rev.as_ref().or(detailed.tag.as_ref()).or(detailed.branch.as_ref());
-        let cache_key = format!("{}#{}", url, requested_ref.map(String::as_str).unwrap_or("HEAD"));
-        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
+        let cache_name = git_cache_entry_name(name, url, requested_ref.map(String::as_str));
         let clone_dir = cache_dir.join(&cache_name);
+        ensure_git_cache_child(&cache_dir, &clone_dir)?;
 
         let git_result = if clone_dir.exists() && clone_dir.join(".git").exists() {
             Self::git_update(&clone_dir)
         } else {
-            let _ = std::fs::remove_dir_all(&clone_dir);
+            remove_git_cache_child(&cache_dir, &clone_dir).map_err(|e| {
+                CompileError::without_span(format!("failed to remove stale git cache entry '{}': {}", clone_dir.display(), e))
+            })?;
             Self::git_clone(url, &clone_dir)
         };
 
@@ -619,13 +624,87 @@ impl DependencyGraph {
     }
 }
 
-fn simple_hash(s: &str) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in s.bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+fn canonical_package_child_path(base_root: &Path, raw_path: &str, label: &str) -> Result<PathBuf> {
+    reject_package_path_escape(raw_path, label)?;
+    let canonical_root = std::fs::canonicalize(base_root)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {}", base_root.display(), e)))?;
+    let candidate = base_root.join(raw_path);
+    if !candidate.exists() {
+        return Err(CompileError::without_span(format!("{} '{}' does not exist", label, candidate.display())));
     }
-    hash
+    let canonical_candidate = std::fs::canonicalize(&candidate)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, candidate.display(), e)))?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err(CompileError::without_span(format!(
+            "{} '{}' resolves outside package root '{}'",
+            label,
+            raw_path,
+            canonical_root.display()
+        )));
+    }
+    Ok(canonical_candidate)
+}
+
+fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
+    let path = Path::new(raw_path);
+    if raw_path.is_empty() {
+        return Err(CompileError::without_span(format!("{} path must not be empty", label)));
+    }
+    if path.is_absolute() {
+        return Err(CompileError::without_span(format!("{} '{}' must be relative to the package root", label, raw_path)));
+    }
+    if path.components().any(|component| matches!(component, Component::ParentDir | Component::Prefix(_) | Component::RootDir)) {
+        return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
+    }
+    Ok(())
+}
+
+fn git_cache_entry_name(name: &str, url: &str, requested_ref: Option<&str>) -> String {
+    let cache_key = format!("{}\0{}\0{}", name, url, requested_ref.unwrap_or("HEAD"));
+    let digest = blake2b_simd::Params::new().hash_length(16).personal(b"CellPkgGitCache").hash(cache_key.as_bytes());
+    format!("git-{}", digest.to_hex())
+}
+
+fn ensure_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
+    if target.file_name().is_none() {
+        return Err(CompileError::without_span(format!("invalid git cache target '{}'", target.display())));
+    }
+
+    let parent =
+        target.parent().ok_or_else(|| CompileError::without_span(format!("invalid git cache target '{}'", target.display())))?;
+    let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
+        CompileError::without_span(format!("failed to canonicalize git cache target parent '{}': {}", parent.display(), e))
+    })?;
+    if canonical_parent != cache_root {
+        return Err(CompileError::without_span(format!(
+            "git cache target '{}' resolves outside cache root '{}'",
+            target.display(),
+            cache_root.display()
+        )));
+    }
+
+    if target.exists() {
+        let canonical_target = std::fs::canonicalize(target).map_err(|e| {
+            CompileError::without_span(format!("failed to canonicalize git cache target '{}': {}", target.display(), e))
+        })?;
+        if !canonical_target.starts_with(cache_root) {
+            return Err(CompileError::without_span(format!(
+                "git cache target '{}' resolves outside cache root '{}'",
+                target.display(),
+                cache_root.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn remove_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
+    ensure_git_cache_child(cache_root, target)?;
+    if target.exists() {
+        std::fs::remove_dir_all(target)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1094,7 +1173,7 @@ version = "0.1.0"
         assert_eq!(math.name, "math");
         assert_eq!(math.version, "0.1.0");
         assert!(matches!(math.source, PackageSource::Local(_)));
-        assert_eq!(manager.get_source_paths(), vec![root.join("deps/math/src")]);
+        assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(root.join("deps/math/src")).unwrap()]);
     }
 
     #[test]
@@ -1136,7 +1215,7 @@ version = "0.2.0"
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/util/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/math/deps/util/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1159,12 +1238,12 @@ version = "0.1.0"
 
 [dependencies.util]
 version = "0.1.0"
-path = "../util"
+path = "deps/util"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/util/Cell.toml"),
+            root.join("deps/math/deps/util/Cell.toml"),
             r#"
 [package]
 name = "util"
@@ -1182,11 +1261,57 @@ version = "0.1.0"
     }
 
     #[test]
+    fn package_manager_rejects_local_path_dependency_traversal() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
+        std::fs::create_dir_all(root.join("outside/src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+path = "deps/math"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/math/Cell.toml"),
+            r#"
+[package]
+name = "math"
+version = "0.1.0"
+
+[dependencies.outside]
+path = "../outside"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("outside/Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(root);
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("must stay inside the package root"), "{}", error.message);
+    }
+
+    #[test]
     fn package_manager_rejects_transitive_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/a/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/b/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/a/deps/b/deps/a/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1207,19 +1332,28 @@ name = "a"
 version = "0.1.0"
 
 [dependencies.b]
-path = "../b"
+path = "deps/b"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/b/Cell.toml"),
+            root.join("deps/a/deps/b/Cell.toml"),
             r#"
 [package]
 name = "b"
 version = "0.1.0"
 
 [dependencies.a]
-path = "../a"
+path = "deps/a"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/a/deps/b/deps/a/Cell.toml"),
+            r#"
+[package]
+name = "a"
+version = "0.1.0"
 "#,
         )
         .unwrap();
@@ -1378,6 +1512,34 @@ remote = "1.2.3"
         assert!(error.message.contains("not supported yet"));
         assert!(error.message.contains("local path dependency"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn git_cache_entry_name_is_hash_only() {
+        let cache_name = git_cache_entry_name("../../outside", "https://example.com/repo.git", Some("../rev"));
+
+        assert!(cache_name.starts_with("git-"));
+        assert!(!cache_name.contains(".."));
+        assert!(!cache_name.contains('/'));
+        assert!(!cache_name.contains('\\'));
+        let digest = cache_name.strip_prefix("git-").unwrap();
+        assert_eq!(digest.len(), 32);
+        assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn git_cache_child_check_rejects_path_escape() {
+        let temp = tempdir().unwrap();
+        let cache_root = temp.path().join(".cell").join("git-cache");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let cache_root = std::fs::canonicalize(cache_root).unwrap();
+        let escaped = cache_root.join("..").join("..").join("outside");
+        let error = ensure_git_cache_child(&cache_root, &escaped).unwrap_err();
+
+        assert!(error.message.contains("outside cache root"), "{}", error.message);
     }
 
     #[test]

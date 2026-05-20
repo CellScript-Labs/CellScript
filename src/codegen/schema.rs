@@ -55,6 +55,29 @@ pub(crate) enum SourcePointer {
     StackAddress { offset: usize },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CanonicalMoleculeTable<'a> {
+    pub(crate) base_reg: &'a str,
+    pub(crate) size_offset: usize,
+    pub(crate) field_count: usize,
+    pub(crate) header_size: usize,
+    pub(crate) context: &'a str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ValidatedFieldSpan<'a> {
+    pub(crate) table: CanonicalMoleculeTable<'a>,
+    pub(crate) field_index: usize,
+    pub(crate) start_reg: &'static str,
+    pub(crate) end_reg: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TypedField<'a> {
+    pub(crate) span: ValidatedFieldSpan<'a>,
+    pub(crate) exact_width: Option<usize>,
+}
+
 pub(crate) fn fixed_scalar_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
     match (ty, fixed_size) {
         (IrType::Bool | IrType::U8, Some(1)) => Some(1),
@@ -342,82 +365,84 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
     }
 
-    pub(crate) fn emit_molecule_table_field_bounds_to_t5(
-        &mut self,
-        base_reg: &str,
-        size_offset: usize,
-        field_index: usize,
-        field_width: usize,
-        context: &str,
-    ) {
-        self.emit(format!("# cellscript abi: molecule table field {} index={} min_width={}", context, field_index, field_width));
-        let field_count = field_index + 1;
-        let header_size = 4 + 4 * field_count;
-        self.emit_loaded_schema_bounds_check(size_offset, header_size, context);
-
-        self.emit_stack_load("a0", size_offset);
-        let total_ok = self.fresh_label("molecule_table_total_ok");
-        self.emit_unaligned_scalar_load(base_reg, "t0", "t2", 0, 4);
-        self.emit("sub t2, t0, a0");
-        self.emit(format!("beqz t2, {}", total_ok));
-        self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
-        self.emit_label(&total_ok);
-
-        self.emit_unaligned_scalar_load(base_reg, "t5", "t2", 4 + 4 * field_index, 4);
-        self.emit(format!("li t1, {}", header_size));
-        self.emit("sltu t2, t5, t1");
-        let start_ok = self.fresh_label("molecule_table_start_ok");
-        self.emit(format!("beqz t2, {}", start_ok));
-        self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
-        self.emit_label(&start_ok);
-
-        if field_width > 0 {
-            self.emit(format!("li t1, {}", field_width));
-            self.emit("add t3, t5, t1");
-            self.emit("sltu t2, t3, t5");
-            let overflow_ok = self.fresh_label("molecule_table_field_overflow_ok");
-            self.emit(format!("beqz t2, {}", overflow_ok));
-            self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
-            self.emit_label(&overflow_ok);
-            self.emit("sltu t2, a0, t3");
-            let end_ok = self.fresh_label("molecule_table_end_ok");
-            self.emit(format!("beqz t2, {}", end_ok));
-            self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
-            self.emit_label(&end_ok);
-        }
-    }
-
-    pub(crate) fn emit_molecule_table_field_span_to_t5_t6(
+    pub(crate) fn emit_validated_molecule_table_field_bounds_to_t5(
         &mut self,
         base_reg: &str,
         size_offset: usize,
         field_index: usize,
         field_count: usize,
+        field_width: usize,
         context: &str,
     ) {
+        let table = self.canonical_molecule_table_plan(base_reg, size_offset, field_count, context);
         self.emit(format!(
-            "# cellscript abi: molecule table dynamic field {} index={} field_count={}",
-            context, field_index, field_count
+            "# cellscript abi: CanonicalMoleculeTable field {} index={} field_count={} width={}",
+            context, field_index, field_count, field_width
         ));
-        let header_size = 4 + 4 * field_count;
-        self.emit_loaded_schema_bounds_check(size_offset, header_size, context);
+        let span = self.emit_validated_field_span_from_canonical_table_to_t5_t6(&table, field_index);
+        let typed = TypedField { span, exact_width: (field_width > 0).then_some(field_width) };
+        self.emit_typed_field_exact_width_check(&typed);
+    }
 
-        self.emit_stack_load("a0", size_offset);
+    fn canonical_molecule_table_plan<'a>(
+        &self,
+        base_reg: &'a str,
+        size_offset: usize,
+        field_count: usize,
+        context: &'a str,
+    ) -> CanonicalMoleculeTable<'a> {
+        CanonicalMoleculeTable { base_reg, size_offset, field_count, header_size: 4 + 4 * field_count, context }
+    }
+
+    fn emit_validate_canonical_molecule_table(&mut self, table: &CanonicalMoleculeTable<'_>) {
+        self.emit(format!(
+            "# cellscript abi: validate CanonicalMoleculeTable {} field_count={} header_size={}",
+            table.context, table.field_count, table.header_size
+        ));
+        self.emit_loaded_schema_bounds_check(table.size_offset, table.header_size, table.context);
+
+        self.emit_stack_load("a0", table.size_offset);
         let total_ok = self.fresh_label("molecule_table_total_ok");
-        self.emit_unaligned_scalar_load(base_reg, "t0", "t2", 0, 4);
+        self.emit_unaligned_scalar_load(table.base_reg, "t0", "t2", 0, 4);
         self.emit("sub t2, t0, a0");
         self.emit(format!("beqz t2, {}", total_ok));
         self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
         self.emit_label(&total_ok);
 
-        self.emit_unaligned_scalar_load(base_reg, "t5", "t2", 4 + 4 * field_index, 4);
-        if field_index + 1 < field_count {
-            self.emit_unaligned_scalar_load(base_reg, "t6", "t2", 4 + 4 * (field_index + 1), 4);
+        self.emit("mv a1, a0");
+        self.emit(format!("mv a0, {}", table.base_reg));
+        self.emit(format!("li a2, {}", table.field_count));
+        self.emit(format!("li a3, {}", table.header_size));
+        self.emit("call __cellscript_validate_molecule_table_offsets");
+        let offsets_ok = self.fresh_label("molecule_table_offsets_ok");
+        self.emit(format!("beqz a0, {}", offsets_ok));
+        self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+        self.emit_label(&offsets_ok);
+        self.emit_stack_load("a0", table.size_offset);
+    }
+
+    fn emit_validated_field_span_from_canonical_table_to_t5_t6<'a>(
+        &mut self,
+        table: &CanonicalMoleculeTable<'a>,
+        field_index: usize,
+    ) -> ValidatedFieldSpan<'a> {
+        if field_index >= table.field_count {
+            self.emit(format!(
+                "# cellscript abi: fail closed because Molecule table field {} index {} is outside field_count {}",
+                table.context, field_index, table.field_count
+            ));
+            self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+            return ValidatedFieldSpan { table: *table, field_index, start_reg: "t5", end_reg: "t6" };
+        }
+        self.emit_validate_canonical_molecule_table(table);
+        self.emit(format!("# cellscript abi: ValidatedFieldSpan {} field_index={} start=t5 end=t6", table.context, field_index));
+        self.emit_unaligned_scalar_load(table.base_reg, "t5", "t2", 4 + 4 * field_index, 4);
+        if field_index + 1 < table.field_count {
+            self.emit_unaligned_scalar_load(table.base_reg, "t6", "t2", 4 + 4 * (field_index + 1), 4);
         } else {
             self.emit("add t6, a0, zero");
         }
-
-        self.emit(format!("li t1, {}", header_size));
+        self.emit(format!("li t1, {}", table.header_size));
         self.emit("sltu t2, t5, t1");
         let start_ok = self.fresh_label("molecule_table_start_ok");
         self.emit(format!("beqz t2, {}", start_ok));
@@ -435,6 +460,38 @@ impl CodeGenerator {
         self.emit(format!("beqz t2, {}", end_ok));
         self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
         self.emit_label(&end_ok);
+
+        ValidatedFieldSpan { table: *table, field_index, start_reg: "t5", end_reg: "t6" }
+    }
+
+    fn emit_typed_field_exact_width_check(&mut self, field: &TypedField<'_>) {
+        let Some(width) = field.exact_width else {
+            return;
+        };
+        let _boundary_context = (field.span.table.context, field.span.field_index);
+        self.emit(format!("sub t3, {}, {}", field.span.end_reg, field.span.start_reg));
+        self.emit(format!("li t1, {}", width));
+        self.emit("sub t2, t3, t1");
+        let width_ok = self.fresh_label("molecule_table_width_ok");
+        self.emit(format!("beqz t2, {}", width_ok));
+        self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+        self.emit_label(&width_ok);
+    }
+
+    pub(crate) fn emit_validated_molecule_table_field_span_to_t5_t6(
+        &mut self,
+        base_reg: &str,
+        size_offset: usize,
+        field_index: usize,
+        field_count: usize,
+        context: &str,
+    ) {
+        let table = self.canonical_molecule_table_plan(base_reg, size_offset, field_count, context);
+        self.emit(format!(
+            "# cellscript abi: CanonicalMoleculeTable dynamic field {} index={} field_count={}",
+            context, field_index, field_count
+        ));
+        self.emit_validated_field_span_from_canonical_table_to_t5_t6(&table, field_index);
     }
 
     pub(crate) fn emit_mutate_replacement_field_hash_check(
@@ -726,6 +783,7 @@ impl CodeGenerator {
                 input_size_offset,
                 input_buffer_offset,
                 layout,
+                field_count,
                 width,
                 &format!("{} input.{}", type_name, field),
                 start_offset,
@@ -734,6 +792,7 @@ impl CodeGenerator {
                 output_size_offset,
                 output_buffer_offset,
                 layout,
+                field_count,
                 width,
                 &format!("{} output.{}", type_name, field),
                 output_start_offset,
@@ -792,7 +851,7 @@ impl CodeGenerator {
         len_stack_offset: usize,
     ) {
         self.emit_sp_addi("t4", buffer_offset);
-        self.emit_molecule_table_field_span_to_t5_t6("t4", size_offset, field_index, field_count, context);
+        self.emit_validated_molecule_table_field_span_to_t5_t6("t4", size_offset, field_index, field_count, context);
         self.emit_sp_addi("t4", buffer_offset);
         self.emit("add t5, t4, t5");
         self.emit("add t6, t4, t6");
@@ -806,12 +865,13 @@ impl CodeGenerator {
         size_offset: usize,
         buffer_offset: usize,
         layout: &SchemaFieldLayout,
+        field_count: usize,
         width: usize,
         context: &str,
         start_stack_offset: usize,
     ) {
         self.emit_sp_addi("t4", buffer_offset);
-        self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, layout.index, width, context);
+        self.emit_validated_molecule_table_field_bounds_to_t5("t4", size_offset, layout.index, field_count, width, context);
         self.emit_sp_addi("t4", buffer_offset);
         self.emit("add t5, t4, t5");
         self.emit_stack_store("t5", start_stack_offset);
@@ -1611,8 +1671,23 @@ impl CodeGenerator {
             self.emit_loaded_schema_exact_size_check(size_offset, expected_size, &source.type_name);
             self.emit_loaded_schema_bounds_check(size_offset, source.layout.offset + width, &context);
         } else {
+            let Some(field_count) = self.type_layouts.get(&source.type_name).map(|fields| fields.len()) else {
+                self.emit(format!(
+                    "# cellscript abi: fail closed because schema field source {}.{} has no type layout",
+                    source.type_name, source.field
+                ));
+                self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+                return;
+            };
             self.emit_stack_load("t4", source.obj_var_id * 8);
-            self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
+            self.emit_validated_molecule_table_field_bounds_to_t5(
+                "t4",
+                size_offset,
+                source.layout.index,
+                field_count,
+                width,
+                &context,
+            );
         }
     }
 
@@ -1632,8 +1707,23 @@ impl CodeGenerator {
                     self.emit_large_addi(dest_reg, dest_reg, source.layout.offset as i64);
                 }
             } else {
+                let Some(field_count) = self.type_layouts.get(&source.type_name).map(|fields| fields.len()) else {
+                    self.emit(format!(
+                        "# cellscript abi: fail closed because schema field source {}.{} has no type layout",
+                        source.type_name, source.field
+                    ));
+                    self.emit_fail(CellScriptRuntimeError::BoundsCheckFailed);
+                    return false;
+                };
                 self.emit_stack_load("t4", source.obj_var_id * 8);
-                self.emit_molecule_table_field_bounds_to_t5("t4", size_offset, source.layout.index, width, &context);
+                self.emit_validated_molecule_table_field_bounds_to_t5(
+                    "t4",
+                    size_offset,
+                    source.layout.index,
+                    field_count,
+                    width,
+                    &context,
+                );
                 self.emit(format!("add {}, t4, t5", dest_reg));
             }
             true
@@ -1660,7 +1750,11 @@ impl CodeGenerator {
         let Some(type_name) = named_type_name(&var.ty) else {
             return false;
         };
-        let Some(layout) = self.type_layouts.get(type_name).and_then(|fields| fields.get(field)).cloned() else {
+        let Some(layouts) = self.type_layouts.get(type_name) else {
+            return false;
+        };
+        let field_count = layouts.len();
+        let Some(layout) = layouts.get(field).cloned() else {
             return false;
         };
         let Some(width) = layout_fixed_byte_width(&layout) else {
@@ -1683,10 +1777,11 @@ impl CodeGenerator {
                     self.emit(format!("addi t0, t4, {}", layout.offset));
                 }
             } else {
-                self.emit_molecule_table_field_bounds_to_t5(
+                self.emit_validated_molecule_table_field_bounds_to_t5(
                     "t4",
                     size_offset,
                     layout.index,
+                    field_count,
                     width,
                     &format!("{}.{}", type_name, field),
                 );
@@ -1742,7 +1837,7 @@ impl CodeGenerator {
         self.emit(format!("# field access .{}", field));
         self.emit(format!("# cellscript abi: dynamic schema field {} index={} as Molecule vector bytes", context, layout.index));
         self.emit_stack_load("t4", obj.id * 8);
-        self.emit_molecule_table_field_span_to_t5_t6("t4", size_offset, layout.index, field_count, &context);
+        self.emit_validated_molecule_table_field_span_to_t5_t6("t4", size_offset, layout.index, field_count, &context);
         self.emit("add t0, t4, t5");
         self.emit("sub t1, t6, t5");
         self.emit_stack_store("t0", dest.id * 8);

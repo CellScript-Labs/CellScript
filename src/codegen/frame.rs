@@ -44,6 +44,16 @@ impl CodeGenerator {
         let Some(function) = self.current_function.clone() else {
             return;
         };
+        let abort_codes = self.abort_handler_codes.iter().copied().collect::<Vec<_>>();
+        for error in abort_codes {
+            self.emit_label(&format!(".L{}_abort_{}", function, error.code()));
+            self.emit_runtime_error_comment(error);
+            self.emit(format!("li a0, {}", error.code()));
+            self.emit("# cellscript abi: abort to entry failure context");
+            self.emit("mv sp, s10");
+            self.emit("mv ra, s11");
+            self.emit("ret");
+        }
         let fail_codes = self.fail_handler_codes.iter().copied().collect::<Vec<_>>();
         for error in fail_codes {
             self.emit_label(&format!(".L{}_fail_{}", function, error.code()));
@@ -701,7 +711,7 @@ impl CodeGenerator {
             IrTerminator::Return(Some(operand)) | IrTerminator::Branch { cond: operand, .. } => {
                 self.record_operand(operand, max_var_id)
             }
-            IrTerminator::Return(None) | IrTerminator::Jump(_) => {}
+            IrTerminator::Return(None) | IrTerminator::Abort(_) | IrTerminator::Jump(_) => {}
         }
     }
 

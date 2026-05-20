@@ -211,10 +211,19 @@ impl CodeGenerator {
     }
 
     pub(crate) fn emit_entry_direct_wrapper(&mut self, target: &str) {
+        let done_label = self.fresh_label("entry_direct_done");
         self.emit_global(ENTRY_WITNESS_LABEL);
         self.emit_label(ENTRY_WITNESS_LABEL);
-        self.emit(format!("# cellscript entry abi: {} tail-calls no-arg {}", ENTRY_WITNESS_LABEL, target));
-        self.emit(format!("j {}", target));
+        self.emit(format!("# cellscript entry abi: {} calls no-arg {}", ENTRY_WITNESS_LABEL, target));
+        self.emit_large_addi("sp", "sp", -16);
+        self.emit_stack_store("ra", 8);
+        self.emit("mv s10, sp");
+        self.emit(format!("la s11, {}", done_label));
+        self.emit(format!("call {}", target));
+        self.emit_label(&done_label);
+        self.emit_stack_load("ra", 8);
+        self.emit_large_addi("sp", "sp", 16);
+        self.emit("ret");
     }
 
     pub(crate) fn emit_entry_witness_wrapper(&mut self, target: &str, params: &[IrParam]) -> Result<()> {
@@ -240,6 +249,8 @@ impl CodeGenerator {
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
+        self.emit("mv s10, sp");
+        self.emit(format!("la s11, {}", done_label));
         if has_lock_args {
             self.emit_entry_load_script_args(&fail_label);
         }

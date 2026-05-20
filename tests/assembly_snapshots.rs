@@ -63,10 +63,13 @@ fn snapshot_simple_action_assembly() {
     let assembly = compile_to_asm(SIMPLE_ACTION_SOURCE);
     let n = normalise_assembly(&assembly);
 
-    // Structural shape: entry jumps to main, main has one block, shared epilogue.
+    // Structural shape: entry calls main through the direct wrapper, main has one block, shared epilogue.
     assert!(n.contains(".global _cellscript_entry"), "missing entry label:\n{}", n);
-    assert!(n.contains("# cellscript entry abi: _cellscript_entry tail-calls no-arg main"), "missing entry ABI comment:\n{}", n);
-    assert!(n.contains("j main"), "entry should tail-call main:\n{}", n);
+    assert!(n.contains("# cellscript entry abi: _cellscript_entry calls no-arg main"), "missing entry ABI comment:\n{}", n);
+    assert!(n.contains("mv s10, sp"), "entry should stage direct-wrapper stack base:\n{}", n);
+    assert!(n.contains("la s11, .Lentry_direct_done_"), "entry should stage direct-wrapper return label:\n{}", n);
+    assert!(n.contains("call main"), "entry should call main through the direct wrapper:\n{}", n);
+    assert!(n.contains("ld ra, 8(sp)\n    addi sp, sp, 16\n    ret"), "entry should restore wrapper frame and return:\n{}", n);
     assert!(n.contains(".global main"), "missing main label:\n{}", n);
     assert!(n.contains("main:"), "missing main function label:\n{}", n);
     assert!(n.contains("addi sp, sp, -1184"), "main should have expected frame size:\n{}", n);
@@ -194,6 +197,88 @@ fn snapshot_witness_schema_syscall_assembly() {
     assert!(n.contains("# cellscript runtime error 2 bounds-check-failed"), "should have bounds-check-failed error path:\n{}", n);
     assert!(n.contains("# cellscript runtime error 4 exact-size-mismatch"), "should have exact-size-mismatch error path:\n{}", n);
     assert!(n.contains("# cellscript runtime error 5 assertion-failed"), "should have assertion-failed error path:\n{}", n);
+}
+
+#[test]
+fn runtime_u64_helpers_fail_closed_before_value_use() {
+    let assembly = compile_to_asm(
+        r"module __snap_runtime_u64
+
+lock check() -> bool {
+    ckb::header_epoch_number() > 0
+}
+",
+    );
+    let n = normalise_assembly(&assembly);
+    let after_call =
+        n.split_once("\n    call __ckb_header_epoch_number").map(|(_, after)| after).expect("header helper call should be present");
+    let status_check = after_call.find("beqz a1").expect("header helper status should be checked");
+    let value_store = after_call.find("sd a0").expect("header helper value should be stored");
+    assert!(status_check < value_store, "header helper status must be checked before a0 is used as a value:\n{}", after_call);
+    assert!(
+        after_call.contains("mv a0, a1\n    j .Lcheck_epilogue"),
+        "runtime helper failure should return the helper status through the function epilogue:\n{}",
+        after_call
+    );
+
+    let helper = n.split_once("__ckb_header_epoch_number:").map(|(_, after)| after).expect("header helper body should be present");
+    assert!(helper.contains("li a1, 0"), "header helper success must clear status in a1:\n{}", helper);
+    assert!(
+        helper.contains("# cellscript runtime error 1 syscall-failed\n    li a0, 0\n    li a1, 1"),
+        "header helper failure must not forge a0=1 as a value:\n{}",
+        helper
+    );
+}
+
+#[test]
+fn runtime_void_helpers_fail_closed_before_continuing() {
+    let assembly = compile_to_asm(
+        r"module __snap_runtime_void
+
+lock check() -> bool {
+    require_maturity(100)
+    true
+}
+",
+    );
+    let n = normalise_assembly(&assembly);
+    let after_call = n
+        .split_once("\n    call __ckb_require_maturity")
+        .map(|(_, after)| after)
+        .expect("require_maturity helper call should be present");
+    let status_check = after_call.find("beqz a1").expect("void helper status should be checked");
+    let success_value = after_call.find("li a0, 1").expect("lock success value should be present");
+    assert!(status_check < success_value, "void runtime helper status must be checked before execution continues:\n{}", after_call);
+    assert!(
+        after_call.contains("mv a0, a1\n    j .Lcheck_epilogue"),
+        "runtime helper failure should return the helper status through the function epilogue:\n{}",
+        after_call
+    );
+    assert!(
+        after_call.contains("__ckb_require_maturity:\n    # cellscript abi: v0.14 CKB semantic helper")
+            && after_call.contains("# cellscript runtime error 1 syscall-failed\n    li a0, 0\n    li a1, 1"),
+        "fail-closed helper should return status in a1 without forging success data:\n{}",
+        after_call
+    );
+}
+
+#[test]
+fn runtime_witness_helpers_fail_closed_before_pointer_use() {
+    let assembly = compile_to_asm(WITNESS_SOURCE);
+    let n = normalise_assembly(&assembly);
+    for helper in ["__ckb_witness_lock", "__ckb_sighash_all"] {
+        let after_call = n
+            .split_once(&format!("\n    call {}", helper))
+            .map(|(_, after)| after)
+            .unwrap_or_else(|| panic!("{helper} call should be present"));
+        let status_check = after_call.find("beqz a1").unwrap_or_else(|| panic!("{helper} status should be checked"));
+        let pointer_store = after_call.find("sd a0").unwrap_or_else(|| panic!("{helper} pointer/result should be stored"));
+        assert!(
+            status_check < pointer_store,
+            "{helper} status must be checked before a0 is stored or compared as data:\n{}",
+            after_call
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

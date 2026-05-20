@@ -547,8 +547,8 @@ fn cellc_compiles_bundled_examples_to_requested_outputs() {
 fn cellc_compiles_package_with_local_path_dependency() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -582,7 +582,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -657,8 +657,8 @@ where
 fn cellc_rejects_underdeclared_effects_from_path_dependency_calls() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -699,7 +699,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -751,8 +751,8 @@ where
 fn cellc_rejects_external_dependency_function_calls_until_linking_exists() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -786,7 +786,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -3466,7 +3466,7 @@ fn cellc_install_path_updates_lockfile_and_remove_prunes_it() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let dep_root = root.join("math");
-    let util_root = root.join("util");
+    let util_root = dep_root.join("deps").join("util");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(util_root.join("src")).unwrap();
@@ -3488,7 +3488,7 @@ version = "0.2.0"
 
 [dependencies.util]
 version = "0.1.0"
-path = "../util"
+path = "deps/util"
 "#,
     )
     .unwrap();

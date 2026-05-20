@@ -62,25 +62,14 @@ use crate::error::{CompileError, Result};
 
 use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
+pub(crate) use crate::syscalls::{CKB_SOURCE_CELL_DEP, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT};
 use crate::{ArtifactFormat, TargetProfile};
 use std::collections::{BTreeSet, HashMap};
 
-const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = 2082;
-const CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER: u64 = 2083;
-const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = 2074;
-const CKB_LOAD_SCRIPT_SYSCALL_NUMBER: u64 = 2052;
-const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = 2081;
-const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
 const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = 1;
 const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = 2;
 const CKB_INPUT_FIELD_SINCE: u64 = 1;
-pub(crate) const CKB_SOURCE_INPUT: u64 = 0x01;
-pub(crate) const CKB_SOURCE_OUTPUT: u64 = 0x02;
-const CKB_SOURCE_CELL_DEP: u64 = 0x03;
-const CKB_SOURCE_HEADER_DEP: u64 = 0x04;
-const CKB_SOURCE_GROUP_FLAG: u64 = 0x0100_0000_0000_0000;
-const CKB_SOURCE_GROUP_INPUT: u64 = CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT;
 pub(crate) const CKB_CELL_FIELD_CAPACITY: u64 = 0;
 pub(crate) const CKB_CELL_FIELD_LOCK_HASH: u64 = 3;
 pub(crate) const CKB_CELL_FIELD_TYPE_HASH: u64 = 5;
@@ -264,6 +253,8 @@ pub struct CodeGenerator {
     bind_readonly_schema_params: bool,
     /// Whether the current function is a CKB lock predicate entry.
     current_lock_entry: bool,
+    /// Whether source-level aborts in the current function must skip typed callers and return to the entry wrapper.
+    current_abort_to_entry: bool,
     /// Mutable schema parameter variable ids keyed by source binding name.
     mutate_param_ids: HashMap<String, usize>,
     /// Output index for source-level operations that materialize transaction Outputs.
@@ -274,6 +265,8 @@ pub struct CodeGenerator {
     verified_collection_push_values: BTreeSet<usize>,
     /// Function-local cold fail handlers keyed by returned verifier error code.
     fail_handler_codes: BTreeSet<CellScriptRuntimeError>,
+    /// Function-local cold abort handlers keyed by non-returning verifier error code.
+    abort_handler_codes: BTreeSet<CellScriptRuntimeError>,
     /// Unique label counter for runtime checks.
     next_runtime_label: usize,
 }
@@ -371,11 +364,13 @@ impl CodeGenerator {
             output_param_ids: HashMap::new(),
             bind_readonly_schema_params: false,
             current_lock_entry: false,
+            current_abort_to_entry: false,
             mutate_param_ids: HashMap::new(),
             operation_output_indices: HashMap::new(),
             verified_operation_outputs: BTreeSet::new(),
             verified_collection_push_values: BTreeSet::new(),
             fail_handler_codes: BTreeSet::new(),
+            abort_handler_codes: BTreeSet::new(),
             next_runtime_label: 0,
         }
     }
@@ -614,7 +609,9 @@ impl CodeGenerator {
         self.current_function = Some(action.name.clone());
         self.current_state_transition_edges = action.state_transition_edges.clone();
         self.bind_readonly_schema_params = true;
+        self.current_abort_to_entry = false;
         self.fail_handler_codes.clear();
+        self.abort_handler_codes.clear();
         self.prepare_function_layout(&action.body, &action.params)?;
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&action.params);
@@ -641,6 +638,7 @@ impl CodeGenerator {
         self.current_function = None;
         self.current_state_transition_edges.clear();
         self.bind_readonly_schema_params = false;
+        self.current_abort_to_entry = false;
         self.schema_pointer_vars.clear();
         self.schema_pointer_size_offsets.clear();
         self.fixed_byte_param_size_offsets.clear();
@@ -671,7 +669,9 @@ impl CodeGenerator {
     fn generate_pure_fn(&mut self, function: &IrPureFn) -> Result<()> {
         self.current_function = Some(function.name.clone());
         self.bind_readonly_schema_params = false;
+        self.current_abort_to_entry = true;
         self.fail_handler_codes.clear();
+        self.abort_handler_codes.clear();
         self.prepare_function_layout(&function.body, &function.params)?;
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&function.params);
@@ -692,6 +692,7 @@ impl CodeGenerator {
         self.emit_shared_epilogue();
 
         self.current_function = None;
+        self.current_abort_to_entry = false;
         self.schema_pointer_vars.clear();
         self.schema_pointer_size_offsets.clear();
         self.fixed_byte_param_size_offsets.clear();
@@ -723,7 +724,9 @@ impl CodeGenerator {
         self.current_function = Some(lock.name.clone());
         self.bind_readonly_schema_params = true;
         self.current_lock_entry = true;
+        self.current_abort_to_entry = false;
         self.fail_handler_codes.clear();
+        self.abort_handler_codes.clear();
         self.prepare_function_layout(&lock.body, &lock.params)?;
         self.next_virtual_output = 0;
         self.set_schema_pointer_params(&lock.params);
@@ -750,6 +753,7 @@ impl CodeGenerator {
         self.current_function = None;
         self.bind_readonly_schema_params = false;
         self.current_lock_entry = false;
+        self.current_abort_to_entry = false;
         self.schema_pointer_vars.clear();
         self.schema_pointer_size_offsets.clear();
         self.fixed_byte_param_size_offsets.clear();
@@ -1578,7 +1582,11 @@ impl CodeGenerator {
                     self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                     return Ok(());
                 }
-                if let Some(lock) = &pattern.lock {
+                if defer_all_output_fields {
+                    if pattern.lock.is_some() {
+                        self.emit("# cellscript abi: output lock verification deferred to ordered create constraint");
+                    }
+                } else if let Some(lock) = &pattern.lock {
                     if !(self.can_verify_output_lock(pattern) && self.emit_output_lock_hash_check(index, lock)) {
                         self.emit("# cellscript abi: output lock verification incomplete for this named output");
                         self.emit("# cellscript abi: fail closed because the output lock is not fully verified");
@@ -1843,7 +1851,8 @@ impl CodeGenerator {
                 self.emit_operand_to_register("a0", operand);
                 if self.current_lock_entry {
                     let ok_label = self.fresh_label("lock_predicate_true");
-                    self.emit(format!("bnez a0, {}", ok_label));
+                    self.emit("li t0, 1");
+                    self.emit(format!("beq a0, t0, {}", ok_label));
                     self.emit_runtime_error_comment(CellScriptRuntimeError::AssertionFailed);
                     self.emit(format!("li a0, {}", CellScriptRuntimeError::AssertionFailed.code()));
                     self.emit_epilogue();
@@ -1853,6 +1862,9 @@ impl CodeGenerator {
                     return Ok(());
                 }
                 self.emit_epilogue();
+            }
+            IrTerminator::Abort(error) => {
+                self.emit_abort(*error);
             }
             IrTerminator::Jump(block_id) => {
                 self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), block_id.0));
@@ -1915,6 +1927,21 @@ impl CodeGenerator {
         if let Some(function) = &self.current_function {
             self.fail_handler_codes.insert(error);
             self.emit(format!("j .L{}_fail_{}", function, error.code()));
+            return;
+        }
+        self.emit_runtime_error_comment(error);
+        self.emit(format!("li a0, {}", error.code()));
+        self.emit_epilogue_body();
+    }
+
+    fn emit_abort(&mut self, error: CellScriptRuntimeError) {
+        if !self.current_abort_to_entry {
+            self.emit_fail(error);
+            return;
+        }
+        if let Some(function) = &self.current_function {
+            self.abort_handler_codes.insert(error);
+            self.emit(format!("j .L{}_abort_{}", function, error.code()));
             return;
         }
         self.emit_runtime_error_comment(error);
@@ -2344,6 +2371,7 @@ pub(crate) use schema::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stdlib::StdLib;
     use std::path::PathBuf;
 
     const SUPPORTED_INTERNAL_ASSEMBLER_MNEMONICS: &[(&str, &str)] = &[
@@ -2765,6 +2793,241 @@ where
         assert!(assembly.contains("u128 Sub with u64 delta"), "u128 - u64 lowering missing:\n{}", assembly);
         assert!(assembly.contains("sltu t2, t5, t0"), "u128 add carry check missing:\n{}", assembly);
         assert!(assembly.contains("sltu t2, t0, t1"), "u128 subtract borrow check missing:\n{}", assembly);
+    }
+
+    #[test]
+    fn dynamic_molecule_fixed_field_codegen_checks_full_header_and_exact_span() {
+        let program = r#"
+module codegen::dynamic_table_fixed_field
+
+resource Collection has store {
+    name: String,
+    symbol: String,
+    creator: Address,
+    total_supply: u64,
+    max_supply: u64,
+    base_uri: String,
+}
+
+lock check(collection: protected Collection, expected: witness Address) -> bool {
+    collection.creator == expected
+}
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("dynamic Molecule fixed field access should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("# cellscript abi: CanonicalMoleculeTable field Collection.creator index=2 field_count=6 width=32"),
+            "fixed field access must validate against the schema field count, not field_index + 1:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: bounds check Collection.creator required=28"),
+            "6-field dynamic table fixed access must require the full 28-byte offset header:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: validate CanonicalMoleculeTable Collection.creator field_count=6 header_size=28"),
+            "fixed field access must reject non-monotonic or out-of-bounds offset tables:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("call __cellscript_validate_molecule_table_offsets"),
+            "full offset table validation should use the shared helper instead of inlining per-field-count checks:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("sub t3, t6, t5\n    li t1, 32\n    sub t2, t3, t1"),
+            "fixed field access must reject spans whose end-start is not the field width:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("sub a4, t3, a3"),
+            "shared Molecule offset validator must require the first offset to equal the full header size:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("mv a5, a2")
+                && assembly.contains("bne t1, a5, .L__cellscript_molecule_offsets_not_first")
+                && !assembly.contains("mv t4, a2")
+                && !assembly.contains("bne t1, t4, .L__cellscript_molecule_offsets_not_first"),
+            "shared Molecule offset validator must not clobber t4, which validated field access keeps as the table base:\n{}",
+            assembly
+        );
+    }
+
+    #[test]
+    fn dynamic_molecule_vector_field_access_validates_full_table_offsets() {
+        let program = r#"
+module codegen::dynamic_table_vector_field
+
+receipt Emergency {
+    lock_hash: Hash,
+    approvers: Vec<Address>,
+}
+
+lock enough(emergency: protected Emergency, required: witness u8) -> bool {
+    emergency.approvers.len() >= required as usize
+}
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("dynamic Molecule vector field access should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("# cellscript abi: CanonicalMoleculeTable dynamic field Emergency.approvers index=1 field_count=2"),
+            "dynamic table field access should expose schema field count in the checked boundary:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: validate CanonicalMoleculeTable Emergency.approvers field_count=2 header_size=12"),
+            "dynamic field spans must validate the whole containing table before returning a field span:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: ValidatedFieldSpan Emergency.approvers field_index=1 start=t5 end=t6"),
+            "dynamic field spans must cross the ValidatedFieldSpan boundary before vector len reads:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("call __cellscript_validate_molecule_table_offsets"),
+            "dynamic table spans must use the shared whole-table canonicality guard:\n{}",
+            assembly
+        );
+    }
+
+    #[test]
+    fn semantic_molecule_field_access_uses_validated_api_gate() {
+        let schema_source = include_str!("schema.rs");
+        let cell_ops_source = include_str!("cell_ops.rs");
+
+        assert!(
+            !schema_source.contains("emit_molecule_table_field_bounds_to_t5(")
+                && !schema_source.contains("emit_molecule_table_field_span_to_t5_t6("),
+            "semantic Molecule field helpers must expose validated entrypoints only"
+        );
+        assert!(
+            !cell_ops_source.contains("emit_molecule_table_field_bounds_to_t5(")
+                && !cell_ops_source.contains("emit_molecule_table_field_span_to_t5_t6("),
+            "cell operation codegen must not bypass the validated Molecule field boundary"
+        );
+        assert!(
+            schema_source.contains("emit_validated_molecule_table_field_bounds_to_t5")
+                && schema_source.contains("emit_validated_molecule_table_field_span_to_t5_t6")
+                && schema_source.contains("emit_validated_field_span_from_canonical_table_to_t5_t6"),
+            "validated Molecule table and field-span gates should remain explicit in schema codegen"
+        );
+    }
+
+    #[test]
+    fn vm2_syscall_helpers_fail_closed_instead_of_returning_raw_status_values() {
+        let program = r#"
+module codegen::vm2_fd
+
+lock always_ok(fd_index: witness u64) -> bool {
+    let fd = inherited_fd(fd_index)
+    close(fd)
+    true
+}
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions {
+                target: Some("riscv64-asm".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..crate::CompileOptions::default()
+            },
+        )
+        .expect("VM2 helper use should compile to fail-closed runtime helpers");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("__ckb_inherited_fd:\n")
+                && assembly.contains("__ckb_close:\n")
+                && assembly.contains("status-checked but not value-typed yet; fail closed"),
+            "VM2 helper wrappers must not be raw ecall; ret value shims:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: __ckb_inherited_fd returns status in a1; fail closed on nonzero")
+                && assembly.contains("# cellscript abi: __ckb_close returns status in a1; fail closed on nonzero"),
+            "call sites must check VM2 helper status before continuing to a final true:\n{}",
+            assembly
+        );
+        assert!(
+            !assembly.contains("__ckb_inherited_fd:\n# cellscript abi: CKB VM v2 syscall 2607")
+                || !assembly.contains(
+                    "__ckb_inherited_fd:\n# cellscript abi: CKB VM v2 syscall 2607 (resolve inherited fd)\nli a7, 2607\necall\nret"
+                ),
+            "VM2 inherited_fd must not expose raw ecall result as a DSL value:\n{}",
+            assembly
+        );
+    }
+
+    #[test]
+    fn emitted_runtime_helper_symbols_are_classified_in_syscall_inventory() {
+        let program = r#"
+module codegen::helper_inventory
+
+receipt Emergency {
+    lock_hash: Hash,
+    approvers: Vec<Address>,
+}
+
+lock helpers(
+    emergency: protected Emergency,
+    input: witness Hash,
+    expected: witness Hash,
+    fd_index: witness u64,
+    required: witness u8,
+) -> bool {
+    let now = env::current_timepoint()
+    let epoch = ckb::header_epoch_number()
+    let since = ckb::input_since()
+    let fd = inherited_fd(fd_index)
+    close(fd)
+    let digest = hash_blake2b(input)
+    digest == expected && now >= epoch && since >= 0 && emergency.approvers.len() >= required as usize
+}
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions {
+                target: Some("riscv64-asm".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..crate::CompileOptions::default()
+            },
+        )
+        .expect("helper inventory fixture should compile");
+        let mut assembly = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
+        assembly.push_str(std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8"));
+
+        let helper_symbols = assembly
+            .lines()
+            .filter_map(|line| line.strip_prefix(".global "))
+            .filter(|symbol| {
+                symbol.starts_with("__syscall_")
+                    || symbol.starts_with("__ckb_")
+                    || symbol.starts_with("__env_")
+                    || symbol.starts_with("__cellscript_")
+            })
+            .filter(|symbol| !symbol.starts_with("__cellscript_const_data_"))
+            .collect::<BTreeSet<_>>();
+
+        assert!(!helper_symbols.is_empty(), "fixture should emit runtime/std helper globals");
+        for symbol in helper_symbols {
+            assert!(
+                crate::syscalls::helper_inventory_entry(symbol, TargetProfile::Ckb).is_some(),
+                "emitted helper symbol {symbol} must be classified in syscall/helper inventory"
+            );
+        }
     }
 
     fn supported_instruction_surface_lines() -> Vec<String> {

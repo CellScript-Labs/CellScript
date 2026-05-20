@@ -24,12 +24,13 @@ pub mod resolve;
 pub mod runtime_errors;
 pub mod simulate;
 pub mod stdlib;
+pub(crate) mod syscalls;
 pub mod types;
 pub mod wasm;
 
-pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
+pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanEvidenceMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use error::{CompileError, Result};
 use resolve::ModuleResolver;
 use serde::{Deserialize, Serialize};
@@ -3999,10 +4000,13 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut source_paths = BTreeSet::new();
     let package_root = find_package_root(&entry_path)?;
+    let mut dependency_roots = BTreeSet::new();
 
     if let Some(package_root) = &package_root {
         let mut visited_roots = HashSet::new();
         collect_package_source_paths_recursive(package_root, &mut visited_roots, &mut source_paths)?;
+        let mut visited_dependency_roots = HashSet::new();
+        collect_package_dependency_roots_recursive(package_root, &mut visited_dependency_roots, &mut dependency_roots)?;
     } else if let Some(parent) = entry_path.parent() {
         for source_path in collect_cell_files(parent)? {
             source_paths.insert(source_path);
@@ -4015,6 +4019,8 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
         .map(|source_path| {
             let role = if source_path == entry_path {
                 "entry"
+            } else if dependency_roots.iter().any(|root| source_path.starts_with(root)) {
+                "dependency"
             } else if package_root.as_ref().is_some_and(|root| source_path.starts_with(root)) {
                 "package"
             } else {
@@ -4023,6 +4029,24 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
             source_unit_from_file(&source_path, role)
         })
         .collect()
+}
+
+fn collect_package_dependency_roots_recursive(
+    package_root: &Utf8Path,
+    visited_roots: &mut HashSet<Utf8PathBuf>,
+    dependency_roots: &mut BTreeSet<Utf8PathBuf>,
+) -> Result<()> {
+    let package_root = canonical_utf8_path(package_root)?;
+    if !visited_roots.insert(package_root.clone()) {
+        return Ok(());
+    }
+
+    for dep_root in local_dependency_roots(&package_root)? {
+        dependency_roots.insert(dep_root.clone());
+        collect_package_dependency_roots_recursive(&dep_root, visited_roots, dependency_roots)?;
+    }
+
+    Ok(())
 }
 
 fn collect_package_source_paths_recursive(
@@ -4237,7 +4261,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 };
 
-                let dep_root = package_root.join(path);
+                let dep_root = canonical_package_child_path(package_root, path, &format!("dependency '{}' path", name))?;
                 let dep_manifest = dep_root.join("Cell.toml");
                 if !dep_manifest.exists() {
                     return Err(CompileError::new(
@@ -4246,7 +4270,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 }
 
-                roots.push(canonical_utf8_path(&dep_root)?);
+                roots.push(dep_root);
             }
         }
     }
@@ -4283,12 +4307,7 @@ fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let manifest = load_manifest(package_root)?;
 
     let entry = manifest.package.as_ref().and_then(|package| package.entry.clone()).unwrap_or_else(default_package_entry);
-    let entry_path = package_root.join(entry);
-    if !entry_path.exists() {
-        return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-    }
-
-    canonical_utf8_path(&entry_path)
+    canonical_package_child_path(package_root, &entry, "package entry")
 }
 
 fn default_output_path_from_input(
@@ -4310,7 +4329,7 @@ fn default_output_path_from_input(
         })?;
         let manifest = load_manifest(&package_root)?;
         let out_dir = manifest.build.out_dir.as_deref().unwrap_or("build");
-        return Ok(package_root.join(out_dir).join(format!("{}.{}", stem, artifact_format.file_extension())));
+        return Ok(package_output_dir_path(&package_root, out_dir)?.join(format!("{}.{}", stem, artifact_format.file_extension())));
     }
 
     Ok(resolved_input.with_extension(artifact_format.file_extension()))
@@ -4859,7 +4878,7 @@ fn collect_body_scope(body: &ir::IrBody, used_types: &mut BTreeSet<String>, pend
             ir::IrTerminator::Return(Some(operand)) | ir::IrTerminator::Branch { cond: operand, .. } => {
                 collect_operand_named_types(operand, used_types);
             }
-            ir::IrTerminator::Return(None) | ir::IrTerminator::Jump(_) => {}
+            ir::IrTerminator::Return(None) | ir::IrTerminator::Abort(_) | ir::IrTerminator::Jump(_) => {}
         }
     }
 }
@@ -6554,7 +6573,8 @@ fn body_resource_conservation_obligations(
                     }
                 }
                 ir::IrInstruction::Create { pattern, .. }
-                    if pattern.operation == "create" && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
+                    if matches!(pattern.operation.as_str(), "create" | "output")
+                        && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
                 {
                     created_outputs.entry(pattern.ty.clone()).or_default().push(pattern.clone());
                 }
@@ -6895,9 +6915,11 @@ fn canonical_metadata_field_equality(
 }
 
 fn block_returns_error(body: &ir::IrBody, block_id: ir::BlockId) -> bool {
-    body.blocks.iter().find(|block| block.id == block_id).is_some_and(
-        |block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code != 0),
-    )
+    body.blocks.iter().find(|block| block.id == block_id).is_some_and(|block| match &block.terminator {
+        ir::IrTerminator::Abort(_) => true,
+        ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code != 0,
+        _ => false,
+    })
 }
 
 fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlias> {
@@ -8326,11 +8348,10 @@ fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str,
     let assert_fail_blocks = body
         .blocks
         .iter()
-        .filter(|block| {
-            matches!(
-                block.terminator,
-                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-            )
+        .filter(|block| match &block.terminator {
+            ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+            ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+            _ => false,
         })
         .map(|block| block.id)
         .collect::<HashSet<_>>();
@@ -9828,11 +9849,10 @@ fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
             let ir::IrTerminator::Branch { else_block, .. } = &block.terminator else {
                 return false;
             };
-            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| {
-                matches!(
-                    candidate.terminator,
-                    ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-                )
+            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| match &candidate.terminator {
+                ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+                _ => false,
             })
         })
         .count()
@@ -9932,7 +9952,7 @@ fn body_state_transition_checks(
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier; state-transition=checked-runtime; state-output-field-verifier=checked-runtime".to_string(),
             });
         } else {
             checks.push(StateTransitionCheck {
@@ -13333,20 +13353,15 @@ fn hex_bytes(bytes: &[u8]) -> String {
 }
 
 fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(package_root)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let manifest = load_manifest(&package_root)?;
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
     if let Some(package) = &manifest.package {
         if !package.source_roots.is_empty() {
             for source_root in &package.source_roots {
-                let root = package_root.join(source_root);
-                if !root.exists() {
-                    return Err(CompileError::new(
-                        format!("configured source root '{}' does not exist", root),
-                        error::Span::default(),
-                    ));
-                }
+                let root = canonical_package_child_path(&package_root, source_root, "configured source root")?;
                 if !root.is_dir() {
                     return Err(CompileError::new(
                         format!("configured source root '{}' is not a directory", root),
@@ -13354,7 +13369,6 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
                     ));
                 }
 
-                let root = canonical_utf8_path(&root)?;
                 if seen_roots.insert(root.clone()) {
                     roots.push(root);
                 }
@@ -13374,11 +13388,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
 
     let mut explicit_entry = None;
     if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.clone()) {
-        let entry_path = package_root.join(entry);
-        if !entry_path.exists() {
-            return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-        }
-        let entry_path = canonical_utf8_path(&entry_path)?;
+        let entry_path = canonical_package_child_path(&package_root, &entry, "package entry")?;
         if let Some(entry_parent) = entry_path.parent() {
             let entry_parent = canonical_utf8_path(entry_parent)?;
             if seen_roots.insert(entry_parent.clone()) {
@@ -13459,6 +13469,74 @@ fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map_err(|e| CompileError::new(format!("failed to canonicalize '{}': {}", path, e), error::Span::default()))?;
     Utf8PathBuf::from_path_buf(canonical)
         .map_err(|non_utf8| CompileError::new(format!("path is not valid UTF-8: {}", non_utf8.display()), error::Span::default()))
+}
+
+fn canonical_package_child_path(package_root: &Utf8Path, raw_path: &str, label: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, label)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+    if !candidate.exists() {
+        return Err(CompileError::new(format!("{} '{}' does not exist", label, candidate), error::Span::default()));
+    }
+    let canonical = canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("{} '{}' resolves outside package root '{}'", label, raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn package_output_dir_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, "build output directory")?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+
+    let existing_anchor = if candidate.exists() {
+        candidate.clone()
+    } else {
+        let mut anchor = candidate.as_path();
+        while !anchor.exists() {
+            anchor = anchor.parent().ok_or_else(|| {
+                CompileError::new(
+                    format!("build output directory '{}' has no existing package-root ancestor", raw_path),
+                    error::Span::default(),
+                )
+            })?;
+        }
+        anchor.to_path_buf()
+    };
+
+    let canonical_anchor = canonical_utf8_path(&existing_anchor)?;
+    if !canonical_anchor.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("build output directory '{}' resolves outside package root '{}'", raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+
+    Ok(candidate)
+}
+
+fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
+    let path = Utf8Path::new(raw_path);
+    if path.as_str().is_empty() {
+        return Err(CompileError::new(format!("{} path must not be empty", label), error::Span::default()));
+    }
+    if path.is_absolute() {
+        return Err(CompileError::new(
+            format!("{} '{}' must be relative to the package root", label, raw_path),
+            error::Span::default(),
+        ));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Utf8Component::ParentDir | Utf8Component::Prefix(_) | Utf8Component::RootDir))
+    {
+        return Err(CompileError::new(format!("{} '{}' must stay inside the package root", label, raw_path), error::Span::default()));
+    }
+    Ok(())
 }
 
 fn default_package_entry() -> String {
@@ -15699,18 +15777,17 @@ resource Token {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token)
+action split(token: Token, fee: u64) -> (change: Token, paid_fee: Token)
 where
     let amount = token.amount
     let remaining = amount - fee
     consume token
-    let change = create Token {
+    create change = Token {
         amount: remaining
     }
-    let paid_fee = create Token {
+    create paid_fee = Token {
         amount: fee
     }
-    return (change, paid_fee)
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
@@ -17231,21 +17308,29 @@ where
 
     #[test]
     fn compile_rejects_linear_state_changes_hidden_inside_loops() {
-        compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap();
+        let local = compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(local.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", local.message);
 
         let dropped = compile(LOOP_DROPPED_LOCAL_LINEAR_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(dropped.message.contains("linear resource 'out' was not consumed"), "unexpected error: {}", dropped.message);
+        assert!(
+            dropped.message.contains("branch-local lifecycle operation 'create'")
+                || dropped.message.contains("linear resource 'out' was not consumed"),
+            "unexpected error: {}",
+            dropped.message
+        );
 
         let for_err = compile(FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            for_err.message.contains("branch-local lifecycle operation")
+                || for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             for_err.message
         );
 
         let while_err = compile(WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            while_err.message.contains("branch-local lifecycle operation")
+                || while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             while_err.message
         );
@@ -17578,8 +17663,41 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
-        assert!(asm.contains("li a0, 5"), "assert failure path did not return assertion-failed code:\n{}", asm);
+        assert!(
+            asm.contains("cellscript runtime error 5 assertion-failed"),
+            "assert failure path lost its runtime error code:\n{}",
+            asm
+        );
         assert!(!asm.contains("assert_invariant"), "assert was not lowered out of source form:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_pure_function_assert_failure_to_abort() {
+        let result = compile(
+            r#"
+module test
+
+fn checked(value: u64) -> u64 {
+    assert_invariant(value > 0, "positive")
+    return value
+}
+
+action run(value: u64) -> bool
+where
+    checked(value) > 0
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(asm.contains(".global checked"), "missing checked helper:\n{}", asm);
+        assert!(asm.contains("cellscript runtime error 5 assertion-failed"), "assert failure lost its error code:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript abi: abort to entry failure context"),
+            "pure helper assert failure must abort instead of returning ordinary u64:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -17957,18 +18075,21 @@ where
 
     #[test]
     fn compile_merges_if_branch_linear_states_conservatively() {
-        compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap();
+        let both = compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(both.message.contains("branch-local lifecycle operation 'consume'"), "unexpected error: {}", both.message);
 
         let partial = compile(IF_PARTIAL_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            partial.message.contains("branch-local lifecycle operation 'consume'")
+                || partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             partial.message
         );
 
         let mismatched = compile(IF_MISMATCHED_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            mismatched.message.contains("branch-local lifecycle operation 'consume'")
+                || mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             mismatched.message
         );
@@ -19021,13 +19142,22 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("seqz t0, t0"), "exhaustive match lowering missing equality check:\n{}", asm);
-        assert!(asm.contains("li a0, 8"), "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript runtime error 20 numeric-or-discriminant-invalid") && asm.contains("li a0, 20"),
+            "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}",
+            asm
+        );
     }
 
     #[test]
     fn compile_merges_linear_transfers_inside_match_expressions() {
         compile(LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful_arms = compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            stateful_arms.message.contains("branch-local lifecycle operation 'destroy'"),
+            "unexpected error: {}",
+            stateful_arms.message
+        );
 
         let moved_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -19039,7 +19169,8 @@ where
 
         let stateful_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
+            stateful_err.message.contains("branch-local lifecycle operation 'destroy'")
+                || stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
             "unexpected error: {}",
             stateful_err.message
         );
@@ -21340,8 +21471,14 @@ where
         .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(asm.contains("# cellscript entry abi: _cellscript_entry tail-calls no-arg main"), "missing entry wrapper:\n{}", asm);
-        assert!(asm.contains("    j main"), "entry wrapper must tail-call main without clobbering ra:\n{}", asm);
+        assert!(asm.contains("# cellscript entry abi: _cellscript_entry calls no-arg main"), "missing entry wrapper:\n{}", asm);
+        assert!(asm.contains("    mv s10, sp"), "entry wrapper must stage the direct-wrapper stack base:\n{}", asm);
+        assert!(
+            asm.contains("    la s11, .Lentry_direct_done_"),
+            "entry wrapper must stage the direct-wrapper return label:\n{}",
+            asm
+        );
+        assert!(asm.contains("    call main"), "entry wrapper must call main through the direct wrapper:\n{}", asm);
         assert!(
             asm.find("_cellscript_entry:").unwrap() < asm.find("needs_arg:").unwrap(),
             "entry wrapper must precede actions:\n{}",
@@ -21916,7 +22053,8 @@ where
 
         let err = compile(LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            err.message.contains("branch-local lifecycle operation 'consume'")
+                || err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             err.message
         );
@@ -21938,7 +22076,8 @@ where
     #[test]
     fn compile_merges_linear_transfers_inside_if_expressions() {
         compile(LINEAR_IF_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful = compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(stateful.message.contains("branch-local lifecycle operation 'destroy'"), "unexpected error: {}", stateful.message);
 
         let err = compile(LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -22159,6 +22298,19 @@ where
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
+        let state_transition_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.category == "state-transition" && plan.feature == "Ticket.state")
+            .expect("state transition ProofPlan record");
+        assert_eq!(state_transition_plan.codegen_coverage_status, "covered");
+        assert!(
+            state_transition_plan.executable_evidence.iter().any(|evidence| evidence.layer == "runtime"),
+            "{:?}",
+            state_transition_plan.executable_evidence
+        );
         assert!(asm.contains("state_count=2"), "qualified flow state names should preserve verifier metadata:\n{}", asm);
     }
 
@@ -24249,7 +24401,7 @@ where
         metadata_hash: metadata_hashes[0],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250,
-    }
+    } with_lock(recipients[0])
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -24269,6 +24421,11 @@ where
             "prelude must not compare against recipients[0] before body temporaries are assigned:\n{}",
             asm
         );
+        assert!(
+            !prelude.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "prelude must not compare output locks against recipients[0] before body temporaries are assigned:\n{}",
+            asm
+        );
         assert!(ordered_create > body_start, "named output create check should stay in body order:\n{}", asm);
         assert!(
             ordered_section.contains("# cellscript abi: verify output bytes field NFT.owner")
@@ -24276,10 +24433,15 @@ where
             "ordered create constraint must verify dynamic indexed expected byte fields after body lowering:\n{}",
             asm
         );
+        assert!(
+            ordered_section.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "ordered create constraint must verify dynamic indexed output locks after body lowering:\n{}",
+            asm
+        );
     }
 
     #[test]
-    fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
+    fn branch_local_anonymous_creates_are_rejected_until_effects_are_cfg_aware() {
         let source = r#"
 module test
 
@@ -24317,26 +24479,9 @@ where
     create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
 "#;
 
-        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes).unwrap();
-
-        assert!(
-            asm.contains("LOAD_CELL_DATA reason=create source=Output index=3")
-                && asm.contains("LOAD_CELL_DATA reason=create source=Output index=4"),
-            "distinct anonymous creates after three named outputs must bind Output#3 and Output#4:\n{}",
-            asm
-        );
-        assert_eq!(
-            asm.matches("LOAD_CELL_DATA reason=create source=Output index=3").count(),
-            1,
-            "anonymous creates must not all collapse to the first anonymous output index:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=1 field=5"),
-            "type_hash() of named output `pool` must read the signature-bound Pool output index:\n{}",
-            asm
-        );
+        let err =
+            compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -25897,8 +26042,8 @@ where
     fn compile_file_loads_local_path_dependencies_from_cell_manifest() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -25932,7 +26077,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -26257,7 +26402,7 @@ name = "demo"
 version = "0.1.0"
 
 [dependencies]
-token_std = { path = "../missing_dep" }
+token_std = { path = "missing_dep" }
 "#,
         )
         .unwrap();
@@ -26274,8 +26419,54 @@ where
         .unwrap();
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("expected manifest"));
+        assert!(err.message.contains("does not exist"));
         assert!(err.message.contains("token_std"));
+    }
+
+    #[test]
+    fn compile_path_rejects_path_dependency_traversal() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        let outside = root.join("outside");
+        let app = root.join("app");
+
+        std::fs::create_dir_all(outside.join("src")).unwrap();
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+outside = { path = "../outside" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("src").join("main.cell"),
+            r#"
+module app::main
+
+action ping() -> u64
+where
+    1
+"#,
+        )
+        .unwrap();
+
+        let err = compile_path(app, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -26362,8 +26553,8 @@ where
     fn compile_path_rejects_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -26376,7 +26567,7 @@ name = "dep_pkg"
 version = "0.1.0"
 
 [dependencies]
-app_pkg = { path = "../app_pkg" }
+app_pkg = { path = "../.." }
 "#,
         )
         .unwrap();
@@ -26400,7 +26591,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -26417,7 +26608,7 @@ where
         .unwrap();
 
         let err = compile_path(app_root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("path dependency cycle detected"));
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -26500,6 +26691,88 @@ where
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("configured source root"));
         assert!(err.message.contains("shared"));
+    }
+
+    #[test]
+    fn package_entry_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "../outside/main.cell"
+"#,
+        )
+        .unwrap();
+        std::fs::write(outside.join("main.cell"), "module outside\n").unwrap();
+
+        let err = resolve_input_path(&root).unwrap_err();
+
+        assert!(err.message.contains("package entry"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_source_roots_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["../outside"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+        std::fs::write(outside.join("leak.cell"), "module outside\n").unwrap();
+
+        let err = load_modules_for_input(&root).unwrap_err();
+
+        assert!(err.message.contains("configured source root"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_out_dir_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+out_dir = "../outside"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+
+        let resolved = resolve_input_path(root).unwrap();
+        let err = default_output_path_for_input(root, &resolved, ArtifactFormat::RiscvAssembly).unwrap_err();
+
+        assert!(err.message.contains("build output directory"));
+        assert!(err.message.contains("package root"));
     }
 
     #[test]

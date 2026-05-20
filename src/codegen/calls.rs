@@ -11,7 +11,7 @@ use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
 use super::assembler::{scratch_register_avoiding, small_signed_immediate};
-use super::runtime::is_ckb_fixed_hash_helper;
+use super::runtime::{is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
 use super::schema::{fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
 use super::CodeGenerator;
 
@@ -96,6 +96,9 @@ impl CodeGenerator {
         if outgoing_stack_arg_bytes > 0 {
             self.emit_large_addi("sp", "sp", outgoing_stack_arg_bytes as i64);
         }
+        if is_ckb_checked_runtime_helper(func) {
+            self.emit_checked_runtime_status(func);
+        }
 
         if let Some(d) = dest {
             if let IrType::Tuple(items) = &d.ty {
@@ -112,6 +115,15 @@ impl CodeGenerator {
         }
 
         Ok(())
+    }
+
+    fn emit_checked_runtime_status(&mut self, func: &str) {
+        let ok_label = self.fresh_label("runtime_helper_ok");
+        self.emit(format!("# cellscript abi: {} returns status in a1; fail closed on nonzero", func));
+        self.emit(format!("beqz a1, {}", ok_label));
+        self.emit("mv a0, a1");
+        self.emit_epilogue();
+        self.emit_label(&ok_label);
     }
 
     fn emit_call_param_arg(

@@ -8,14 +8,17 @@
 use std::collections::BTreeSet;
 
 use crate::ir::*;
+use crate::syscalls::{
+    checked_runtime_helper_spec, fail_closed_helper_spec, fail_closed_runtime_helper_specs, runtime_helper_symbols,
+    source_constant_specs, vm2_helper_specs, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
+    CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
+    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_HEADER_DEP,
+};
 use crate::TargetProfile;
 
 use super::{
     CellScriptRuntimeError, CodeGenerator, CKB_HEADER_FIELD_EPOCH_LENGTH, CKB_HEADER_FIELD_EPOCH_NUMBER,
-    CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER, CKB_INPUT_FIELD_SINCE, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER,
-    CKB_LOAD_CELL_DATA_SYSCALL_NUMBER, CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER,
-    CKB_LOAD_SCRIPT_SYSCALL_NUMBER, CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_CELL_DEP, CKB_SOURCE_GROUP_FLAG,
-    CKB_SOURCE_HEADER_DEP, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT,
+    CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER, CKB_INPUT_FIELD_SINCE,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,7 +43,7 @@ const CKB_RUNTIME_SYSCALL_ABI: RuntimeSyscallAbi = RuntimeSyscallAbi {
     load_script: CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
     load_cell_by_field: CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER,
     load_cell_data: CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
-    source_group_input: CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT,
+    source_group_input: CKB_SOURCE_GROUP_INPUT,
     source_header_dep: CKB_SOURCE_HEADER_DEP,
 };
 
@@ -81,39 +84,24 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
 }
 
 fn is_v014_runtime_helper(func: &str) -> bool {
-    matches!(
-        func,
-        "__ckb_spawn"
-            | "__ckb_wait"
-            | "__ckb_process_id"
-            | "__ckb_pipe"
-            | "__ckb_pipe_write"
-            | "__ckb_pipe_read"
-            | "__ckb_inherited_fd"
-            | "__ckb_close"
-            | "__ckb_source_input"
-            | "__ckb_source_output"
-            | "__ckb_source_cell_dep"
-            | "__ckb_source_header_dep"
-            | "__ckb_source_group_input"
-            | "__ckb_source_group_output"
-            | "__ckb_witness_raw"
-            | "__ckb_witness_lock"
-            | "__ckb_witness_input_type"
-            | "__ckb_witness_output_type"
-            | "__ckb_sighash_all"
-            | "__ckb_require_maturity"
-            | "__ckb_require_time"
-            | "__ckb_require_epoch_after"
-            | "__ckb_require_epoch_relative"
-            | "__ckb_occupied_capacity"
-            | "__ckb_hash_chain"
-            | "__ckb_hash_blake2b"
-    )
+    runtime_helper_symbols().any(|symbol| symbol == func)
 }
 
 pub(crate) fn is_ckb_fixed_hash_helper(func: &str) -> bool {
     matches!(func, "__ckb_hash_chain" | "__ckb_hash_blake2b")
+}
+
+pub(crate) fn is_ckb_checked_runtime_helper(func: &str) -> bool {
+    checked_runtime_helper_spec(func).is_some()
+        || fail_closed_helper_spec(func).is_some()
+        || matches!(
+            func,
+            "__env_current_timepoint"
+                | "__ckb_header_epoch_number"
+                | "__ckb_header_epoch_start_block_number"
+                | "__ckb_header_epoch_length"
+                | "__ckb_input_since"
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -127,11 +115,19 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_status_fail_ret(&mut self, error: CellScriptRuntimeError) {
+        self.emit_runtime_error_comment(error);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", error.code()));
+        self.emit("ret");
+    }
+
     pub(crate) fn generate_runtime_support(&mut self, ir: &IrModule) {
         self.emit_section(".text");
         self.emit_runtime_memcmp_fixed();
         self.emit_runtime_memzero_fixed();
         self.emit_runtime_size_guards();
+        self.emit_runtime_molecule_table_offset_guard();
         // CKB exposes epoch-number based timepoints here, not Unix timestamps.
         self.emit_runtime_header_field_u64(
             "__env_current_timepoint",
@@ -174,76 +170,52 @@ impl CodeGenerator {
 
     fn emit_runtime_ckb_v014_surface_helpers(&mut self, referenced_helpers: &BTreeSet<String>) {
         let enabled = self.options.target_profile == TargetProfile::Ckb;
-        for (name, syscall, detail) in [
-            ("__ckb_spawn", 2601, "spawn bounded verifier child"),
-            ("__ckb_wait", 2602, "wait for bounded verifier child"),
-            ("__ckb_process_id", 2603, "current process id"),
-            ("__ckb_pipe", 2604, "create IPC pipe; returns read fd in a0 and write fd in a1"),
-            ("__ckb_pipe_write", 2605, "write u64 payload to IPC pipe"),
-            ("__ckb_pipe_read", 2606, "read u64 payload from IPC pipe"),
-            ("__ckb_inherited_fd", 2607, "resolve inherited fd"),
-            ("__ckb_close", 2608, "close fd"),
-        ] {
-            if !referenced_helpers.contains(name) {
+        for spec in vm2_helper_specs() {
+            if !referenced_helpers.contains(spec.symbol) {
                 continue;
             }
-            self.emit_global(name);
-            self.emit_label(name);
-            self.emit(format!("# cellscript abi: CKB VM v2 syscall {} ({})", syscall, detail));
+            self.emit_global(spec.symbol);
+            self.emit_label(spec.symbol);
+            self.emit(format!("# cellscript abi: CKB VM v2 syscall {} ({})", spec.number, spec.detail));
+            if !enabled {
+                self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            } else {
+                self.emit(format!(
+                    "# cellscript abi: {} is status-checked but not value-typed yet; fail closed until VM2 ABI values are modeled",
+                    spec.symbol
+                ));
+                self.emit(format!("# cellscript abi: withheld raw syscall {} so status cannot become a DSL value", spec.number));
+                self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            }
+        }
+
+        for spec in source_constant_specs() {
+            if !referenced_helpers.contains(spec.symbol) {
+                continue;
+            }
+            self.emit_global(spec.symbol);
+            self.emit_label(spec.symbol);
+            self.emit(format!("# cellscript abi: v0.14 CKB semantic helper ({})", spec.detail));
             if !enabled {
                 self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
             } else {
-                self.emit(format!("li a7, {}", syscall));
-                self.emit("ecall");
+                self.emit(format!("li a0, {}", spec.value));
                 self.emit("ret");
             }
         }
 
-        for (name, detail, value) in [
-            ("__ckb_source_input", "Source::Input", CKB_SOURCE_INPUT),
-            ("__ckb_source_output", "Source::Output", CKB_SOURCE_OUTPUT),
-            ("__ckb_source_cell_dep", "Source::CellDep", CKB_SOURCE_CELL_DEP),
-            ("__ckb_source_header_dep", "Source::HeaderDep", CKB_SOURCE_HEADER_DEP),
-            ("__ckb_source_group_input", "Source::GroupInput", CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT),
-            ("__ckb_source_group_output", "Source::GroupOutput", CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_OUTPUT),
-        ] {
-            if !referenced_helpers.contains(name) {
+        for spec in fail_closed_runtime_helper_specs() {
+            if !referenced_helpers.contains(spec.symbol) {
                 continue;
             }
-            self.emit_global(name);
-            self.emit_label(name);
-            self.emit(format!("# cellscript abi: v0.14 CKB semantic helper ({})", detail));
+            self.emit_global(spec.symbol);
+            self.emit_label(spec.symbol);
+            self.emit(format!("# cellscript abi: v0.14 CKB semantic helper ({})", spec.detail));
             if !enabled {
-                self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
-            } else {
-                self.emit(format!("li a0, {}", value));
-                self.emit("ret");
-            }
-        }
-
-        for (name, detail) in [
-            ("__ckb_witness_raw", "raw witness bytes"),
-            ("__ckb_witness_lock", "WitnessArgs.lock"),
-            ("__ckb_witness_input_type", "WitnessArgs.input_type"),
-            ("__ckb_witness_output_type", "WitnessArgs.output_type"),
-            ("__ckb_sighash_all", "CKB sighash-all digest"),
-            ("__ckb_require_maturity", "CKB block-number since maturity"),
-            ("__ckb_require_time", "CKB timestamp since"),
-            ("__ckb_require_epoch_after", "CKB absolute epoch since"),
-            ("__ckb_require_epoch_relative", "CKB relative epoch since"),
-            ("__ckb_occupied_capacity", "compile-visible occupied capacity floor"),
-        ] {
-            if !referenced_helpers.contains(name) {
-                continue;
-            }
-            self.emit_global(name);
-            self.emit_label(name);
-            self.emit(format!("# cellscript abi: v0.14 CKB semantic helper ({})", detail));
-            if !enabled {
-                self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
+                self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
             } else {
                 self.emit("# cellscript abi: helper is not executable yet; fail closed instead of returning a forged success value");
-                self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
+                self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
             }
         }
 
@@ -496,13 +468,64 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_molecule_table_offset_guard(&mut self) {
+        self.emit_global("__cellscript_validate_molecule_table_offsets");
+        self.emit_label("__cellscript_validate_molecule_table_offsets");
+        self.emit("# cellscript abi: validate Molecule table offsets a0=base a1=total_size a2=field_count a3=header_size");
+        self.emit("addi t0, a0, 4");
+        self.emit("mv t1, a2");
+        self.emit("mv t2, a3");
+        self.emit("mv a5, a2");
+        let loop_label = ".L__cellscript_molecule_offsets_loop";
+        let not_first_label = ".L__cellscript_molecule_offsets_not_first";
+        let lower_bound_ok_label = ".L__cellscript_molecule_offsets_lower_bound_ok";
+        let ok_label = ".L__cellscript_molecule_offsets_ok";
+        let fail_label = ".L__cellscript_molecule_offsets_fail";
+        self.emit_label(loop_label);
+        self.emit(format!("beqz t1, {}", ok_label));
+        self.emit("li t3, 0");
+        self.emit("lbu a4, 0(t0)");
+        self.emit("or t3, t3, a4");
+        self.emit("lbu a4, 1(t0)");
+        self.emit("slli a4, a4, 8");
+        self.emit("or t3, t3, a4");
+        self.emit("lbu a4, 2(t0)");
+        self.emit("slli a4, a4, 16");
+        self.emit("or t3, t3, a4");
+        self.emit("lbu a4, 3(t0)");
+        self.emit("slli a4, a4, 24");
+        self.emit("or t3, t3, a4");
+        self.emit(format!("bne t1, a5, {}", not_first_label));
+        self.emit("sub a4, t3, a3");
+        self.emit(format!("bnez a4, {}", fail_label));
+        self.emit(format!("j {}", lower_bound_ok_label));
+        self.emit_label(not_first_label);
+        self.emit("sltu a4, t3, t2");
+        self.emit(format!("bnez a4, {}", fail_label));
+        self.emit_label(lower_bound_ok_label);
+        self.emit("sltu a4, a1, t3");
+        self.emit(format!("bnez a4, {}", fail_label));
+        self.emit("mv t2, t3");
+        self.emit("addi t0, t0, 4");
+        self.emit("addi t1, t1, -1");
+        self.emit(format!("j {}", loop_label));
+        self.emit_label(ok_label);
+        self.emit("li a0, 0");
+        self.emit("ret");
+        self.emit_label(fail_label);
+        self.emit_runtime_error_comment(CellScriptRuntimeError::BoundsCheckFailed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::BoundsCheckFailed.code()));
+        self.emit("ret");
+    }
+
     fn emit_runtime_header_field_u64(&mut self, symbol: &str, field_name: &str, field_id: u64, enabled: bool, disabled_reason: &str) {
         self.emit_global(symbol);
         self.emit_label(symbol);
         if !enabled {
             self.emit(format!("# cellscript abi: {}", disabled_reason));
             self.emit_runtime_error_comment(CellScriptRuntimeError::ConsumeInvalidOperand);
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            self.emit("li a0, 0");
+            self.emit(format!("li a1, {}", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             self.emit("ret");
             return;
         }
@@ -527,12 +550,14 @@ impl CodeGenerator {
         self.emit("li t1, 8");
         self.emit(format!("bne t0, t1, {}", fail));
         self.emit_stack_load("a0", 16);
+        self.emit("li a1, 0");
         self.emit_stack_load("ra", 24);
         self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");
         self.emit_label(&fail);
         self.emit_runtime_error_comment(CellScriptRuntimeError::SyscallFailed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
         self.emit_stack_load("ra", 24);
         self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");
@@ -544,7 +569,8 @@ impl CodeGenerator {
         if !enabled {
             self.emit(format!("# cellscript abi: {}", disabled_reason));
             self.emit_runtime_error_comment(CellScriptRuntimeError::ConsumeInvalidOperand);
-            self.emit(format!("li a0, {}", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            self.emit("li a0, 0");
+            self.emit(format!("li a1, {}", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             self.emit("ret");
             return;
         }
@@ -569,12 +595,14 @@ impl CodeGenerator {
         self.emit("li t1, 8");
         self.emit(format!("bne t0, t1, {}", fail));
         self.emit_stack_load("a0", 16);
+        self.emit("li a1, 0");
         self.emit_stack_load("ra", 24);
         self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");
         self.emit_label(&fail);
         self.emit_runtime_error_comment(CellScriptRuntimeError::SyscallFailed);
-        self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
         self.emit_stack_load("ra", 24);
         self.emit_large_addi("sp", "sp", 32);
         self.emit("ret");

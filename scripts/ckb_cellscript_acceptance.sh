@@ -2403,8 +2403,8 @@ def mint_authority_data(token_symbol=b"TOKEN001", max_supply=1000, minted=0):
     return token_symbol + max_supply.to_bytes(8, "little") + minted.to_bytes(8, "little")
 
 def fixed_recipient_tuple_array(recipients):
-    if len(recipients) != 8:
-        raise RuntimeError(f"launch recipients must contain exactly 8 entries, got {len(recipients)}")
+    if len(recipients) != 2:
+        raise RuntimeError(f"launch recipients must contain exactly 2 entries, got {len(recipients)}")
     out = bytearray()
     for address, amount in recipients:
         if len(address) != 32:
@@ -4408,12 +4408,12 @@ def run_launch_action(action_record, always_success_dep):
     paired_symbol = b"PAIR0001"
     fee_rate_bps = 30
     creator_lock = always_success_lock("0x60")
-    recipient_count = 4 if action == "launch_token" else 8
+    recipient_count = 4 if action == "launch_token" else 2
     recipient_locks = [always_success_lock("0x7" + format(index, "x")) for index in range(recipient_count)]
     creator = decode_hex(script_hash(creator_lock), 32)
     recipients = [
         (decode_hex(script_hash(lock), 32), amount)
-        for lock, amount in zip(recipient_locks, [10, 20, 30, 40] if action == "launch_token" else [10, 20, 30, 40, 50, 60, 70, 80])
+        for lock, amount in zip(recipient_locks, [10, 20, 30, 40] if action == "launch_token" else [10, 20])
     ]
     recipient_payload = fixed_recipient_tuple_array4(recipients) if action == "launch_token" else fixed_recipient_tuple_array(recipients)
     total_distributed = sum(amount for _, amount in recipients)
@@ -4493,19 +4493,15 @@ def build_launch_action_case(action_record, cellscript_lock, auth_type, token_ty
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        outputs = [
-            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type},
-            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": pool_type},
-            {"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": lp_type},
-        ]
-        outputs_data = [
-            "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
-            "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, initial_lp, fee_rate_bps).hex(),
-            "0x" + lp_receipt_data(pool_id, initial_lp, creator).hex(),
-        ]
+        outputs = [{"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type}]
+        outputs_data = ["0x" + mint_authority_data(symbol, max_supply, initial_mint).hex()]
         for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
             outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
             outputs_data.append("0x" + token_data(amount, symbol).hex())
+        outputs.append({"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": pool_type})
+        outputs_data.append("0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, initial_lp, fee_rate_bps).hex())
+        outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": lp_type})
+        outputs_data.append("0x" + lp_receipt_data(pool_id, initial_lp, creator).hex())
         outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": token_type})
         outputs_data.append("0x" + token_data(remaining, symbol).hex())
         witness = entry_witness(symbol, max_supply, initial_mint, pool_seed_amount, bytes([fee_rate_bps & 0xff, fee_rate_bps >> 8]), creator, recipient_payload)
@@ -5305,7 +5301,7 @@ def build_stateful_action_branch_case(record, always_success_dep):
         paired_symbol = b"PAIR0001"
         fee_rate_bps = 30
         creator_lock = always_success_lock("0x60")
-        recipient_amounts = [10, 20, 30, 40] if action == "launch_token" else [10, 20, 30, 40, 50, 60, 70, 80]
+        recipient_amounts = [10, 20, 30, 40] if action == "launch_token" else [10, 20]
         recipient_locks = [always_success_lock("0x7" + format(index, "x")) for index in range(len(recipient_amounts))]
         recipients = [
             (decode_hex(script_hash(lock), 32), amount)
@@ -5724,19 +5720,15 @@ def run_stateful_launch_to_token_mint(always_success_dep):
         launch["cell_deps"],
     )
     paired_input = initial["cells"][0]
-    outputs = [
-        {"capacity": hex_u64(400 * 100_000_000), "lock": mint["lock"], "type": auth_type},
-        {"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": pool_type},
-        {"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": lp_type},
-    ]
-    outputs_data = [
-        "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
-        "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, pool_seed_amount, fee_rate_bps).hex(),
-        "0x" + lp_receipt_data(pool_id, pool_seed_amount, creator).hex(),
-    ]
+    outputs = [{"capacity": hex_u64(400 * 100_000_000), "lock": mint["lock"], "type": auth_type}]
+    outputs_data = ["0x" + mint_authority_data(symbol, max_supply, initial_mint).hex()]
     for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
         outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
         outputs_data.append("0x" + token_data(amount, symbol).hex())
+    outputs.append({"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": pool_type})
+    outputs_data.append("0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, pool_seed_amount, fee_rate_bps).hex())
+    outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": lp_type})
+    outputs_data.append("0x" + lp_receipt_data(pool_id, pool_seed_amount, creator).hex())
     outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": token_type})
     outputs_data.append("0x" + token_data(remaining, symbol).hex())
 

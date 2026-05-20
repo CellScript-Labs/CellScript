@@ -2,6 +2,10 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use crate::runtime_errors::CellScriptRuntimeError;
+use crate::syscalls::{
+    checked_runtime_helper_spec, fail_closed_helper_spec, low_level_value_class_for_raw_symbol, LowLevelValueClass, SyscallKind,
+};
+use crate::types::lifecycle_effect_keys;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -152,6 +156,31 @@ pub enum IrType {
     Named(String),
     Ref(Box<IrType>),
     MutRef(Box<IrType>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrValueKind {
+    Domain,
+    Bool,
+    SyscallStatus,
+    HelperStatus,
+    ErrorCode,
+    ExitStatus,
+}
+
+impl IrValueKind {
+    fn is_status_like(self) -> bool {
+        matches!(self, IrValueKind::SyscallStatus | IrValueKind::HelperStatus | IrValueKind::ErrorCode | IrValueKind::ExitStatus)
+    }
+}
+
+impl IrType {
+    pub fn value_kind(&self) -> IrValueKind {
+        match self {
+            IrType::Bool => IrValueKind::Bool,
+            _ => IrValueKind::Domain,
+        }
+    }
 }
 
 /// IR Action
@@ -347,6 +376,7 @@ pub enum IrConst {
 #[derive(Debug, Clone)]
 pub enum IrTerminator {
     Return(Option<IrOperand>),
+    Abort(CellScriptRuntimeError),
     Jump(BlockId),
     Branch { cond: IrOperand, then_block: BlockId, else_block: BlockId },
 }
@@ -380,6 +410,9 @@ struct EffectFootprint {
     has_create: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StraightLineLifecycleOnly;
+
 pub struct IrGenerator {
     module: IrModule,
     var_counter: usize,
@@ -403,7 +436,6 @@ pub struct IrGenerator {
     external_function_effects: HashMap<String, EffectClass>,
     function_return_types: HashMap<String, Option<IrType>>,
     external_function_return_types: HashMap<String, Option<IrType>>,
-    lowering_lock_entry: bool,
     errors: Vec<CompileError>,
 }
 
@@ -443,7 +475,6 @@ impl IrGenerator {
             external_function_effects: HashMap::new(),
             function_return_types: HashMap::new(),
             external_function_return_types: HashMap::new(),
-            lowering_lock_entry: false,
             errors: Vec::new(),
         }
     }
@@ -976,10 +1007,7 @@ impl IrGenerator {
         self.mutated_field_transitions.clear();
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
-        let previous_lock_entry = self.lowering_lock_entry;
-        self.lowering_lock_entry = true;
         let (params, body) = self.lower_signature_and_body(&lock.params, &[], &lock.body, Some(IrType::Bool), &HashSet::new());
-        self.lowering_lock_entry = previous_lock_entry;
 
         IrLock { name: lock.name.clone(), params, body }
     }
@@ -1285,13 +1313,21 @@ impl IrGenerator {
             });
         }
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
+        let lifecycle_certificate = match certify_straight_line_lifecycle_only(stmts) {
+            Ok(certificate) => certificate,
+            Err(err) => {
+                self.errors.push(err);
+                StraightLineLifecycleOnly
+            }
+        };
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
         let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_return_type.as_ref());
-        let consume_set = self.collect_consume_patterns(&blocks, &ir_params, core_input_bindings);
+        let consume_set =
+            self.collect_straight_line_consume_patterns(&blocks, &ir_params, core_input_bindings, &lifecycle_certificate);
         let mut read_refs = self.collect_read_ref_param_patterns(&ir_params);
         read_refs.extend(self.collect_read_ref_patterns(&blocks));
-        let create_set = self.collect_create_patterns(&blocks, &ir_params);
+        let create_set = self.collect_straight_line_create_patterns(&blocks, &ir_params, &lifecycle_certificate);
         let mutate_set = self.collect_mutate_param_patterns(&ir_params, consume_set.len(), create_set.len());
         let write_intents = Self::collect_write_intents(&create_set, &mutate_set);
         self.transition_param_ids.clear();
@@ -1319,11 +1355,12 @@ impl IrGenerator {
         create_intents.chain(mutate_intents).collect()
     }
 
-    fn collect_consume_patterns(
+    fn collect_straight_line_consume_patterns(
         &self,
         blocks: &[IrBlock],
         params: &[IrParam],
         core_input_bindings: &HashSet<String>,
+        _certificate: &StraightLineLifecycleOnly,
     ) -> Vec<CellPattern> {
         let mut patterns = params
             .iter()
@@ -1398,7 +1435,12 @@ impl IrGenerator {
             .collect()
     }
 
-    fn collect_create_patterns(&self, blocks: &[IrBlock], params: &[IrParam]) -> Vec<CreatePattern> {
+    fn collect_straight_line_create_patterns(
+        &self,
+        blocks: &[IrBlock],
+        params: &[IrParam],
+        _certificate: &StraightLineLifecycleOnly,
+    ) -> Vec<CreatePattern> {
         let output_bindings =
             params.iter().filter(|param| param.source == ParamSource::Output).map(|param| param.name.clone()).collect::<HashSet<_>>();
         let mut patterns = params
@@ -1676,9 +1718,11 @@ impl IrGenerator {
 
     fn estimate_cycles(&self, body: &IrBody) -> u64 {
         let instruction_count = body.blocks.iter().map(|block| block.instructions.len() as u64).sum::<u64>();
-        let branch_count =
-            body.blocks.iter().filter(|block| matches!(block.terminator, IrTerminator::Jump(_) | IrTerminator::Branch { .. })).count()
-                as u64;
+        let branch_count = body
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.terminator, IrTerminator::Abort(_) | IrTerminator::Jump(_) | IrTerminator::Branch { .. }))
+            .count() as u64;
         let cell_ops = (body.consume_set.len() + body.read_refs.len() + body.create_set.len()) as u64;
         instruction_count
             .saturating_mul(8)
@@ -2769,7 +2813,7 @@ impl IrGenerator {
         let ok_block = self.push_block(blocks);
         let fail_block = self.push_block(blocks);
         self.block_mut(blocks, active).terminator = IrTerminator::Branch { cond, then_block: ok_block, else_block: fail_block };
-        self.block_mut(blocks, fail_block).terminator = IrTerminator::Return(Some(self.fail_closed_return_operand()));
+        self.block_mut(blocks, fail_block).terminator = self.fail_closed_terminator();
 
         LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(ok_block) }
     }
@@ -2790,17 +2834,13 @@ impl IrGenerator {
         let ok_block = self.push_block(blocks);
         let fail_block = self.push_block(blocks);
         self.block_mut(blocks, active).terminator = IrTerminator::Branch { cond, then_block: ok_block, else_block: fail_block };
-        self.block_mut(blocks, fail_block).terminator = IrTerminator::Return(Some(self.fail_closed_return_operand()));
+        self.block_mut(blocks, fail_block).terminator = self.fail_closed_terminator();
 
         LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(ok_block) }
     }
 
-    fn fail_closed_return_operand(&self) -> IrOperand {
-        if self.lowering_lock_entry {
-            IrOperand::Const(IrConst::Bool(false))
-        } else {
-            IrOperand::Const(IrConst::U64(CellScriptRuntimeError::AssertionFailed.code()))
-        }
+    fn fail_closed_terminator(&self) -> IrTerminator {
+        IrTerminator::Abort(CellScriptRuntimeError::AssertionFailed)
     }
 
     /// Lower `require { expr1, expr2, ... }` — desugar into independent atomic `require` statements.
@@ -2824,7 +2864,7 @@ impl IrGenerator {
             let ok_block = self.push_block(blocks);
             let fail_block = self.push_block(blocks);
             self.block_mut(blocks, next).terminator = IrTerminator::Branch { cond, then_block: ok_block, else_block: fail_block };
-            self.block_mut(blocks, fail_block).terminator = IrTerminator::Return(Some(self.fail_closed_return_operand()));
+            self.block_mut(blocks, fail_block).terminator = self.fail_closed_terminator();
             active = ok_block;
         }
         LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
@@ -4375,7 +4415,8 @@ impl IrGenerator {
                     self.push_block(blocks)
                 } else {
                     let fail_block = self.push_block(blocks);
-                    self.block_mut(blocks, fail_block).terminator = IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(8))));
+                    self.block_mut(blocks, fail_block).terminator =
+                        IrTerminator::Abort(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
                     fail_block
                 };
                 self.block_mut(blocks, check_block).terminator =
@@ -4609,15 +4650,9 @@ impl IrGenerator {
                 "process_id" if call.args.is_empty() => {
                     self.lower_simple_runtime_call("__ckb_process_id", "process_id", IrType::U64, &call.args, current, blocks, vars)
                 }
-                "pipe_write" if call.args.len() == 2 => self.lower_simple_runtime_call(
-                    "__ckb_pipe_write",
-                    "pipe_write_result",
-                    IrType::U64,
-                    &call.args,
-                    current,
-                    blocks,
-                    vars,
-                ),
+                "pipe_write" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_pipe_write", &call.args, current, blocks, vars)
+                }
                 "pipe_read" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_pipe_read",
                     "pipe_read_result",
@@ -4636,9 +4671,7 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
-                "close" if call.args.len() == 1 => {
-                    self.lower_simple_runtime_call("__ckb_close", "close_result", IrType::U64, &call.args, current, blocks, vars)
-                }
+                "close" if call.args.len() == 1 => self.lower_void_runtime_call("__ckb_close", &call.args, current, blocks, vars),
                 "require_maturity" if call.args.len() == 1 => {
                     self.lower_void_runtime_call("__ckb_require_maturity", &call.args, current, blocks, vars)
                 }
@@ -5252,6 +5285,170 @@ impl IrGenerator {
     }
 }
 
+fn certify_straight_line_lifecycle_only(stmts: &[Stmt]) -> Result<StraightLineLifecycleOnly> {
+    let mut bindings = HashMap::new();
+    certify_lifecycle_stmts(stmts, false, &mut bindings)?;
+    Ok(StraightLineLifecycleOnly)
+}
+
+fn certify_lifecycle_stmts(stmts: &[Stmt], branch_local: bool, bindings: &mut HashMap<String, (&'static str, Span)>) -> Result<()> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => certify_lifecycle_expr(&let_stmt.value, branch_local, bindings)?,
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => certify_lifecycle_expr(expr, branch_local, bindings)?,
+            Stmt::Return(None) => {}
+            Stmt::If(if_stmt) => {
+                certify_lifecycle_expr(&if_stmt.condition, branch_local, bindings)?;
+                certify_lifecycle_stmts(&if_stmt.then_branch, true, bindings)?;
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    certify_lifecycle_stmts(else_branch, true, bindings)?;
+                }
+            }
+            Stmt::For(for_stmt) => {
+                certify_lifecycle_expr(&for_stmt.iterable, branch_local, bindings)?;
+                certify_lifecycle_stmts(&for_stmt.body, true, bindings)?;
+            }
+            Stmt::While(while_stmt) => {
+                certify_lifecycle_expr(&while_stmt.condition, branch_local, bindings)?;
+                certify_lifecycle_stmts(&while_stmt.body, true, bindings)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn certify_lifecycle_expr(expr: &Expr, branch_local: bool, bindings: &mut HashMap<String, (&'static str, Span)>) -> Result<()> {
+    for (key, span, label) in lifecycle_effect_keys(expr) {
+        if branch_local {
+            return Err(CompileError::new(
+                format!("branch-local lifecycle operation '{}' cannot be lowered by straight-line IR lifecycle collectors", label),
+                span,
+            ));
+        }
+        if let Some((previous_label, previous_span)) = bindings.insert(key.clone(), (label, span)) {
+            return Err(CompileError::new(
+                format!(
+                    "duplicate lifecycle binding '{}' cannot be lowered by straight-line IR lifecycle collectors; previous '{}' binding starts at byte {}",
+                    key, previous_label, previous_span.start
+                ),
+                span,
+            ));
+        }
+    }
+
+    match expr {
+        Expr::Assign(assign) => {
+            certify_lifecycle_expr(&assign.target, branch_local, bindings)?;
+            certify_lifecycle_expr(&assign.value, branch_local, bindings)
+        }
+        Expr::Binary(binary) => {
+            certify_lifecycle_expr(&binary.left, branch_local, bindings)?;
+            certify_lifecycle_expr(&binary.right, branch_local, bindings)
+        }
+        Expr::Unary(unary) => certify_lifecycle_expr(&unary.expr, branch_local, bindings),
+        Expr::Call(call) => {
+            certify_lifecycle_expr(&call.func, branch_local, bindings)?;
+            for arg in &call.args {
+                certify_lifecycle_expr(arg, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::FieldAccess(field) => certify_lifecycle_expr(&field.expr, branch_local, bindings),
+        Expr::Index(index) => {
+            certify_lifecycle_expr(&index.expr, branch_local, bindings)?;
+            certify_lifecycle_expr(&index.index, branch_local, bindings)
+        }
+        Expr::Create(create) => {
+            for (_, value) in &create.fields {
+                certify_lifecycle_expr(value, branch_local, bindings)?;
+            }
+            if let Some(lock) = &create.lock {
+                certify_lifecycle_expr(lock, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::Consume(consume) => certify_lifecycle_expr(&consume.expr, branch_local, bindings),
+        Expr::Transfer(transfer) => {
+            certify_lifecycle_expr(&transfer.expr, branch_local, bindings)?;
+            certify_lifecycle_expr(&transfer.to, branch_local, bindings)
+        }
+        Expr::Destroy(destroy) => certify_lifecycle_expr(&destroy.expr, branch_local, bindings),
+        Expr::Claim(claim) => certify_lifecycle_expr(&claim.receipt, branch_local, bindings),
+        Expr::Settle(settle) => certify_lifecycle_expr(&settle.expr, branch_local, bindings),
+        Expr::CreateUnique(create) => {
+            for (_, value) in &create.fields {
+                certify_lifecycle_expr(value, branch_local, bindings)?;
+            }
+            if let Some(lock) = &create.lock {
+                certify_lifecycle_expr(lock, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::ReplaceUnique(replace) => {
+            certify_lifecycle_expr(&replace.expr, branch_local, bindings)?;
+            for (_, value) in &replace.fields {
+                certify_lifecycle_expr(value, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::Assert(assert_expr) => {
+            certify_lifecycle_expr(&assert_expr.condition, branch_local, bindings)?;
+            certify_lifecycle_expr(&assert_expr.message, branch_local, bindings)
+        }
+        Expr::Require(require_expr) => {
+            certify_lifecycle_expr(&require_expr.condition, branch_local, bindings)?;
+            if let Some(message) = &require_expr.message {
+                certify_lifecycle_expr(message, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::RequireBlock(require_block) => {
+            for expr in &require_block.expressions {
+                certify_lifecycle_expr(expr, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::Preserve(_) => Ok(()),
+        Expr::Block(stmts) => certify_lifecycle_stmts(stmts, branch_local, bindings),
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                certify_lifecycle_expr(item, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::If(if_expr) => {
+            certify_lifecycle_expr(&if_expr.condition, branch_local, bindings)?;
+            certify_lifecycle_expr(&if_expr.then_branch, true, bindings)?;
+            certify_lifecycle_expr(&if_expr.else_branch, true, bindings)
+        }
+        Expr::Cast(cast) => certify_lifecycle_expr(&cast.expr, branch_local, bindings),
+        Expr::Range(range) => {
+            certify_lifecycle_expr(&range.start, branch_local, bindings)?;
+            certify_lifecycle_expr(&range.end, branch_local, bindings)
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                certify_lifecycle_expr(value, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::Match(match_expr) => {
+            certify_lifecycle_expr(&match_expr.expr, branch_local, bindings)?;
+            for arm in &match_expr.arms {
+                certify_lifecycle_expr(&arm.value, true, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::StdlibCall(call) => {
+            for arg in &call.args {
+                certify_lifecycle_expr(arg, branch_local, bindings)?;
+            }
+            Ok(())
+        }
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => Ok(()),
+    }
+}
+
 fn inline_ir_type_repr(ty: &IrType) -> Option<String> {
     match ty {
         IrType::U8 => Some("u8".to_string()),
@@ -5332,9 +5529,14 @@ pub fn verify_module(module: &IrModule) -> Result<()> {
                 &callable_returns,
                 &callable_params,
             )?,
-            IrItem::Lock(lock) => {
-                verify_body(&format!("lock '{}'", lock.name), &lock.body, &lock.params, None, &callable_returns, &callable_params)?
-            }
+            IrItem::Lock(lock) => verify_body(
+                &format!("lock '{}'", lock.name),
+                &lock.body,
+                &lock.params,
+                Some(&IrType::Bool),
+                &callable_returns,
+                &callable_params,
+            )?,
             IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
         }
     }
@@ -5393,6 +5595,7 @@ fn verify_body(
     }
 
     let all_var_types = collect_body_var_types(body, params)?;
+    let all_value_kinds = collect_body_value_kinds(body, params)?;
     let all_defs = all_var_types.keys().copied().collect::<HashSet<_>>();
     let param_defs = params.iter().map(|param| param.binding.id).collect::<HashSet<_>>();
     let mut in_defs = body.blocks.iter().map(|block| (block.id, HashSet::new())).collect::<HashMap<_, _>>();
@@ -5447,12 +5650,15 @@ fn verify_body(
         for instruction in &block.instructions {
             verify_instruction_operands(label, block.id, instruction, &defs, &all_var_types)?;
             verify_instruction_abi(label, block.id, instruction, callable_returns, callable_params)?;
+            verify_instruction_value_kinds(label, block.id, instruction, &all_value_kinds)?;
             if let Some(dest) = instruction_dest(instruction) {
                 defs.insert(dest.id);
             }
         }
         verify_terminator(label, block.id, &block.terminator, return_type, &defs, &all_var_types)?;
+        verify_terminator_value_kinds(label, block.id, &block.terminator, &all_value_kinds)?;
     }
+    verify_no_unconsumed_status_values(label, body, &all_value_kinds)?;
 
     Ok(())
 }
@@ -5486,6 +5692,61 @@ fn insert_var_type(types: &mut HashMap<usize, IrType>, var: &IrVar) -> Result<()
     Ok(())
 }
 
+fn collect_body_value_kinds(body: &IrBody, params: &[IrParam]) -> Result<HashMap<usize, IrValueKind>> {
+    let mut kinds = HashMap::new();
+    for param in params {
+        insert_value_kind(&mut kinds, &param.binding, param.ty.value_kind())?;
+    }
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            if let Some((var, kind)) = instruction_result_value_kind(instruction, &kinds) {
+                insert_value_kind(&mut kinds, var, kind)?;
+            }
+        }
+    }
+    Ok(kinds)
+}
+
+fn insert_value_kind(kinds: &mut HashMap<usize, IrValueKind>, var: &IrVar, kind: IrValueKind) -> Result<()> {
+    if let Some(existing) = kinds.get(&var.id) {
+        if *existing != kind {
+            return Err(ir_verify_error(format!("IR var{} has inconsistent value kinds {:?} and {:?}", var.id, existing, kind)));
+        }
+    } else {
+        kinds.insert(var.id, kind);
+    }
+    Ok(())
+}
+
+fn instruction_result_value_kind<'a>(
+    instruction: &'a IrInstruction,
+    known_kinds: &HashMap<usize, IrValueKind>,
+) -> Option<(&'a IrVar, IrValueKind)> {
+    match instruction {
+        IrInstruction::Call { dest: Some(dest), func, .. } => {
+            let kind = low_level_value_class_for_raw_symbol(func).map(low_level_value_kind).unwrap_or_else(|| dest.ty.value_kind());
+            Some((dest, kind))
+        }
+        IrInstruction::Move { dest, src } => {
+            let kind = operand_value_kind(src, known_kinds).unwrap_or_else(|| dest.ty.value_kind());
+            Some((dest, kind))
+        }
+        IrInstruction::LoadConst { dest, value } => Some((dest, const_ir_type(value).value_kind())),
+        _ => instruction_dest(instruction).map(|dest| (dest, dest.ty.value_kind())),
+    }
+}
+
+fn low_level_value_kind(class: LowLevelValueClass) -> IrValueKind {
+    match class {
+        LowLevelValueClass::Bool => IrValueKind::Bool,
+        LowLevelValueClass::DomainU64 => IrValueKind::Domain,
+        LowLevelValueClass::ErrorCode => IrValueKind::ErrorCode,
+        LowLevelValueClass::ExitStatus => IrValueKind::ExitStatus,
+        LowLevelValueClass::HelperStatus => IrValueKind::HelperStatus,
+        LowLevelValueClass::SyscallStatus => IrValueKind::SyscallStatus,
+    }
+}
+
 fn verify_instruction_operands(
     label: &str,
     block_id: BlockId,
@@ -5512,6 +5773,41 @@ fn verify_instruction_abi(
     let IrInstruction::Call { dest, func, args } = instruction else {
         return Ok(());
     };
+    if let Some(raw_class) = low_level_value_class_for_raw_symbol(func) {
+        if let (None, LowLevelValueClass::SyscallStatus | LowLevelValueClass::ErrorCode | LowLevelValueClass::ExitStatus) =
+            (dest, raw_class)
+        {
+            return Err(ir_verify_error(format!(
+                "{label} block {} call '{}' drops raw {:?} without a typed runtime boundary",
+                block_id.0, func, raw_class
+            )));
+        }
+    }
+    if let Some(kind) =
+        checked_runtime_helper_spec(func).map(|spec| spec.kind).or_else(|| fail_closed_helper_spec(func).map(|spec| spec.kind))
+    {
+        match (kind, dest) {
+            (SyscallKind::Unit, Some(_)) => {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' stores a unit helper status as a DSL value",
+                    block_id.0, func
+                )));
+            }
+            (SyscallKind::Value | SyscallKind::MultiReturn, None) => {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' drops a checked runtime helper value",
+                    block_id.0, func
+                )));
+            }
+            (SyscallKind::MultiReturn, Some(dest)) if !matches!(&dest.ty, IrType::Tuple(_)) => {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} call '{}' stores multi-return helper into non-tuple destination {:?}",
+                    block_id.0, func, dest.ty
+                )));
+            }
+            _ => {}
+        }
+    }
     if func.starts_with("__") {
         return Ok(());
     }
@@ -5558,6 +5854,48 @@ fn verify_instruction_abi(
     Ok(())
 }
 
+fn verify_instruction_value_kinds(
+    label: &str,
+    block_id: BlockId,
+    instruction: &IrInstruction,
+    value_kinds: &HashMap<usize, IrValueKind>,
+) -> Result<()> {
+    match instruction {
+        IrInstruction::Call { func, args, .. } => {
+            for (index, arg) in args.iter().enumerate() {
+                if let Some(kind) = operand_value_kind(arg, value_kinds).filter(|kind| kind.is_status_like()) {
+                    return Err(status_value_error(label, block_id, format!("passes {:?} as argument {} to '{}'", kind, index, func)));
+                }
+            }
+        }
+        IrInstruction::StoreVar { name, src } => {
+            if let Some(kind) = operand_value_kind(src, value_kinds).filter(|kind| kind.is_status_like()) {
+                return Err(status_value_error(label, block_id, format!("stores {:?} into DSL local '{}'", kind, name)));
+            }
+        }
+        IrInstruction::Move { dest, src } | IrInstruction::Cast { dest, src } => {
+            if let Some(kind) = operand_value_kind(src, value_kinds).filter(|kind| kind.is_status_like()) {
+                return Err(status_value_error(label, block_id, format!("stores {:?} into DSL value var{}", kind, dest.id)));
+            }
+        }
+        IrInstruction::Tuple { fields, .. } => {
+            for (index, field) in fields.iter().enumerate() {
+                if let Some(kind) = operand_value_kind(field, value_kinds).filter(|kind| kind.is_status_like()) {
+                    return Err(status_value_error(label, block_id, format!("stores {:?} into tuple field {}", kind, index)));
+                }
+            }
+        }
+        _ => {
+            for operand in instruction_operands(instruction) {
+                if let Some(kind) = operand_value_kind(operand, value_kinds).filter(|kind| kind.is_status_like()) {
+                    return Err(status_value_error(label, block_id, format!("uses {:?} as an ordinary IR operand", kind)));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verify_terminator(
     label: &str,
     block_id: BlockId,
@@ -5584,10 +5922,52 @@ fn verify_terminator(
                 return Err(ir_verify_error(format!("{label} block {} returns unit, expected {:?}", block_id.0, expected)));
             }
         }
+        IrTerminator::Abort(_) => {}
         IrTerminator::Branch { cond, .. } => {
             verify_operand_defined(label, block_id, cond, defs, all_var_types)?;
         }
         IrTerminator::Jump(_) => {}
+    }
+    Ok(())
+}
+
+fn verify_terminator_value_kinds(
+    label: &str,
+    block_id: BlockId,
+    terminator: &IrTerminator,
+    value_kinds: &HashMap<usize, IrValueKind>,
+) -> Result<()> {
+    match terminator {
+        IrTerminator::Return(Some(operand)) => {
+            if let Some(kind) = operand_value_kind(operand, value_kinds).filter(|kind| kind.is_status_like()) {
+                return Err(status_value_error(label, block_id, format!("returns {:?} as an ordinary value", kind)));
+            }
+        }
+        IrTerminator::Branch { cond, .. } => {
+            if let Some(kind) = operand_value_kind(cond, value_kinds).filter(|kind| kind.is_status_like()) {
+                return Err(status_value_error(label, block_id, format!("branches on {:?} as a predicate", kind)));
+            }
+        }
+        IrTerminator::Return(None) | IrTerminator::Abort(_) | IrTerminator::Jump(_) => {}
+    }
+    Ok(())
+}
+
+fn verify_no_unconsumed_status_values(label: &str, body: &IrBody, value_kinds: &HashMap<usize, IrValueKind>) -> Result<()> {
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            let Some(dest) = instruction_dest(instruction) else {
+                continue;
+            };
+            let Some(kind) = value_kinds.get(&dest.id).copied().filter(|kind| kind.is_status_like()) else {
+                continue;
+            };
+            return Err(status_value_error(
+                label,
+                block.id,
+                format!("produces {:?} in var{} without a checked fail-closed consumer", kind, dest.id),
+            ));
+        }
     }
     Ok(())
 }
@@ -5616,11 +5996,25 @@ fn verify_operand_defined(
     Ok(())
 }
 
+fn operand_value_kind(operand: &IrOperand, value_kinds: &HashMap<usize, IrValueKind>) -> Option<IrValueKind> {
+    match operand {
+        IrOperand::Var(var) => Some(value_kinds.get(&var.id).copied().unwrap_or_else(|| var.ty.value_kind())),
+        IrOperand::Const(value) => Some(const_ir_type(value).value_kind()),
+    }
+}
+
+fn status_value_error(label: &str, block_id: BlockId, detail: String) -> CompileError {
+    ir_verify_error(format!(
+        "{label} block {} leaks a status/error boundary value: {detail}; status-like values must be consumed by a checked fail-closed boundary",
+        block_id.0
+    ))
+}
+
 fn terminator_targets(terminator: &IrTerminator) -> Vec<BlockId> {
     match terminator {
         IrTerminator::Jump(target) => vec![*target],
         IrTerminator::Branch { then_block, else_block, .. } => vec![*then_block, *else_block],
-        IrTerminator::Return(_) => Vec::new(),
+        IrTerminator::Return(_) | IrTerminator::Abort(_) => Vec::new(),
     }
 }
 
@@ -5724,7 +6118,7 @@ fn instruction_vars(instruction: &IrInstruction) -> Vec<&IrVar> {
 fn terminator_vars(terminator: &IrTerminator) -> Vec<&IrVar> {
     match terminator {
         IrTerminator::Return(Some(IrOperand::Var(var))) | IrTerminator::Branch { cond: IrOperand::Var(var), .. } => vec![var],
-        IrTerminator::Return(_) | IrTerminator::Branch { .. } | IrTerminator::Jump(_) => Vec::new(),
+        IrTerminator::Return(_) | IrTerminator::Abort(_) | IrTerminator::Branch { .. } | IrTerminator::Jump(_) => Vec::new(),
     }
 }
 
@@ -6873,6 +7267,12 @@ mod tests {
         ir
     }
 
+    fn parse_and_generate_without_typecheck(source: &str) -> Result<IrModule> {
+        let tokens = lex(source).unwrap();
+        let ast = parse(&tokens).unwrap();
+        generate(&ast)
+    }
+
     fn first_action_body_mut(ir: &mut IrModule) -> &mut IrBody {
         ir.items
             .iter_mut()
@@ -6881,6 +7281,231 @@ mod tests {
                 _ => None,
             })
             .expect("expected action body")
+    }
+
+    fn raw_status_var(id: usize) -> IrVar {
+        IrVar { id, name: format!("raw_status_{id}"), ty: IrType::U64 }
+    }
+
+    fn module_with_instructions(instructions: Vec<IrInstruction>, return_type: Option<IrType>, terminator: IrTerminator) -> IrModule {
+        IrModule {
+            name: "ir::raw_syscall_boundary".to_string(),
+            items: vec![IrItem::PureFn(IrPureFn {
+                name: "bad".to_string(),
+                params: Vec::new(),
+                return_type,
+                body: IrBody {
+                    consume_set: Vec::new(),
+                    read_refs: Vec::new(),
+                    create_set: Vec::new(),
+                    mutate_set: Vec::new(),
+                    write_intents: Vec::new(),
+                    blocks: vec![IrBlock { id: BlockId(0), instructions, terminator }],
+                },
+            })],
+            external_type_defs: Vec::new(),
+            external_callable_abis: Vec::new(),
+            enum_fixed_sizes: HashMap::new(),
+        }
+    }
+
+    fn raw_status_call(dest: Option<IrVar>) -> IrInstruction {
+        IrInstruction::Call { dest, func: "__syscall_current_cycles".to_string(), args: Vec::new() }
+    }
+
+    fn raw_unit_helper_call(dest: Option<IrVar>) -> IrInstruction {
+        IrInstruction::Call { dest, func: "__ckb_close".to_string(), args: vec![IrOperand::Const(IrConst::U64(0))] }
+    }
+
+    #[test]
+    fn ir_verifier_rejects_raw_syscall_status_returned_as_domain_u64() {
+        let status = raw_status_var(0);
+        let ir = module_with_instructions(
+            vec![raw_status_call(Some(status.clone()))],
+            Some(IrType::U64),
+            IrTerminator::Return(Some(IrOperand::Var(status))),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("returns SyscallStatus as an ordinary value"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_raw_syscall_status_stored_as_dsl_local() {
+        let status = raw_status_var(0);
+        let ir = module_with_instructions(
+            vec![
+                raw_status_call(Some(status.clone())),
+                IrInstruction::StoreVar { name: "cycles".to_string(), src: IrOperand::Var(status) },
+            ],
+            None,
+            IrTerminator::Return(None),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("stores SyscallStatus into DSL local 'cycles'"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_dropped_raw_syscall_status() {
+        let ir = module_with_instructions(vec![raw_status_call(None)], None, IrTerminator::Return(None));
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("drops raw SyscallStatus without a typed runtime boundary"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_raw_syscall_status_in_tuple_field() {
+        let status = raw_status_var(0);
+        let tuple = IrVar { id: 1, name: "tuple".to_string(), ty: IrType::Tuple(vec![IrType::U64]) };
+        let ir = module_with_instructions(
+            vec![raw_status_call(Some(status.clone())), IrInstruction::Tuple { dest: tuple, fields: vec![IrOperand::Var(status)] }],
+            None,
+            IrTerminator::Return(None),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("stores SyscallStatus into tuple field 0"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_raw_syscall_status_as_domain_call_argument() {
+        let status = raw_status_var(0);
+        let ir = module_with_instructions(
+            vec![
+                raw_status_call(Some(status.clone())),
+                IrInstruction::Call { dest: None, func: "domain_sink".to_string(), args: vec![IrOperand::Var(status)] },
+            ],
+            None,
+            IrTerminator::Return(None),
+        );
+        let mut ir = ir;
+        ir.external_callable_abis.push(IrCallableAbi {
+            name: "domain_sink".to_string(),
+            params: vec![IrParam {
+                name: "value".to_string(),
+                ty: IrType::U64,
+                is_mut: false,
+                is_ref: false,
+                is_read_ref: false,
+                source: ParamSource::Default,
+                binding: IrVar { id: 99, name: "value".to_string(), ty: IrType::U64 },
+            }],
+            type_hash_param_indices: BTreeSet::new(),
+        });
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("passes SyscallStatus as argument 0 to 'domain_sink'"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_raw_syscall_status_produced_without_checked_consumer() {
+        let status = raw_status_var(0);
+        let ir = module_with_instructions(vec![raw_status_call(Some(status))], None, IrTerminator::Return(None));
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("produces SyscallStatus in var0 without a checked fail-closed consumer"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_rejects_unit_runtime_helper_status_stored_as_domain_u64() {
+        let status = raw_status_var(0);
+        let ir = module_with_instructions(vec![raw_unit_helper_call(Some(status))], None, IrTerminator::Return(None));
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("call '__ckb_close' stores a unit helper status as a DSL value"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_verifier_allows_unit_runtime_helper_when_status_is_checked_by_codegen_boundary() {
+        let ir = module_with_instructions(vec![raw_unit_helper_call(None)], None, IrTerminator::Return(None));
+
+        verify_module(&ir).expect("unit helper statement should be checked by codegen boundary");
+    }
+
+    #[test]
+    fn ir_verifier_allows_domain_u64_return_tuple_and_call_argument() {
+        let value = IrVar { id: 0, name: "value".to_string(), ty: IrType::U64 };
+        let tuple = IrVar { id: 1, name: "tuple".to_string(), ty: IrType::Tuple(vec![IrType::U64]) };
+        let ir = module_with_instructions(
+            vec![
+                IrInstruction::LoadConst { dest: value.clone(), value: IrConst::U64(42) },
+                IrInstruction::Tuple { dest: tuple, fields: vec![IrOperand::Var(value.clone())] },
+                IrInstruction::Call { dest: None, func: "domain_sink".to_string(), args: vec![IrOperand::Var(value.clone())] },
+            ],
+            Some(IrType::U64),
+            IrTerminator::Return(Some(IrOperand::Var(value))),
+        );
+        let mut ir = ir;
+        ir.external_callable_abis.push(IrCallableAbi {
+            name: "domain_sink".to_string(),
+            params: vec![IrParam {
+                name: "value".to_string(),
+                ty: IrType::U64,
+                is_mut: false,
+                is_ref: false,
+                is_read_ref: false,
+                source: ParamSource::Default,
+                binding: IrVar { id: 99, name: "value".to_string(), ty: IrType::U64 },
+            }],
+            type_hash_param_indices: BTreeSet::new(),
+        });
+
+        verify_module(&ir).unwrap();
+    }
+
+    #[test]
+    fn ir_straight_line_lifecycle_certificate_rejects_branch_local_create_without_typecheck() {
+        let err = parse_and_generate_without_typecheck(
+            r#"
+module ir::branch_create_certificate
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(flag: bool) -> Token
+where
+    if flag {
+        return create Token { amount: 1 }
+    } else {
+        return create Token { amount: 2 }
+    }
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("straight-line IR lifecycle collectors"), "{}", err.message);
+    }
+
+    #[test]
+    fn ir_straight_line_lifecycle_certificate_rejects_duplicate_consume_without_typecheck() {
+        let err = parse_and_generate_without_typecheck(
+            r#"
+module ir::duplicate_consume_certificate
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(token: Token) -> bool
+where
+    consume token
+    consume token
+    return true
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("duplicate lifecycle binding 'input:token'"), "{}", err.message);
+        assert!(err.message.contains("straight-line IR lifecycle collectors"), "{}", err.message);
     }
 
     #[test]
@@ -7262,6 +7887,101 @@ where
             "expected at least 2 branch terminators from require block, found {} out of {} blocks",
             branch_count,
             action.body.blocks.len()
+        );
+    }
+
+    #[test]
+    fn assert_in_pure_function_lowers_failure_to_abort_terminator() {
+        let ir = parse_and_lower(
+            r#"
+module test
+
+fn checked(value: u64) -> u64 {
+    assert_invariant(value > 0, "positive")
+    return value
+}
+
+action run(value: u64) -> u64
+where
+    checked(value)
+"#,
+        );
+        let function = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::PureFn(function) if function.name == "checked" => Some(function),
+                _ => None,
+            })
+            .expect("expected checked function");
+
+        assert!(
+            function
+                .body
+                .blocks
+                .iter()
+                .any(|block| matches!(block.terminator, IrTerminator::Abort(CellScriptRuntimeError::AssertionFailed))),
+            "assert failure must lower to Abort, blocks: {:?}",
+            function.body.blocks
+        );
+        assert!(
+            !function.body.blocks.iter().any(|block| {
+                matches!(
+                    block.terminator,
+                    IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(code))))
+                        if code == CellScriptRuntimeError::AssertionFailed.code()
+                )
+            }),
+            "assert failure must not lower to an ordinary u64 return: {:?}",
+            function.body.blocks
+        );
+    }
+
+    #[test]
+    fn exhaustive_enum_match_unmatched_path_lowers_to_abort_terminator() {
+        let ir = parse_and_lower(
+            r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action select(flag: Flag) -> u64
+where
+    return match flag {
+        Flag::On => { 1 }
+        Flag::Off => { 2 }
+    }
+"#,
+        );
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) if action.name == "select" => Some(action),
+                _ => None,
+            })
+            .expect("expected select action");
+
+        assert!(
+            action.body.blocks.iter().any(|block| {
+                matches!(block.terminator, IrTerminator::Abort(CellScriptRuntimeError::NumericOrDiscriminantInvalid))
+            }),
+            "unmatched match path must lower to Abort, blocks: {:?}",
+            action.body.blocks
+        );
+        assert!(
+            !action.body.blocks.iter().any(|block| {
+                matches!(
+                    block.terminator,
+                    IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(code))))
+                        if code == CellScriptRuntimeError::NumericOrDiscriminantInvalid.code()
+                )
+            }),
+            "unmatched match path must not lower to an ordinary u64 return: {:?}",
+            action.body.blocks
         );
     }
 
