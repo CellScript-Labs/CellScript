@@ -135,6 +135,7 @@ pub const METADATA_SCHEMA_VERSION: u32 = 40;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
+const ENTRY_ABI_MAX_SLOTS: usize = 1024;
 pub const CKB_DEFAULT_HASH_PERSONALIZATION: &[u8; 16] = b"ckb-default-hash";
 pub const CKB_BLANK_HASH: [u8; 32] = [
     68, 244, 198, 151, 68, 213, 248, 197, 93, 100, 32, 98, 148, 157, 202, 228, 155, 196, 231, 239, 67, 211, 136, 197, 161, 47, 66,
@@ -1066,14 +1067,21 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         }
 
         let slot_start = abi_index;
-        let slot_end = abi_index.saturating_add(abi_slots).saturating_sub(1);
-        let register_slots = (slot_start..slot_start + abi_slots).filter(|slot| *slot < 8).count();
+        let slot_end_exclusive = abi_index.saturating_add(abi_slots);
+        if slot_end_exclusive > ENTRY_ABI_MAX_SLOTS {
+            supported = false;
+            let reason = format!("entry ABI uses more than {} slots", ENTRY_ABI_MAX_SLOTS);
+            unsupported_reason.get_or_insert_with(|| reason.clone());
+            unsupported_reasons.push(format!("parameter '{}': {}", param.name, reason));
+        }
+        let slot_end = slot_end_exclusive.saturating_sub(1);
+        let register_slots = slot_end_exclusive.min(8).saturating_sub(slot_start.min(8));
         let stack_spill_slots = abi_slots.saturating_sub(register_slots);
-        let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_start + abi_slots > 8;
+        let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_end_exclusive > 8;
         if param.source == "lock_args" || param.cell_bound_abi || param.ty.starts_with('&') {
             witness_bytes = 0;
         }
-        witness_payload_bytes += witness_bytes;
+        witness_payload_bytes = witness_payload_bytes.saturating_add(witness_bytes);
         param_constraints.push(ParamAbiConstraintsMetadata {
             name: param.name.clone(),
             ty: param.ty.clone(),
@@ -1083,19 +1091,20 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
             slot_end,
             register_slots,
             stack_spill_slots,
-            stack_spill_bytes: stack_spill_slots * 8,
+            stack_spill_bytes: stack_spill_slots.saturating_mul(8),
             witness_bytes,
             pointer_length_pair,
             pointer_pair_crosses_register_boundary,
             supported,
             unsupported_reason,
         });
-        abi_index += abi_slots;
+        abi_index = slot_end_exclusive;
     }
 
     let register_slots_used = abi_index.min(8);
     let stack_spill_slots = abi_index.saturating_sub(8);
-    let min_witness_bytes = if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes };
+    let min_witness_bytes =
+        if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len().saturating_add(witness_payload_bytes) };
     EntryAbiConstraintsMetadata {
         entry_kind: entry_kind.to_string(),
         entry_name: entry_name.to_string(),
@@ -1103,13 +1112,17 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         abi_slots_used: abi_index,
         register_slots_used,
         stack_spill_slots,
-        stack_spill_bytes: stack_spill_slots * 8,
+        stack_spill_bytes: stack_spill_slots.saturating_mul(8),
         witness_payload_bytes,
         min_witness_bytes,
         unsupported: !unsupported_reasons.is_empty(),
         unsupported_reasons,
         params: param_constraints,
     }
+}
+
+fn ckb_code_cell_capacity_shannons(artifact_size_bytes: usize, overhead_bytes: u64) -> u64 {
+    u64::try_from(artifact_size_bytes).unwrap_or(u64::MAX).saturating_add(overhead_bytes).saturating_mul(CKB_SHANNONS_PER_CKB)
 }
 
 fn ckb_constraints(
@@ -1133,8 +1146,8 @@ fn ckb_constraints(
             max_block_bytes
         );
     }
-    let min_code_cell_data_capacity_shannons = (artifact_size_bytes as u64 + 8) * CKB_SHANNONS_PER_CKB;
-    let recommended_code_cell_capacity_shannons = (artifact_size_bytes as u64 + 1_000) * CKB_SHANNONS_PER_CKB;
+    let min_code_cell_data_capacity_shannons = ckb_code_cell_capacity_shannons(artifact_size_bytes, 8);
+    let recommended_code_cell_capacity_shannons = ckb_code_cell_capacity_shannons(artifact_size_bytes, 1_000);
     let ckb_runtime_features = metadata.runtime.ckb_runtime_features.clone();
     let uses_input_since = ckb_runtime_features.iter().any(|feature| feature == "ckb-input-since");
     let uses_header_epoch = ckb_runtime_features.iter().any(|feature| feature.starts_with("ckb-header-epoch-"));
@@ -2664,21 +2677,19 @@ fn validate_molecule_schema_manifest_metadata(metadata: &CompileMetadata) -> Res
 }
 
 pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
+    let root = current_source_verification_root()?;
+    validate_source_units_on_disk_under(metadata, &root)
+}
+
+pub fn validate_source_units_on_disk_under(metadata: &CompileMetadata, trusted_root: &Utf8Path) -> Result<()> {
     validate_source_metadata(metadata)?;
     if metadata.source_units.is_empty() {
         return Err(CompileError::without_span("metadata has no source_units to verify"));
     }
 
     for unit in &metadata.source_units {
-        if unit.path.starts_with('<') && unit.path.ends_with('>') {
-            return Err(CompileError::without_span(format!(
-                "source unit '{}' is not backed by a disk file and cannot be verified",
-                unit.path
-            )));
-        }
-
-        let path = Utf8Path::new(&unit.path);
-        let bytes = std::fs::read(path)
+        let path = verified_source_unit_disk_path(unit, trusted_root)?;
+        let bytes = std::fs::read(&path)
             .map_err(|error| CompileError::without_span(format!("failed to read source unit '{}': {}", unit.path, error)))?;
         if bytes.len() != unit.size_bytes {
             return Err(CompileError::without_span(format!(
@@ -2702,6 +2713,15 @@ pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
 }
 
 pub fn validate_source_units_primitive_mode(metadata: &CompileMetadata, primitive_compat: Option<String>) -> Result<()> {
+    let root = current_source_verification_root()?;
+    validate_source_units_primitive_mode_under(metadata, primitive_compat, &root)
+}
+
+pub fn validate_source_units_primitive_mode_under(
+    metadata: &CompileMetadata,
+    primitive_compat: Option<String>,
+    trusted_root: &Utf8Path,
+) -> Result<()> {
     let options = CompileOptions { primitive_compat, ..CompileOptions::default() };
     validate_compile_options(&options)?;
     if !options.is_primitive_strict() {
@@ -2709,14 +2729,8 @@ pub fn validate_source_units_primitive_mode(metadata: &CompileMetadata, primitiv
     }
 
     for unit in &metadata.source_units {
-        if unit.path.starts_with('<') && unit.path.ends_with('>') {
-            return Err(CompileError::without_span(format!(
-                "primitive mode verification requires disk-backed source units, got '{}'",
-                unit.path
-            )));
-        }
-        let path = Utf8Path::new(&unit.path);
-        let source = std::fs::read_to_string(path)
+        let path = verified_source_unit_disk_path(unit, trusted_root)?;
+        let source = std::fs::read_to_string(&path)
             .map_err(|error| CompileError::without_span(format!("failed to read source unit '{}': {}", unit.path, error)))?;
         let tokens = lexer::lex(&source).map_err(|error| {
             CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
@@ -2730,6 +2744,45 @@ pub fn validate_source_units_primitive_mode(metadata: &CompileMetadata, primitiv
     }
 
     Ok(())
+}
+
+fn current_source_verification_root() -> Result<Utf8PathBuf> {
+    let cwd = std::env::current_dir()
+        .map_err(|error| CompileError::without_span(format!("failed to resolve source verification root: {}", error)))?;
+    Utf8PathBuf::from_path_buf(cwd)
+        .map_err(|path| CompileError::without_span(format!("source verification root is not valid UTF-8: {}", path.display())))
+}
+
+fn verified_source_unit_disk_path(unit: &SourceUnitMetadata, trusted_root: &Utf8Path) -> Result<Utf8PathBuf> {
+    if unit.path.starts_with('<') && unit.path.ends_with('>') {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' is not backed by a disk file and cannot be verified",
+            unit.path
+        )));
+    }
+    if unit.path.is_empty() {
+        return Err(CompileError::without_span("source unit path must not be empty"));
+    }
+
+    let path = Utf8Path::new(&unit.path);
+    if path.components().any(|component| matches!(component, Utf8Component::ParentDir | Utf8Component::Prefix(_))) {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' must not contain parent-directory or platform-prefix components",
+            unit.path
+        )));
+    }
+
+    let trusted_root = canonical_utf8_path(trusted_root)?;
+    let candidate = if path.is_absolute() { path.to_path_buf() } else { trusted_root.join(path) };
+    let canonical = canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(&trusted_root) {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' resolves outside trusted source root '{}'",
+            unit.path, trusted_root
+        )));
+    }
+
+    Ok(canonical)
 }
 
 pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
@@ -3739,11 +3792,40 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<CompileResult> {
 pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
     let ast = parser::parse(&tokens)?;
+    compile_metadata_for_ast(source, &ast, target, None)
+}
+
+/// Only generate compile metadata using an already-built module resolver.
+pub fn compile_metadata_with_resolver(
+    source: &str,
+    target: Option<String>,
+    resolver: &ModuleResolver,
+    current_module: &str,
+) -> Result<CompileMetadata> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    compile_metadata_for_ast(source, &ast, target, Some((resolver, current_module)))
+}
+
+fn compile_metadata_for_ast(
+    source: &str,
+    ast: &ast::Module,
+    target: Option<String>,
+    resolver: Option<(&ModuleResolver, &str)>,
+) -> Result<CompileMetadata> {
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
     let target_profile = TargetProfile::Ckb;
-    types::check(&ast)?;
-    flow::check(&ast)?;
-    let ir = ir::generate(&ast)?;
+    if let Some((resolver, module_name)) = resolver {
+        types::check_with_resolver(ast, resolver, module_name)?;
+    } else {
+        types::check(ast)?;
+    }
+    flow::check(ast)?;
+    let ir = if let Some((resolver, module_name)) = resolver {
+        ir::generate_with_resolver(ast, resolver, module_name)?
+    } else {
+        ir::generate(ast)?
+    };
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
@@ -3955,7 +4037,9 @@ fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOption
     // stay up to date, even though we cannot return a cached CompileResult yet.
     let cache_dir = path.parent()?.join(".cell/build/cache");
     let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+    if let Err(error) = compiler.load_cache() {
+        warn_incremental_cache_error("load", &cache_dir, error);
+    }
 
     let inc_options = incremental::CompileOptions {
         opt_level: options.opt_level,
@@ -3965,7 +4049,7 @@ fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOption
 
     // We must recompile from source because the incremental cache does not
     // serialize the full CompileResult. A future improvement could cache it.
-    let _ = compiler.needs_recompile(path.as_std_path(), &inc_options);
+    compiler.needs_recompile(path.as_std_path(), &inc_options);
     None
 }
 
@@ -3974,7 +4058,9 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
     let Some(parent) = path.parent() else { return };
     let cache_dir = parent.join(".cell/build/cache");
     let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+    if let Err(error) = compiler.load_cache() {
+        warn_incremental_cache_error("load", &cache_dir, error);
+    }
 
     let inc_options = incremental::CompileOptions {
         opt_level: options.opt_level,
@@ -3983,8 +4069,17 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
     };
 
     let output_path = parent.join(".cell/build").join(path.file_name().unwrap_or("output"));
-    let _ = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options);
-    let _ = compiler.save_cache();
+    if let Err(error) = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options) {
+        warn_incremental_cache_error("record compilation", &cache_dir, error);
+        return;
+    }
+    if let Err(error) = compiler.save_cache() {
+        warn_incremental_cache_error("save", &cache_dir, error);
+    }
+}
+
+fn warn_incremental_cache_error(context: &str, cache_dir: &Utf8Path, error: impl std::fmt::Display) {
+    log::warn!("incremental cache {} failed for '{}': {}", context, cache_dir, error);
 }
 
 fn source_unit_from_bytes(path: impl Into<String>, role: impl Into<String>, bytes: &[u8]) -> SourceUnitMetadata {
@@ -4088,6 +4183,7 @@ fn build_module_resolver(path: &Utf8Path, current_module: &ast::Module) -> Resul
         }
     }
 
+    resolver.check_circular_deps()?;
     Ok(resolver)
 }
 
@@ -13585,10 +13681,11 @@ pub const NAME: &str = "cellc";
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
-        decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, load_modules_for_input,
-        resolve_input_path, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC,
-        SCHEDULER_WITNESS_ABI_MOLECULE,
+        bind_source_metadata, ckb_code_cell_capacity_shannons, compile, compile_file, compile_file_with_entry_action,
+        compile_file_with_entry_lock, compile_path, decode_scheduler_witness_hex, default_output_path_for_input,
+        encode_entry_witness_args_for_params, entry_abi_constraints, load_modules_for_input, resolve_input_path,
+        source_unit_from_file, validate_source_units_on_disk_under, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
+        ParamMetadata, ENTRY_ABI_MAX_SLOTS, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -13666,13 +13763,13 @@ where
 
     fn decode_molecule_table(bytes: &[u8], expected_fields: usize) -> Vec<&[u8]> {
         assert!(bytes.len() >= 8, "molecule table header is too short: {}", bytes.len());
-        let total_size = read_u32(&bytes[..4], "total_size") as usize;
+        let total_size = read_u32_usize(&bytes[..4], "total_size");
         assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
-        let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
+        let first_offset = read_u32_usize(&bytes[4..8], "first_offset");
         assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
         let field_count = first_offset / 4 - 1;
         assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
-        let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();
+        let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32_usize(chunk, "offset")).collect::<Vec<_>>();
         offsets.push(total_size);
         for pair in offsets.windows(2) {
             assert!(pair[0] <= pair[1], "molecule offsets must be monotonic: {:?}", offsets);
@@ -13682,8 +13779,11 @@ where
     }
 
     fn read_scheduler_accesses(bytes: &[u8]) -> Vec<SchedulerAccessWitness> {
-        let count = read_u32(&bytes[..4], "access_count") as usize;
-        assert_eq!(bytes.len(), 4 + count * 38, "access fixvec byte length mismatch");
+        let count = read_u32_usize(&bytes[..4], "access_count");
+        let expected_len = 4usize
+            .checked_add(count.checked_mul(38).expect("access fixvec byte length overflow"))
+            .expect("access fixvec byte length overflow");
+        assert_eq!(bytes.len(), expected_len, "access fixvec byte length mismatch");
         bytes[4..]
             .chunks_exact(38)
             .map(|chunk| SchedulerAccessWitness {
@@ -13696,8 +13796,11 @@ where
     }
 
     fn read_fixvec_byte32(bytes: &[u8]) -> Vec<[u8; 32]> {
-        let count = read_u32(&bytes[..4], "byte32_count") as usize;
-        assert_eq!(bytes.len(), 4 + count * 32, "byte32 fixvec byte length mismatch");
+        let count = read_u32_usize(&bytes[..4], "byte32_count");
+        let expected_len = 4usize
+            .checked_add(count.checked_mul(32).expect("byte32 fixvec byte length overflow"))
+            .expect("byte32 fixvec byte length overflow");
+        assert_eq!(bytes.len(), expected_len, "byte32 fixvec byte length mismatch");
         bytes[4..].chunks_exact(32).map(|chunk| chunk.try_into().expect("byte32 width")).collect()
     }
 
@@ -13722,6 +13825,10 @@ where
     fn read_u32(bytes: &[u8], field: &str) -> u32 {
         assert_eq!(bytes.len(), 4, "{field} should be a molecule u32");
         u32::from_le_bytes(bytes.try_into().expect("u32 width"))
+    }
+
+    fn read_u32_usize(bytes: &[u8], field: &str) -> usize {
+        usize::try_from(read_u32(bytes, field)).unwrap_or_else(|_| panic!("{field} does not fit this target"))
     }
 
     fn read_u64(bytes: &[u8], field: &str) -> u64 {
@@ -21659,6 +21766,77 @@ where
             left_result.metadata.source_content_hash, right_result.metadata.source_content_hash,
             "path-independent source content hash must stay stable across equivalent source locations"
         );
+    }
+
+    #[test]
+    fn source_unit_disk_verification_rejects_paths_outside_trusted_root() {
+        let trusted = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let trusted_root = Utf8Path::from_path(trusted.path()).unwrap();
+        let outside_root = Utf8Path::from_path(outside.path()).unwrap();
+        let source_path = outside_root.join("outside.cell");
+        std::fs::write(&source_path, SIMPLE_PROGRAM).unwrap();
+
+        let mut metadata = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap().metadata;
+        metadata.source_units = vec![source_unit_from_file(&source_path, "entry").unwrap()];
+        let source_units = metadata.source_units.clone();
+        bind_source_metadata(&mut metadata, source_units);
+
+        let err = validate_source_units_on_disk_under(&metadata, trusted_root).unwrap_err();
+
+        assert!(err.message.contains("outside trusted source root"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn source_unit_disk_verification_accepts_paths_inside_trusted_root() {
+        let trusted = tempdir().unwrap();
+        let trusted_root = Utf8Path::from_path(trusted.path()).unwrap();
+        let source_path = trusted_root.join("main.cell");
+        std::fs::write(&source_path, SIMPLE_PROGRAM).unwrap();
+
+        let mut metadata = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap().metadata;
+        metadata.source_units = vec![source_unit_from_file(&source_path, "entry").unwrap()];
+        let source_units = metadata.source_units.clone();
+        bind_source_metadata(&mut metadata, source_units);
+
+        validate_source_units_on_disk_under(&metadata, trusted_root).unwrap();
+    }
+
+    #[test]
+    fn entry_abi_constraints_mark_extreme_slot_counts_unsupported() {
+        fn scalar_param(index: usize) -> ParamMetadata {
+            ParamMetadata {
+                name: format!("p{index}"),
+                ty: "u64".to_string(),
+                is_mut: false,
+                is_ref: false,
+                source: "default".to_string(),
+                protected_spend_surface: false,
+                witness_data_source: true,
+                lock_args_data_source: false,
+                cell_bound_abi: false,
+                schema_pointer_abi: false,
+                schema_length_abi: false,
+                fixed_byte_pointer_abi: false,
+                fixed_byte_length_abi: false,
+                fixed_byte_len: None,
+                type_hash_pointer_abi: false,
+                type_hash_length_abi: false,
+                type_hash_len: None,
+            }
+        }
+
+        let params = (0..=ENTRY_ABI_MAX_SLOTS).map(scalar_param).collect::<Vec<_>>();
+
+        let constraints = entry_abi_constraints("action", "huge", &params);
+
+        assert!(constraints.unsupported);
+        assert!(constraints.unsupported_reasons.iter().any(|reason| reason.contains("more than 1024 slots")));
+    }
+
+    #[test]
+    fn ckb_capacity_calculation_saturates_on_extreme_sizes() {
+        assert_eq!(ckb_code_cell_capacity_shannons(usize::MAX, u64::MAX), u64::MAX);
     }
 
     #[test]

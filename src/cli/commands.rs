@@ -6,10 +6,10 @@ use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, Cell
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk, validate_source_units_primitive_mode, ArtifactFormat, CompileMetadata, CompileOptions,
+    validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat, CompileMetadata, CompileOptions,
     EntryWitnessArg, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
 };
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
 use ckb_vm::{
     cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
@@ -17,9 +17,12 @@ use ckb_vm::{
 };
 use colored::Colorize;
 use std::collections::HashMap;
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug)]
 pub enum Command {
@@ -596,6 +599,12 @@ impl CommandExecutor {
     fn doc(args: DocArgs) -> Result<()> {
         let output = Self::generate_docs(&args)?;
         let output_size_bytes = std::fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
+        let opened = if args.open {
+            open_doc_output(&output)?;
+            true
+        } else {
+            false
+        };
 
         if args.json {
             let summary = serde_json::json!({
@@ -603,25 +612,17 @@ impl CommandExecutor {
                 "format": display_doc_output_format(&args.output_format),
                 "output": output.display().to_string(),
                 "output_size_bytes": output_size_bytes,
-                "opened": args.open,
+                "opened": opened,
             });
             let json = serde_json::to_string_pretty(&summary)
                 .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize doc summary: {}", error)))?;
             println!("{}", json);
-
-            if args.open {
-                let _ = std::process::Command::new("open").arg(&output).status();
-            }
 
             return Ok(());
         }
 
         println!("{}", "Documentation generated".green());
         println!("  Output: {}", output.display());
-
-        if args.open {
-            let _ = std::process::Command::new("open").arg(&output).status();
-        }
 
         Ok(())
     }
@@ -1336,9 +1337,7 @@ impl CommandExecutor {
         let bytes = if let Some(hex) = args.hex.as_deref() {
             decode_hex_arg("ckb-hash", hex, None)?
         } else if let Some(path) = args.file.as_ref() {
-            std::fs::read(path).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
-            })?
+            read_ckb_hash_file(path)?
         } else {
             args.input.unwrap_or_default().into_bytes()
         };
@@ -1819,11 +1818,12 @@ impl CommandExecutor {
         let result = validate_artifact_metadata(artifact_bytes, metadata)?;
         let primitive_compat = args.primitive_compat.clone();
         let sources_verified = args.verify_sources || primitive_compat.is_some();
+        let source_verification_root = source_verification_root_for_artifact(artifact_path);
         if sources_verified {
-            validate_source_units_on_disk(&result.metadata)?;
+            validate_source_units_on_disk_under(&result.metadata, &source_verification_root)?;
         }
         if primitive_compat.is_some() {
-            validate_source_units_primitive_mode(&result.metadata, primitive_compat.clone())?;
+            validate_source_units_primitive_mode_under(&result.metadata, primitive_compat.clone(), &source_verification_root)?;
         }
         validate_expected_target_profile(result.metadata.target_profile.name.as_str(), args.expect_target_profile.as_deref())?;
         validate_expected_metadata_hash(
@@ -2576,6 +2576,38 @@ fn display_doc_output_format(format: &OutputFormat) -> &'static str {
     }
 }
 
+fn open_doc_output(output: &Path) -> Result<()> {
+    let status = std::process::Command::new("open").arg(output).status().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to open documentation '{}': {}", output.display(), error))
+    })?;
+    if !status.success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "failed to open documentation '{}': open exited with {}",
+            output.display(),
+            status
+        )));
+    }
+    Ok(())
+}
+
+fn read_ckb_hash_file(path: &Path) -> Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
+    })?;
+    let mut bytes = Vec::new();
+    file.by_ref().take(CKB_HASH_FILE_SIZE_LIMIT_BYTES + 1).read_to_end(&mut bytes).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
+    })?;
+    if bytes.len() as u64 > CKB_HASH_FILE_SIZE_LIMIT_BYTES {
+        return Err(crate::error::CompileError::without_span(format!(
+            "CKB hash input '{}' is too large: limit is {} bytes",
+            path.display(),
+            CKB_HASH_FILE_SIZE_LIMIT_BYTES
+        )));
+    }
+    Ok(bytes)
+}
+
 fn ensure_new_package_destination(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -2739,7 +2771,7 @@ fn validate_expected_metadata_hash(field: &str, actual: Option<&str>, expected: 
         )));
     }
     match actual {
-        Some(actual) if actual.eq_ignore_ascii_case(expected) => Ok(()),
+        Some(actual) if actual == expected => Ok(()),
         Some(actual) => Err(crate::error::CompileError::without_span(format!(
             "metadata {} '{}' does not match expected '{}'",
             field, actual, expected
@@ -3537,6 +3569,14 @@ fn compile_test_obligation_summary(metadata: &crate::CompileMetadata, status: Op
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn source_verification_root_for_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
+    let artifact_dir = artifact_path.parent().unwrap_or_else(|| Utf8Path::new("."));
+    match artifact_dir.file_name() {
+        Some("artifacts" | "build" | "target") => artifact_dir.parent().unwrap_or(artifact_dir).to_path_buf(),
+        _ => artifact_dir.to_path_buf(),
+    }
 }
 
 fn collect_cell_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -4528,6 +4568,27 @@ mod tests {
             .expect_err("invalid parser mapping should be reported");
 
         assert!(err.to_string().contains("missing parser mapping"));
+    }
+
+    #[test]
+    fn ckb_hash_file_rejects_inputs_above_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("too-large.bin");
+        std::fs::write(&path, vec![0u8; CKB_HASH_FILE_SIZE_LIMIT_BYTES as usize + 1]).unwrap();
+
+        let err = read_ckb_hash_file(&path).expect_err("oversized ckb-hash input should fail");
+
+        assert!(err.to_string().contains("too large"));
+    }
+
+    #[test]
+    fn expected_metadata_hash_comparison_is_case_sensitive() {
+        let expected = "ab".repeat(32);
+        let actual = expected.to_uppercase();
+
+        let err = validate_expected_metadata_hash("artifact_hash", Some(&actual), Some(&expected)).unwrap_err();
+
+        assert!(err.message.contains("does not match expected"), "unexpected error: {}", err.message);
     }
 
     #[test]

@@ -438,7 +438,7 @@ impl Formatter {
 
     fn format_expr_as_block_body(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Block(stmts) => self.format_block_expr_body(stmts),
+            Expr::Block(stmts, _) => self.format_block_expr_body(stmts),
             _ => self.format_expr(expr),
         }
     }
@@ -465,17 +465,17 @@ impl Formatter {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(value) => value.to_string(),
-            Expr::Bool(value) => value.to_string(),
-            Expr::String(value) => format!("{:?}", value),
-            Expr::ByteString(bytes) => {
+            Expr::Integer(value, _) => value.to_string(),
+            Expr::Bool(value, _) => value.to_string(),
+            Expr::String(value, _) => format!("{:?}", value),
+            Expr::ByteString(bytes, _) => {
                 let mut body = String::with_capacity(bytes.len() * 4);
                 for byte in bytes {
                     write!(&mut body, "\\x{:02x}", byte).expect("writing to a String cannot fail");
                 }
                 format!("b\"{}\"", body)
             }
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name, _) => name.clone(),
             Expr::Assign(assign) => format!(
                 "{} {} {}",
                 self.format_expr(&assign.target),
@@ -573,7 +573,7 @@ impl Formatter {
                 let fields = preserve.fields.join("\n");
                 format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let inner = stmts
                     .iter()
                     .map(|stmt| {
@@ -590,8 +590,8 @@ impl Formatter {
                     format!("{{\n{}\n}}", inner)
                 }
             }
-            Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
-            Expr::Array(items) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Tuple(items, _) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Array(items, _) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::If(if_expr) => format!(
                 "if {} {{ {} }} else {{ {} }}",
                 self.format_expr(&if_expr.condition),
@@ -628,7 +628,7 @@ impl Formatter {
     }
 
     fn format_field_initializer(&self, name: &str, value: &Expr) -> String {
-        if matches!(value, Expr::Identifier(identifier) if identifier == name) {
+        if matches!(value, Expr::Identifier(identifier, _) if identifier == name) {
             name.to_string()
         } else {
             format!("{}: {}", name, self.format_expr(value))

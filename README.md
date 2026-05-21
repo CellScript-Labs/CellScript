@@ -347,7 +347,7 @@ Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
 CKB production acceptance matrix. `registry.cell` covers bounded local
 `Vec<Address>` / `Vec<Hash>` helpers; `examples/registry.cell` keeps that
-surface available from the top-level examples directory. `order_book.cell` is a
+surface available from the top-level examples directory. `examples/language/order_book.cell` is a
 local stack-backed order-vector sketch and does not claim persistent order-book
 semantics. The v0.14 language examples cover CKB source/witness, capacity/time,
 TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
@@ -410,7 +410,7 @@ CellScript includes production-style local language tooling for early users:
 - [Output append example](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
 - [Roadmap overview](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
-- [Mutate append example](https://github.com/a19q3/CellScript/blob/main/docs/examples/mutate_append.md)
+- [Output append example](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
 - [0.14 roadmap](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes draft](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
 - [0.14 community update](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)

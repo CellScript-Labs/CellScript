@@ -68,6 +68,18 @@ soundness-checked, compatibility-tested production behavior:
 - collection runtime boundary closure: generated allocation-backed collection
   symbols must either derive from a checked allocator/runtime ABI or remain
   fail-closed and undocumented as production helpers
+- verifier boundary architecture closure:
+  - derive all runtime, stdlib, and helper syscall wrappers from a complete
+    `SyscallSpec`
+  - separate internal status/value classes such as `SyscallStatus`,
+    `HelperStatus`, `ErrorCode`, `ExitStatus`, `DomainU64`, and `Bool`
+  - replace flat lifecycle collectors with CFG-aware `ResourceEffectSummary`
+    merging
+  - require semantic Molecule field access to pass through validated schema
+    boundary objects instead of raw spans
+  - link ProofPlan claims from source obligation to IR, codegen/runtime check,
+    and evidence ID
+  - add VM-level malformed Molecule and syscall-failure negative fixtures
 - `Address` / `LockScript` / `LockHash` type separation
 - explicit `#[entry(lock)]` / `#[entry(type)]` role declarations
 - versioned data-layout preserve/migrate policies
@@ -162,7 +174,72 @@ Add an internal checker that rejects:
 
 ---
 
-### 3. Invariant Satisfaction Gate
+### 3. Verifier Boundary Architecture Closure
+
+**Problem**
+
+v0.15 closes known fail-open and semantic-boundary bugs and introduces the
+first boundary scaffolding. Some boundaries are still protected by entry-point
+discipline, conservative rejection, static tests, and review conventions rather
+than by hard internal APIs or first-class value categories.
+
+v0.16 must turn those scaffolds into enforced architecture without changing the
+public CellScript syntax.
+
+**Change**
+
+Make the high-risk verifier boundaries explicit and difficult to bypass:
+
+- complete `SyscallSpec` migration: all runtime, stdlib, and helper syscall
+  wrappers derive from one internal spec, including status register policy,
+  return registers, size/bounds policy, and fail behavior
+- first-class internal status/value separation: `Bool`, `DomainU64`,
+  `SyscallStatus`, `HelperStatus`, `ErrorCode`, and `ExitStatus` cannot flow
+  across each other's IR/codegen boundaries
+- CFG-aware `ResourceEffectSummary`: lifecycle effects are merged by control
+  flow instead of collected as flat syntax occurrences
+- hard schema API gate: semantic field equality, transition checks, vector
+  length, fixed field reads, and create-output checks consume
+  `CanonicalMoleculeTable -> ValidatedFieldSpan -> TypedField` plans, not raw
+  offset spans
+- ProofPlan coverage linker: checked runtime claims cite a concrete source
+  obligation, IR obligation, codegen/runtime check, and evidence ID
+- VM-level negative evidence: malformed Molecule layouts and syscall/helper
+  failures are tested at execution level, with snapshot tests only as
+  supplementary coverage
+
+**Code Areas**
+
+- `src/syscalls.rs`
+- IR validation and value-kind metadata
+- `src/codegen/runtime.rs`
+- `src/stdlib/`
+- `src/codegen/schema.rs`
+- lifecycle/effect validation and lowering
+- `src/proof_plan/`
+- VM-backed verifier fixtures
+
+**Acceptance**
+
+- no runtime, stdlib, or helper syscall wrapper is emitted outside
+  `SyscallSpec` unless explicitly classified as internal non-syscall code
+- status-like values cannot be returned, stored as domain locals, placed in
+  tuples, passed as domain arguments, dropped unused, or interpreted as lock
+  success
+- domain `u64` values remain legal and are not confused with status or error
+  codes
+- raw Molecule span helpers are private to schema internals and cannot be
+  called by semantic field checks
+- branch-local and duplicate lifecycle effects are rejected unless a
+  CFG-aware summary proves a safe merge
+- `checked-runtime` ProofPlan records fail strict/production checks without
+  executable evidence
+- VM-level negative tests cover malformed dynamic tables, fixed-width span
+  mismatches, syscall/helper failure, and fail-closed lock rejection
+
+---
+
+### 4. Invariant Satisfaction Gate
 
 **Problem**
 
@@ -201,7 +278,7 @@ The checker must reject or explicitly mark:
 
 ---
 
-### 4. Executable Aggregate Invariant Lowering
+### 5. Executable Aggregate Invariant Lowering
 
 **Problem**
 
@@ -236,7 +313,7 @@ Rules:
 
 ---
 
-### 5. Macro-Only Protocol Lowering
+### 6. Macro-Only Protocol Lowering
 
 **Problem**
 
@@ -272,7 +349,7 @@ Each stable macro must publish:
 
 ---
 
-### 6. Standard CKB Contract Compatibility Suite
+### 7. Standard CKB Contract Compatibility Suite
 
 **Problem**
 
@@ -316,7 +393,7 @@ Each suite must cover:
 
 ---
 
-### 7. Script Role and Lock Identity Precision
+### 8. Script Role and Lock Identity Precision
 
 **Problem**
 
@@ -353,7 +430,7 @@ action transfer(...)
 
 ---
 
-### 8. Builder Assumption Contract
+### 9. Builder Assumption Contract
 
 **Problem**
 
@@ -393,7 +470,7 @@ Add validation APIs:
 
 ## P1
 
-### 9. Versioned Data-Layout Policies
+### 10. Versioned Data-Layout Policies
 
 **Problem**
 
@@ -421,7 +498,7 @@ ProofPlan obligations.
 
 ---
 
-### 10. Non-TYPE-ID Global Uniqueness Proof Boundaries
+### 11. Non-TYPE-ID Global Uniqueness Proof Boundaries
 
 **Problem**
 
@@ -447,7 +524,7 @@ Define proof boundaries for non-TYPE-ID uniqueness:
 
 ---
 
-### 11. Transaction Solver
+### 12. Transaction Solver
 
 **Problem**
 
@@ -484,7 +561,7 @@ Solver responsibilities:
 
 ---
 
-### 12. Deployment and Upgrade Governance
+### 13. Deployment and Upgrade Governance
 
 **Problem**
 
@@ -519,7 +596,7 @@ cellc lock-deps
 
 ---
 
-### 13. Audit and Debug UX
+### 14. Audit and Debug UX
 
 **Problem**
 
@@ -557,7 +634,7 @@ cellc audit-bundle
 
 ---
 
-### 14. Standard Library Release Track
+### 15. Standard Library Release Track
 
 **Problem**
 
@@ -590,7 +667,7 @@ Rules:
 
 ## P2
 
-### 15. Collection Runtime and Allocator ABI Boundary
+### 16. Collection Runtime and Allocator ABI Boundary
 
 **Problem**
 
@@ -637,7 +714,7 @@ Rules:
 
 ---
 
-### 16. Advanced Linear Collections
+### 17. Advanced Linear Collections
 
 **Problem**
 
@@ -668,7 +745,7 @@ Constraints:
 
 ---
 
-### 17. Formal Verification Backend Exploration
+### 18. Formal Verification Backend Exploration
 
 **Problem**
 

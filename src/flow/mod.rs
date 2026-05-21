@@ -119,7 +119,7 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
 fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, expr: &Expr) {
     match expr {
         Expr::Consume(consume) => {
-            if let Expr::Identifier(name) = consume.expr.as_ref() {
+            if let Expr::Identifier(name, _) = consume.expr.as_ref() {
                 if let Some(ty) = context.variable_flow_types.get(name) {
                     context.consumed_flow_types.insert(ty.clone());
                 }
@@ -127,7 +127,7 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
             collect_state_context_from_expr(specs, context, &consume.expr);
         }
         Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+            if let Expr::Identifier(name, _) = transfer.expr.as_ref() {
                 if let Some(ty) = context.variable_flow_types.get(name) {
                     context.consumed_flow_types.insert(ty.clone());
                 }
@@ -196,8 +196,8 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
             }
         }
         Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_state_context_from_stmts(specs, context, stmts),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_state_context_from_stmts(specs, context, stmts),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_state_context_from_expr(specs, context, item);
             }
@@ -223,11 +223,11 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
                 collect_state_context_from_expr(specs, context, &arm.value);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => {}
     }
@@ -235,7 +235,7 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
 
 fn flow_expr_type(specs: &HashMap<String, FlowSpec>, context: &ActionStateContext, expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Identifier(name) => context.variable_flow_types.get(name).cloned(),
+        Expr::Identifier(name, _) => context.variable_flow_types.get(name).cloned(),
         Expr::Create(create) if specs.contains_key(&create.ty) => Some(create.ty.clone()),
         Expr::Cast(cast) => flow_expr_type(specs, context, &cast.expr),
         _ => None,
@@ -349,8 +349,8 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             Ok(())
         }
         Expr::Preserve(_) => Ok(()),
-        Expr::Block(stmts) => validate_stmt_list(specs, context, stmts),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => validate_stmt_list(specs, context, stmts),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 validate_state_transition_expr(specs, context, item)?;
             }
@@ -379,11 +379,11 @@ fn validate_state_transition_expr(specs: &HashMap<String, FlowSpec>, context: &A
             }
             Ok(())
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => Ok(()),
     }
@@ -429,7 +429,7 @@ fn validate_state_transition_create(
 
 fn integer_literal(expr: &Expr) -> Option<u64> {
     match expr {
-        Expr::Integer(value) => Some(*value),
+        Expr::Integer(value, _) => Some(*value),
         Expr::Cast(cast) => integer_literal(&cast.expr),
         _ => None,
     }
@@ -437,14 +437,14 @@ fn integer_literal(expr: &Expr) -> Option<u64> {
 
 fn static_integer_value(expr: &Expr, context: &ActionStateContext) -> Option<u64> {
     match expr {
-        Expr::Identifier(name) => context.integer_aliases.get(name).copied(),
+        Expr::Identifier(name, _) => context.integer_aliases.get(name).copied(),
         _ => integer_literal(expr),
     }
 }
 
 fn static_flow_state_value(expr: &Expr, context: &ActionStateContext, _type_name: &str, states: &[String]) -> Option<u64> {
     static_integer_value(expr, context).or_else(|| match expr {
-        Expr::Identifier(name) => {
+        Expr::Identifier(name, _) => {
             let state_name = if let Some((_qualified_type, state_name)) = name.rsplit_once("::") {
                 // The qualified prefix is the enum namespace (e.g. OfferState in
                 // OfferState::Filled), not the flow type name (e.g. Offer).

@@ -297,7 +297,7 @@ CellScript 为早期用户提供 production-style 的本地语言工具：
 - [Output append 示例](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
 - [路线图 overview](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
-- [Mutate append 示例](https://github.com/a19q3/CellScript/blob/main/docs/examples/mutate_append.md)
+- [Output append 示例](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
 - [0.14 roadmap](https://github.com/a19q3/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes draft](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
 - [0.14 community update](https://github.com/a19q3/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)

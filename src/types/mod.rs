@@ -76,6 +76,18 @@ enum CellTypeKind {
     Receipt,
 }
 
+#[derive(Debug, Clone)]
+struct TypeDependencyEdge {
+    target: String,
+    span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeGraphVisitState {
+    Visiting,
+    Done,
+}
+
 pub struct TypeEnv {
     vars: HashMap<String, Type>,
     mutability: HashMap<String, bool>,
@@ -448,6 +460,7 @@ impl<'a> TypeChecker<'a> {
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
+        self.reject_imports_without_resolver(module)?;
         let mut seen_symbols = HashSet::new();
         let mut seen_type_ids = HashMap::new();
         for item in &module.items {
@@ -552,11 +565,30 @@ impl<'a> TypeChecker<'a> {
         self.register_imported_type_ids(&mut seen_type_ids)?;
         self.register_flows(module)?;
         self.validate_flow_action_edges(module)?;
+        self.validate_local_schema_type_graph_acyclic(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
         }
         Ok(())
+    }
+
+    fn reject_imports_without_resolver(&self, module: &Module) -> Result<()> {
+        if self.resolver.is_some() {
+            return Ok(());
+        }
+
+        let Some(use_stmt) = module.items.iter().find_map(|item| match item {
+            Item::Use(use_stmt) => Some(use_stmt),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+
+        Err(CompileError::new(
+            "module imports require resolver-aware type checking; compile from a file/package or call check_with_resolver",
+            use_stmt.span,
+        ))
     }
 
     fn register_imported_type_ids(&self, seen_type_ids: &mut HashMap<String, Span>) -> Result<()> {
@@ -1105,6 +1137,60 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn validate_local_schema_type_graph_acyclic(&self, module: &Module) -> Result<()> {
+        let mut local_types = HashSet::new();
+        let mut type_order = Vec::new();
+
+        for item in &module.items {
+            let name = match item {
+                Item::Resource(def) => &def.name,
+                Item::Shared(def) => &def.name,
+                Item::Receipt(def) => &def.name,
+                Item::Struct(def) => &def.name,
+                Item::Enum(def) => &def.name,
+                _ => continue,
+            };
+
+            if local_types.insert(name.clone()) {
+                type_order.push(name.clone());
+            }
+        }
+
+        let mut graph = type_order.iter().map(|name| (name.clone(), Vec::<TypeDependencyEdge>::new())).collect::<HashMap<_, _>>();
+
+        for item in &module.items {
+            match item {
+                Item::Resource(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Shared(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Receipt(def) => {
+                    collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph);
+                    if let Some(output) = &def.claim_output {
+                        collect_type_dependencies(&def.name, output, def.span, &local_types, &mut graph);
+                    }
+                }
+                Item::Struct(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Enum(def) => {
+                    for variant in &def.variants {
+                        for field_ty in &variant.fields {
+                            collect_type_dependencies(&def.name, field_ty, variant.span, &local_types, &mut graph);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut states = HashMap::new();
+        let mut stack = Vec::new();
+        for name in type_order {
+            if !states.contains_key(&name) {
+                visit_type_dependency_graph(&name, &graph, &mut states, &mut stack)?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn check_enum(&mut self, enum_def: &EnumDef) -> Result<()> {
         let mut seen = HashSet::new();
         for variant in &enum_def.variants {
@@ -1149,8 +1235,8 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_const_initializer(&self, const_name: &str, expr: &Expr) -> Result<()> {
         match expr {
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => Ok(()),
-            Expr::Identifier(name) => {
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) => Ok(()),
+            Expr::Identifier(name, _) => {
                 if self.resolve_constant(name).is_some() || self.enum_variant_expr_type(name, expr_span(expr))?.is_some() {
                     Ok(())
                 } else {
@@ -1160,7 +1246,7 @@ impl<'a> TypeChecker<'a> {
                     ))
                 }
             }
-            Expr::Array(elems) | Expr::Tuple(elems) => {
+            Expr::Array(elems, _) | Expr::Tuple(elems, _) => {
                 for elem in elems {
                     self.validate_const_initializer(const_name, elem)?;
                 }
@@ -1195,7 +1281,7 @@ impl<'a> TypeChecker<'a> {
             | Expr::FieldAccess(_)
             | Expr::Index(_)
             | Expr::Assert(_)
-            | Expr::Block(_)
+            | Expr::Block(..)
             | Expr::If(_)
             | Expr::Cast(_)
             | Expr::Range(_)
@@ -1413,8 +1499,8 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Block(stmts) => self.validate_lifecycle_effects_in_stmts(stmts, branch_local, summary),
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Block(stmts, _) => self.validate_lifecycle_effects_in_stmts(stmts, branch_local, summary),
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.validate_lifecycle_effects_in_expr(item, branch_local, summary)?;
                 }
@@ -1449,11 +1535,11 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_)
             | Expr::Preserve(_) => Ok(()),
         }
@@ -1543,7 +1629,7 @@ impl<'a> TypeChecker<'a> {
                 };
                 Ok(iter.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect()))
             }
-            Expr::Block(stmts) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
+            Expr::Block(stmts, _) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
             Expr::Assign(assign) => {
                 self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)
@@ -1602,7 +1688,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
             }
-            Expr::Tuple(elems) | Expr::Array(elems) => {
+            Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
                 for elem in elems {
                     self.validate_branch_obligations_in_expr(elem, outputs, guaranteed.clone())?;
                 }
@@ -1619,11 +1705,11 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(guaranteed)
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_)
             | Expr::StdlibCall(_) => Ok(guaranteed),
             Expr::RequireBlock(require_block) => {
@@ -1779,8 +1865,8 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(message, outputs)?;
                 }
             }
-            Expr::Block(stmts) => self.validate_create_targets_in_stmts(stmts, outputs)?,
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Block(stmts, _) => self.validate_create_targets_in_stmts(stmts, outputs)?,
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.validate_create_targets_in_expr(item, outputs)?;
                 }
@@ -1806,11 +1892,11 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(&arm.value, outputs)?;
                 }
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_)
             | Expr::StdlibCall(_) => {}
             Expr::RequireBlock(require_block) => {
@@ -2585,12 +2671,12 @@ impl<'a> TypeChecker<'a> {
                     self.validate_spawn_ipc_fd_usage_expr(message, state)?;
                 }
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let mut block_state = state.clone();
                 self.validate_spawn_ipc_fd_usage_statements(stmts, &mut block_state)?;
                 *state = block_state;
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.validate_spawn_ipc_fd_usage_expr(item, state)?;
                 }
@@ -2647,11 +2733,11 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Preserve(_)
-            | Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            | Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_) => {}
         }
         Ok(())
@@ -2706,9 +2792,9 @@ impl<'a> TypeChecker<'a> {
 
     fn spawn_ipc_fd_key(&self, expr: &Expr, state: &SpawnIpcFdState) -> Option<String> {
         match expr {
-            Expr::Identifier(name) => state.aliases.get(name).cloned(),
+            Expr::Identifier(name, _) => state.aliases.get(name).cloned(),
             Expr::FieldAccess(field) => {
-                let Expr::Identifier(base) = field.expr.as_ref() else {
+                let Expr::Identifier(base, _) = field.expr.as_ref() else {
                     return None;
                 };
                 let (read_fd, write_fd) = state.pipe_tuples.get(base)?;
@@ -2878,7 +2964,7 @@ impl<'a> TypeChecker<'a> {
             }
             Stmt::For(for_stmt) => self.check_no_unreachable_stmts(&for_stmt.body)?,
             Stmt::While(while_stmt) => self.check_no_unreachable_stmts(&while_stmt.body)?,
-            Stmt::Expr(Expr::Block(stmts)) => self.check_no_unreachable_stmts(stmts)?,
+            Stmt::Expr(Expr::Block(stmts, _)) => self.check_no_unreachable_stmts(stmts)?,
             _ => {}
         }
         Ok(())
@@ -2888,7 +2974,7 @@ impl<'a> TypeChecker<'a> {
         if let Some(declared_ty) = &let_stmt.ty {
             return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
         }
-        if let Expr::Array(elems) = &let_stmt.value {
+        if let Expr::Array(elems, _) = &let_stmt.value {
             if elems.is_empty() {
                 return match &let_stmt.ty {
                     Some(declared @ Type::Array(_, 0)) => Ok(declared.clone()),
@@ -2906,8 +2992,8 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
-            Expr::Integer(value) => self.infer_integer_literal_with_expected_type(*value, expected_ty, span),
-            Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
+            Expr::Integer(value, _) => self.infer_integer_literal_with_expected_type(*value, expected_ty, span),
+            Expr::Array(elems, _) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
             _ => {
                 let actual_ty = self.infer_expr(env, expr)?;
                 Ok(actual_ty)
@@ -2988,17 +3074,17 @@ impl<'a> TypeChecker<'a> {
             return Ok(expected_ty.clone());
         }
 
-        self.infer_expr(env, &Expr::Array(elems.to_vec()))
+        self.infer_expr(env, &Expr::Array(elems.to_vec(), span))
     }
 
     fn infer_expr(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
         self.validate_expr_allowed_in_current_callable(expr)?;
         match expr {
-            Expr::Integer(_) => Ok(Type::U64),
-            Expr::Bool(_) => Ok(Type::Bool),
-            Expr::String(_) => Ok(Type::Named("String".to_string())),
-            Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
-            Expr::Identifier(name) => {
+            Expr::Integer(..) => Ok(Type::U64),
+            Expr::Bool(..) => Ok(Type::Bool),
+            Expr::String(..) => Ok(Type::Named("String".to_string())),
+            Expr::ByteString(bytes, _) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
+            Expr::Identifier(name, _) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     Ok(ty)
                 } else if let Some(constant) = self.resolve_constant(name) {
@@ -3016,13 +3102,13 @@ impl<'a> TypeChecker<'a> {
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
             Expr::Binary(bin) => {
                 let left_ty = self.infer_expr(env, &bin.left)?;
-                let right_ty = if matches!(bin.right.as_ref(), Expr::Integer(_)) {
+                let right_ty = if matches!(bin.right.as_ref(), Expr::Integer(..)) {
                     let expected = self.contextual_integer_type_for_binary_right(bin.op, &left_ty);
                     self.infer_expr_with_expected_type(env, &bin.right, &expected, bin.span)?
                 } else {
                     self.infer_expr(env, &bin.right)?
                 };
-                let left_ty = if matches!(bin.left.as_ref(), Expr::Integer(_)) {
+                let left_ty = if matches!(bin.left.as_ref(), Expr::Integer(..)) {
                     let expected = self.contextual_integer_type_for_binary_left(bin.op, &right_ty);
                     self.infer_expr_with_expected_type(env, &bin.left, &expected, bin.span)?
                 } else {
@@ -3242,7 +3328,7 @@ impl<'a> TypeChecker<'a> {
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("assert condition must be boolean", assert_expr.span));
                 }
-                if !matches!(assert_expr.message.as_ref(), Expr::String(_)) {
+                if !matches!(assert_expr.message.as_ref(), Expr::String(..)) {
                     return Err(CompileError::new("assert message must be a string literal", expr_span(&assert_expr.message)));
                 }
                 Ok(Type::Unit)
@@ -3254,27 +3340,27 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
                 }
                 if let Some(message) = &require_expr.message {
-                    if !matches!(message.as_ref(), Expr::String(_)) {
+                    if !matches!(message.as_ref(), Expr::String(..)) {
                         return Err(CompileError::new("require message must be a string literal", expr_span(message)));
                     }
                 }
                 Ok(Type::Bool)
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let mut block_env = env.child();
                 let last_ty = self.infer_tail_block_value(&mut block_env, stmts)?;
                 block_env.check_linear_complete()?;
                 env.merge_existing_linear_states_from(&block_env);
                 Ok(last_ty)
             }
-            Expr::Tuple(elems) => {
+            Expr::Tuple(elems, _) => {
                 let mut types = Vec::new();
                 for elem in elems {
                     types.push(self.infer_expr(env, elem)?);
                 }
                 Ok(Type::Tuple(types))
             }
-            Expr::Array(elems) => {
+            Expr::Array(elems, _) => {
                 if elems.is_empty() {
                     return Err(CompileError::new("empty array literal requires an explicit array type annotation", expr_span(expr)));
                 }
@@ -3414,7 +3500,7 @@ impl<'a> TypeChecker<'a> {
                 )
                 .with_code("E1005"));
             }
-            Expr::If(_) | Expr::Match(_) | Expr::Block(_) => {
+            Expr::If(_) | Expr::Match(_) | Expr::Block(..) => {
                 return Err(CompileError::new(
                     format!("{} contains control flow; require expressions must be pure boolean constraints", context),
                     expr_span(expr),
@@ -3448,7 +3534,7 @@ impl<'a> TypeChecker<'a> {
                 Self::validate_require_condition_is_pure(&assert_expr.condition, context)?;
                 Self::validate_require_condition_is_pure(&assert_expr.message, context)?;
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     Self::validate_require_condition_is_pure(item, context)?;
                 }
@@ -3463,7 +3549,7 @@ impl<'a> TypeChecker<'a> {
                     Self::validate_require_condition_is_pure(value, context)?;
                 }
             }
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => {}
         }
         Ok(())
     }
@@ -3550,7 +3636,7 @@ impl<'a> TypeChecker<'a> {
         if !self.is_linear_type(&ty) {
             return Err(CompileError::new(format!("{} {} must be a cell-backed value", operation, role), expr_span(expr)));
         }
-        if !matches!(expr, Expr::Identifier(_)) {
+        if !matches!(expr, Expr::Identifier(..)) {
             return Err(CompileError::new(format!("{} {} must be a named cell-backed binding", operation, role), expr_span(expr)));
         }
         Ok(ty)
@@ -3825,7 +3911,7 @@ impl<'a> TypeChecker<'a> {
         if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return Ok(None);
         }
-        let Expr::Identifier(state_name) = value else {
+        let Expr::Identifier(state_name, _) = value else {
             return Ok(None);
         };
         if let Type::Named(enum_name) = expected_ty {
@@ -4087,7 +4173,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         match call.func.as_ref() {
-            Expr::Identifier(name)
+            Expr::Identifier(name, _)
                 if name.starts_with("env::")
                     || name.starts_with("ckb::")
                     || name.starts_with("source::")
@@ -4209,7 +4295,7 @@ impl<'a> TypeChecker<'a> {
                 };
                 self.stmts_always_return(&if_stmt.then_branch) && self.stmts_always_return(else_branch)
             }
-            Stmt::Expr(Expr::Block(stmts)) => self.stmts_always_return(stmts),
+            Stmt::Expr(Expr::Block(stmts, _)) => self.stmts_always_return(stmts),
             _ => false,
         }
     }
@@ -4308,7 +4394,7 @@ impl<'a> TypeChecker<'a> {
 
     fn mark_expr_as_moved(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<()> {
         match expr {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     if self.is_linear_type(&ty) {
                         env.consume(name)?;
@@ -4316,7 +4402,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.mark_expr_as_moved(env, item)?;
                 }
@@ -4351,7 +4437,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 env.merge_match_linear_states(&arm_envs, match_expr.span)
             }
-            Expr::Block(_) => Ok(()),
+            Expr::Block(..) => Ok(()),
             _ => Ok(()),
         }
     }
@@ -4382,7 +4468,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.reject_stored_linear_reference_alias(env, item, span)?;
                 }
@@ -4399,7 +4485,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Block(stmts) => self.reject_stored_linear_reference_alias_in_tail_stmt(env, stmts, span),
+            Expr::Block(stmts, _) => self.reject_stored_linear_reference_alias_in_tail_stmt(env, stmts, span),
             _ => Ok(()),
         }
     }
@@ -4452,7 +4538,7 @@ impl<'a> TypeChecker<'a> {
         self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
 
         match assign.target.as_ref() {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 let Some(target_ty) = env.lookup(name).cloned() else {
                     return Err(CompileError::new(format!("undefined variable '{}'", name), assign.span));
                 };
@@ -4648,7 +4734,7 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
         match call.func.as_ref() {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 if let Some(signature) = self.functions.get(name).cloned() {
                     self.validate_call_allowed(name, signature.kind, call.span)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
@@ -4879,7 +4965,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         if let Type::Named(name) = &receiver_ty {
                             if name == "Vec" {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 return Ok(Type::Unit);
@@ -4943,7 +5029,7 @@ impl<'a> TypeChecker<'a> {
                         let arg_ty = &arg_types[0];
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Bool)
@@ -5013,7 +5099,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -5050,7 +5136,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -5086,7 +5172,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -5225,8 +5311,8 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_static_spawn_target_expr(&self, expr: &Expr, span: Span) -> Result<()> {
         match expr {
-            Expr::String(_) => Ok(()),
-            Expr::Identifier(name) if self.is_string_constant(name) => {
+            Expr::String(..) => Ok(()),
+            Expr::Identifier(name, _) if self.is_string_constant(name) => {
                 Ok(())
             }
             _ => Err(CompileError::new(
@@ -5440,8 +5526,8 @@ impl<'a> TypeChecker<'a> {
 
     fn expr_is_constant_scalar(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Integer(_) | Expr::Bool(_) => true,
-            Expr::Identifier(name) => self.constants.contains_key(name) || self.resolve_constant(name).is_some(),
+            Expr::Integer(..) | Expr::Bool(..) => true,
+            Expr::Identifier(name, _) => self.constants.contains_key(name) || self.resolve_constant(name).is_some(),
             Expr::Cast(cast) => self.expr_is_constant_scalar(&cast.expr),
             _ => false,
         }
@@ -5449,9 +5535,9 @@ impl<'a> TypeChecker<'a> {
 
     fn const_integer_value(&self, expr: &Expr) -> Option<u128> {
         match expr {
-            Expr::Integer(value) => Some(*value as u128),
-            Expr::Bool(value) => Some(u128::from(*value)),
-            Expr::Identifier(name) => {
+            Expr::Integer(value, _) => Some(*value as u128),
+            Expr::Bool(value, _) => Some(u128::from(*value)),
+            Expr::Identifier(name, _) => {
                 if let Some(constant) = self.constants.get(name) {
                     self.const_integer_value(&constant.value)
                 } else if let Some(constant) = self.resolve_constant(name) {
@@ -5629,7 +5715,7 @@ impl<'a> TypeChecker<'a> {
             return Err(CompileError::new(format!("{} requires a cell-backed linear value", operation), span));
         }
         match expr {
-            Expr::Identifier(name) => Ok((ty, name.clone())),
+            Expr::Identifier(name, _) => Ok((ty, name.clone())),
             _ => Err(CompileError::new(
                 format!("{} requires a named cell-backed value so the compiler can track linear ownership", operation),
                 span,
@@ -5718,36 +5804,91 @@ fn stmt_span(stmt: &Stmt) -> Span {
 }
 
 fn expr_span(expr: &Expr) -> Span {
-    match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => Span::default(),
-        Expr::StdlibCall(call) => call.span,
-        Expr::Assign(assign) => assign.span,
-        Expr::Binary(binary) => binary.span,
-        Expr::Unary(unary) => unary.span,
-        Expr::Call(call) => call.span,
-        Expr::FieldAccess(field) => field.span,
-        Expr::Index(index) => index.span,
-        Expr::Create(create) => create.span,
-        Expr::Consume(consume) => consume.span,
-        Expr::Transfer(transfer) => transfer.span,
-        Expr::Destroy(destroy) => destroy.span,
-        Expr::ReadRef(read_ref) => read_ref.span,
-        Expr::Claim(claim) => claim.span,
-        Expr::Settle(settle) => settle.span,
-        Expr::CreateUnique(cu) => cu.span,
-        Expr::ReplaceUnique(ru) => ru.span,
-        Expr::Assert(assert_expr) => assert_expr.span,
-        Expr::Require(require_expr) => require_expr.span,
-        Expr::Block(stmts) => stmts.last().map(stmt_span).unwrap_or_default(),
-        Expr::Tuple(_) | Expr::Array(_) => Span::default(),
-        Expr::If(if_expr) => if_expr.span,
-        Expr::Cast(cast) => cast.span,
-        Expr::Range(range) => range.span,
-        Expr::StructInit(init) => init.span,
-        Expr::Match(match_expr) => match_expr.span,
-        Expr::RequireBlock(require_block) => require_block.span,
-        Expr::Preserve(preserve) => preserve.span,
+    expr.span()
+}
+
+fn collect_field_type_dependencies(
+    owner: &str,
+    fields: &[Field],
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    for field in fields {
+        collect_type_dependencies(owner, &field.ty, field.span, local_types, graph);
     }
+}
+
+fn collect_type_dependencies(
+    owner: &str,
+    ty: &Type,
+    span: Span,
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    match ty {
+        Type::Array(elem, _) | Type::Ref(elem) | Type::MutRef(elem) => {
+            collect_type_dependencies(owner, elem, span, local_types, graph);
+        }
+        Type::Tuple(types) => {
+            for elem in types {
+                collect_type_dependencies(owner, elem, span, local_types, graph);
+            }
+        }
+        Type::Named(name) => collect_named_type_dependencies(owner, name, span, local_types, graph),
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Bool | Type::Unit | Type::Address | Type::Hash => {}
+    }
+}
+
+fn collect_named_type_dependencies(
+    owner: &str,
+    name: &str,
+    span: Span,
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    let mut token = String::new();
+    for ch in name.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
+            token.push(ch);
+            continue;
+        }
+
+        if !token.is_empty() {
+            if local_types.contains(&token) {
+                graph.entry(owner.to_string()).or_default().push(TypeDependencyEdge { target: token.clone(), span });
+            }
+            token.clear();
+        }
+    }
+}
+
+fn visit_type_dependency_graph(
+    name: &str,
+    graph: &HashMap<String, Vec<TypeDependencyEdge>>,
+    states: &mut HashMap<String, TypeGraphVisitState>,
+    stack: &mut Vec<String>,
+) -> Result<()> {
+    states.insert(name.to_string(), TypeGraphVisitState::Visiting);
+    stack.push(name.to_string());
+
+    if let Some(edges) = graph.get(name) {
+        for edge in edges {
+            match states.get(&edge.target).copied() {
+                Some(TypeGraphVisitState::Done) => {}
+                Some(TypeGraphVisitState::Visiting) => {
+                    let start = stack.iter().position(|entry| entry == &edge.target).unwrap_or(0);
+                    let mut cycle = stack[start..].to_vec();
+                    cycle.push(edge.target.clone());
+                    return Err(CompileError::new(format!("cyclic type dependency detected: {}", cycle.join(" -> ")), edge.span));
+                }
+                None => visit_type_dependency_graph(&edge.target, graph, states, stack)?,
+            }
+        }
+    }
+
+    stack.pop();
+    states.insert(name.to_string(), TypeGraphVisitState::Done);
+    Ok(())
 }
 
 pub(crate) fn lifecycle_effect_keys(expr: &Expr) -> Vec<(String, Span, &'static str)> {
@@ -5792,7 +5933,7 @@ fn lifecycle_input_key(expr: &Expr, span: Span, label: &'static str) -> Vec<(Str
 
 pub(crate) fn lifecycle_operand_root(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::Identifier(name, _) => Some(name.as_str()),
         Expr::FieldAccess(field) => lifecycle_operand_root(&field.expr),
         Expr::Index(index) => lifecycle_operand_root(&index.expr),
         _ => None,
@@ -5865,12 +6006,12 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 collect_required_output_fields(message, outputs, fields);
             }
         }
-        Expr::Block(stmts) => {
+        Expr::Block(stmts, _) => {
             for stmt in stmts {
                 collect_required_output_fields_from_stmt(stmt, outputs, fields);
             }
         }
-        Expr::Tuple(elems) | Expr::Array(elems) => {
+        Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
             for elem in elems {
                 collect_required_output_fields(elem, outputs, fields);
             }
@@ -5896,11 +6037,11 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 collect_required_output_fields(&arm.value, outputs, fields);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => {}
         Expr::RequireBlock(require_block) => {
@@ -5953,7 +6094,7 @@ fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<Str
     let Expr::FieldAccess(field) = expr else {
         return None;
     };
-    let Expr::Identifier(base) = field.expr.as_ref() else {
+    let Expr::Identifier(base, _) = field.expr.as_ref() else {
         return None;
     };
     if outputs.contains(base) {
@@ -5965,7 +6106,7 @@ fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<Str
 
 fn forbidden_consensus_call_name(expr: &Expr) -> Option<&'static str> {
     match expr {
-        Expr::Identifier(name) => forbidden_consensus_terminal(name),
+        Expr::Identifier(name, _) => forbidden_consensus_terminal(name),
         Expr::FieldAccess(field) => forbidden_consensus_terminal(&field.field),
         _ => None,
     }
@@ -6052,7 +6193,7 @@ fn aggregate_field_type_is_supported(ty: &Type) -> bool {
 
 fn assignment_root_name(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::Identifier(name, _) => Some(name.as_str()),
         Expr::FieldAccess(field) => assignment_root_name(&field.expr),
         Expr::Index(index) => assignment_root_name(&index.expr),
         _ => None,
@@ -6173,13 +6314,13 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
 fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
     match expr {
         Expr::Consume(consume) => {
-            if let Expr::Identifier(name) = consume.expr.as_ref() {
+            if let Expr::Identifier(name, _) = consume.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&consume.expr, bindings);
         }
         Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+            if let Expr::Identifier(name, _) = transfer.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&transfer.expr, bindings);
@@ -6214,19 +6355,19 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::Destroy(destroy) => {
-            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+            if let Expr::Identifier(name, _) = destroy.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
         }
         Expr::Claim(claim) => {
-            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+            if let Expr::Identifier(name, _) = claim.receipt.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&claim.receipt, bindings);
         }
         Expr::Settle(settle) => {
-            if let Expr::Identifier(name) = settle.expr.as_ref() {
+            if let Expr::Identifier(name, _) = settle.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&settle.expr, bindings);
@@ -6240,7 +6381,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::ReplaceUnique(replace) => {
-            if let Expr::Identifier(name) = replace.expr.as_ref() {
+            if let Expr::Identifier(name, _) = replace.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&replace.expr, bindings);
@@ -6258,8 +6399,8 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(message, bindings);
             }
         }
-        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_consumed_bindings_from_expr(item, bindings);
             }
@@ -6285,13 +6426,13 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) | Expr::ReadRef(_) => {}
         Expr::StdlibCall(call) => {
             let qualified = format!("std::{}::{}", call.namespace, call.name);
             match qualified.as_str() {
                 "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
                     if !call.args.is_empty() {
-                        if let Expr::Identifier(name) = &call.args[0] {
+                        if let Expr::Identifier(name, _) = &call.args[0] {
                             bindings.insert(name.clone());
                         }
                     }
@@ -6310,7 +6451,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
 
 fn direct_call_name(call: &CallExpr) -> Option<&str> {
     match call.func.as_ref() {
-        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::Identifier(name, _) => Some(name.as_str()),
         _ => None,
     }
 }
@@ -6334,7 +6475,7 @@ fn mutable_reference_root_names(expr: &Expr) -> Vec<&str> {
 
 fn collect_mutable_reference_root_names<'a>(expr: &'a Expr, roots: &mut Vec<&'a str>) {
     match expr {
-        Expr::Identifier(name) => push_unique_root(roots, name.as_str()),
+        Expr::Identifier(name, _) => push_unique_root(roots, name.as_str()),
         Expr::FieldAccess(field) => collect_mutable_reference_root_names(&field.expr, roots),
         Expr::Index(index) => collect_mutable_reference_root_names(&index.expr, roots),
         Expr::Cast(cast) => collect_mutable_reference_root_names(&cast.expr, roots),
@@ -6347,7 +6488,7 @@ fn collect_mutable_reference_root_names<'a>(expr: &'a Expr, roots: &mut Vec<&'a 
                 collect_mutable_reference_root_names(&arm.value, roots);
             }
         }
-        Expr::Block(stmts) => collect_mutable_reference_root_names_from_tail_stmts(stmts, roots),
+        Expr::Block(stmts, _) => collect_mutable_reference_root_names_from_tail_stmts(stmts, roots),
         _ => {}
     }
 }
@@ -7158,6 +7299,43 @@ where
     }
 
     #[test]
+    fn cyclic_schema_type_dependencies_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::cyclic_schema
+
+struct A {
+    b: B
+}
+
+struct B {
+    a: A
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cyclic type dependency detected: A -> B -> A"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn recursive_enum_payloads_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::recursive_enum
+
+enum Node {
+    Leaf,
+    Branch(Node)
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cyclic type dependency detected: Node -> Node"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn const_initializers_reject_cell_lifecycle_expressions() {
         let err = check(&source_module(
             r#"
@@ -7363,6 +7541,25 @@ where
         let err = check_with_resolver(&app, &resolver, &app.name).unwrap_err();
 
         assert!(err.message.contains("duplicate type_id 'cellscript::asset::Token:v1'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn check_without_resolver_rejects_imports() {
+        let app = source_module(
+            r#"
+module app
+
+use cellscript::left::Token
+
+action main(token: Token) -> u64
+where
+    token.amount
+"#,
+        );
+
+        let err = check(&app).unwrap_err();
+
+        assert!(err.message.contains("resolver-aware type checking"), "unexpected error: {}", err.message);
     }
 
     #[test]

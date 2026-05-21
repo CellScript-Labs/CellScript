@@ -2,9 +2,13 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
+const MAX_PARSE_RECURSION_DEPTH: u16 = 128;
+
 pub struct Parser<'a> {
     tokens: &'a [Token],
     position: usize,
+    eof: Token,
+    recursion_depth: u16,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -24,11 +28,11 @@ struct TypePolicyDecls {
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0 }
+        Self { tokens, position: 0, eof: Token::new(TokenKind::Eof, Span::default(), ""), recursion_depth: 0 }
     }
 
     fn current(&self) -> &Token {
-        &self.tokens[self.position.min(self.tokens.len() - 1)]
+        self.tokens.get(self.position.min(self.tokens.len().saturating_sub(1))).unwrap_or(&self.eof)
     }
 
     fn current_identifier(&self) -> Option<String> {
@@ -39,15 +43,32 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self, offset: usize) -> &Token {
-        &self.tokens[(self.position + offset).min(self.tokens.len() - 1)]
+        self.tokens.get(self.position.saturating_add(offset).min(self.tokens.len().saturating_sub(1))).unwrap_or(&self.eof)
+    }
+
+    fn with_recursion_guard<T>(&mut self, span: Span, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.recursion_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("parser recursion limit exceeded while parsing nested syntax (limit {})", MAX_PARSE_RECURSION_DEPTH),
+                span,
+            ));
+        }
+
+        self.recursion_depth += 1;
+        let result = f(self);
+        self.recursion_depth -= 1;
+        result
     }
 
     fn advance(&mut self) -> &Token {
-        let token = &self.tokens[self.position];
-        if self.position < self.tokens.len() - 1 {
+        if self.tokens.is_empty() {
+            return &self.eof;
+        }
+        let index = self.position.min(self.tokens.len().saturating_sub(1));
+        if self.position < self.tokens.len().saturating_sub(1) {
             self.position += 1;
         }
-        token
+        &self.tokens[index]
     }
 
     fn check(&self, kind: &TokenKind) -> bool {
@@ -153,6 +174,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_binding_pattern_inner())
+    }
+
+    fn parse_binding_pattern_inner(&mut self) -> Result<BindingPattern> {
         self.skip_newlines();
         match &self.current().kind {
             TokenKind::Underscore => {
@@ -1181,7 +1207,7 @@ impl<'a> Parser<'a> {
         let end_span = self.current().span;
         Ok(Expr::Assert(AssertExpr {
             condition: Box::new(condition),
-            message: Box::new(Expr::String("invariant assertion failed".to_string())),
+            message: Box::new(Expr::String("invariant assertion failed".to_string(), start_span)),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -1230,6 +1256,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_type_inner())
+    }
+
+    fn parse_type_inner(&mut self) -> Result<Type> {
         let ty = match &self.current().kind {
             TokenKind::U8 => {
                 self.advance();
@@ -1290,7 +1321,8 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Semi)?;
                 let size = match &self.current().kind {
                     TokenKind::Integer(n) => {
-                        let size = *n as usize;
+                        let size = usize::try_from(*n)
+                            .map_err(|_| CompileError::new("array size does not fit this target", self.current().span))?;
                         self.advance();
                         size
                     }
@@ -1857,6 +1889,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if(&mut self) -> Result<IfStmt> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_if_inner())
+    }
+
+    fn parse_if_inner(&mut self) -> Result<IfStmt> {
         let start_span = self.current().span;
         self.expect(TokenKind::If)?;
 
@@ -1911,6 +1948,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_expr_inner())
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<Expr> {
         self.skip_newlines();
         self.parse_assignment()
     }
@@ -2135,6 +2177,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary(&mut self) -> Result<Expr> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_unary_inner())
+    }
+
+    fn parse_unary_inner(&mut self) -> Result<Expr> {
         if self.check(&TokenKind::Minus) {
             let start_span = self.current().span;
             self.advance();
@@ -2215,27 +2262,32 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> Result<Expr> {
         match &self.current().kind {
             TokenKind::Integer(n) => {
+                let span = self.current().span;
                 let val = *n;
                 self.advance();
-                Ok(Expr::Integer(val))
+                Ok(Expr::Integer(val, span))
             }
             TokenKind::True => {
+                let span = self.current().span;
                 self.advance();
-                Ok(Expr::Bool(true))
+                Ok(Expr::Bool(true, span))
             }
             TokenKind::False => {
+                let span = self.current().span;
                 self.advance();
-                Ok(Expr::Bool(false))
+                Ok(Expr::Bool(false, span))
             }
             TokenKind::String(s) => {
+                let span = self.current().span;
                 let val = s.clone();
                 self.advance();
-                Ok(Expr::String(val))
+                Ok(Expr::String(val, span))
             }
             TokenKind::ByteString(b) => {
+                let span = self.current().span;
                 let val = b.clone();
                 self.advance();
-                Ok(Expr::ByteString(val))
+                Ok(Expr::ByteString(val, span))
             }
             TokenKind::Create => self.parse_create(),
             TokenKind::Consume => self.parse_consume(),
@@ -2255,6 +2307,7 @@ impl<'a> Parser<'a> {
             TokenKind::Claim => self.parse_claim_expr(),
             TokenKind::Settle => self.parse_settle_expr(),
             _ if self.ident_like_name().is_some() => {
+                let start_span = self.current().span;
                 let name = self.parse_name_path()?;
                 // v0.15 destruction policy forms (context-sensitive identifiers)
                 match name.as_str() {
@@ -2269,14 +2322,17 @@ impl<'a> Parser<'a> {
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
                     self.parse_struct_init(name)
                 } else {
-                    Ok(Expr::Identifier(name))
+                    let end = self.current().span.start.max(start_span.end);
+                    Ok(Expr::Identifier(name, Span::new(start_span.start, end, start_span.line, start_span.column)))
                 }
             }
             TokenKind::LParen => {
+                let start_span = self.current().span;
                 self.advance();
                 if self.check(&TokenKind::RParen) {
+                    let end_span = self.current().span;
                     self.advance();
-                    return Ok(Expr::Tuple(vec![]));
+                    return Ok(Expr::Tuple(vec![], Span::new(start_span.start, end_span.end, start_span.line, start_span.column)));
                 }
                 let expr = self.parse_expr()?;
                 if self.check(&TokenKind::Comma) {
@@ -2288,8 +2344,9 @@ impl<'a> Parser<'a> {
                         }
                         elems.push(self.parse_expr()?);
                     }
+                    let end_span = self.current().span;
                     self.expect(TokenKind::RParen)?;
-                    Ok(Expr::Tuple(elems))
+                    Ok(Expr::Tuple(elems, Span::new(start_span.start, end_span.end, start_span.line, start_span.column)))
                 } else {
                     self.expect(TokenKind::RParen)?;
                     Ok(expr)
@@ -2297,14 +2354,17 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBracket => self.parse_array_expr(),
             TokenKind::LBrace => {
+                let start_span = self.current().span;
                 let stmts = self.parse_block()?;
-                Ok(Expr::Block(stmts))
+                let end = self.current().span.start.max(start_span.end);
+                Ok(Expr::Block(stmts, Span::new(start_span.start, end, start_span.line, start_span.column)))
             }
             _ => Err(CompileError::new(format!("unexpected token in expression: {}", self.current().kind), self.current().span)),
         }
     }
 
     fn parse_array_expr(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
         self.expect(TokenKind::LBracket)?;
         let mut elems = Vec::new();
         loop {
@@ -2320,8 +2380,9 @@ impl<'a> Parser<'a> {
             }
             break;
         }
+        let end_span = self.current().span;
         self.expect(TokenKind::RBracket)?;
-        Ok(Expr::Array(elems))
+        Ok(Expr::Array(elems, Span::new(start_span.start, end_span.end, start_span.line, start_span.column)))
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>> {
@@ -2362,12 +2423,13 @@ impl<'a> Parser<'a> {
 
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let field_span = self.current().span;
             let field_name = self.parse_name()?;
             let value = if self.check(&TokenKind::Colon) {
                 self.advance();
                 self.parse_expr()?
             } else {
-                Expr::Identifier(field_name.clone())
+                Expr::Identifier(field_name.clone(), field_span)
             };
             fields.push((field_name, value));
 
@@ -2663,6 +2725,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let name_span = self.current().span;
             let name = self.parse_name_path()?;
             if self.check(&TokenKind::Colon) {
                 self.advance();
@@ -2670,7 +2733,7 @@ impl<'a> Parser<'a> {
                 fields.push((name, value));
             } else {
                 // Field shorthand: `amount` means `amount: amount`
-                fields.push((name.clone(), Expr::Identifier(name)));
+                fields.push((name.clone(), Expr::Identifier(name, name_span)));
             }
             if self.check(&TokenKind::Comma) {
                 self.advance();
@@ -2795,7 +2858,8 @@ impl<'a> Parser<'a> {
         let output_name = self.parse_name()?;
 
         // Expect "from"
-        let from_marker = self.ident_like_name().unwrap_or_default();
+        let from_marker =
+            self.ident_like_name().ok_or_else(|| CompileError::new("expected 'from' in preserve expression", self.current().span))?;
         if from_marker != "from" {
             return Err(CompileError::new("expected 'from' in preserve expression", self.current().span));
         }
@@ -2909,7 +2973,10 @@ impl<'a> Parser<'a> {
     fn parse_branch_expr(&mut self) -> Result<Expr> {
         self.skip_newlines();
         if self.check(&TokenKind::LBrace) {
-            Ok(Expr::Block(self.parse_block()?))
+            let start_span = self.current().span;
+            let stmts = self.parse_block()?;
+            let end = self.current().span.start.max(start_span.end);
+            Ok(Expr::Block(stmts, Span::new(start_span.start, end, start_span.line, start_span.column)))
         } else if self.check(&TokenKind::If) {
             self.parse_if_expr()
         } else {
@@ -2924,12 +2991,13 @@ impl<'a> Parser<'a> {
 
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let field_span = self.current().span;
             let field_name = self.parse_name()?;
             let value = if self.check(&TokenKind::Colon) {
                 self.advance();
                 self.parse_expr()?
             } else {
-                Expr::Identifier(field_name.clone())
+                Expr::Identifier(field_name.clone(), field_span)
             };
             fields.push((field_name, value));
 
@@ -2966,7 +3034,12 @@ impl<'a> Parser<'a> {
             if !self.check(&TokenKind::LBrace) {
                 return Err(CompileError::new("match arms must use '{}' proof blocks", self.current().span));
             }
-            let value = Expr::Block(self.parse_block()?);
+            let block_span = self.current().span;
+            let value = {
+                let stmts = self.parse_block()?;
+                let end = self.current().span.start.max(block_span.end);
+                Expr::Block(stmts, Span::new(block_span.start, end, block_span.line, block_span.column))
+            };
             let arm_span = self.current().span;
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
@@ -3033,6 +3106,77 @@ fn aggregate_scope_from_target(target: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn parser_empty_token_slice_returns_controlled_error() {
+        let mut parser = Parser::new(&[]);
+        let err = parser.parse_module().unwrap_err();
+
+        assert!(err.message.contains("expected 'module', found end of file"), "{}", err.message);
+    }
+
+    #[test]
+    fn array_size_uses_checked_target_width_conversion() {
+        let input = "module test\n\nstruct Huge { bytes: [u8; 18446744073709551615] }\n";
+        let tokens = lex(input).unwrap();
+        let result = parse(&tokens);
+
+        #[cfg(target_pointer_width = "64")]
+        assert!(result.is_ok(), "64-bit targets can represent u64::MAX as usize");
+
+        #[cfg(target_pointer_width = "32")]
+        {
+            let err = result.unwrap_err();
+            assert!(err.message.contains("array size does not fit this target"), "{}", err.message);
+        }
+    }
+
+    #[test]
+    fn parser_rejects_deep_unary_expression_before_stack_overflow() {
+        let input = format!(
+            "module test\n\naction test() -> u64\nwhere\n    return {}1\n",
+            "-".repeat(MAX_PARSE_RECURSION_DEPTH as usize + 8)
+        );
+        let tokens = lex(&input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
+    }
+
+    #[test]
+    fn primitive_and_container_exprs_keep_source_spans() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    let values = [1, 2]
+    return values
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+
+        let Stmt::Let(let_stmt) = &action.body[0] else {
+            panic!("expected let statement");
+        };
+        let Expr::Array(items, array_span) = &let_stmt.value else {
+            panic!("expected array expression");
+        };
+        assert_ne!(*array_span, Span::default());
+
+        let Expr::Integer(_, integer_span) = &items[0] else {
+            panic!("expected integer expression");
+        };
+        assert_ne!(*integer_span, Span::default());
+
+        let Stmt::Return(Some(Expr::Identifier(_, identifier_span))) = &action.body[1] else {
+            panic!("expected identifier return expression");
+        };
+        assert_ne!(*identifier_span, Span::default());
+    }
 
     #[test]
     fn test_parse_resource() {
@@ -3489,7 +3633,7 @@ where
         }
 
         match &action.body[1] {
-            Stmt::Expr(Expr::Tuple(items)) => {
+            Stmt::Expr(Expr::Tuple(items, _)) => {
                 assert_eq!(items.len(), 2);
             }
             other => panic!("expected tuple return expr, found {:?}", other),

@@ -5,7 +5,7 @@
 //! visible to type checking, IR lowering, and metadata generation.
 
 use crate::ast::*;
-use crate::error::Result;
+use crate::error::{Result, Span};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,8 +158,8 @@ impl Optimizer {
 
     fn optimize_expr(&mut self, expr: &Expr) -> Result<Expr> {
         match expr {
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => Ok(expr.clone()),
-            Expr::Identifier(name) => Ok(self.lookup_const(name).map(const_to_expr).unwrap_or_else(|| expr.clone())),
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) => Ok(expr.clone()),
+            Expr::Identifier(name, _) => Ok(self.lookup_const(name).map(const_to_expr).unwrap_or_else(|| expr.clone())),
             Expr::Assign(assign) => Ok(Expr::Assign(AssignExpr {
                 target: Box::new(self.optimize_assignment_target(&assign.target)?),
                 op: assign.op,
@@ -199,7 +199,7 @@ impl Optimizer {
                     args.push(self.optimize_expr(arg)?);
                 }
                 let func = self.optimize_expr(&call.func)?;
-                if let Expr::Identifier(name) = &func {
+                if let Expr::Identifier(name, _) = &func {
                     if let Some(inlined) = self.inline_call(name, &args)? {
                         return Ok(inlined);
                     }
@@ -263,20 +263,20 @@ impl Optimizer {
                 Ok(Expr::RequireBlock(RequireBlockExpr { expressions: optimized, span: require_block.span }))
             }
             Expr::Preserve(preserve) => Ok(Expr::Preserve(preserve.clone())),
-            Expr::Block(stmts) => Ok(Expr::Block(self.with_child_scope(|this| this.optimize_stmts(stmts))?)),
-            Expr::Tuple(items) => {
+            Expr::Block(stmts, span) => Ok(Expr::Block(self.with_child_scope(|this| this.optimize_stmts(stmts))?, *span)),
+            Expr::Tuple(items, span) => {
                 let mut optimized = Vec::with_capacity(items.len());
                 for item in items {
                     optimized.push(self.optimize_expr(item)?);
                 }
-                Ok(Expr::Tuple(optimized))
+                Ok(Expr::Tuple(optimized, *span))
             }
-            Expr::Array(items) => {
+            Expr::Array(items, span) => {
                 let mut optimized = Vec::with_capacity(items.len());
                 for item in items {
                     optimized.push(self.optimize_expr(item)?);
                 }
-                Ok(Expr::Array(optimized))
+                Ok(Expr::Array(optimized, *span))
             }
             Expr::If(if_expr) => {
                 let condition = self.optimize_expr(&if_expr.condition)?;
@@ -342,10 +342,10 @@ impl Optimizer {
 
     fn try_eval_const(&self, expr: &Expr) -> Option<ConstValue> {
         match expr {
-            Expr::Integer(value) => Some(ConstValue::U64(*value)),
-            Expr::Bool(value) => Some(ConstValue::Bool(*value)),
-            Expr::String(value) => Some(ConstValue::String(value.clone())),
-            Expr::ByteString(value) => Some(ConstValue::Bytes(value.clone())),
+            Expr::Integer(value, _) => Some(ConstValue::U64(*value)),
+            Expr::Bool(value, _) => Some(ConstValue::Bool(*value)),
+            Expr::String(value, _) => Some(ConstValue::String(value.clone())),
+            Expr::ByteString(value, _) => Some(ConstValue::Bytes(value.clone())),
             _ => None,
         }
     }
@@ -456,21 +456,21 @@ fn fold_unary(op: UnaryOp, value: &ConstValue) -> Option<ConstValue> {
 
 fn simplify_binary(op: BinaryOp, left: &Expr, right: &Expr) -> Option<Expr> {
     match (op, left, right) {
-        (BinaryOp::Add, _, Expr::Integer(0))
-        | (BinaryOp::Sub, _, Expr::Integer(0))
-        | (BinaryOp::Mul, _, Expr::Integer(1))
-        | (BinaryOp::Div, _, Expr::Integer(1)) => Some(left.clone()),
-        (BinaryOp::Add, Expr::Integer(0), _) | (BinaryOp::Mul, Expr::Integer(1), _) => Some(right.clone()),
+        (BinaryOp::Add, _, Expr::Integer(0, _))
+        | (BinaryOp::Sub, _, Expr::Integer(0, _))
+        | (BinaryOp::Mul, _, Expr::Integer(1, _))
+        | (BinaryOp::Div, _, Expr::Integer(1, _)) => Some(left.clone()),
+        (BinaryOp::Add, Expr::Integer(0, _), _) | (BinaryOp::Mul, Expr::Integer(1, _), _) => Some(right.clone()),
         _ => None,
     }
 }
 
 fn const_to_expr(value: ConstValue) -> Expr {
     match value {
-        ConstValue::U64(value) => Expr::Integer(value),
-        ConstValue::Bool(value) => Expr::Bool(value),
-        ConstValue::String(value) => Expr::String(value),
-        ConstValue::Bytes(value) => Expr::ByteString(value),
+        ConstValue::U64(value) => Expr::Integer(value, Span::default()),
+        ConstValue::Bool(value) => Expr::Bool(value, Span::default()),
+        ConstValue::String(value) => Expr::String(value, Span::default()),
+        ConstValue::Bytes(value) => Expr::ByteString(value, Span::default()),
     }
 }
 
@@ -512,7 +512,7 @@ fn eliminate_unused_lets(stmts: Vec<Stmt>) -> Vec<Stmt> {
     stmts
         .into_iter()
         .filter(|stmt| match stmt {
-            Stmt::Let(let_stmt) if !let_stmt.is_mut && expr_is_pure_inlineable(&let_stmt.value) => match &let_stmt.pattern {
+            Stmt::Let(let_stmt) if !let_stmt.is_mut && expr_can_be_elided_when_unused(&let_stmt.value) => match &let_stmt.pattern {
                 BindingPattern::Name(name) => used.contains(name),
                 BindingPattern::Wildcard => false,
                 BindingPattern::Tuple(_) => true,
@@ -554,7 +554,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut Vec<String>) {
 fn collect_call_names_from_expr(expr: &Expr, names: &mut Vec<String>) {
     match expr {
         Expr::Call(call) => {
-            if let Expr::Identifier(name) = call.func.as_ref() {
+            if let Expr::Identifier(name, _) = call.func.as_ref() {
                 names.push(name.clone());
             }
             collect_call_names_from_expr(&call.func, names);
@@ -616,8 +616,8 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
             }
         }
         Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_call_names_from_stmts(stmts, names),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_call_names_from_expr(item, names);
             }
@@ -643,11 +643,11 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
                 collect_call_names_from_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::Call(_)
         | Expr::StdlibCall(_) => {}
     }
@@ -685,7 +685,7 @@ fn collect_used_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
 }
 
 fn collect_used_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
-    if let Expr::Identifier(name) = expr {
+    if let Expr::Identifier(name, _) = expr {
         names.insert(name.clone());
         return;
     }
@@ -694,7 +694,7 @@ fn collect_used_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
 
 fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
     match expr {
-        Expr::Identifier(name) => {
+        Expr::Identifier(name, _) => {
             names.insert(name.clone());
         }
         Expr::Assign(assign) => {
@@ -745,12 +745,12 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_names_by_walking_expr(message, names);
             }
         }
-        Expr::Block(stmts) => {
+        Expr::Block(stmts, _) => {
             for stmt in stmts {
                 collect_used_names_from_stmt(stmt, names);
             }
         }
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_names_by_walking_expr(item, names);
             }
@@ -782,19 +782,19 @@ fn collect_names_by_walking_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Preserve(_) => {}
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::StdlibCall(_) => {}
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::StdlibCall(_) => {}
     }
 }
 
 fn expr_is_pure_inlineable(expr: &Expr) -> bool {
     match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::StdlibCall(_) => true,
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => true,
         Expr::Binary(binary) => expr_is_pure_inlineable(&binary.left) && expr_is_pure_inlineable(&binary.right),
         Expr::Unary(unary) => expr_is_pure_inlineable(&unary.expr),
         Expr::Call(call) => expr_is_pure_inlineable(&call.func) && call.args.iter().all(expr_is_pure_inlineable),
         Expr::FieldAccess(field) => expr_is_pure_inlineable(&field.expr),
         Expr::Index(index) => expr_is_pure_inlineable(&index.expr) && expr_is_pure_inlineable(&index.index),
-        Expr::Tuple(items) | Expr::Array(items) => items.iter().all(expr_is_pure_inlineable),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => items.iter().all(expr_is_pure_inlineable),
         Expr::If(if_expr) => {
             expr_is_pure_inlineable(&if_expr.condition)
                 && expr_is_pure_inlineable(&if_expr.then_branch)
@@ -803,7 +803,6 @@ fn expr_is_pure_inlineable(expr: &Expr) -> bool {
         Expr::Cast(cast) => expr_is_pure_inlineable(&cast.expr),
         Expr::Range(range) => expr_is_pure_inlineable(&range.start) && expr_is_pure_inlineable(&range.end),
         Expr::StructInit(init) => init.fields.iter().all(|(_, value)| expr_is_pure_inlineable(value)),
-        Expr::Block(stmts) => stmts.iter().all(stmt_is_pure_inlineable),
         Expr::Match(match_expr) => {
             expr_is_pure_inlineable(&match_expr.expr) && match_expr.arms.iter().all(|arm| expr_is_pure_inlineable(&arm.value))
         }
@@ -820,27 +819,55 @@ fn expr_is_pure_inlineable(expr: &Expr) -> bool {
         | Expr::Assert(_)
         | Expr::Require(_)
         | Expr::RequireBlock(_)
-        | Expr::Preserve(_) => false,
+        | Expr::Preserve(_)
+        | Expr::Block(..)
+        | Expr::StdlibCall(_) => false,
     }
 }
 
-fn stmt_is_pure_inlineable(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Let(let_stmt) => !let_stmt.is_mut && expr_is_pure_inlineable(&let_stmt.value),
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => expr_is_pure_inlineable(expr),
-        Stmt::Return(None) => true,
-        Stmt::If(if_stmt) => {
-            expr_is_pure_inlineable(&if_stmt.condition)
-                && if_stmt.then_branch.iter().all(stmt_is_pure_inlineable)
-                && if_stmt.else_branch.as_ref().is_none_or(|branch| branch.iter().all(stmt_is_pure_inlineable))
+fn expr_can_be_elided_when_unused(expr: &Expr) -> bool {
+    match expr {
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => true,
+        Expr::Binary(binary) => expr_can_be_elided_when_unused(&binary.left) && expr_can_be_elided_when_unused(&binary.right),
+        Expr::Unary(unary) => expr_can_be_elided_when_unused(&unary.expr),
+        Expr::FieldAccess(field) => expr_can_be_elided_when_unused(&field.expr),
+        Expr::Index(index) => expr_can_be_elided_when_unused(&index.expr) && expr_can_be_elided_when_unused(&index.index),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => items.iter().all(expr_can_be_elided_when_unused),
+        Expr::If(if_expr) => {
+            expr_can_be_elided_when_unused(&if_expr.condition)
+                && expr_can_be_elided_when_unused(&if_expr.then_branch)
+                && expr_can_be_elided_when_unused(&if_expr.else_branch)
         }
-        Stmt::For(_) | Stmt::While(_) => false,
+        Expr::Cast(cast) => expr_can_be_elided_when_unused(&cast.expr),
+        Expr::Range(range) => expr_can_be_elided_when_unused(&range.start) && expr_can_be_elided_when_unused(&range.end),
+        Expr::StructInit(init) => init.fields.iter().all(|(_, value)| expr_can_be_elided_when_unused(value)),
+        Expr::Match(match_expr) => {
+            expr_can_be_elided_when_unused(&match_expr.expr)
+                && match_expr.arms.iter().all(|arm| expr_can_be_elided_when_unused(&arm.value))
+        }
+        Expr::Assign(_)
+        | Expr::Call(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Transfer(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::Block(..)
+        | Expr::StdlibCall(_) => false,
     }
 }
 
 fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
     match expr {
-        Expr::Identifier(name) => substitutions.get(name).cloned().unwrap_or_else(|| expr.clone()),
+        Expr::Identifier(name, _) => substitutions.get(name).cloned().unwrap_or_else(|| expr.clone()),
         Expr::Assign(assign) => Expr::Assign(AssignExpr {
             target: Box::new(substitute_expr(&assign.target, substitutions)),
             op: assign.op,
@@ -871,8 +898,8 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
             index: Box::new(substitute_expr(&index.index, substitutions)),
             span: index.span,
         }),
-        Expr::Tuple(items) => Expr::Tuple(items.iter().map(|item| substitute_expr(item, substitutions)).collect()),
-        Expr::Array(items) => Expr::Array(items.iter().map(|item| substitute_expr(item, substitutions)).collect()),
+        Expr::Tuple(items, span) => Expr::Tuple(items.iter().map(|item| substitute_expr(item, substitutions)).collect(), *span),
+        Expr::Array(items, span) => Expr::Array(items.iter().map(|item| substitute_expr(item, substitutions)).collect(), *span),
         Expr::If(if_expr) => Expr::If(IfExpr {
             condition: Box::new(substitute_expr(&if_expr.condition, substitutions)),
             then_branch: Box::new(substitute_expr(&if_expr.then_branch, substitutions)),
@@ -930,11 +957,11 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
         | Expr::CreateUnique(_)
         | Expr::ReplaceUnique(_)
         | Expr::Assert(_)
-        | Expr::Block(_)
-        | Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
+        | Expr::Block(..)
+        | Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
         | Expr::StdlibCall(_) => expr.clone(),
     }
 }
@@ -949,12 +976,12 @@ mod tests {
         let mut optimizer = Optimizer::new(1);
         let expr = Expr::Binary(BinaryExpr {
             op: BinaryOp::Add,
-            left: Box::new(Expr::Integer(2)),
-            right: Box::new(Expr::Integer(3)),
+            left: Box::new(Expr::Integer(2, Span::default())),
+            right: Box::new(Expr::Integer(3, Span::default())),
             span: Span::default(),
         });
 
-        assert!(matches!(optimizer.optimize_expr(&expr).unwrap(), Expr::Integer(5)));
+        assert!(matches!(optimizer.optimize_expr(&expr).unwrap(), Expr::Integer(5, _)));
     }
 
     #[test]
@@ -973,14 +1000,14 @@ mod tests {
             op: UnaryOp::Not,
             expr: Box::new(Expr::Binary(BinaryExpr {
                 op: BinaryOp::And,
-                left: Box::new(Expr::Bool(true)),
-                right: Box::new(Expr::Bool(false)),
+                left: Box::new(Expr::Bool(true, Span::default())),
+                right: Box::new(Expr::Bool(false, Span::default())),
                 span: Span::default(),
             })),
             span: Span::default(),
         });
 
-        assert!(matches!(optimizer.optimize_expr(&expr).unwrap(), Expr::Bool(true)));
+        assert!(matches!(optimizer.optimize_expr(&expr).unwrap(), Expr::Bool(true, _)));
     }
 
     #[test]
@@ -994,13 +1021,13 @@ mod tests {
                 outputs: Vec::new(),
                 state_edges: Vec::new(),
                 body: vec![Stmt::If(IfStmt {
-                    condition: Expr::Bool(false),
+                    condition: Expr::Bool(false, Span::default()),
                     then_branch: vec![Stmt::Expr(Expr::Destroy(DestroyExpr {
-                        expr: Box::new(Expr::Identifier("token".to_string())),
+                        expr: Box::new(Expr::Identifier("token".to_string(), Span::default())),
                         policy: DestructionPolicy::Default,
                         span: Span::default(),
                     }))],
-                    else_branch: Some(vec![Stmt::Expr(Expr::Integer(1))]),
+                    else_branch: Some(vec![Stmt::Expr(Expr::Integer(1, Span::default()))]),
                     span: Span::default(),
                 })],
                 effect: EffectClass::Pure,
@@ -1018,7 +1045,141 @@ mod tests {
             panic!("expected action");
         };
         assert_eq!(action.body.len(), 1);
-        assert!(matches!(action.body[0], Stmt::Expr(Expr::Integer(1))));
+        assert!(matches!(action.body[0], Stmt::Expr(Expr::Integer(1, _))));
+    }
+
+    #[test]
+    fn does_not_inline_block_bodies_that_can_capture_call_site_names() {
+        let mut module = Module {
+            name: "test".to_string(),
+            items: vec![
+                Item::Function(FnDef {
+                    name: "from_block".to_string(),
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: Type::U64,
+                        is_mut: false,
+                        is_ref: false,
+                        is_read_ref: false,
+                        source: ParamSource::Default,
+                        span: Span::default(),
+                    }],
+                    return_type: Some(Type::U64),
+                    body: vec![Stmt::Return(Some(Expr::Block(
+                        vec![Stmt::Expr(Expr::Identifier("x".to_string(), Span::default()))],
+                        Span::default(),
+                    )))],
+                    doc_comment: None,
+                    span: Span::default(),
+                }),
+                Item::Action(ActionDef {
+                    name: "run".to_string(),
+                    params: Vec::new(),
+                    return_type: Some(Type::U64),
+                    outputs: Vec::new(),
+                    state_edges: Vec::new(),
+                    body: vec![
+                        Stmt::Let(LetStmt {
+                            pattern: BindingPattern::Name("x".to_string()),
+                            ty: Some(Type::U64),
+                            value: Expr::Integer(1, Span::default()),
+                            is_mut: false,
+                            span: Span::default(),
+                        }),
+                        Stmt::Return(Some(Expr::Call(CallExpr {
+                            func: Box::new(Expr::Identifier("from_block".to_string(), Span::default())),
+                            args: vec![Expr::Integer(2, Span::default())],
+                            span: Span::default(),
+                        }))),
+                    ],
+                    effect: EffectClass::Pure,
+                    effect_declared: false,
+                    scheduler_hint: None,
+                    doc_comment: None,
+                    span: Span::default(),
+                }),
+            ],
+            span: Span::default(),
+        };
+
+        optimize_module(&mut module, 1).unwrap();
+
+        let action = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Action(action) => Some(action),
+                _ => None,
+            })
+            .unwrap();
+        assert!(matches!(action.body[1], Stmt::Return(Some(Expr::Call(_)))));
+    }
+
+    #[test]
+    fn unused_let_elimination_preserves_calls_and_stdlib_constraints() {
+        let mut module = Module {
+            name: "test".to_string(),
+            items: vec![Item::Action(ActionDef {
+                name: "run".to_string(),
+                params: Vec::new(),
+                return_type: Some(Type::U64),
+                outputs: Vec::new(),
+                state_edges: Vec::new(),
+                body: vec![
+                    Stmt::Let(LetStmt {
+                        pattern: BindingPattern::Name("unused_literal".to_string()),
+                        ty: Some(Type::U64),
+                        value: Expr::Integer(7, Span::default()),
+                        is_mut: false,
+                        span: Span::default(),
+                    }),
+                    Stmt::Let(LetStmt {
+                        pattern: BindingPattern::Name("unused_call".to_string()),
+                        ty: Some(Type::U64),
+                        value: Expr::Call(CallExpr {
+                            func: Box::new(Expr::Identifier("compute".to_string(), Span::default())),
+                            args: vec![Expr::Integer(1, Span::default())],
+                            span: Span::default(),
+                        }),
+                        is_mut: false,
+                        span: Span::default(),
+                    }),
+                    Stmt::Let(LetStmt {
+                        pattern: BindingPattern::Name("unused_constraint".to_string()),
+                        ty: Some(Type::Bool),
+                        value: Expr::StdlibCall(StdlibCallExpr {
+                            namespace: "cell".to_string(),
+                            name: "same_lock".to_string(),
+                            args: vec![
+                                Expr::Identifier("output".to_string(), Span::default()),
+                                Expr::Identifier("input".to_string(), Span::default()),
+                            ],
+                            preserve_fields: Vec::new(),
+                            span: Span::default(),
+                        }),
+                        is_mut: false,
+                        span: Span::default(),
+                    }),
+                    Stmt::Return(Some(Expr::Integer(1, Span::default()))),
+                ],
+                effect: EffectClass::Pure,
+                effect_declared: false,
+                scheduler_hint: None,
+                doc_comment: None,
+                span: Span::default(),
+            })],
+            span: Span::default(),
+        };
+
+        optimize_module(&mut module, 2).unwrap();
+
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+        assert_eq!(action.body.len(), 3, "unused literal should be removed, calls and constraints should stay");
+        assert!(matches!(action.body[0], Stmt::Let(LetStmt { value: Expr::Call(_), .. })));
+        assert!(matches!(action.body[1], Stmt::Let(LetStmt { value: Expr::StdlibCall(_), .. })));
+        assert!(matches!(action.body[2], Stmt::Return(Some(Expr::Integer(1, _)))));
     }
 
     #[test]
@@ -1026,7 +1187,12 @@ mod tests {
         let mut module = Module {
             name: "test".to_string(),
             items: vec![
-                Item::Const(ConstDef { name: "STEP".to_string(), ty: Type::U64, value: Expr::Integer(2), span: Span::default() }),
+                Item::Const(ConstDef {
+                    name: "STEP".to_string(),
+                    ty: Type::U64,
+                    value: Expr::Integer(2, Span::default()),
+                    span: Span::default(),
+                }),
                 Item::Function(FnDef {
                     name: "add_step".to_string(),
                     params: vec![Param {
@@ -1041,8 +1207,8 @@ mod tests {
                     return_type: Some(Type::U64),
                     body: vec![Stmt::Return(Some(Expr::Binary(BinaryExpr {
                         op: BinaryOp::Add,
-                        left: Box::new(Expr::Identifier("x".to_string())),
-                        right: Box::new(Expr::Identifier("STEP".to_string())),
+                        left: Box::new(Expr::Identifier("x".to_string(), Span::default())),
+                        right: Box::new(Expr::Identifier("STEP".to_string(), Span::default())),
                         span: Span::default(),
                     })))],
                     doc_comment: None,
@@ -1052,7 +1218,7 @@ mod tests {
                     name: "unused".to_string(),
                     params: Vec::new(),
                     return_type: Some(Type::U64),
-                    body: vec![Stmt::Return(Some(Expr::Integer(99)))],
+                    body: vec![Stmt::Return(Some(Expr::Integer(99, Span::default())))],
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1066,13 +1232,13 @@ mod tests {
                         Stmt::Let(LetStmt {
                             pattern: BindingPattern::Name("unused_local".to_string()),
                             ty: Some(Type::U64),
-                            value: Expr::Integer(7),
+                            value: Expr::Integer(7, Span::default()),
                             is_mut: false,
                             span: Span::default(),
                         }),
                         Stmt::Return(Some(Expr::Call(CallExpr {
-                            func: Box::new(Expr::Identifier("add_step".to_string())),
-                            args: vec![Expr::Integer(40)],
+                            func: Box::new(Expr::Identifier("add_step".to_string(), Span::default())),
+                            args: vec![Expr::Integer(40, Span::default())],
                             span: Span::default(),
                         }))),
                     ],
@@ -1101,6 +1267,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(action.body.len(), 1, "unused local binding should be removed");
-        assert!(matches!(action.body[0], Stmt::Return(Some(Expr::Integer(42)))));
+        assert!(matches!(action.body[0], Stmt::Return(Some(Expr::Integer(42, _)))));
     }
 }

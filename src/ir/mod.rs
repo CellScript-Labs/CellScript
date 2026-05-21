@@ -353,13 +353,13 @@ pub struct IrVar {
     pub ty: IrType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrOperand {
     Var(IrVar),
     Const(IrConst),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrConst {
     Unit,
     U8(u8),
@@ -1166,7 +1166,7 @@ impl IrGenerator {
                 self.check_expr_effects(&unary.expr, footprint);
             }
             Expr::Call(call) => {
-                if let Expr::Identifier(name) = call.func.as_ref() {
+                if let Expr::Identifier(name, _) = call.func.as_ref() {
                     if let Some(effect) = self.function_effects.get(name).copied() {
                         self.apply_effect_to_footprint(effect, footprint);
                     } else if let Some(effect) = self.external_function_effects.get(name).copied() {
@@ -1207,12 +1207,12 @@ impl IrGenerator {
                     self.check_expr_effects(&arm.value, footprint);
                 }
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 for stmt in stmts {
                     self.check_stmt_effects(stmt, footprint);
                 }
             }
-            Expr::Tuple(elems) | Expr::Array(elems) => {
+            Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
                 for elem in elems {
                     self.check_expr_effects(elem, footprint);
                 }
@@ -1948,9 +1948,9 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         match expr {
-            Expr::Integer(value) => LoweredExpr { operand: IrOperand::Const(IrConst::U64(*value)), current: Some(current) },
-            Expr::Bool(value) => LoweredExpr { operand: IrOperand::Const(IrConst::Bool(*value)), current: Some(current) },
-            Expr::Identifier(name) => {
+            Expr::Integer(value, _) => LoweredExpr { operand: IrOperand::Const(IrConst::U64(*value)), current: Some(current) },
+            Expr::Bool(value, _) => LoweredExpr { operand: IrOperand::Const(IrConst::Bool(*value)), current: Some(current) },
+            Expr::Identifier(name, _) => {
                 if let Some(var) = vars.get(name).cloned() {
                     LoweredExpr { operand: IrOperand::Var(var), current: Some(current) }
                 } else if let Some(constant) = self.lower_constant(name, Span::default()) {
@@ -2032,12 +2032,12 @@ impl IrGenerator {
                     args.push(lowered.operand);
                 }
                 let func = match call.func.as_ref() {
-                    Expr::Identifier(name) => self.lower_call_target_name(name),
+                    Expr::Identifier(name, _) => self.lower_call_target_name(name),
                     Expr::FieldAccess(field) => field.field.clone(),
                     _ => "__expr_call".to_string(),
                 };
                 let source_func = match call.func.as_ref() {
-                    Expr::Identifier(name) => name.as_str(),
+                    Expr::Identifier(name, _) => name.as_str(),
                     Expr::FieldAccess(field) => field.field.as_str(),
                     _ => "__expr_call",
                 };
@@ -2073,7 +2073,7 @@ impl IrGenerator {
             Expr::StructInit(init) => self.lower_struct_init(init, current, blocks, vars),
             Expr::FieldAccess(field) => self.lower_field_access(field, current, blocks, vars),
             Expr::Index(index) => self.lower_index_expr(index, current, blocks, vars),
-            Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars, None),
+            Expr::Block(stmts, _) => self.lower_tail_block_value(stmts, current, blocks, vars, None),
             Expr::If(if_expr) => self.lower_if_expr(if_expr, current, blocks, vars),
             Expr::Match(match_expr) => self.lower_match_expr(match_expr, current, blocks, vars),
             Expr::Cast(cast) => {
@@ -2106,13 +2106,13 @@ impl IrGenerator {
                     }
                 }
             }
-            Expr::Array(items) => self.lower_array_expr(items, current, blocks, vars),
-            Expr::Tuple(items) => self.lower_tuple_expr(items, current, blocks, vars),
-            Expr::String(_) => {
+            Expr::Array(items, _) => self.lower_array_expr(items, current, blocks, vars),
+            Expr::Tuple(items, _) => self.lower_tuple_expr(items, current, blocks, vars),
+            Expr::String(..) => {
                 self.record_error("string literals are only supported in metadata positions such as assert messages", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
-            Expr::ByteString(bytes) => LoweredExpr {
+            Expr::ByteString(bytes, _) => LoweredExpr {
                 operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
                 current: Some(current),
             },
@@ -2882,12 +2882,12 @@ impl IrGenerator {
         let mut active = current;
         for field_name in &preserve.fields {
             let output_field = Expr::FieldAccess(FieldAccessExpr {
-                expr: Box::new(Expr::Identifier(preserve.output_name.clone())),
+                expr: Box::new(Expr::Identifier(preserve.output_name.clone(), preserve.span)),
                 field: field_name.clone(),
                 span: preserve.span,
             });
             let input_field = Expr::FieldAccess(FieldAccessExpr {
-                expr: Box::new(Expr::Identifier(preserve.input_name.clone())),
+                expr: Box::new(Expr::Identifier(preserve.input_name.clone(), preserve.span)),
                 field: field_name.clone(),
                 span: preserve.span,
             });
@@ -2951,14 +2951,14 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> Option<BlockId> {
         let output_name = match output {
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name, _) => name.clone(),
             _ => {
                 self.record_error(format!("{} output must be a named Cell output binding", qualified), output.span());
                 return None;
             }
         };
         let input_name = match input {
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name, _) => name.clone(),
             _ => {
                 self.record_error(format!("{} {} must be a named Cell input binding", qualified, input_role), input.span());
                 return None;
@@ -3109,7 +3109,7 @@ impl IrGenerator {
 
                 // 2. constrain the proposed output binding and lock target
                 let output_name = match output {
-                    Expr::Identifier(name) => name.clone(),
+                    Expr::Identifier(name, _) => name.clone(),
                     _ => {
                         self.record_error("std::lifecycle::transfer output must be a named Cell output binding", call.span);
                         return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
@@ -3181,7 +3181,7 @@ impl IrGenerator {
                 // 4. preserve listed fields from input to output
                 if !call.preserve_fields.is_empty() {
                     let input_name = match input {
-                        Expr::Identifier(name) => name.clone(),
+                        Expr::Identifier(name, _) => name.clone(),
                         _ => "input".to_string(),
                     };
                     let preserve = PreserveExpr { output_name, input_name, fields: call.preserve_fields.clone(), span: call.span };
@@ -3287,7 +3287,7 @@ impl IrGenerator {
         };
 
         match assign.target.as_ref() {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 let Some(target_var) = vars.get(name).cloned() else {
                     self.record_error(format!("assignment target '{}' is not bound in IR lowering", name), assign.span);
                     return LoweredExpr { operand: lowered_value.operand, current: Some(active) };
@@ -3391,7 +3391,7 @@ impl IrGenerator {
         if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return None;
         }
-        let Expr::Identifier(state_name) = expr else {
+        let Expr::Identifier(state_name, _) = expr else {
             return None;
         };
         let index = self.flow_state_index(type_name, state_name)?;
@@ -3760,14 +3760,14 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         match expr {
-            Expr::Integer(value) => match Self::integer_const_for_ir_type(*value, expected_ty) {
+            Expr::Integer(value, _) => match Self::integer_const_for_ir_type(*value, expected_ty) {
                 Some(value) => LoweredExpr { operand: IrOperand::Const(value), current: Some(current) },
                 None => {
                     self.record_error(format!("integer literal {} is out of range for {:?}", value, expected_ty), Span::default());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             },
-            Expr::ByteString(bytes) => match expected_ty {
+            Expr::ByteString(bytes, _) => match expected_ty {
                 IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) && *len == bytes.len() => LoweredExpr {
                     operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
                     current: Some(current),
@@ -3784,13 +3784,13 @@ impl IrGenerator {
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             },
-            Expr::Array(items) if collection_item_ir_type(expected_ty).is_some() => {
+            Expr::Array(items, _) if collection_item_ir_type(expected_ty).is_some() => {
                 self.lower_vec_literal_expr(items, expected_ty.clone(), current, blocks, vars)
             }
-            Expr::Array(items) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
+            Expr::Array(items, _) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
                 self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), current, blocks)
             }
-            Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars, Some(expected_ty)),
+            Expr::Block(stmts, _) => self.lower_tail_block_value(stmts, current, blocks, vars, Some(expected_ty)),
             Expr::If(if_expr) => self.lower_if_expr_with_expected_type(if_expr, expected_ty, current, blocks, vars),
             _ => self.lower_expr(expr, current, blocks, vars),
         }
@@ -4177,12 +4177,12 @@ impl IrGenerator {
 
     fn transition_operand_from_expr(&self, expr: &Expr, vars: &HashMap<String, IrVar>) -> Option<IrOperand> {
         match expr {
-            Expr::Identifier(name) => vars
+            Expr::Identifier(name, _) => vars
                 .get(name)
                 .filter(|var| self.transition_param_ids.contains(&var.id) || self.transition_coverable_value_ids.contains(&var.id))
                 .cloned()
                 .map(IrOperand::Var),
-            Expr::Integer(value) => Some(IrOperand::Const(IrConst::U64(*value))),
+            Expr::Integer(value, _) => Some(IrOperand::Const(IrConst::U64(*value))),
             Expr::FieldAccess(field) => {
                 let (root, field_name) = direct_field_access_root(field)?;
                 let root_var = vars.get(root)?;
@@ -4198,11 +4198,11 @@ impl IrGenerator {
 
     fn transition_expr_is_coverable_u64(&self, expr: &Expr, vars: &HashMap<String, IrVar>) -> bool {
         match expr {
-            Expr::Identifier(name) => vars.get(name).is_some_and(|var| {
+            Expr::Identifier(name, _) => vars.get(name).is_some_and(|var| {
                 var.ty == IrType::U64
                     && (self.transition_param_ids.contains(&var.id) || self.transition_coverable_value_ids.contains(&var.id))
             }),
-            Expr::Integer(_) => true,
+            Expr::Integer(..) => true,
             Expr::FieldAccess(field) => {
                 let Some((root, field_name)) = direct_field_access_root(field) else {
                     return false;
@@ -4218,7 +4218,7 @@ impl IrGenerator {
             Expr::Cast(cast) => self.transition_expr_is_coverable_u64(&cast.expr, vars),
             Expr::Call(call) if call.args.is_empty() => match call.func.as_ref() {
                 Expr::FieldAccess(field) if field.field == "len" => match field.expr.as_ref() {
-                    Expr::Identifier(name) => vars.get(name).is_some_and(|var| {
+                    Expr::Identifier(name, _) => vars.get(name).is_some_and(|var| {
                         (matches!(&var.ty, IrType::Named(type_name) if type_name == "String" || type_name.starts_with("Vec<"))
                             || matches!(&var.ty, IrType::Array(_, _)))
                             && (self.transition_param_ids.contains(&var.id) || self.transition_coverable_value_ids.contains(&var.id))
@@ -4463,7 +4463,7 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> Option<LoweredExpr> {
         match call.func.as_ref() {
-            Expr::Identifier(name) => match name.as_str() {
+            Expr::Identifier(name, _) => match name.as_str() {
                 "Address::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Address([0; 32])), current: Some(current) })
                 }
@@ -4605,9 +4605,9 @@ impl IrGenerator {
                 "spawn" if call.args.len() == 1 => {
                     let dest = self.new_var("spawn_result", IrType::U64);
                     let target = match &call.args[0] {
-                        Expr::String(value) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                        Expr::Identifier(name) => match self.constants.get(name) {
-                            Some((_, Expr::String(value))) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
+                        Expr::String(value, _) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
+                        Expr::Identifier(name, _) => match self.constants.get(name) {
+                            Some((_, Expr::String(value, _))) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
                             _ => {
                                 let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
                                 let active = lowered.current?;
@@ -4689,7 +4689,7 @@ impl IrGenerator {
                 "occupied_capacity" if call.args.len() == 1 => {
                     let dest = self.new_var("occupied_capacity", IrType::U64);
                     let tag = match &call.args[0] {
-                        Expr::String(value) => stable_u64_tag(value),
+                        Expr::String(value, _) => stable_u64_tag(value),
                         _ => 0,
                     };
                     self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
@@ -4834,7 +4834,7 @@ impl IrGenerator {
                     let lowered_value = self.lower_expr(&call.args[0], active, blocks, vars);
                     let active = lowered_value.current?;
                     let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
+                    if let (Expr::Identifier(receiver_name, _), IrOperand::Var(collection_var)) =
                         (field.expr.as_ref(), &collection_operand)
                     {
                         if matches!(&collection_var.ty, IrType::Named(name) if name == "Vec") {
@@ -4913,7 +4913,7 @@ impl IrGenerator {
                     let lowered_value = self.lower_expr(&call.args[0], active, blocks, vars);
                     let active = lowered_value.current?;
                     let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
+                    if let (Expr::Identifier(receiver_name, _), IrOperand::Var(collection_var)) =
                         (field.expr.as_ref(), &collection_operand)
                     {
                         if matches!(&collection_var.ty, IrType::Named(name) if name == "Vec") {
@@ -4966,7 +4966,7 @@ impl IrGenerator {
                     let lowered_value = self.lower_expr(&call.args[1], active, blocks, vars);
                     let active = lowered_value.current?;
                     let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
+                    if let (Expr::Identifier(receiver_name, _), IrOperand::Var(collection_var)) =
                         (field.expr.as_ref(), &collection_operand)
                     {
                         if matches!(&collection_var.ty, IrType::Named(name) if name == "Vec") {
@@ -4994,7 +4994,7 @@ impl IrGenerator {
                     let lowered_value = self.lower_expr(&call.args[1], active, blocks, vars);
                     let active = lowered_value.current?;
                     let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
+                    if let (Expr::Identifier(receiver_name, _), IrOperand::Var(collection_var)) =
                         (field.expr.as_ref(), &collection_operand)
                     {
                         if matches!(&collection_var.ty, IrType::Named(name) if name == "Vec") {
@@ -5020,7 +5020,7 @@ impl IrGenerator {
                     let lowered_slice = self.lower_expr(&call.args[0], active, blocks, vars);
                     let active = lowered_slice.current?;
                     let collection_operand = lowered_collection.operand;
-                    if let (Expr::Identifier(receiver_name), IrOperand::Var(collection_var)) =
+                    if let (Expr::Identifier(receiver_name, _), IrOperand::Var(collection_var)) =
                         (field.expr.as_ref(), &collection_operand)
                     {
                         if matches!(&collection_var.ty, IrType::Named(name) if name == "Vec") {
@@ -5117,7 +5117,7 @@ impl IrGenerator {
     fn lower_constant(&mut self, name: &str, span: Span) -> Option<IrOperand> {
         let (ty, value) = self.constants.get(name)?.clone();
         match value {
-            Expr::Integer(n) => {
+            Expr::Integer(n, _) => {
                 let expected_ty = Self::convert_type(&ty);
                 match Self::integer_const_for_ir_type(n, &expected_ty) {
                     Some(value) => Some(IrOperand::Const(value)),
@@ -5127,8 +5127,8 @@ impl IrGenerator {
                     }
                 }
             }
-            Expr::Bool(b) => Some(IrOperand::Const(IrConst::Bool(b))),
-            Expr::ByteString(bytes) => {
+            Expr::Bool(b, _) => Some(IrOperand::Const(IrConst::Bool(b))),
+            Expr::ByteString(bytes, _) => {
                 let items = bytes.into_iter().map(IrConst::U8).collect::<Vec<_>>();
                 Some(IrOperand::Const(IrConst::Array(items)))
             }
@@ -5411,8 +5411,8 @@ fn certify_lifecycle_expr(expr: &Expr, branch_local: bool, bindings: &mut HashMa
             Ok(())
         }
         Expr::Preserve(_) => Ok(()),
-        Expr::Block(stmts) => certify_lifecycle_stmts(stmts, branch_local, bindings),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => certify_lifecycle_stmts(stmts, branch_local, bindings),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 certify_lifecycle_expr(item, branch_local, bindings)?;
             }
@@ -5447,7 +5447,9 @@ fn certify_lifecycle_expr(expr: &Expr, branch_local: bool, bindings: &mut HashMa
             }
             Ok(())
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => Ok(()),
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) | Expr::ReadRef(_) => {
+            Ok(())
+        }
     }
 }
 
@@ -5596,6 +5598,8 @@ fn verify_body(
         }
     }
 
+    verify_body_lifecycle_metadata(label, body, params)?;
+
     let all_var_types = collect_body_var_types(body, params)?;
     let all_value_kinds = collect_body_value_kinds(body, params)?;
     let all_defs = all_var_types.keys().copied().collect::<HashSet<_>>();
@@ -5661,6 +5665,353 @@ fn verify_body(
         verify_terminator_value_kinds(label, block.id, &block.terminator, &all_value_kinds)?;
     }
     verify_no_unconsumed_status_values(label, body, &all_value_kinds)?;
+
+    Ok(())
+}
+
+fn verify_body_lifecycle_metadata(label: &str, body: &IrBody, params: &[IrParam]) -> Result<()> {
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                IrInstruction::ReadRef { dest, ty } => {
+                    if !body.read_refs.iter().any(|pattern| read_ref_pattern_matches_instruction(pattern, dest, ty)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} read_ref '{}' is missing matching read_refs metadata",
+                            block.id.0, dest.name
+                        )));
+                    }
+                }
+                IrInstruction::Consume { operand } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "consume", operand, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} consume instruction is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                }
+                IrInstruction::Transfer { dest, operand, to } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "transfer", operand, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} transfer input is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                    if !body.create_set.iter().any(|pattern| created_output_pattern_matches(pattern, "transfer", dest, Some(to))) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} transfer output '{}' is missing matching create_set metadata",
+                            block.id.0, dest.name
+                        )));
+                    }
+                }
+                IrInstruction::Destroy { operand, policy } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "destroy", operand, Some(policy)))
+                    {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} destroy instruction is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                }
+                IrInstruction::Claim { dest, receipt } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "claim", receipt, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} claim receipt is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                    if !body.create_set.iter().any(|pattern| created_output_pattern_matches(pattern, "claim", dest, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} claim output '{}' is missing matching create_set metadata",
+                            block.id.0, dest.name
+                        )));
+                    }
+                }
+                IrInstruction::Settle { dest, operand } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "settle", operand, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} settle input is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                    if !body.create_set.iter().any(|pattern| created_output_pattern_matches(pattern, "settle", dest, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} settle output '{}' is missing matching create_set metadata",
+                            block.id.0, dest.name
+                        )));
+                    }
+                }
+                IrInstruction::Create { pattern, .. } | IrInstruction::CreateUnique { pattern, .. } => {
+                    if !body.create_set.iter().any(|candidate| create_patterns_equivalent(candidate, pattern)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} {} output '{}' is missing matching create_set metadata",
+                            block.id.0, pattern.operation, pattern.binding
+                        )));
+                    }
+                }
+                IrInstruction::ReplaceUnique { operand, pattern, .. } => {
+                    if !body.consume_set.iter().any(|pattern| cell_pattern_matches_operand(pattern, "replace_unique", operand, None)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} replace_unique input is missing matching consume_set metadata",
+                            block.id.0
+                        )));
+                    }
+                    if !body.create_set.iter().any(|candidate| create_patterns_equivalent(candidate, pattern)) {
+                        return Err(ir_verify_error(format!(
+                            "{label} block {} replace_unique output '{}' is missing matching create_set metadata",
+                            block.id.0, pattern.binding
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for pattern in &body.consume_set {
+        if !consume_pattern_has_backing_instruction(body, pattern) && !input_pattern_matches_param(params, pattern) {
+            return Err(ir_verify_error(format!(
+                "{label} consume_set metadata '{}' for binding '{}' has no matching IR instruction or input parameter",
+                pattern.operation, pattern.binding
+            )));
+        }
+    }
+    for pattern in &body.read_refs {
+        if !read_ref_pattern_has_backing_instruction(body, pattern) && !read_ref_pattern_matches_param(params, pattern) {
+            return Err(ir_verify_error(format!(
+                "{label} read_refs metadata for binding '{}' has no matching IR instruction or read-ref parameter",
+                pattern.binding
+            )));
+        }
+    }
+    for pattern in &body.create_set {
+        if !create_pattern_has_backing_instruction(body, pattern) && !output_pattern_matches_param(params, pattern) {
+            return Err(ir_verify_error(format!(
+                "{label} create_set metadata '{}' for binding '{}' has no matching IR instruction or output parameter",
+                pattern.operation, pattern.binding
+            )));
+        }
+    }
+
+    verify_mutate_set_metadata(label, body, params)?;
+    verify_write_intents_match_sets(label, body)?;
+
+    Ok(())
+}
+
+fn body_instructions(body: &IrBody) -> impl Iterator<Item = &IrInstruction> {
+    body.blocks.iter().flat_map(|block| block.instructions.iter())
+}
+
+fn consume_pattern_has_backing_instruction(body: &IrBody, pattern: &CellPattern) -> bool {
+    body_instructions(body).any(|instruction| match instruction {
+        IrInstruction::Consume { operand } => cell_pattern_matches_operand(pattern, "consume", operand, None),
+        IrInstruction::Transfer { operand, .. } => cell_pattern_matches_operand(pattern, "transfer", operand, None),
+        IrInstruction::Destroy { operand, policy } => cell_pattern_matches_operand(pattern, "destroy", operand, Some(policy)),
+        IrInstruction::Claim { receipt, .. } => cell_pattern_matches_operand(pattern, "claim", receipt, None),
+        IrInstruction::Settle { operand, .. } => cell_pattern_matches_operand(pattern, "settle", operand, None),
+        IrInstruction::ReplaceUnique { operand, .. } => cell_pattern_matches_operand(pattern, "replace_unique", operand, None),
+        _ => false,
+    })
+}
+
+fn read_ref_pattern_has_backing_instruction(body: &IrBody, pattern: &CellPattern) -> bool {
+    body_instructions(body).any(|instruction| match instruction {
+        IrInstruction::ReadRef { dest, ty } => read_ref_pattern_matches_instruction(pattern, dest, ty),
+        _ => false,
+    })
+}
+
+fn create_pattern_has_backing_instruction(body: &IrBody, pattern: &CreatePattern) -> bool {
+    body_instructions(body).any(|instruction| match instruction {
+        IrInstruction::Create { pattern: actual, .. }
+        | IrInstruction::CreateUnique { pattern: actual, .. }
+        | IrInstruction::ReplaceUnique { pattern: actual, .. } => create_patterns_equivalent(pattern, actual),
+        IrInstruction::Transfer { dest, to, .. } => created_output_pattern_matches(pattern, "transfer", dest, Some(to)),
+        IrInstruction::Claim { dest, .. } => created_output_pattern_matches(pattern, "claim", dest, None),
+        IrInstruction::Settle { dest, .. } => created_output_pattern_matches(pattern, "settle", dest, None),
+        _ => false,
+    })
+}
+
+fn input_pattern_matches_param(params: &[IrParam], pattern: &CellPattern) -> bool {
+    pattern.operation == "input"
+        && pattern.destruction_policy.is_none()
+        && pattern.fields.is_empty()
+        && params.iter().any(|param| {
+            param.source != ParamSource::Output
+                && !param.is_read_ref
+                && cell_pattern_matches_var(pattern, "input", &param.binding, None)
+        })
+}
+
+fn read_ref_pattern_matches_param(params: &[IrParam], pattern: &CellPattern) -> bool {
+    pattern.operation == "read_ref"
+        && pattern.destruction_policy.is_none()
+        && pattern.fields.is_empty()
+        && params.iter().any(|param| param.is_read_ref && cell_pattern_matches_var(pattern, "read_ref", &param.binding, None))
+}
+
+fn output_pattern_matches_param(params: &[IrParam], pattern: &CreatePattern) -> bool {
+    pattern.operation == "output"
+        && pattern.lock.is_none()
+        && pattern.identity == IrIdentityPolicy::None
+        && params.iter().any(|param| {
+            param.source == ParamSource::Output
+                && param.name == pattern.binding
+                && IrGenerator::named_type_name_from_ir_type(&param.ty).is_some_and(|type_name| type_name == pattern.ty)
+        })
+}
+
+fn cell_pattern_matches_operand(
+    pattern: &CellPattern,
+    operation: &str,
+    operand: &IrOperand,
+    destruction_policy: Option<&IrDestructionPolicy>,
+) -> bool {
+    let IrOperand::Var(var) = operand else {
+        return false;
+    };
+    cell_pattern_matches_var(pattern, operation, var, destruction_policy)
+}
+
+fn cell_pattern_matches_var(
+    pattern: &CellPattern,
+    operation: &str,
+    var: &IrVar,
+    destruction_policy: Option<&IrDestructionPolicy>,
+) -> bool {
+    if pattern.operation != operation || pattern.binding != var.name || !pattern.fields.is_empty() {
+        return false;
+    }
+    let Some(type_name) = IrGenerator::named_type_name_from_ir_type(&var.ty) else {
+        return false;
+    };
+    if pattern.type_hash != Some(type_hash_for_name(type_name)) {
+        return false;
+    }
+    match destruction_policy {
+        Some(policy) => pattern.destruction_policy.as_ref() == Some(policy),
+        None => pattern.destruction_policy.is_none(),
+    }
+}
+
+fn read_ref_pattern_matches_instruction(pattern: &CellPattern, dest: &IrVar, ty: &str) -> bool {
+    pattern.operation == "read_ref"
+        && pattern.binding == dest.name
+        && pattern.type_hash == Some(type_hash_for_name(ty))
+        && pattern.fields.is_empty()
+        && pattern.destruction_policy.is_none()
+}
+
+fn created_output_pattern_matches(pattern: &CreatePattern, operation: &str, dest: &IrVar, lock: Option<&IrOperand>) -> bool {
+    if pattern.operation != operation || pattern.binding != dest.name || pattern.identity != IrIdentityPolicy::None {
+        return false;
+    }
+    let Some(type_name) = IrGenerator::named_type_name_from_ir_type(&dest.ty) else {
+        return false;
+    };
+    pattern.ty == type_name
+        && match (pattern.lock.as_ref(), lock) {
+            (Some(left), Some(right)) => left == right,
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+fn create_patterns_equivalent(left: &CreatePattern, right: &CreatePattern) -> bool {
+    left.operation == right.operation
+        && left.ty == right.ty
+        && left.binding == right.binding
+        && left.fields == right.fields
+        && left.lock == right.lock
+        && left.identity == right.identity
+}
+
+fn verify_mutate_set_metadata(label: &str, body: &IrBody, params: &[IrParam]) -> Result<()> {
+    for (index, pattern) in body.mutate_set.iter().enumerate() {
+        if pattern.operation != "mutate" {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' has unsupported operation '{}'",
+                pattern.binding, pattern.operation
+            )));
+        }
+        let Some(param) = params.iter().find(|param| param.name == pattern.binding) else {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' does not match a callable parameter",
+                pattern.binding
+            )));
+        };
+        if !(param.is_mut || matches!(param.ty, IrType::MutRef(_))) {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' is not backed by a mutable parameter",
+                pattern.binding
+            )));
+        }
+        if IrGenerator::named_type_name_from_ir_type(&param.ty).is_none_or(|type_name| type_name != pattern.ty) {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' has type '{}', but parameter type is {:?}",
+                pattern.binding, pattern.ty, param.ty
+            )));
+        }
+        let expected_input_index = body.consume_set.len() + index;
+        if pattern.input_index != expected_input_index {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' has input_index {}, expected {}",
+                pattern.binding, pattern.input_index, expected_input_index
+            )));
+        }
+        let expected_output_index = body.create_set.len() + index;
+        if pattern.output_index != expected_output_index {
+            return Err(ir_verify_error(format!(
+                "{label} mutate_set metadata for binding '{}' has output_index {}, expected {}",
+                pattern.binding, pattern.output_index, expected_output_index
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn verify_write_intents_match_sets(label: &str, body: &IrBody) -> Result<()> {
+    let expected_len = body.create_set.len() + body.mutate_set.len();
+    if body.write_intents.len() != expected_len {
+        return Err(ir_verify_error(format!(
+            "{label} write_intents has {} entries, expected {} from create_set and mutate_set",
+            body.write_intents.len(),
+            expected_len
+        )));
+    }
+
+    for (index, pattern) in body.create_set.iter().enumerate() {
+        let intent = &body.write_intents[index];
+        let expected_fields = pattern.fields.iter().map(|(field, _)| field.clone()).collect::<Vec<_>>();
+        if intent.operation != pattern.operation
+            || intent.ty != pattern.ty
+            || intent.binding != pattern.binding
+            || intent.index != index
+            || intent.fields != expected_fields
+        {
+            return Err(ir_verify_error(format!(
+                "{label} write_intents[{}] does not match create_set[{}] for binding '{}'",
+                index, index, pattern.binding
+            )));
+        }
+    }
+
+    for (offset, pattern) in body.mutate_set.iter().enumerate() {
+        let index = body.create_set.len() + offset;
+        let intent = &body.write_intents[index];
+        if intent.operation != pattern.operation
+            || intent.ty != pattern.ty
+            || intent.binding != pattern.binding
+            || intent.index != pattern.output_index
+            || intent.fields != pattern.fields
+        {
+            return Err(ir_verify_error(format!(
+                "{label} write_intents[{}] does not match mutate_set[{}] for binding '{}'",
+                index, offset, pattern.binding
+            )));
+        }
+    }
 
     Ok(())
 }
@@ -6463,7 +6814,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
 fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
     match expr {
         Expr::Call(call) => {
-            if let Expr::Identifier(name) = call.func.as_ref() {
+            if let Expr::Identifier(name, _) = call.func.as_ref() {
                 names.insert(name.clone());
             }
             collect_call_names_from_expr(&call.func, names);
@@ -6530,8 +6881,8 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
         }
         Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_call_names_from_stmts(stmts, names),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_call_names_from_stmts(stmts, names),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_call_names_from_expr(item, names);
             }
@@ -6557,11 +6908,11 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_call_names_from_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => {}
     }
@@ -6735,7 +7086,7 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
                 collect_ast_expr_effects(&arm.value, footprint);
             }
         }
-        Expr::Block(stmts) => {
+        Expr::Block(stmts, _) => {
             for stmt in stmts {
                 collect_ast_stmt_effects(stmt, footprint);
             }
@@ -6775,7 +7126,7 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
             footprint.has_consume = true;
             collect_ast_expr_effects(&settle.expr, footprint);
         }
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_ast_expr_effects(item, footprint);
             }
@@ -7065,7 +7416,7 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
 fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
     match expr {
         Expr::Consume(consume) => {
-            if let Expr::Identifier(name) = consume.expr.as_ref() {
+            if let Expr::Identifier(name, _) = consume.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&consume.expr, bindings);
@@ -7099,26 +7450,26 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::Destroy(destroy) => {
-            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+            if let Expr::Identifier(name, _) = destroy.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
         }
         Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+            if let Expr::Identifier(name, _) = transfer.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&transfer.expr, bindings);
             collect_consumed_bindings_from_expr(&transfer.to, bindings);
         }
         Expr::Claim(claim) => {
-            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+            if let Expr::Identifier(name, _) = claim.receipt.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&claim.receipt, bindings);
         }
         Expr::Settle(settle) => {
-            if let Expr::Identifier(name) = settle.expr.as_ref() {
+            if let Expr::Identifier(name, _) = settle.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&settle.expr, bindings);
@@ -7132,7 +7483,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::ReplaceUnique(replace) => {
-            if let Expr::Identifier(name) = replace.expr.as_ref() {
+            if let Expr::Identifier(name, _) = replace.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&replace.expr, bindings);
@@ -7157,8 +7508,8 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::Preserve(_) => {}
-        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_consumed_bindings_from_expr(item, bindings);
             }
@@ -7189,7 +7540,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 bindings.insert(name);
             }
         }
-        Expr::Identifier(_) | Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => {}
+        Expr::Identifier(..) | Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) => {}
     }
 }
 
@@ -7197,7 +7548,7 @@ fn stdlib_lifecycle_consumed_binding(call: &StdlibCallExpr) -> Option<String> {
     let qualified = format!("std::{}::{}", call.namespace, call.name);
     match qualified.as_str() {
         "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => match call.args.first() {
-            Some(Expr::Identifier(name)) => Some(name.clone()),
+            Some(Expr::Identifier(name, _)) => Some(name.clone()),
             _ => None,
         },
         _ => None,
@@ -7216,7 +7567,7 @@ fn const_usize_operand(operand: &IrOperand) -> Option<usize> {
 
 fn direct_field_access_root(field: &FieldAccessExpr) -> Option<(&str, &str)> {
     match field.expr.as_ref() {
-        Expr::Identifier(root) => Some((root.as_str(), field.field.as_str())),
+        Expr::Identifier(root, _) => Some((root.as_str(), field.field.as_str())),
         _ => None,
     }
 }
@@ -7225,11 +7576,11 @@ fn same_direct_field_access(expr: &Expr, root: &str, field_name: &str) -> bool {
     let Expr::FieldAccess(field) = expr else {
         return false;
     };
-    matches!(field.expr.as_ref(), Expr::Identifier(name) if name == root) && field.field == field_name
+    matches!(field.expr.as_ref(), Expr::Identifier(name, _) if name == root) && field.field == field_name
 }
 
 fn call_target_is_min(expr: &Expr) -> bool {
-    matches!(expr, Expr::Identifier(name) if name == "min" || name == "math_min")
+    matches!(expr, Expr::Identifier(name, _) if name == "min" || name == "math_min")
 }
 
 fn is_verifier_coverable_output_field_type(ty: &IrType) -> bool {
@@ -7525,6 +7876,77 @@ where
 
         let err = verify_module(&ir).unwrap_err();
         assert!(err.message.contains("terminates to missing block 999"), "unexpected verifier error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_missing_create_set_metadata() {
+        let mut ir = parse_and_lower(
+            r#"
+module ir::missing_create_metadata
+
+resource Token has store {
+    amount: u64
+}
+
+action mint() -> Token
+where
+    let out = create Token { amount: 1 }
+    return out
+"#,
+        );
+        first_action_body_mut(&mut ir).create_set.clear();
+
+        let err = verify_module(&ir).unwrap_err();
+        assert!(err.message.contains("missing matching create_set metadata"), "unexpected verifier error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_extra_consume_set_metadata() {
+        let mut ir = parse_and_lower(
+            r#"
+module ir::extra_consume_metadata
+
+action run() -> u64
+where
+    return 1
+"#,
+        );
+        first_action_body_mut(&mut ir).consume_set.push(CellPattern {
+            operation: "consume".to_string(),
+            type_hash: Some(type_hash_for_name("Token")),
+            binding: "ghost".to_string(),
+            fields: Vec::new(),
+            destruction_policy: None,
+        });
+
+        let err = verify_module(&ir).unwrap_err();
+        assert!(
+            err.message.contains("has no matching IR instruction or input parameter"),
+            "unexpected verifier error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_stale_write_intents_metadata() {
+        let mut ir = parse_and_lower(
+            r#"
+module ir::stale_write_intents
+
+resource Token has store {
+    amount: u64
+}
+
+action mint() -> Token
+where
+    let out = create Token { amount: 1 }
+    return out
+"#,
+        );
+        first_action_body_mut(&mut ir).write_intents.clear();
+
+        let err = verify_module(&ir).unwrap_err();
+        assert!(err.message.contains("write_intents"), "unexpected verifier error: {}", err.message);
     }
 
     #[test]

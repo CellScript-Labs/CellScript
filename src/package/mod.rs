@@ -1,7 +1,9 @@
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
@@ -400,6 +402,8 @@ dist/
         url: &str,
         detailed: &DetailedDependency,
     ) -> Result<(ResolvedPackage, PackageManifest)> {
+        validate_git_url(url)?;
+
         let cache_dir = self.git_cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| {
             CompileError::without_span(format!("failed to create git cache directory '{}': {}", cache_dir.display(), e))
@@ -460,10 +464,9 @@ dist/
     }
 
     fn git_clone(url: &str, target: &Path) -> std::result::Result<(), String> {
-        let output = std::process::Command::new("git")
-            .args(["clone", url, &target.to_string_lossy()])
-            .output()
-            .map_err(|e| format!("failed to execute git: {}", e))?;
+        validate_git_url(url).map_err(|error| error.message)?;
+        let mut command = Self::git_command();
+        let output = command.args(Self::git_clone_args(url, target)).output().map_err(|e| format!("failed to execute git: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -474,7 +477,8 @@ dist/
     }
 
     fn git_update(clone_dir: &Path) -> std::result::Result<(), String> {
-        let output = std::process::Command::new("git")
+        let mut command = Self::git_command();
+        let output = command
             .args(["fetch", "--tags", "--prune", "origin"])
             .current_dir(clone_dir)
             .output()
@@ -489,8 +493,9 @@ dist/
     }
 
     fn git_checkout(clone_dir: &Path, ref_str: &str) -> std::result::Result<(), String> {
-        let fetch = std::process::Command::new("git")
-            .args(["fetch", "origin", ref_str])
+        let mut fetch_command = Self::git_command();
+        let fetch = fetch_command
+            .args(Self::git_fetch_ref_args(ref_str))
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git fetch: {}", e))?;
@@ -499,8 +504,9 @@ dist/
             return Err(format!("git fetch {} failed: {}", ref_str, stderr.trim()));
         }
 
-        let output = std::process::Command::new("git")
-            .args(["checkout", ref_str])
+        let mut checkout_command = Self::git_command();
+        let output = checkout_command
+            .args(Self::git_checkout_args(ref_str))
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git checkout: {}", e))?;
@@ -511,6 +517,24 @@ dist/
         }
 
         Ok(())
+    }
+
+    fn git_command() -> Command {
+        let mut command = Command::new("git");
+        command.args(["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never"]);
+        command
+    }
+
+    fn git_clone_args(url: &str, target: &Path) -> Vec<OsString> {
+        vec![OsString::from("clone"), OsString::from("--"), OsString::from(url), target.as_os_str().to_os_string()]
+    }
+
+    fn git_fetch_ref_args(ref_str: &str) -> Vec<OsString> {
+        vec![OsString::from("fetch"), OsString::from("origin"), OsString::from("--"), OsString::from(ref_str)]
+    }
+
+    fn git_checkout_args(ref_str: &str) -> Vec<OsString> {
+        vec![OsString::from("checkout"), OsString::from("--"), OsString::from(ref_str)]
     }
 
     fn git_revision(clone_dir: &Path) -> std::result::Result<String, String> {
@@ -657,6 +681,60 @@ fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
         return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
     }
     Ok(())
+}
+
+fn validate_git_url(url: &str) -> Result<()> {
+    if url.is_empty() || url.trim() != url {
+        return Err(CompileError::without_span("git dependency URL must not be empty or padded with whitespace"));
+    }
+    if url.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()) {
+        return Err(CompileError::without_span(format!("git dependency URL '{}' contains whitespace or control characters", url)));
+    }
+    if url.contains("::") {
+        return Err(CompileError::without_span(format!(
+            "git dependency URL '{}' uses a Git remote-helper/ext-style transport; use https://, http://, git://, ssh://, or scp-like SSH",
+            url
+        )));
+    }
+    if url.bytes().any(is_git_url_shell_metachar) {
+        return Err(CompileError::without_span(format!("git dependency URL '{}' contains unsupported shell metacharacters", url)));
+    }
+
+    if let Some((scheme, _rest)) = url.split_once("://") {
+        let scheme = scheme.to_ascii_lowercase();
+        if matches!(scheme.as_str(), "https" | "http" | "git" | "ssh") {
+            return Ok(());
+        }
+        return Err(CompileError::without_span(format!(
+            "git dependency URL '{}' uses unsupported scheme '{}'; allowed schemes are https, http, git, and ssh",
+            url, scheme
+        )));
+    }
+
+    if is_scp_like_ssh_url(url) {
+        return Ok(());
+    }
+
+    Err(CompileError::without_span(format!(
+        "git dependency URL '{}' must use https://, http://, git://, ssh://, or scp-like SSH",
+        url
+    )))
+}
+
+fn is_git_url_shell_metachar(byte: u8) -> bool {
+    matches!(byte, b';' | b'|' | b'&' | b'`' | b'$' | b'<' | b'>' | b'\'' | b'"' | b'\\')
+}
+
+fn is_scp_like_ssh_url(url: &str) -> bool {
+    let Some((authority, path)) = url.split_once(':') else {
+        return false;
+    };
+    !authority.is_empty()
+        && authority.contains('@')
+        && !authority.starts_with('-')
+        && !path.is_empty()
+        && !path.starts_with('-')
+        && !path.starts_with('/')
 }
 
 fn git_cache_entry_name(name: &str, url: &str, requested_ref: Option<&str>) -> String {
@@ -1566,6 +1644,49 @@ rev = "abc123"
         assert!(error.message.contains("remote"));
         assert!(error.message.contains("https://example.invalid/remote.git"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_rejects_unsafe_git_url_transports() {
+        for url in [
+            "ext::sh -c touch /tmp/cellscript-owned",
+            "file:///tmp/local.git",
+            "hg::https://example.com/repo",
+            "https://example.com/repo.git;touch-owned",
+            "https://example.com/repo.git\nssh://example.com/other.git",
+        ] {
+            let error = validate_git_url(url).expect_err("unsafe git URL should be rejected");
+            assert!(error.message.contains("git dependency URL"), "unexpected error for {url}: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn package_manager_accepts_allowed_git_url_transports() {
+        for url in [
+            "https://example.com/org/repo.git",
+            "http://example.com/org/repo.git",
+            "git://example.com/org/repo.git",
+            "ssh://git@example.com/org/repo.git",
+            "git@example.com:org/repo.git",
+        ] {
+            validate_git_url(url).unwrap_or_else(|error| panic!("expected {url} to be accepted: {}", error.message));
+        }
+    }
+
+    #[test]
+    fn package_manager_git_commands_separate_user_controlled_ref_arguments() {
+        let target = Path::new("/tmp/cellscript-git-target");
+        let clone_args = PackageManager::git_clone_args("--upload-pack=calc.exe", target);
+        let fetch_args = PackageManager::git_fetch_ref_args("--upload-pack=calc.exe");
+        let checkout_args = PackageManager::git_checkout_args("--upload-pack=calc.exe");
+
+        let clone = clone_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let fetch = fetch_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let checkout = checkout_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+
+        assert_eq!(clone, vec!["clone", "--", "--upload-pack=calc.exe", "/tmp/cellscript-git-target"]);
+        assert_eq!(fetch, vec!["fetch", "origin", "--", "--upload-pack=calc.exe"]);
+        assert_eq!(checkout, vec!["checkout", "--", "--upload-pack=calc.exe"]);
     }
 
     #[test]

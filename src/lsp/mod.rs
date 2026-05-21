@@ -1,11 +1,15 @@
 use crate::ast::*;
-use crate::error::{CompileError, Span};
+use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::TokenKind;
+use crate::resolve::ModuleResolver;
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod server;
+
+const LSP_MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
+const LSP_MAX_OPEN_DOCUMENTS: usize = 1_000;
 
 pub struct LspServer {
     documents: HashMap<String, String>,
@@ -144,11 +148,18 @@ impl LspServer {
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
+        if !self.accept_document_update(&uri, content.len(), !self.documents.contains_key(&uri)) {
+            return;
+        }
         self.documents.insert(uri.clone(), content.clone());
         self.parse_document(&uri, &content);
     }
 
     pub fn update_document(&mut self, uri: String, content: String) {
+        let new_document = !self.documents.contains_key(&uri);
+        if !self.accept_document_update(&uri, content.len(), new_document) {
+            return;
+        }
         self.documents.insert(uri.clone(), content.clone());
         self.parse_document(&uri, &content);
     }
@@ -163,6 +174,17 @@ impl LspServer {
         };
 
         for change in changes {
+            if change.text.len() > LSP_MAX_DOCUMENT_BYTES {
+                self.reject_document_update(
+                    uri,
+                    format!(
+                        "document change is too large: {} bytes exceeds the {} byte limit",
+                        change.text.len(),
+                        LSP_MAX_DOCUMENT_BYTES
+                    ),
+                );
+                return;
+            }
             match change.range {
                 None => {
                     // Full document replacement.
@@ -171,6 +193,13 @@ impl LspServer {
                 Some(range) => {
                     content = apply_incremental_change(&content, range, &change.text);
                 }
+            }
+            if content.len() > LSP_MAX_DOCUMENT_BYTES {
+                self.reject_document_update(
+                    uri,
+                    format!("document is too large: {} bytes exceeds the {} byte limit", content.len(), LSP_MAX_DOCUMENT_BYTES),
+                );
+                return;
             }
         }
 
@@ -182,6 +211,35 @@ impl LspServer {
         self.documents.remove(uri);
         self.ast_cache.remove(uri);
         self.diagnostics.remove(uri);
+    }
+
+    fn accept_document_update(&mut self, uri: &str, byte_len: usize, new_document: bool) -> bool {
+        if new_document && self.documents.len() >= LSP_MAX_OPEN_DOCUMENTS {
+            self.reject_document_update(uri, format!("too many open documents: limit is {}", LSP_MAX_OPEN_DOCUMENTS));
+            return false;
+        }
+        if byte_len > LSP_MAX_DOCUMENT_BYTES {
+            self.reject_document_update(
+                uri,
+                format!("document is too large: {} bytes exceeds the {} byte limit", byte_len, LSP_MAX_DOCUMENT_BYTES),
+            );
+            return false;
+        }
+        true
+    }
+
+    fn reject_document_update(&mut self, uri: &str, message: String) {
+        self.documents.remove(uri);
+        self.ast_cache.remove(uri);
+        self.diagnostics.insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+                severity: DiagnosticSeverity::Error,
+                message,
+                source: "cellscript".to_string(),
+            }],
+        );
     }
 
     fn parse_document(&mut self, uri: &str, content: &str) {
@@ -204,10 +262,26 @@ impl LspServer {
         };
 
         self.ast_cache.insert(uri.to_string(), ast.clone());
-        let diagnostics = match crate::types::check(&ast).and_then(|_| crate::flow::check(&ast)) {
+        let resolver = match self.document_resolver(uri) {
+            Ok(resolver) => resolver,
+            Err(error) => {
+                self.diagnostics.insert(uri.to_string(), vec![diagnostic_from_error(content, &error)]);
+                return;
+            }
+        };
+
+        let type_check = match resolver.as_ref() {
+            Some(resolver) => crate::types::check_with_resolver(&ast, resolver, &ast.name),
+            None => crate::types::check(&ast),
+        };
+        let diagnostics = match type_check.and_then(|_| crate::flow::check(&ast)) {
             Ok(()) => {
                 let mut diagnostics = Vec::new();
-                if let Ok(metadata) = crate::compile_metadata(content, None) {
+                let metadata = match resolver.as_ref() {
+                    Some(resolver) => crate::compile_metadata_with_resolver(content, None, resolver, &ast.name),
+                    None => crate::compile_metadata(content, None),
+                };
+                if let Ok(metadata) = metadata {
                     diagnostics.extend(lowering_diagnostics(content, &ast, &metadata));
                 }
                 diagnostics
@@ -215,6 +289,20 @@ impl LspServer {
             Err(error) => vec![diagnostic_from_error(content, &error)],
         };
         self.diagnostics.insert(uri.to_string(), diagnostics);
+    }
+
+    fn document_resolver(&self, uri: &str) -> Result<Option<ModuleResolver>> {
+        let modules = self.workspace_modules(uri);
+        if modules.is_empty() {
+            return Ok(None);
+        }
+
+        let mut resolver = ModuleResolver::new();
+        for module in modules {
+            resolver.register_module(module.ast)?;
+        }
+        resolver.check_circular_deps()?;
+        Ok(Some(resolver))
     }
 
     pub fn get_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
@@ -1993,12 +2081,18 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {
     let mut line = 0u32;
     let mut col = 0u32;
+    let mut iter = source.char_indices().peekable();
 
-    for (idx, ch) in source.char_indices() {
+    while let Some((idx, ch)) = iter.next() {
         if line == position.line && col == position.character {
             return Some(idx);
         }
-        if ch == '\n' {
+        if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
+            let (_, next) = iter.next().expect("peeked CRLF newline");
+            debug_assert_eq!(next, '\n');
+            line += 1;
+            col = 0;
+        } else if ch == '\n' {
             line += 1;
             col = 0;
         } else {
@@ -2022,11 +2116,20 @@ fn position_to_offset(source: &str, position: Position) -> Option<usize> {
 fn offset_to_position(source: &str, offset: usize) -> Position {
     let mut line = 0u32;
     let mut col = 0u32;
-    for (idx, ch) in source.char_indices() {
+    let mut iter = source.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
         if idx >= offset {
             break;
         }
-        if ch == '\n' {
+        if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
+            let (next_idx, next) = iter.next().expect("peeked CRLF newline");
+            debug_assert_eq!(next, '\n');
+            line += 1;
+            col = 0;
+            if next_idx >= offset {
+                break;
+            }
+        } else if ch == '\n' {
             line += 1;
             col = 0;
         } else {
@@ -2201,6 +2304,57 @@ mod tests {
         assert_eq!(position_to_offset(source, Position { line: 0, character: 2 }), None);
         assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
         assert_eq!(position_to_offset(source, Position { line: 1, character: 1 }), Some(beta_offset + 'β'.len_utf8()));
+    }
+
+    #[test]
+    fn lsp_position_conversion_treats_crlf_as_single_line_ending() {
+        let source = "alpha\r\nbeta";
+        let beta_offset = source.find("beta").expect("beta offset");
+
+        assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
+        assert_eq!(offset_to_position(source, source.find('\n').expect("lf offset")), Position { line: 1, character: 0 });
+        assert_eq!(position_to_offset(source, Position { line: 0, character: 5 }), Some(5));
+        assert_eq!(position_to_offset(source, Position { line: 1, character: 0 }), Some(beta_offset));
+        assert_eq!(position_to_offset(source, Position { line: 1, character: 4 }), Some(source.len()));
+    }
+
+    #[test]
+    fn lsp_position_incremental_change_applies_crlf_ranges() {
+        let source = "module demo\r\n// marker\r\n";
+        let marker_start = source.find("marker").expect("marker start");
+        let marker_end = marker_start + "marker".len();
+        let updated = apply_incremental_change(
+            source,
+            Range { start: offset_to_position(source, marker_start), end: offset_to_position(source, marker_end) },
+            "done",
+        );
+
+        assert_eq!(updated, "module demo\r\n// done\r\n");
+    }
+
+    #[test]
+    fn lsp_rejects_oversized_documents() {
+        let mut server = LspServer::new();
+        let uri = "file:///oversized.cell".to_string();
+
+        server.open_document(uri.clone(), "x".repeat(LSP_MAX_DOCUMENT_BYTES + 1));
+
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("too large")));
+    }
+
+    #[test]
+    fn lsp_rejects_document_count_over_limit() {
+        let mut server = LspServer::new();
+        for index in 0..LSP_MAX_OPEN_DOCUMENTS {
+            server.documents.insert(format!("file:///{index}.cell"), String::new());
+        }
+        let uri = "file:///extra.cell".to_string();
+
+        server.open_document(uri.clone(), "module extra".to_string());
+
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("too many open documents")));
     }
 
     #[test]
@@ -2640,6 +2794,58 @@ where
         let definition = server.goto_definition(&main_uri, Position { line: 4, character: 22 }).expect("cross-module definition");
         assert!(definition.uri.ends_with("/src/types.cell"));
         assert_eq!(definition.range.start.line, 2);
+    }
+
+    #[test]
+    fn test_workspace_diagnostics_check_imported_type_id_collisions() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        std::fs::write(
+            root.join("src/left.cell"),
+            r#"module demo::left
+
+#[type_id("demo::asset::Token:v1")]
+resource TokenA has store {
+    amount: u64
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/right.cell"),
+            r#"module demo::right
+
+#[type_id("demo::asset::Token:v1")]
+resource TokenB has store {
+    amount: u64
+}
+"#,
+        )
+        .unwrap();
+        let main_source = r#"module demo::main
+
+use demo::left::TokenA
+use demo::right::TokenB
+
+action inspect(token: TokenA) -> u64
+where
+    token.amount
+"#;
+        let main_path = root.join("src/main.cell");
+        std::fs::write(&main_path, main_source).unwrap();
+
+        let mut server = LspServer::new();
+        let main_uri = utf8_path_to_file_uri(&main_path);
+        server.open_document(main_uri.clone(), main_source.to_string());
+
+        let diagnostics = server.get_diagnostics(&main_uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("duplicate type_id 'demo::asset::Token:v1'")),
+            "expected imported type_id collision diagnostic, got {:?}",
+            diagnostics
+        );
     }
 
     #[test]

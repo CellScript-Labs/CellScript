@@ -95,6 +95,9 @@ cellc build --target riscv64-elf --target-profile ckb --json
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb
 ```
 
+Run these from a package directory that contains `Cell.toml`. The `.` argument
+refers to the current package; for a single file, pass the file path instead.
+
 For CKB admission, keep the profile visible:
 
 ```bash
