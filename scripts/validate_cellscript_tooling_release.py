@@ -137,8 +137,13 @@ def main() -> int:
         '"docs/"',
         '"docs/wiki/"',
         '"editors/"',
+        '"proposals/"',
+        '"scripts/__pycache__/"',
     ]:
         require(excluded in cargo_toml, f"Cargo.toml package exclude is missing {excluded}")
+
+    require("__pycache__/" in read(".gitignore"), ".gitignore must ignore generated Python bytecode directories")
+    require("*.py[cod]" in read(".gitignore"), ".gitignore must ignore generated Python bytecode files")
 
     print("valid CellScript tooling release boundary")
     return 0

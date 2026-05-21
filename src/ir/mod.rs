@@ -7320,7 +7320,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_raw_syscall_status_returned_as_domain_u64() {
+    fn status_boundary_ir_verifier_rejects_raw_syscall_status_returned_as_domain_u64() {
         let status = raw_status_var(0);
         let ir = module_with_instructions(
             vec![raw_status_call(Some(status.clone()))],
@@ -7334,7 +7334,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_raw_syscall_status_stored_as_dsl_local() {
+    fn status_boundary_ir_verifier_rejects_raw_syscall_status_stored_as_dsl_local() {
         let status = raw_status_var(0);
         let ir = module_with_instructions(
             vec![
@@ -7351,7 +7351,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_dropped_raw_syscall_status() {
+    fn status_boundary_ir_verifier_rejects_dropped_raw_syscall_status() {
         let ir = module_with_instructions(vec![raw_status_call(None)], None, IrTerminator::Return(None));
 
         let err = verify_module(&ir).unwrap_err();
@@ -7360,7 +7360,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_raw_syscall_status_in_tuple_field() {
+    fn status_boundary_ir_verifier_rejects_raw_syscall_status_in_tuple_field() {
         let status = raw_status_var(0);
         let tuple = IrVar { id: 1, name: "tuple".to_string(), ty: IrType::Tuple(vec![IrType::U64]) };
         let ir = module_with_instructions(
@@ -7375,7 +7375,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_raw_syscall_status_as_domain_call_argument() {
+    fn status_boundary_ir_verifier_rejects_raw_syscall_status_as_domain_call_argument() {
         let status = raw_status_var(0);
         let ir = module_with_instructions(
             vec![
@@ -7406,7 +7406,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_raw_syscall_status_produced_without_checked_consumer() {
+    fn status_boundary_ir_verifier_rejects_raw_syscall_status_produced_without_checked_consumer() {
         let status = raw_status_var(0);
         let ir = module_with_instructions(vec![raw_status_call(Some(status))], None, IrTerminator::Return(None));
 
@@ -7416,7 +7416,7 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_rejects_unit_runtime_helper_status_stored_as_domain_u64() {
+    fn status_boundary_ir_verifier_rejects_unit_runtime_helper_status_stored_as_domain_u64() {
         let status = raw_status_var(0);
         let ir = module_with_instructions(vec![raw_unit_helper_call(Some(status))], None, IrTerminator::Return(None));
 
@@ -7426,14 +7426,14 @@ mod tests {
     }
 
     #[test]
-    fn ir_verifier_allows_unit_runtime_helper_when_status_is_checked_by_codegen_boundary() {
+    fn status_boundary_ir_verifier_allows_unit_runtime_helper_when_status_is_checked_by_codegen_boundary() {
         let ir = module_with_instructions(vec![raw_unit_helper_call(None)], None, IrTerminator::Return(None));
 
         verify_module(&ir).expect("unit helper statement should be checked by codegen boundary");
     }
 
     #[test]
-    fn ir_verifier_allows_domain_u64_return_tuple_and_call_argument() {
+    fn status_boundary_ir_verifier_allows_domain_u64_return_tuple_and_call_argument() {
         let value = IrVar { id: 0, name: "value".to_string(), ty: IrType::U64 };
         let tuple = IrVar { id: 1, name: "tuple".to_string(), ty: IrType::Tuple(vec![IrType::U64]) };
         let ir = module_with_instructions(

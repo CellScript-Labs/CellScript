@@ -171,7 +171,7 @@ check_package_contents() {
     package_files="$(mktemp)"
     printf '\n==> cargo package --list --locked --allow-dirty --offline\n'
     cargo package --list --locked --allow-dirty --offline | tee "$package_files"
-    if grep -E '^(\.github/|docs/|editors/|tools/|src/bin/)' "$package_files"; then
+    if grep -E '^(\.github/|docs/|editors/|proposals/|tools/|src/bin/|.*__pycache__/|.*\.py[co]$)' "$package_files"; then
         printf 'crates.io package includes repository-only files or unpublished helper binaries\n' >&2
         exit 1
     fi
