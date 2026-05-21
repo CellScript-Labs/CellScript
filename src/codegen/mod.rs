@@ -1,7 +1,7 @@
 //! CellScript RISC-V64 code generator.
 //!
 //! This module lowers CellScript IR to RISC-V assembly and ELF binaries for
-//! the CKB-VM. The code generator is organised into eleven files:
+//! the CKB-VM. The code generator is organised across these files:
 //!
 //! - **`mod.rs`** (this file): orchestration layer. Contains the
 //!   `CodeGenerator` struct, `generate()` entry point, and all IR-to-assembly
@@ -2924,6 +2924,22 @@ lock enough(emergency: protected Emergency, required: witness u8) -> bool {
                 && schema_source.contains("emit_validated_field_span_from_canonical_table_to_t5_t6"),
             "validated Molecule table and field-span gates should remain explicit in schema codegen"
         );
+    }
+
+    #[test]
+    fn cell_operation_identity_helpers_stay_in_cell_ops() {
+        let schema_source = include_str!("schema.rs");
+        let cell_ops_source = include_str!("cell_ops.rs");
+        let helpers = [
+            "fn emit_mutate_replacement_field_hash_check(",
+            "fn emit_cell_field_hash_equality(",
+            "fn emit_output_type_hash_present_check(",
+        ];
+
+        for helper in helpers {
+            assert!(!schema_source.contains(helper), "{helper} belongs to cell_ops.rs, not schema.rs");
+            assert!(cell_ops_source.contains(helper), "{helper} should remain in cell_ops.rs");
+        }
     }
 
     #[test]

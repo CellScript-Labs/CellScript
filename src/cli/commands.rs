@@ -54,6 +54,7 @@ pub enum Command {
     Update,
     Info(InfoArgs),
     Login(LoginArgs),
+    Invalid(String),
 }
 
 #[derive(Debug, Default)]
@@ -347,6 +348,7 @@ impl CommandExecutor {
             Command::Update => Self::update(),
             Command::Info(args) => Self::info(args),
             Command::Login(args) => Self::login(args),
+            Command::Invalid(message) => Err(crate::error::CompileError::without_span(message)),
         }
     }
 
@@ -4466,7 +4468,8 @@ impl CliParser {
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
-            _ => unreachable!(),
+            Some((name, _)) => Command::Invalid(format!("internal CLI parser missing handler for subcommand '{}'", name)),
+            None => Command::Invalid("internal CLI parser did not receive a subcommand".to_string()),
         }
     }
 }
@@ -4517,6 +4520,14 @@ mod tests {
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn invalid_parser_mapping_returns_error_instead_of_panicking() {
+        let err = CommandExecutor::execute(Command::Invalid("missing parser mapping".to_string()))
+            .expect_err("invalid parser mapping should be reported");
+
+        assert!(err.to_string().contains("missing parser mapping"));
     }
 
     #[test]

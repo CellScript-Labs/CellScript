@@ -10,8 +10,8 @@ project contract.
 - Prefer existing AST, IR, metadata, and codegen structures over parallel
   stringly typed paths.
 - Parser support alone is not a feature boundary. New syntax must agree across
-  parsing, formatting, type checking, lowering, metadata, examples, docs, and
-  tests.
+  parsing, formatting, type checking, lowering, metadata, LSP/editor behavior,
+  examples, docs, and tests.
 - Use enums and typed fields when the concept already has a structured
   representation.
 - Error messages should name the rejected boundary and the next valid action.
@@ -24,6 +24,9 @@ project contract.
   `cargo test --locked -p cellscript`, clippy with `-D warnings`, and
   `git diff --check` remain useful while debugging, but passing one component
   does not replace the matching gate.
+- Keep new lint allowances narrow. Prefer item-level `#[allow(...)]` with a
+  short reason; crate-wide or module-wide clippy allowances are only for
+  documented legacy or transition boundaries.
 
 ## Backend And Codegen Rules
 
@@ -51,17 +54,16 @@ implicit backend contracts more implicit.
   main codegen, generated stdlib assembly, generated collection assembly, or
   internal lowering helpers must be accepted and correctly encoded by the
   internal assembler.
-- The current Tier 1 canonical forms are `add`, `addi`, `sub`, `and`, `or`,
-  `mul`, `div`, `rem`, `slt`, `sltu`, `xori`, `ld`, `lbu`, `sb`, `sh`, `sw`,
-  `sd`, `slli`, `srli`, `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`, `ret`, and
-  `ecall`.
-- Treat pseudo-instructions as explicit API. `li`, `la`, `call`, `j`, `mv`,
-  `seqz`, `snez`, `neg`, `sgt`, `bgt`, `bgez`, `beqz`, and `bnez` are supported
-  because current generated surfaces use them.
+- The current Tier 1 real instruction forms are `add`, `addi`, `sub`, `and`,
+  `andi`, `or`, `xor`, `mul`, `div`, `divu`, `rem`, `remu`, `slt`, `sltu`,
+  `xori`, `ld`, `lbu`, `sb`, `sh`, `sw`, `sd`, `slli`, `srli`, `beq`, `bne`,
+  `blt`, `bge`, `bltu`, `bgeu`, `ret`, and `ecall`.
+- Treat pseudo-instructions and aliases as explicit API. `li`, `la`, `call`,
+  `j`, `mv`, `seqz`, `snez`, `neg`, `sgt`, `sgtu`, `bgt`, `bgez`, `beqz`, and
+  `bnez` are supported because current generated surfaces use them.
 - Tier 2 candidates may be added when an optimizer, typed emission path, or
   constant materializer needs them: `nop`, `lui`, `auipc`, raw `jal`/`jalr`,
-  `andi`, `ori`, register-register `xor`, `sll`, `srl`, `sra`, `srai`, `addw`,
-  `addiw`, and `subw`.
+  `ori`, `sll`, `srl`, `sra`, `srai`, `addw`, `addiw`, and `subw`.
 - Tier 3 instructions remain demand-driven: signed byte/half/word loads,
   unsigned half/word loads, `slti`, `sltiu`, branch aliases such as `ble`,
   `bleu`, `bgtu`, `bltz`, `bgtz`, `blez`, plus `not` and `jr`.
@@ -109,7 +111,8 @@ implicit backend contracts more implicit.
 ## Documentation And Release Notes
 
 - Do not describe a feature as implemented unless parser, type checking,
-  lowering, metadata, tests, examples, and docs agree on the same boundary.
+  lowering, metadata, LSP/editor behavior, tests, examples, and docs agree on
+  the same boundary.
 - Use "reserved", "deferred", or "fail-closed" when syntax exists but executable
   semantics are intentionally unavailable.
 - Release notes should separate highlights, scope boundaries, validation
@@ -119,8 +122,8 @@ implicit backend contracts more implicit.
 
 ## Tests
 
-- For syntax changes, add parser, formatter, type-checker, lowering, and
-  metadata tests where applicable.
+- For syntax changes, add parser, formatter, type-checker, lowering, metadata,
+  and LSP/editor tests where applicable.
 - For CKB-facing changes, add negative tests for unsafe or ambiguous forms.
 - For assembler/codegen changes, add targeted tests for the exact generated
   instruction surface and at least one compile-through `riscv64-elf` path.

@@ -13,8 +13,7 @@ use crate::ir::*;
 
 use super::{
     ckb_source_name, CellScriptRuntimeError, CodeGenerator, PreludeU64OperandSource, PreludeU64ValueSource, CKB_CELL_FIELD_CAPACITY,
-    CKB_CELL_FIELD_LOCK_HASH, CKB_CELL_FIELD_TYPE_HASH, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, RUNTIME_EXPR_TEMP_SLOTS,
-    RUNTIME_SCRATCH_BUFFER_SIZE,
+    CKB_CELL_FIELD_LOCK_HASH, RUNTIME_EXPR_TEMP_SLOTS, RUNTIME_SCRATCH_BUFFER_SIZE,
 };
 
 #[derive(Debug, Clone)]
@@ -494,59 +493,6 @@ impl CodeGenerator {
         self.emit_validated_field_span_from_canonical_table_to_t5_t6(&table, field_index);
     }
 
-    pub(crate) fn emit_mutate_replacement_field_hash_check(
-        &mut self,
-        pattern: &MutatePattern,
-        cell_field: u64,
-        field_name: &str,
-        error: CellScriptRuntimeError,
-    ) {
-        let input_size_offset = self.runtime_scratch_size_offset();
-        let input_buffer_offset = self.runtime_scratch_buffer_offset();
-        let output_size_offset = self.runtime_scratch2_size_offset();
-        let output_buffer_offset = self.runtime_scratch2_buffer_offset();
-
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            &format!("mutate_input_{}", field_name),
-            CKB_SOURCE_INPUT,
-            pattern.input_index,
-            cell_field,
-            input_size_offset,
-            input_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            &format!("mutate_output_{}", field_name),
-            CKB_SOURCE_OUTPUT,
-            pattern.output_index,
-            cell_field,
-            output_size_offset,
-            output_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
-        self.emit_loaded_schema_exact_size_check(input_size_offset, 32, &format!("mutate input {}", field_name));
-        self.emit_loaded_schema_exact_size_check(output_size_offset, 32, &format!("mutate output {}", field_name));
-        self.emit(format!(
-            "# cellscript abi: verify mutate output {} {} Input#{} == Output#{} size=32",
-            pattern.ty, field_name, pattern.input_index, pattern.output_index
-        ));
-        self.emit_sp_addi("t4", input_buffer_offset);
-        self.emit_sp_addi("t5", output_buffer_offset);
-        for byte_index in 0..32 {
-            self.emit(format!("lbu t0, {}(t4)", byte_index));
-            self.emit(format!("lbu t1, {}(t5)", byte_index));
-            self.emit("sub t2, t0, t1");
-            let ok_label = self.fresh_label("mutate_identity_byte_ok");
-            self.emit(format!("beqz t2, {}", ok_label));
-            self.emit_runtime_error_comment(error);
-            self.emit(format!("li a0, {}", error.code()));
-            self.emit_epilogue();
-            self.emit_label(&ok_label);
-        }
-    }
-
     pub(crate) fn emit_cell_metadata_equality(&mut self, left: &IrOperand, right: &IrOperand, field: CellMetadataField) -> Result<()> {
         let Some((left_source, left_index)) = self.operand_cell_location(left) else {
             self.emit("# cellscript abi: fail closed because left cell metadata source cannot be determined");
@@ -617,84 +563,6 @@ impl CodeGenerator {
             self.emit_label(&ok_label);
         }
         Ok(())
-    }
-
-    pub(crate) fn emit_cell_field_hash_equality(
-        &mut self,
-        left_reason: &str,
-        left_source: u64,
-        left_index: usize,
-        right_reason: &str,
-        right_source: u64,
-        right_index: usize,
-        cell_field: u64,
-        field_name: &str,
-        detail: &str,
-        error: CellScriptRuntimeError,
-    ) {
-        let left_size_offset = self.runtime_scratch_size_offset();
-        let left_buffer_offset = self.runtime_scratch_buffer_offset();
-        let right_size_offset = self.runtime_scratch2_size_offset();
-        let right_buffer_offset = self.runtime_scratch2_buffer_offset();
-
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            left_reason,
-            left_source,
-            left_index,
-            cell_field,
-            left_size_offset,
-            left_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(error);
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            right_reason,
-            right_source,
-            right_index,
-            cell_field,
-            right_size_offset,
-            right_buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(error);
-        self.emit_loaded_schema_exact_size_check(left_size_offset, 32, &format!("{} {}", left_reason, field_name));
-        self.emit_loaded_schema_exact_size_check(right_size_offset, 32, &format!("{} {}", right_reason, field_name));
-        self.emit(format!(
-            "# cellscript abi: verify {} {} {}#{} == {}#{} size=32",
-            detail,
-            field_name,
-            ckb_source_name(left_source),
-            left_index,
-            ckb_source_name(right_source),
-            right_index
-        ));
-        self.emit_sp_addi("a0", left_buffer_offset);
-        self.emit_sp_addi("a1", right_buffer_offset);
-        self.emit("li a2, 32");
-        self.emit("call __cellscript_memcmp_fixed");
-        let ok_label = self.fresh_label("identity_hash_ok");
-        self.emit(format!("beqz a0, {}", ok_label));
-        self.emit_runtime_error_comment(error);
-        self.emit(format!("li a0, {}", error.code()));
-        self.emit_epilogue();
-        self.emit_label(&ok_label);
-    }
-
-    pub(crate) fn emit_output_type_hash_present_check(&mut self, output_index: usize, context: &str) {
-        let size_offset = self.runtime_scratch2_size_offset();
-        let buffer_offset = self.runtime_scratch2_buffer_offset();
-        self.emit_load_cell_by_field_syscall_to_offsets(
-            context,
-            CKB_SOURCE_OUTPUT,
-            output_index,
-            CKB_CELL_FIELD_TYPE_HASH,
-            size_offset,
-            buffer_offset,
-            32,
-        );
-        self.emit_return_on_syscall_error(CellScriptRuntimeError::TypeHashMismatch);
-        self.emit_loaded_schema_exact_size_check(size_offset, 32, context);
-        self.emit(format!("# cellscript abi: verify {} Output#{} TypeHash is present size=32", context, output_index));
     }
 
     pub(crate) fn emit_loaded_fixed_field_pointer_to_stack(
