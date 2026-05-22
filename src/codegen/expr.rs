@@ -28,8 +28,8 @@ impl CodeGenerator {
                     self.emit_stack_store("t0", dest.id * 8);
                     return Ok(());
                 }
-                let label = self.const_data_label_for_bytes(value.to_le_bytes().to_vec());
-                self.emit(format!("la t0, {}", label));
+                self.record_fatal_error(format!("u128 const destination var{} has no fixed-byte storage", dest.id));
+                return Ok(());
             }
             IrConst::Bool(b) => self.emit(format!("li t0, {}", if *b { 1 } else { 0 })),
             IrConst::Address(_) | IrConst::Hash(_) | IrConst::Array(_) => {

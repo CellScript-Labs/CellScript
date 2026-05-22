@@ -105,11 +105,19 @@ pub(crate) fn fixed_byte_width(ty: &IrType, fixed_size: Option<usize>) -> Option
     }
 }
 
+pub(crate) fn storage_type(ty: &IrType) -> &IrType {
+    match ty {
+        IrType::Ref(inner) | IrType::MutRef(inner) => storage_type(inner),
+        ty => ty,
+    }
+}
+
 pub(crate) fn molecule_vector_element_fixed_width(
     ty: &IrType,
     type_fixed_sizes: &HashMap<String, usize>,
     enum_fixed_sizes: &HashMap<String, usize>,
 ) -> Option<usize> {
+    let ty = storage_type(ty);
     let IrType::Named(name) = ty else {
         return None;
     };
@@ -168,7 +176,7 @@ pub(crate) fn operand_fixed_byte_width(operand: &IrOperand) -> Option<usize> {
         IrOperand::Var(var) => &var.ty,
         _ => return None,
     };
-    match ty {
+    match storage_type(ty) {
         IrType::Address | IrType::Hash => Some(32),
         IrType::U128 => Some(16),
         IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
@@ -271,7 +279,7 @@ pub(crate) fn aggregate_type_label(ty: &IrType) -> String {
 }
 
 pub(crate) fn aggregate_field_layout(ty: &IrType, field: &str) -> Option<SchemaFieldLayout> {
-    match ty {
+    match storage_type(ty) {
         IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
             let field_ty = items.get(index)?.clone();

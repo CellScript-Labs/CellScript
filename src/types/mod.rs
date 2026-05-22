@@ -2601,10 +2601,10 @@ impl<'a> TypeChecker<'a> {
             return Ok(None);
         };
         for stmt in prefix {
-            self.check_stmt(env, stmt)?;
+            self.check_stmt_with_context(env, stmt, false)?;
         }
         let tail_base = env.clone();
-        self.check_stmt(env, last)?;
+        self.check_stmt_with_context(env, last, true)?;
         Ok(Some((tail_base, last)))
     }
 
@@ -2888,7 +2888,21 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn check_stmt_list(&mut self, env: &mut TypeEnv, stmts: &[Stmt], allow_tail_expr: bool) -> Result<()> {
+        let Some((last, prefix)) = stmts.split_last() else {
+            return Ok(());
+        };
+        for stmt in prefix {
+            self.check_stmt_with_context(env, stmt, false)?;
+        }
+        self.check_stmt_with_context(env, last, allow_tail_expr)
+    }
+
     fn check_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<()> {
+        self.check_stmt_with_context(env, stmt, false)
+    }
+
+    fn check_stmt_with_context(&mut self, env: &mut TypeEnv, stmt: &Stmt, allow_tail_expr: bool) -> Result<()> {
         match stmt {
             Stmt::Let(let_stmt) => {
                 let ty = self.infer_let_value_type(env, let_stmt)?;
@@ -2911,7 +2925,16 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
             Stmt::Expr(expr) => {
-                self.infer_expr(env, expr)?;
+                let ty = self.infer_expr(env, expr)?;
+                if self.is_linear_type(&ty) && !allow_tail_expr && !Self::linear_expr_statement_has_effect(expr) {
+                    return Err(CompileError::new(
+                        format!(
+                            "linear expression result of type {} must be bound, returned, or consumed by an explicit lifecycle operation",
+                            type_repr(&ty)
+                        ),
+                        expr_span(expr),
+                    ));
+                }
                 Ok(())
             }
             Stmt::Return(None) => {
@@ -2953,15 +2976,11 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("if condition must be boolean", if_stmt.span));
                 }
                 let mut then_env = env.child();
-                for stmt in &if_stmt.then_branch {
-                    self.check_stmt(&mut then_env, stmt)?;
-                }
+                self.check_stmt_list(&mut then_env, &if_stmt.then_branch, allow_tail_expr)?;
                 let then_returns = self.stmts_always_return(&if_stmt.then_branch);
                 if let Some(ref else_branch) = if_stmt.else_branch {
                     let mut else_env = env.child();
-                    for stmt in else_branch {
-                        self.check_stmt(&mut else_env, stmt)?;
-                    }
+                    self.check_stmt_list(&mut else_env, else_branch, allow_tail_expr)?;
                     let else_returns = self.stmts_always_return(else_branch);
                     env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span)?;
                 } else {
@@ -2974,9 +2993,7 @@ impl<'a> TypeChecker<'a> {
                 let mut loop_env = env.child();
                 let item_ty = self.iter_item_type(&iter_ty, for_stmt.span)?;
                 self.bind_pattern(&mut loop_env, &for_stmt.pattern, &item_ty, false, for_stmt.span)?;
-                for stmt in &for_stmt.body {
-                    self.check_stmt(&mut loop_env, stmt)?;
-                }
+                self.check_stmt_list(&mut loop_env, &for_stmt.body, false)?;
                 loop_env.check_linear_complete()?;
                 env.reject_loop_linear_state_changes(&loop_env, for_stmt.span)?;
                 env.merge_existing_type_refinements_from(&loop_env);
@@ -2988,9 +3005,7 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("while condition must be boolean", while_stmt.span));
                 }
                 let mut while_env = env.child();
-                for stmt in &while_stmt.body {
-                    self.check_stmt(&mut while_env, stmt)?;
-                }
+                self.check_stmt_list(&mut while_env, &while_stmt.body, false)?;
                 while_env.check_linear_complete()?;
                 env.reject_loop_linear_state_changes(&while_env, while_stmt.span)?;
                 env.merge_existing_type_refinements_from(&while_env);
@@ -3264,10 +3279,15 @@ impl<'a> TypeChecker<'a> {
                     Ok(ty)
                 } else if let Some(ty) = self.flow_state_expr_type(name, expr_span(expr))? {
                     Ok(ty)
-                } else if let Some((prefix, _)) = name.split_once("::") {
-                    Ok(Type::Named(prefix.to_string()))
+                } else if let Some(ty) = Self::qualified_value_constructor_type(name) {
+                    Ok(ty)
+                } else if name.contains("::") {
+                    Err(CompileError::new(
+                        format!("qualified identifier '{}' does not resolve to a value in this expression context", name),
+                        expr_span(expr),
+                    ))
                 } else {
-                    Err(CompileError::new(format!("undefined variable '{}'", name), Span::default()))
+                    Err(CompileError::new(format!("undefined variable '{}'", name), expr_span(expr)))
                 }
             }
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
@@ -3818,6 +3838,14 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn qualified_value_constructor_type(name: &str) -> Option<Type> {
+        match name {
+            "Address::zero" => Some(Type::Address),
+            "Hash::zero" => Some(Type::Hash),
+            _ => None,
+        }
+    }
+
     fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
         let ty = self.infer_expr(env, expr)?;
         if !self.is_linear_type(&ty) {
@@ -3914,7 +3942,7 @@ impl<'a> TypeChecker<'a> {
             return Ok(Type::Unit);
         };
         for stmt in prefix {
-            self.check_stmt(env, stmt)?;
+            self.check_stmt_with_context(env, stmt, false)?;
         }
         match last {
             Stmt::Expr(expr) => {
@@ -3926,7 +3954,7 @@ impl<'a> TypeChecker<'a> {
             }
             Stmt::If(if_stmt) if if_stmt.else_branch.is_some() => self.infer_tail_if_stmt_value(env, if_stmt),
             stmt => {
-                self.check_stmt(env, stmt)?;
+                self.check_stmt_with_context(env, stmt, true)?;
                 Ok(Type::Unit)
             }
         }
@@ -3962,10 +3990,16 @@ impl<'a> TypeChecker<'a> {
 
     fn check_match_patterns(&self, scrutinee_ty: &Type, match_expr: &MatchExpr) -> Result<()> {
         let Type::Named(enum_name) = scrutinee_ty else {
-            return Ok(());
+            return Err(CompileError::new(
+                format!("match expression requires an enum scrutinee, found {}", type_repr(scrutinee_ty)),
+                expr_span(&match_expr.expr),
+            ));
         };
         let Some(variants) = self.resolve_enum_variants(enum_name) else {
-            return Ok(());
+            return Err(CompileError::new(
+                format!("match expression requires an enum scrutinee, found {}", type_repr(scrutinee_ty)),
+                expr_span(&match_expr.expr),
+            ));
         };
         let variant_set = variants.iter().map(String::as_str).collect::<HashSet<_>>();
         let mut seen = HashSet::new();
@@ -4461,10 +4495,10 @@ impl<'a> TypeChecker<'a> {
             return Ok(branch_env);
         };
         for stmt in prefix {
-            self.check_stmt(&mut branch_env, stmt)?;
+            self.check_stmt_with_context(&mut branch_env, stmt, false)?;
         }
         let tail_base = branch_env.clone();
-        self.check_stmt(&mut branch_env, last)?;
+        self.check_stmt_with_context(&mut branch_env, last, true)?;
         self.mark_stmt_as_returned(&mut branch_env, &tail_base, last)?;
         Ok(branch_env)
     }
@@ -4524,7 +4558,7 @@ impl<'a> TypeChecker<'a> {
         };
         let mut tail_env = env.clone();
         for stmt in prefix {
-            self.check_stmt(&mut tail_env, stmt)?;
+            self.check_stmt_with_context(&mut tail_env, stmt, false)?;
         }
 
         if let Stmt::Expr(expr) = last {
@@ -4638,6 +4672,13 @@ impl<'a> TypeChecker<'a> {
             Expr::Block(..) => Ok(()),
             _ => Ok(()),
         }
+    }
+
+    fn linear_expr_statement_has_effect(expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Create(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) | Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_)
+        )
     }
 
     fn reject_local_reference_to_linear_root(&self, env: &TypeEnv, value: &Expr, ty: &Type, span: Span) -> Result<()> {
@@ -5690,18 +5731,14 @@ impl<'a> TypeChecker<'a> {
         if !self.is_numeric_type(target_ty) || !self.is_numeric_type(value_ty) {
             return Err(CompileError::new("'+=' requires numeric types", span));
         }
-        if self.types_equal(target_ty, value_ty) {
+
+        let result_ty = self.validate_numeric_binary_types(BinaryOp::Add, target_ty, value_ty, span)?;
+        if self.types_equal(&result_ty, target_ty) {
             return Ok(());
         }
-        // Allow if value widens to target (value is narrower or equal).
-        if let Some(promoted) = Self::widen_to(target_ty, value_ty) {
-            if self.types_equal(&promoted, target_ty) {
-                // value is narrower than or equal to target: safe.
-                return Ok(());
-            }
-        }
+
         Err(CompileError::new(
-            "compound assignment would implicitly narrow the result; use an explicit expression and checked cast",
+            "compound assignment would implicitly narrow the result; use an explicit `as` cast after verifying the value fits the target width",
             span,
         ))
     }
@@ -7074,6 +7111,66 @@ where
         .expect("u64 += u16 should succeed");
     }
 
+    #[test]
+    fn compound_assign_uses_numeric_binary_rules() {
+        let generic_u128 = check(&source_module(
+            r#"
+module types::compound_u128_generic
+action bad(mut x: u128, y: u128) -> bool
+where
+    x += y
+    return true
+"#,
+        ))
+        .unwrap_err();
+        assert!(generic_u128.message.contains("u128"), "u128 += u128 should be rejected, got: {}", generic_u128.message);
+
+        check(&source_module(
+            r#"
+module types::compound_u128_delta
+action ok(mut x: u128, y: u64) -> bool
+where
+    x += y
+    return true
+"#,
+        ))
+        .expect("u128 += u64 delta should succeed");
+
+        check(&source_module(
+            r#"
+module types::compound_usize_u64
+action ok(mut x: u64, y: usize) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += usize should match u64 + usize");
+
+        check(&source_module(
+            r#"
+module types::compound_isize_u64
+action ok(mut x: isize, y: u64) -> isize
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("isize += u64 should match isize + u64");
+
+        let narrow_u128 = check(&source_module(
+            r#"
+module types::compound_u64_u128
+action bad(mut x: u64, y: u128) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(narrow_u128.message.contains("narrow"), "u64 += u128 should reject narrowing, got: {}", narrow_u128.message);
+    }
+
     /// Comprehensive boundary test: widening is expression-local only.
     /// Every boundary (let, return, assign, field write, call arg) must reject
     /// implicit narrowing, even when the expression itself involves widening.
@@ -7841,6 +7938,93 @@ lock pick_lock(witness choice: Choice) -> bool {
 "#,
         ))
         .expect("tail match expressions should satisfy function and lock return checks");
+    }
+
+    #[test]
+    fn match_requires_enum_scrutinee() {
+        let err = check(&source_module(
+            r#"
+module types::match_non_enum
+
+action bad(value: u64) -> u64
+where
+    return match value {
+        _ => {
+            0
+        },
+    }
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("enum scrutinee"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn qualified_identifier_must_resolve_to_value() {
+        let err = check(&source_module(
+            r#"
+module types::qualified_identifier
+
+struct Foo {
+    value: u64,
+}
+
+fn foo() -> Foo {
+    return Foo::CONST
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("qualified identifier"), "unexpected error: {}", err.message);
+
+        check(&source_module(
+            r#"
+module types::qualified_zero_constructor
+
+action zero() -> Address
+where
+    return Address::zero
+"#,
+        ))
+        .expect("recognised qualified zero constructors should remain valid values");
+    }
+
+    #[test]
+    fn non_tail_linear_expression_statements_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::linear_expr_statement
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action bad() -> u64
+where
+    let token = create Token { amount: 1 }
+    token
+    destroy token
+    return 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("linear expression result"), "unexpected error: {}", err.message);
+
+        check(&source_module(
+            r#"
+module types::linear_create_statement
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action ok(amount: u64) -> u64
+where
+    create Token { amount: amount }
+    return amount
+"#,
+        ))
+        .expect("explicit lifecycle create statements should remain valid");
     }
 
     #[test]

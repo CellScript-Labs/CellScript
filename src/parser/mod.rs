@@ -1298,15 +1298,7 @@ impl<'a> Parser<'a> {
                 let mut name = self.parse_name_path()?;
                 if self.check(&TokenKind::Lt) {
                     self.advance();
-                    let mut args = Vec::new();
-                    while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
-                        args.push(self.parse_type()?);
-                        if self.check(&TokenKind::Comma) {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
+                    let args = self.parse_type_list(TokenKind::Gt)?;
                     self.expect(TokenKind::Gt)?;
                     let rendered_args = args.iter().map(Self::render_type).collect::<Vec<_>>().join(", ");
                     name.push('<');
@@ -1335,15 +1327,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.advance();
-                let mut elems = Vec::new();
-                while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                    elems.push(self.parse_type()?);
-                    if self.check(&TokenKind::Comma) {
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
+                let elems = self.parse_type_list(TokenKind::RParen)?;
                 self.expect(TokenKind::RParen)?;
                 Type::Tuple(elems)
             }
@@ -2044,17 +2028,18 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::EqEq) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Eq)
+                Some((BinaryOp::Eq, start_span))
             } else if self.check(&TokenKind::NotEq) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Ne)
+                Some((BinaryOp::Ne, start_span))
             } else {
                 None
             };
 
-            if let Some(op) = op {
-                let start_span = self.current().span;
+            if let Some((op, start_span)) = op {
                 self.skip_newlines();
                 let right = self.parse_comparison()?;
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
@@ -2072,23 +2057,26 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Lt) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Lt)
+                Some((BinaryOp::Lt, start_span))
             } else if self.check(&TokenKind::Le) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Le)
+                Some((BinaryOp::Le, start_span))
             } else if self.check(&TokenKind::Gt) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Gt)
+                Some((BinaryOp::Gt, start_span))
             } else if self.check(&TokenKind::Ge) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Ge)
+                Some((BinaryOp::Ge, start_span))
             } else {
                 None
             };
 
-            if let Some(op) = op {
-                let start_span = self.current().span;
+            if let Some((op, start_span)) = op {
                 self.skip_newlines();
                 let right = self.parse_term()?;
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
@@ -2106,17 +2094,18 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Plus) && !matches!(&self.peek(1).kind, TokenKind::Eq) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Add)
+                Some((BinaryOp::Add, start_span))
             } else if self.check(&TokenKind::Minus) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Sub)
+                Some((BinaryOp::Sub, start_span))
             } else {
                 None
             };
 
-            if let Some(op) = op {
-                let start_span = self.current().span;
+            if let Some((op, start_span)) = op {
                 self.skip_newlines();
                 let right = self.parse_factor()?;
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
@@ -2134,20 +2123,22 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Star) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Mul)
+                Some((BinaryOp::Mul, start_span))
             } else if self.check(&TokenKind::Slash) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Div)
+                Some((BinaryOp::Div, start_span))
             } else if self.check(&TokenKind::Percent) {
+                let start_span = self.current().span;
                 self.advance();
-                Some(BinaryOp::Mod)
+                Some((BinaryOp::Mod, start_span))
             } else {
                 None
             };
 
-            if let Some(op) = op {
-                let start_span = self.current().span;
+            if let Some((op, start_span)) = op {
                 self.skip_newlines();
                 let right = self.parse_cast()?;
                 left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
@@ -2230,27 +2221,34 @@ impl<'a> Parser<'a> {
                 break;
             }
             if self.check(&TokenKind::Dot) && !matches!(&self.peek(1).kind, TokenKind::Dot) {
+                let start_span = expr.span();
                 self.advance();
-                let field = match &self.current().kind {
-                    _ if self.ident_like_name().is_some() => self.parse_name()?,
+                let (field, end_span) = match &self.current().kind {
+                    _ if self.ident_like_name().is_some() => {
+                        let end_span = self.current().span;
+                        (self.parse_name()?, end_span)
+                    }
                     TokenKind::Integer(n) => {
+                        let end_span = self.current().span;
                         let index = n.to_string();
                         self.advance();
-                        index
+                        (index, end_span)
                     }
                     _ => {
                         return Err(CompileError::new("expected field name", self.current().span));
                     }
                 };
-                expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: self.current().span });
+                expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: start_span.combine(&end_span) });
             } else if self.check(&TokenKind::LParen) {
-                let args = self.parse_args()?;
-                expr = Expr::Call(CallExpr { func: Box::new(expr), args, span: self.current().span });
+                let start_span = expr.span();
+                let (args, end_span) = self.parse_args_with_end_span()?;
+                expr = Expr::Call(CallExpr { func: Box::new(expr), args, span: start_span.combine(&end_span) });
             } else if self.check(&TokenKind::LBracket) {
+                let start_span = expr.span();
                 self.advance();
                 let index = self.parse_expr()?;
-                self.expect(TokenKind::RBracket)?;
-                expr = Expr::Index(IndexExpr { expr: Box::new(expr), index: Box::new(index), span: self.current().span });
+                let end_span = self.expect(TokenKind::RBracket)?.span;
+                expr = Expr::Index(IndexExpr { expr: Box::new(expr), index: Box::new(index), span: start_span.combine(&end_span) });
             } else {
                 break;
             }
@@ -2385,7 +2383,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::Array(elems, Span::new(start_span.start, end_span.end, start_span.line, start_span.column)))
     }
 
-    fn parse_args(&mut self) -> Result<Vec<Expr>> {
+    fn parse_args_with_end_span(&mut self) -> Result<(Vec<Expr>, Span)> {
         self.expect(TokenKind::LParen)?;
 
         let mut args = Vec::new();
@@ -2403,8 +2401,8 @@ impl<'a> Parser<'a> {
         }
 
         self.skip_newlines();
-        self.expect(TokenKind::RParen)?;
-        Ok(args)
+        let end_span = self.expect(TokenKind::RParen)?.span;
+        Ok((args, end_span))
     }
 
     fn parse_create(&mut self) -> Result<Expr> {
@@ -2931,7 +2929,7 @@ impl<'a> Parser<'a> {
         let name = self.parse_name()?;
 
         // Parse argument list
-        let args = self.parse_args()?;
+        let (args, mut end_span) = self.parse_args_with_end_span()?;
 
         // Optional preserve-style field block for lifecycle patterns
         let preserve_fields = if self.check(&TokenKind::LBrace) {
@@ -2943,13 +2941,12 @@ impl<'a> Parser<'a> {
                 self.consume_optional_semi();
                 self.skip_newlines();
             }
-            self.expect(TokenKind::RBrace)?;
+            end_span = self.expect(TokenKind::RBrace)?.span;
             fields
         } else {
             vec![]
         };
 
-        let end_span = self.current().span;
         Ok(Expr::StdlibCall(StdlibCallExpr {
             namespace,
             name,
@@ -2960,6 +2957,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_expr(&mut self) -> Result<Expr> {
+        let span = self.current().span;
+        self.with_recursion_guard(span, |this| this.parse_if_expr_inner())
+    }
+
+    fn parse_if_expr_inner(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::If)?;
         let condition = self.parse_expr()?;
@@ -3144,6 +3146,108 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_deep_if_expression_before_stack_overflow() {
+        let depth = MAX_PARSE_RECURSION_DEPTH as usize + 8;
+        let input = format!(
+            "module test\n\naction test() -> u64\nwhere\n    return {}1{}\n",
+            "if true ".repeat(depth),
+            " else 1".repeat(depth)
+        );
+        let tokens = lex(&input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
+    }
+
+    #[test]
+    fn binary_expr_spans_keep_operator_token() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    let eq = 1 == 2
+    let ne = 1 != 2
+    let lt = 1 < 2
+    let le = 1 <= 2
+    let gt = 2 > 1
+    let ge = 2 >= 1
+    let add = 1 + 2
+    let sub = 2 - 1
+    let mul = 2 * 3
+    let div = 4 / 2
+    let modulo = 5 % 2
+    return 0
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+
+        let cases = [
+            (0, BinaryOp::Eq, "1 == 2", "=="),
+            (1, BinaryOp::Ne, "1 != 2", "!="),
+            (2, BinaryOp::Lt, "1 < 2", "<"),
+            (3, BinaryOp::Le, "1 <= 2", "<="),
+            (4, BinaryOp::Gt, "2 > 1", ">"),
+            (5, BinaryOp::Ge, "2 >= 1", ">="),
+            (6, BinaryOp::Add, "1 + 2", "+"),
+            (7, BinaryOp::Sub, "2 - 1", "-"),
+            (8, BinaryOp::Mul, "2 * 3", "*"),
+            (9, BinaryOp::Div, "4 / 2", "/"),
+            (10, BinaryOp::Mod, "5 % 2", "%"),
+        ];
+
+        for (stmt_index, expected_op, expression_text, operator_text) in cases {
+            let Stmt::Let(let_stmt) = &action.body[stmt_index] else {
+                panic!("expected let statement");
+            };
+            let Expr::Binary(binary) = &let_stmt.value else {
+                panic!("expected binary expression");
+            };
+            let expression_start = input.find(expression_text).unwrap();
+            let operator_start = expression_start + expression_text.find(operator_text).unwrap();
+
+            assert_eq!(binary.op, expected_op);
+            assert_eq!(binary.span.start, operator_start);
+            assert_eq!(binary.span.end, operator_start + operator_text.len());
+        }
+    }
+
+    #[test]
+    fn postfix_expr_spans_cover_the_full_postfix_chain() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    let field = foo.bar.baz
+    let call = foo(1, 2)
+    let index = values[0]
+    return 0
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+
+        let cases = [(0, "foo.bar.baz"), (1, "foo(1, 2)"), (2, "values[0]")];
+
+        for (stmt_index, expression_text) in cases {
+            let Stmt::Let(let_stmt) = &action.body[stmt_index] else {
+                panic!("expected let statement");
+            };
+            let expected_start = input.find(expression_text).unwrap();
+            let expected_end = expected_start + expression_text.len();
+
+            assert_eq!(let_stmt.value.span().start, expected_start);
+            assert_eq!(let_stmt.value.span().end, expected_end);
+        }
+    }
+
+    #[test]
     fn primitive_and_container_exprs_keep_source_spans() {
         let input = r#"
 module test
@@ -3176,6 +3280,70 @@ where
             panic!("expected identifier return expression");
         };
         assert_ne!(*identifier_span, Span::default());
+    }
+
+    #[test]
+    fn postfix_exprs_cover_the_consumed_source_range() {
+        let input = r#"
+module test
+
+action test()
+where
+    let value = foo.bar(1)[0]
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+        let Stmt::Let(let_stmt) = &action.body[0] else {
+            panic!("expected let statement");
+        };
+        let Expr::Index(index) = &let_stmt.value else {
+            panic!("expected index expression");
+        };
+
+        let index_start = input.find("foo.bar(1)[0]").unwrap();
+        assert_eq!(index.span.start, index_start);
+        assert_eq!(index.span.end, index_start + "foo.bar(1)[0]".len());
+
+        let Expr::Call(call) = index.expr.as_ref() else {
+            panic!("expected call expression");
+        };
+        let call_start = input.find("foo.bar(1)").unwrap();
+        assert_eq!(call.span.start, call_start);
+        assert_eq!(call.span.end, call_start + "foo.bar(1)".len());
+
+        let Expr::FieldAccess(field) = call.func.as_ref() else {
+            panic!("expected field access expression");
+        };
+        let field_start = input.find("foo.bar").unwrap();
+        assert_eq!(field.span.start, field_start);
+        assert_eq!(field.span.end, field_start + "foo.bar".len());
+    }
+
+    #[test]
+    fn generic_type_arguments_allow_newlines() {
+        let input = r#"
+module test
+
+action test(input: Vec<
+    (
+        u64,
+        u32,
+    ),
+    Hash,
+>) -> u64
+where
+    return 0
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+
+        assert_eq!(action.params[0].ty, Type::Named("Vec<(u64, u32), Hash>".to_string()));
     }
 
     #[test]

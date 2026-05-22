@@ -467,11 +467,17 @@ fn codegen_evidence_id(obligation: &VerifierObligationMetadata) -> String {
         "codegen:resource-conservation-runtime-check".to_string()
     } else if obligation.feature.starts_with("create-output:") {
         "codegen:create-output-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("replace-unique-output:") {
+        "codegen:unique-output-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-unique-identity:") || obligation.feature.starts_with("replace-unique-identity:") {
+        "codegen:unique-identity-runtime-check".to_string()
     } else if obligation.feature.starts_with("consume-input:")
+        || obligation.feature.starts_with("transfer-input:")
         || obligation.feature.starts_with("destroy-input:")
         || obligation.feature.starts_with("claim-input:")
         || obligation.feature.starts_with("settle-input:")
         || obligation.feature.starts_with("replace-input:")
+        || obligation.feature.starts_with("replace-unique-input:")
     {
         "codegen:input-lifecycle-runtime-check".to_string()
     } else if obligation.feature.starts_with("destroy-output-scan:") {
@@ -503,6 +509,7 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
         || obligation.feature.contains("destroy-unique")
         || obligation.feature.contains("destroy-instance")
         || obligation.feature.contains("burn-amount")
+        || obligation.feature.contains("replace-unique")
         || obligation.feature.contains("resource-conservation")
     {
         "transaction"
@@ -1281,6 +1288,40 @@ mod tests {
             "{:?}",
             plan.executable_evidence
         );
+    }
+
+    #[test]
+    fn unique_lifecycle_features_have_specific_codegen_evidence_ids() {
+        for (feature, expected) in [
+            ("replace-unique-input:Token:old", "codegen:input-lifecycle-runtime-check"),
+            ("create-unique-output:Token:out", "codegen:unique-output-runtime-check"),
+            ("replace-unique-output:Token:out", "codegen:unique-output-runtime-check"),
+            ("create-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
+            ("replace-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
+        ] {
+            let obligation = VerifierObligationMetadata {
+                scope: "action:rotate".to_string(),
+                category: "transaction-invariant".to_string(),
+                feature: feature.to_string(),
+                status: "checked-runtime".to_string(),
+                detail: "replace-unique-identity=checked-runtime".to_string(),
+            };
+
+            assert_eq!(codegen_evidence_id(&obligation), expected);
+        }
+    }
+
+    #[test]
+    fn replace_unique_features_are_transaction_scoped() {
+        let obligation = VerifierObligationMetadata {
+            scope: "action:rotate".to_string(),
+            category: "state-transition".to_string(),
+            feature: "replace-unique-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "replace-unique-output-fields=checked-runtime".to_string(),
+        };
+
+        assert_eq!(proof_scope("action", &obligation, &[]), "transaction");
     }
 
     #[test]

@@ -871,11 +871,11 @@ impl CodeGenerator {
                 for instruction in &block.instructions {
                     let alias = match instruction {
                         IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) }
-                        | IrInstruction::Move { dest, src: IrOperand::Var(src) }
-                            if dest.ty == src.ty =>
+                            if named_type_name(&dest.ty).is_some() && named_type_name(&dest.ty) == named_type_name(&src.ty) =>
                         {
                             Some((dest, src))
                         }
+                        IrInstruction::Move { dest, src: IrOperand::Var(src) } if dest.ty == src.ty => Some((dest, src)),
                         _ => None,
                     };
                     let Some((dest, src)) = alias else {
@@ -1118,7 +1118,7 @@ impl CodeGenerator {
                     IrInstruction::Move { dest, src: IrOperand::Var(src) }
                     | IrInstruction::Cast { dest, src: IrOperand::Var(src) }
                     | IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) } => {
-                        if self.stack_collection_vars.contains(&src.id) && dest.ty == src.ty {
+                        if self.stack_collection_vars.contains(&src.id) && storage_type(&dest.ty) == storage_type(&src.ty) {
                             self.stack_collection_vars.insert(dest.id);
                         }
                         if let Some(source) = self.schema_field_value_sources.get(&src.id).cloned() {
@@ -2108,8 +2108,8 @@ impl CodeGenerator {
             index_reg,
             field
         ));
-        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit(format!("addi a3, {}, 0", index_reg));
+        self.emit_store_data_args_at(max_bytes, size_offset, buffer_offset);
         self.emit(format!("li a4, {}", source));
         self.emit(format!("li a5, {}", field));
         self.emit(format!("li a7, {}", self.runtime_abi().load_cell_by_field));
@@ -2204,9 +2204,11 @@ impl CodeGenerator {
     pub(crate) fn emit_type_hash(&mut self, dest: &IrVar, operand: &IrOperand) -> Result<()> {
         if let Some(output_index) = self.output_type_hash_sources.get(&dest.id).copied() {
             let Some(size_offset) = self.cell_buffer_size_offsets.get(&dest.id).copied() else {
+                self.record_fatal_error(format!("output type_hash destination var{} has no cell buffer size slot", dest.id));
                 return Ok(());
             };
             let Some(buffer_offset) = self.cell_buffer_offsets.get(&dest.id).copied() else {
+                self.record_fatal_error(format!("output type_hash destination var{} has no cell buffer slot", dest.id));
                 return Ok(());
             };
             self.emit("# type_hash");
@@ -2231,9 +2233,11 @@ impl CodeGenerator {
         }
         if let Some(param_id) = self.param_type_hash_sources.get(&dest.id).copied() {
             let Some(pointer_offset) = self.param_type_hash_pointer_offsets.get(&param_id).copied() else {
+                self.record_fatal_error(format!("param type_hash source var{} has no pointer slot", param_id));
                 return Ok(());
             };
             let Some(size_offset) = self.param_type_hash_size_offsets.get(&param_id).copied() else {
+                self.record_fatal_error(format!("param type_hash source var{} has no size slot", param_id));
                 return Ok(());
             };
             self.emit("# type_hash");
@@ -2409,7 +2413,7 @@ pub(crate) use schema::{
     aggregate_field_layout, aggregate_type_label, const_ir_type, const_usize_operand, constructed_byte_vector_part_width,
     fixed_aggregate_pointer_param_width, fixed_byte_const_bytes, fixed_byte_pointer_param_width, fixed_byte_width,
     fixed_register_width, fixed_scalar_const_value, fixed_scalar_operand_width, fixed_scalar_width, layout_fixed_byte_width,
-    layout_fixed_scalar_width, molecule_vector_element_fixed_width, named_type_name, operand_fixed_byte_width,
+    layout_fixed_scalar_width, molecule_vector_element_fixed_width, named_type_name, operand_fixed_byte_width, storage_type,
     tuple_return_field_type, type_static_length, AggregatePointerSource, ExpectedFixedByteSource, SchemaFieldLayout,
     SchemaFieldValueSource,
 };
@@ -2851,6 +2855,44 @@ where
     }
 
     #[test]
+    fn schema_ref_call_preserves_schema_abi_length() {
+        let program = r#"
+module codegen::schema_ref_call
+
+struct TimeLock {
+    owner: Address,
+    unlock_height: u64,
+}
+
+fn can_unlock(time_lock: &TimeLock, current_height: u64) -> bool {
+    current_height >= time_lock.unlock_height
+}
+
+action execute_release(time_lock: TimeLock, executor: Address, current_height: u64) -> bool
+where
+    assert(can_unlock(&time_lock, current_height), "cannot unlock")
+    return time_lock.owner == executor
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("schema ref call should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("call can_unlock schema param time_lock pointer=a0 length=a1"),
+            "schema ref call ABI comment missing:\n{}",
+            assembly
+        );
+        assert!(
+            !assembly.contains("schema param time_lock has no tracked ABI length"),
+            "schema ref call must preserve the source size slot:\n{}",
+            assembly
+        );
+    }
+
+    #[test]
     fn dynamic_molecule_fixed_field_codegen_checks_full_header_and_exact_span() {
         let program = r#"
 module codegen::dynamic_table_fixed_field
@@ -3269,6 +3311,60 @@ lock helpers(
     }
 
     #[test]
+    fn unrepresentable_memory_load_offsets_report_compile_error() {
+        if usize::BITS <= 63 {
+            return;
+        }
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_memory_load_with_avoid("lbu", "t0", "t1", (i64::MAX as usize) + 1, &[]);
+
+        let error = generator.check_fatal_error().expect_err("oversized memory offset should be a compile error");
+        assert!(error.message.contains("does not fit in signed 64-bit"));
+    }
+
+    #[test]
+    fn u128_const_without_fixed_storage_reports_compile_error() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        let dest = IrVar { id: 9, name: "wide".to_string(), ty: IrType::U128 };
+
+        generator.emit_load_const(&dest, &IrConst::U128(42)).expect("u128 const emission should not return a runtime error");
+
+        let error = generator.check_fatal_error().expect_err("missing u128 fixed-byte storage should be a compile error");
+        assert!(error.message.contains("u128 const destination var9 has no fixed-byte storage"));
+        assert!(
+            generator.assembly.iter().all(|line| !line.contains("la t0,")),
+            "u128 fallback must not store a rodata address as the value:\n{}",
+            generator.assembly.join("\n")
+        );
+    }
+
+    #[test]
+    fn type_hash_missing_output_buffer_slots_report_compile_error() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        let dest = IrVar { id: 7, name: "hash".to_string(), ty: IrType::Hash };
+        let output = IrVar { id: 3, name: "created".to_string(), ty: IrType::Named("Cell".to_string()) };
+        generator.output_type_hash_sources.insert(dest.id, 0);
+
+        generator.emit_type_hash(&dest, &IrOperand::Var(output)).expect("type_hash emission should not return a runtime error");
+
+        let error = generator.check_fatal_error().expect_err("missing output type_hash buffer slots should be a compile error");
+        assert!(error.message.contains("output type_hash destination var7 has no cell buffer size slot"));
+    }
+
+    #[test]
+    fn type_hash_missing_param_slots_report_compile_error() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        let dest = IrVar { id: 7, name: "hash".to_string(), ty: IrType::Hash };
+        let param = IrVar { id: 3, name: "schema".to_string(), ty: IrType::Named("Cell".to_string()) };
+        generator.param_type_hash_sources.insert(dest.id, param.id);
+
+        generator.emit_type_hash(&dest, &IrOperand::Var(param)).expect("type_hash emission should not return a runtime error");
+
+        let error = generator.check_fatal_error().expect_err("missing param type_hash slots should be a compile error");
+        assert!(error.message.contains("param type_hash source var3 has no pointer slot"));
+    }
+
+    #[test]
     fn state_transition_edges_use_explicit_consumed_binding() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.consume_order = vec![1, 2];
@@ -3376,6 +3472,33 @@ lock helpers(
                 "    add t5, t6, t5",
                 "    sb t0, 0(t5)",
             ]
+        );
+    }
+
+    #[test]
+    fn dynamic_syscall_index_is_copied_before_large_stack_staging() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_load_cell_by_field_syscall_to_offsets_dynamic_index(
+            "destroy_output_type_hash",
+            CKB_SOURCE_OUTPUT,
+            "t6",
+            CKB_CELL_FIELD_TYPE_HASH,
+            4096,
+            4104,
+            32,
+        );
+
+        let index_copy = generator
+            .assembly
+            .iter()
+            .position(|line| line == "    addi a3, t6, 0")
+            .expect("dynamic output index should be copied into a3");
+        let first_large_stack_staging =
+            generator.assembly.iter().position(|line| line == "    li t6, 4096").expect("large stack staging should use t6 scratch");
+        assert!(
+            index_copy < first_large_stack_staging,
+            "dynamic syscall index must be preserved before t6 is reused as stack scratch:\n{}",
+            generator.assembly.join("\n")
         );
     }
 

@@ -10949,13 +10949,19 @@ fn metadata_prelude_availability(
                         if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                             availability.schema_pointer_vars.insert(dest.id);
                         }
-                        if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.dynamic_collection_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.dynamic_collection_vars.insert(dest.id);
                         }
-                        if availability.stack_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.stack_collection_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.stack_collection_vars.insert(dest.id);
                         }
-                        if availability.empty_molecule_vector_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.empty_molecule_vector_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.empty_molecule_vector_vars.insert(dest.id);
                         }
                         if let Some(byte_count) = availability.constructed_byte_vector_vars.get(&src_var.id).copied() {
@@ -10974,13 +10980,16 @@ fn metadata_prelude_availability(
                     if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                         availability.schema_pointer_vars.insert(dest.id);
                     }
-                    if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.dynamic_collection_vars.contains(&src_var.id) && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                    {
                         availability.dynamic_collection_vars.insert(dest.id);
                     }
-                    if availability.stack_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.stack_collection_vars.contains(&src_var.id) && metadata_same_storage_type(&dest.ty, &src_var.ty) {
                         availability.stack_collection_vars.insert(dest.id);
                     }
-                    if availability.empty_molecule_vector_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.empty_molecule_vector_vars.contains(&src_var.id)
+                        && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                    {
                         availability.empty_molecule_vector_vars.insert(dest.id);
                     }
                     if let Some(byte_count) = availability.constructed_byte_vector_vars.get(&src_var.id).copied() {
@@ -11568,7 +11577,19 @@ fn metadata_fixed_aggregate_pointer_size(ty: &ir::IrType) -> Option<usize> {
     }
 }
 
+fn metadata_storage_type(ty: &ir::IrType) -> &ir::IrType {
+    match ty {
+        ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) => metadata_storage_type(inner),
+        ty => ty,
+    }
+}
+
+fn metadata_same_storage_type(left: &ir::IrType, right: &ir::IrType) -> bool {
+    metadata_storage_type(left) == metadata_storage_type(right)
+}
+
 fn metadata_molecule_vector_element_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    let ty = metadata_storage_type(ty);
     let ir::IrType::Named(name) = ty else {
         return None;
     };
@@ -11596,14 +11617,15 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
 }
 
 fn metadata_ir_type_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
-    type_static_length(ty).or_else(|| match ty {
+    let storage_ty = metadata_storage_type(ty);
+    type_static_length(ty).or_else(|| match storage_ty {
         ir::IrType::Named(name) => metadata_inline_type_fixed_width(name, type_layouts),
         _ => None,
     })
 }
 
 fn metadata_aggregate_field_layout(ty: &ir::IrType, field: &str) -> Option<MetadataFieldLayout> {
-    match ty {
+    match metadata_storage_type(ty) {
         ir::IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
             let field_ty = items.get(index)?.clone();
@@ -11659,6 +11681,7 @@ fn const_usize_operand(operand: &ir::IrOperand) -> Option<usize> {
 fn metadata_fixed_byte_const_len(value: &ir::IrConst) -> Option<usize> {
     match value {
         ir::IrConst::Address(_) | ir::IrConst::Hash(_) => Some(32),
+        ir::IrConst::U128(_) => Some(16),
         ir::IrConst::Array(items) if items.iter().all(|item| matches!(item, ir::IrConst::U8(_))) => Some(items.len()),
         _ => None,
     }
@@ -13086,8 +13109,10 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
     match operand {
         ir::IrOperand::Const(ir::IrConst::Address(_) | ir::IrConst::Hash(_)) => Some(32),
         ir::IrOperand::Const(ir::IrConst::Array(items)) => Some(items.len()),
-        ir::IrOperand::Var(var) => match &var.ty {
+        ir::IrOperand::Const(ir::IrConst::U128(_)) => Some(16),
+        ir::IrOperand::Var(var) => match metadata_storage_type(&var.ty) {
             ir::IrType::Address | ir::IrType::Hash => Some(32),
+            ir::IrType::U128 => Some(16),
             ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
             _ => None,
         },

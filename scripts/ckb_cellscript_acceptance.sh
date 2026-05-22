@@ -481,7 +481,7 @@ for action, source in TOKEN_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock {
+NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -489,7 +489,7 @@ NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, re
     royalty_bps: u16
 }
 
-resource Collection has store {
+resource Collection has store, replace {
     creator: Address
     total_supply: u64
     max_supply: u64
@@ -509,7 +509,7 @@ receipt Offer has create, consume, burn {
     expires_at: u64
 }
 
-receipt RoyaltyPayment {
+receipt RoyaltyPayment has create {
     token_id: u64
     recipient: Address
     amount: u64
@@ -685,7 +685,7 @@ for action, source in NFT_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn {
+TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn, read_ref {
     owner: Address
     lock_type: u8
     unlock_height: u64
@@ -710,7 +710,7 @@ receipt EmergencyRelease has create, consume, replace, burn {
     approvals: u8
 }
 
-receipt ReleaseRecord {
+receipt ReleaseRecord has create {
     lock_hash: Hash
     released_at: u64
     released_by: Address
@@ -891,12 +891,12 @@ for action, source in TIMELOCK_ACTION_SOURCES.items():
 
 AMM_ACTION_SOURCES = {
     "seed_pool": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -905,7 +905,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -954,12 +954,12 @@ where
     x
 """,
     "add_liquidity": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -968,7 +968,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -1004,12 +1004,12 @@ where
     if a < b { a } else { b }
 """,
     "swap_a_for_b": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -1045,12 +1045,12 @@ where
     } with_lock(to)
 """,
     "remove_liquidity": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -1059,7 +1059,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -1121,7 +1121,7 @@ for action, source in AMM_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
+MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store, create, replace, read_ref {
     wallet_id: Hash
     signer_a: Address
     signer_b: Address
@@ -1143,13 +1143,13 @@ receipt Proposal has create, consume, replace, burn {
     expires_at: u64
 }
 
-receipt SignatureConfirmation {
+receipt SignatureConfirmation has create {
     proposal_id: u64
     signer: Address
     timestamp: u64
 }
 
-receipt ExecutionRecord {
+receipt ExecutionRecord has create {
     proposal_id: u64
     executor: Address
     executed_at: u64

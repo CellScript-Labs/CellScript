@@ -1965,6 +1965,9 @@ impl IrGenerator {
             }
             Expr::Assign(assign) => self.lower_assign_expr(assign, current, blocks, vars),
             Expr::Binary(binary) => {
+                if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
+                    return self.lower_short_circuit_binary_expr(binary, current, blocks, vars);
+                }
                 let left = self.lower_expr(&binary.left, current, blocks, vars);
                 let Some(active) = left.current else {
                     return left;
@@ -2010,16 +2013,21 @@ impl IrGenerator {
                     return lowered;
                 }
                 let mut active = current;
-                // If the call target is a field access (e.g. obj.method()), lower the receiver
-                // expression first so that any side effects (e.g. consume) are not dropped.
+                let mut args = Vec::with_capacity(call.args.len() + usize::from(matches!(call.func.as_ref(), Expr::FieldAccess(_))));
                 if let Expr::FieldAccess(field) = call.func.as_ref() {
                     let lowered = self.lower_expr(&field.expr, active, blocks, vars);
                     let Some(next) = lowered.current else {
                         return lowered;
                     };
                     active = next;
+                    args.push(lowered.operand);
+                } else if !matches!(call.func.as_ref(), Expr::Identifier(..)) {
+                    let lowered = self.lower_expr(&call.func, active, blocks, vars);
+                    let Some(next) = lowered.current else {
+                        return lowered;
+                    };
+                    active = next;
                 }
-                let mut args = Vec::with_capacity(call.args.len());
                 for arg in &call.args {
                     let lowered = self.lower_expr(arg, active, blocks, vars);
                     let Some(next) = lowered.current else {
@@ -2119,6 +2127,52 @@ impl IrGenerator {
             }
             Expr::StdlibCall(call) => self.lower_stdlib_call(call, current, blocks, vars),
         }
+    }
+
+    fn lower_short_circuit_binary_expr(
+        &mut self,
+        binary: &BinaryExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        let left = self.lower_expr(&binary.left, current, blocks, vars);
+        let Some(active) = left.current else {
+            return left;
+        };
+        if self.operand_type(&left.operand) != IrType::Bool {
+            self.record_error("logical operations require boolean operands", binary.span);
+        }
+
+        let right_block = self.push_block(blocks);
+        let short_block = self.push_block(blocks);
+        let join = self.push_block(blocks);
+        let dest = self.new_var("logical_tmp", IrType::Bool);
+
+        let (then_block, else_block, short_value) = match binary.op {
+            BinaryOp::And => (right_block, short_block, false),
+            BinaryOp::Or => (short_block, right_block, true),
+            _ => unreachable!("short-circuit lowering only handles logical operators"),
+        };
+        self.block_mut(blocks, active).terminator = IrTerminator::Branch { cond: left.operand, then_block, else_block };
+
+        {
+            let block = self.block_mut(blocks, short_block);
+            block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value: IrConst::Bool(short_value) });
+            block.terminator = IrTerminator::Jump(join);
+        }
+
+        let mut right_vars = vars.clone();
+        let right = self.lower_expr(&binary.right, right_block, blocks, &mut right_vars);
+        if let Some(right_exit) = right.current {
+            if self.operand_type(&right.operand) != IrType::Bool {
+                self.record_error("logical operations require boolean operands", binary.span);
+            }
+            self.lower_join_value_into_dest(&dest, right.operand, right_exit, blocks);
+            self.block_mut(blocks, right_exit).terminator = IrTerminator::Jump(join);
+        }
+
+        LoweredExpr { operand: IrOperand::Var(dest), current: Some(join) }
     }
 
     fn lower_tail_block_value(
@@ -2289,7 +2343,14 @@ impl IrGenerator {
                     Err(format!("unsupported ordering operand types {:?} and {:?}", left_ty, right_ty))
                 }
             }
-            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::And | BinaryOp::Or => Ok(()),
+            BinaryOp::Eq | BinaryOp::Ne => Ok(()),
+            BinaryOp::And | BinaryOp::Or => {
+                if left_ty == IrType::Bool && right_ty == IrType::Bool {
+                    Ok(())
+                } else {
+                    Err(format!("logical operations require boolean operands, got {:?} and {:?}", left_ty, right_ty))
+                }
+            }
         }
     }
 
@@ -2321,9 +2382,10 @@ impl IrGenerator {
         match op {
             UnaryOp::Not => IrType::Bool,
             UnaryOp::Neg => self.operand_type(operand),
-            UnaryOp::Ref | UnaryOp::Deref => match operand {
-                IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+            UnaryOp::Ref => IrType::Ref(Box::new(self.operand_type(operand))),
+            UnaryOp::Deref => match self.operand_type(operand) {
+                IrType::Ref(inner) | IrType::MutRef(inner) => *inner,
+                ty => ty,
             },
         }
     }
@@ -3119,6 +3181,10 @@ impl IrGenerator {
                 let input = &call.args[0];
                 let output = &call.args[1];
                 let lock = &call.args[2];
+                if !matches!(input, Expr::Identifier(..)) {
+                    self.record_error("std::lifecycle::transfer input must be a named Cell input binding", input.span());
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
 
                 // 1. consume input
                 let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
@@ -3221,6 +3287,10 @@ impl IrGenerator {
                     return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
                 }
                 let receipt = &call.args[0];
+                if !matches!(receipt, Expr::Identifier(..)) {
+                    self.record_error("std::receipt::claim receipt must be a named Cell input binding", receipt.span());
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
 
                 // 1. consume receipt
                 let consume_expr = ConsumeExpr { expr: Box::new(receipt.clone()), span: call.span };
@@ -3254,6 +3324,10 @@ impl IrGenerator {
                     return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
                 }
                 let input = &call.args[0];
+                if !matches!(input, Expr::Identifier(..)) {
+                    self.record_error("std::lifecycle::settle input must be a named Cell input binding", input.span());
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                }
 
                 // 1. consume input
                 let consume_expr = ConsumeExpr { expr: Box::new(input.clone()), span: call.span };
@@ -4400,7 +4474,7 @@ impl IrGenerator {
         for _ in &match_expr.arms {
             arm_entries.push(self.push_block(blocks));
         }
-        let join = self.push_block(blocks);
+        let mut join = None;
         let mut result_dest: Option<IrVar> = None;
 
         for (index, arm) in match_expr.arms.iter().enumerate() {
@@ -4419,8 +4493,12 @@ impl IrGenerator {
                     result_dest = Some(self.new_var("match_tmp", ty));
                 }
                 let Some(dest) = result_dest.as_ref() else {
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(join) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
                 };
+                if join.is_none() {
+                    join = Some(self.push_block(blocks));
+                }
+                let join = join.expect("match join block should exist after creation");
                 self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
                 self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
                 self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
@@ -4465,15 +4543,22 @@ impl IrGenerator {
                 result_dest = Some(self.new_var("match_tmp", ty));
             }
             let Some(dest) = result_dest.as_ref() else {
-                return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(join) };
+                return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
             };
+            if join.is_none() {
+                join = Some(self.push_block(blocks));
+            }
+            let join = join.expect("match join block should exist after creation");
             self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
             self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
             self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
         }
 
         let Some(dest) = result_dest else {
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(join) };
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+        let Some(join) = join else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(join) }
     }
@@ -8078,6 +8163,162 @@ where
             })
             .expect("expected claim action");
         assert!(field_access_count >= 2, "schema field must be materialized independently in both if-expression paths");
+    }
+
+    #[test]
+    fn logical_operators_lower_as_short_circuit_control_flow() {
+        let ir = parse_and_lower(
+            r#"
+module ir::short_circuit
+
+fn rhs(flag: bool) -> bool {
+    return flag
+}
+
+action check_and(a: bool, b: bool) -> bool
+where
+    return a && rhs(b)
+
+action check_or(a: bool, b: bool) -> bool
+where
+    return a || rhs(b)
+"#,
+        );
+
+        let action_body = |name: &str| {
+            ir.items
+                .iter()
+                .find_map(|item| match item {
+                    IrItem::Action(action) if action.name == name => Some(&action.body),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing action {name}"))
+        };
+
+        let and_body = action_body("check_and");
+        assert!(
+            and_body
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .all(|instruction| !matches!(instruction, IrInstruction::Binary { op: BinaryOp::And | BinaryOp::Or, .. })),
+            "logical operators must not lower to eager Binary instructions: {:#?}",
+            and_body.blocks
+        );
+        let IrTerminator::Branch { then_block, else_block, .. } = and_body.blocks[0].terminator else {
+            panic!("&& should branch on the left operand: {:#?}", and_body.blocks[0].terminator);
+        };
+        assert!(
+            and_body.blocks[then_block.0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == "rhs")),
+            "&& should evaluate rhs only on the true branch"
+        );
+        assert!(
+            and_body.blocks[else_block.0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, IrInstruction::LoadConst { value: IrConst::Bool(false), .. })),
+            "&& false branch should materialize false"
+        );
+
+        let or_body = action_body("check_or");
+        assert!(
+            or_body
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .all(|instruction| !matches!(instruction, IrInstruction::Binary { op: BinaryOp::And | BinaryOp::Or, .. })),
+            "logical operators must not lower to eager Binary instructions: {:#?}",
+            or_body.blocks
+        );
+        let IrTerminator::Branch { then_block, else_block, .. } = or_body.blocks[0].terminator else {
+            panic!("|| should branch on the left operand: {:#?}", or_body.blocks[0].terminator);
+        };
+        assert!(
+            or_body.blocks[then_block.0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, IrInstruction::LoadConst { value: IrConst::Bool(true), .. })),
+            "|| true branch should materialize true"
+        );
+        assert!(
+            or_body.blocks[else_block.0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == "rhs")),
+            "|| should evaluate rhs only on the false branch"
+        );
+    }
+
+    #[test]
+    fn reference_and_deref_unary_result_types_match_ast_types() {
+        let ir = parse_and_lower(
+            r#"
+module ir::reference_types
+
+action check(x: u64) -> u64
+where
+    let r = &x
+    let y: u64 = *r
+    return y
+"#,
+        );
+
+        let unary_dests = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) if action.name == "check" => Some(
+                    action
+                        .body
+                        .blocks
+                        .iter()
+                        .flat_map(|block| &block.instructions)
+                        .filter_map(|instruction| match instruction {
+                            IrInstruction::Unary { dest, op, .. } => Some((*op, dest.ty.clone())),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("expected check action");
+
+        assert!(
+            unary_dests.iter().any(|(op, ty)| *op == UnaryOp::Ref && *ty == IrType::Ref(Box::new(IrType::U64))),
+            "reference expression should produce Ref(U64), got {unary_dests:#?}"
+        );
+        assert!(
+            unary_dests.iter().any(|(op, ty)| *op == UnaryOp::Deref && *ty == IrType::U64),
+            "deref expression should produce U64, got {unary_dests:#?}"
+        );
+    }
+
+    #[test]
+    fn all_diverging_match_expression_does_not_leave_unreachable_join() {
+        parse_and_lower(
+            r#"
+module ir::diverging_match
+
+enum Choice {
+    A,
+    B,
+}
+
+fn pick(choice: Choice) -> u64 {
+    match choice {
+        Choice::A => {
+            return 1
+        },
+        Choice::B => {
+            return 2
+        },
+    }
+}
+"#,
+        );
     }
 
     #[test]
