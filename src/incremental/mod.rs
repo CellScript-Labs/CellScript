@@ -25,11 +25,19 @@ pub struct CompiledUnit {
     pub compile_options: CompileOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct CompileOptions {
     pub opt_level: u8,
     pub target: String,
     pub debug: bool,
+    #[serde(default)]
+    pub target_profile: String,
+    #[serde(default)]
+    pub primitive_compat: String,
+    #[serde(default)]
+    pub ckb_limit_env: Vec<(String, Option<String>)>,
+    #[serde(default)]
+    pub riscv_toolchain_env: Vec<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -549,7 +557,7 @@ mod tests {
         let source = temp.path().join("test.cell");
         fs::write(&source, "module test;").unwrap();
 
-        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false };
+        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false, ..CompileOptions::default() };
 
         assert!(compiler.needs_recompile(&source, &options));
 
@@ -558,6 +566,15 @@ mod tests {
         compiler.record_compilation(&source, &output, vec![], &options).unwrap();
 
         assert!(!compiler.needs_recompile(&source, &options));
+        assert!(compiler.needs_recompile(&source, &CompileOptions { target_profile: "ckb".to_string(), ..options.clone() }));
+        assert!(compiler.needs_recompile(&source, &CompileOptions { primitive_compat: "0.15".to_string(), ..options.clone() }));
+        assert!(compiler.needs_recompile(
+            &source,
+            &CompileOptions {
+                ckb_limit_env: vec![("CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES".to_string(), Some("1".to_string()))],
+                ..options.clone()
+            }
+        ));
 
         fs::write(&source, "module test2;").unwrap();
         assert!(compiler.needs_recompile(&source, &options));
@@ -583,7 +600,12 @@ mod tests {
                 output_hash: 0,
                 dependencies: Vec::new(),
                 timestamp: SystemTime::now(),
-                compile_options: CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false },
+                compile_options: CompileOptions {
+                    opt_level: 0,
+                    target: "riscv64".to_string(),
+                    debug: false,
+                    ..CompileOptions::default()
+                },
             },
         );
         let cache = IncrementalCache { dep_graph: DependencyGraph::default(), units };
@@ -615,7 +637,12 @@ mod tests {
                 output_hash: 0,
                 dependencies: Vec::new(),
                 timestamp: SystemTime::UNIX_EPOCH,
-                compile_options: CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false },
+                compile_options: CompileOptions {
+                    opt_level: 0,
+                    target: "riscv64".to_string(),
+                    debug: false,
+                    ..CompileOptions::default()
+                },
             },
         );
 

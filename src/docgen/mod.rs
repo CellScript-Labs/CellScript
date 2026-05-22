@@ -1364,7 +1364,7 @@ invariant token_supply_conserved {
     assert_conserved(Token.amount, scope = group)
 }
 
-resource Token {
+resource Token has store, create, consume {
     amount: u64,
 }
 

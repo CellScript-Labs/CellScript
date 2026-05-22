@@ -403,6 +403,7 @@ dist/
         detailed: &DetailedDependency,
     ) -> Result<(ResolvedPackage, PackageManifest)> {
         validate_git_url(url)?;
+        validate_git_dependency_pin(name, detailed)?;
 
         let cache_dir = self.git_cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| {
@@ -412,7 +413,7 @@ dist/
             CompileError::without_span(format!("failed to canonicalize git cache directory '{}': {}", cache_dir.display(), e))
         })?;
 
-        let requested_ref = detailed.rev.as_ref().or(detailed.tag.as_ref()).or(detailed.branch.as_ref());
+        let requested_ref = detailed.rev.as_ref();
         let cache_name = git_cache_entry_name(name, url, requested_ref.map(String::as_str));
         let clone_dir = cache_dir.join(&cache_name);
         ensure_git_cache_child(&cache_dir, &clone_dir)?;
@@ -721,6 +722,34 @@ fn validate_git_url(url: &str) -> Result<()> {
     )))
 }
 
+fn validate_git_dependency_pin(name: &str, detailed: &DetailedDependency) -> Result<()> {
+    if detailed.branch.is_some() || detailed.tag.is_some() {
+        return Err(CompileError::without_span(format!(
+            "git dependency '{}' must pin an immutable rev; branch and tag refs are not accepted",
+            name
+        )));
+    }
+
+    let Some(rev) = detailed.rev.as_deref() else {
+        return Err(CompileError::without_span(format!(
+            "git dependency '{}' must specify a full commit rev for provenance; branch/tag/default-branch dependencies are not accepted",
+            name
+        )));
+    };
+
+    validate_git_revision(rev)
+}
+
+pub(crate) fn validate_git_revision(rev: &str) -> Result<()> {
+    let is_full_sha1 = rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let is_full_sha256 = rev.len() == 64 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if is_full_sha1 || is_full_sha256 {
+        return Ok(());
+    }
+
+    Err(CompileError::without_span("git dependency rev must be a full 40-character SHA-1 or 64-character SHA-256 commit hash"))
+}
+
 fn is_git_url_shell_metachar(byte: u8) -> bool {
     matches!(byte, b';' | b'|' | b'&' | b'`' | b'$' | b'<' | b'>' | b'\'' | b'"' | b'\\')
 }
@@ -956,8 +985,7 @@ fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &Loc
                 match &locked.source {
                     LockedSource::Git { url, revision } if url == git => {
                         if let Some(rev) = &detail.rev {
-                            let rev_matches = revision == rev || revision.starts_with(rev) || rev.starts_with(revision);
-                            if !rev_matches {
+                            if revision != rev {
                                 issues.push(format!(
                                     "dependency '{}' expects git revision '{}' but Cell.lock records '{}'",
                                     name, rev, revision
@@ -1529,6 +1557,39 @@ path = "deps/math"
     }
 
     #[test]
+    fn lockfile_consistency_requires_exact_git_revision_match() {
+        let manifest: PackageManifest = toml::from_str(
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+version = "0.1.0"
+git = "https://example.com/math.git"
+rev = "0123456789abcdef0123456789abcdef01234567"
+"#,
+        )
+        .unwrap();
+        let mut lockfile = Lockfile::new();
+        lockfile.dependencies.insert(
+            "math".to_string(),
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Git {
+                    url: "https://example.com/math.git".to_string(),
+                    revision: "0123456789abcdef0123456789abcdef0123456".to_string(),
+                },
+            },
+        );
+
+        let issues = lockfile.consistency_issues(&manifest);
+
+        assert!(issues.iter().any(|issue| issue.contains("expects git revision")), "{issues:?}");
+        assert!(!lockfile.is_consistent(&manifest));
+    }
+
+    #[test]
     fn lockfile_replace_with_resolved_prunes_removed_dependencies() {
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
@@ -1633,7 +1694,7 @@ version = "0.1.0"
 [dependencies.remote]
 version = "0.1.0"
 git = "https://example.invalid/remote.git"
-rev = "abc123"
+rev = "0123456789abcdef0123456789abcdef01234567"
 "#,
         )
         .unwrap();
@@ -1644,6 +1705,59 @@ rev = "abc123"
         assert!(error.message.contains("remote"));
         assert!(error.message.contains("https://example.invalid/remote.git"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_rejects_unpinned_git_dependency_before_fetch() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.remote]
+version = "0.1.0"
+git = "https://example.com/remote.git"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(temp.path());
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("must specify a full commit rev"), "{}", error.message);
+        assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_rejects_branch_or_tag_git_dependency_before_fetch() {
+        for ref_key in ["branch", "tag"] {
+            let temp = tempdir().unwrap();
+            std::fs::write(
+                temp.path().join("Cell.toml"),
+                format!(
+                    r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.remote]
+version = "0.1.0"
+git = "https://example.com/remote.git"
+{ref_key} = "main"
+"#
+                ),
+            )
+            .unwrap();
+
+            let mut manager = PackageManager::new(temp.path());
+            let error = manager.resolve_dependencies().unwrap_err();
+
+            assert!(error.message.contains("branch and tag refs are not accepted"), "{}", error.message);
+            assert!(manager.get_resolved().is_empty());
+        }
     }
 
     #[test]

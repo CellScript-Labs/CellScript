@@ -149,6 +149,10 @@ impl CodeGenerator {
 
         self.emit_operand_to_register("t0", left);
         self.emit_operand_to_register("t1", right);
+        if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+            self.emit_truncate_register_to_type("t0", &dest.ty);
+            self.emit_truncate_register_to_type("t1", &dest.ty);
+        }
 
         match op {
             BinaryOp::Add => self.emit("add t0, t0, t1"),
@@ -192,7 +196,7 @@ impl CodeGenerator {
             }
         }
 
-        if matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul) {
+        if matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
             self.emit_truncate_register_to_type("t0", &dest.ty);
         }
         self.emit_stack_store("t0", dest.id * 8);

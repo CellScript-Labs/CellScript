@@ -54,7 +54,7 @@ fn cellc_top_level_accepts_primitive_strict_for_kernel_effect_capabilities() {
         r#"
 module test
 
-resource Token has store, consume, burn {
+resource Token has store, consume, burn, create, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -87,7 +87,7 @@ fn cellc_top_level_primitive_strict_rejects_legacy_capabilities() {
         r#"
 module test
 
-resource Token has store, destroy {
+resource Token has store, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -111,7 +111,7 @@ where
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -141,7 +141,7 @@ fn cellc_verify_artifact_primitive_strict_rechecks_disk_sources() {
         r#"
 module test
 
-resource Token has store, destroy {
+resource Token has store, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -415,7 +415,7 @@ fn cellc_verify_artifact_enforces_policy_flags() {
     let source = r#"
 module test
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -567,7 +567,7 @@ version = "0.1.0"
         r#"
 module dep::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -677,7 +677,7 @@ version = "0.1.0"
         r#"
 module dep::token
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -1219,7 +1219,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1305,7 +1305,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1353,7 +1353,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1423,12 +1423,12 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     owner: Address
 }
 
-receipt VestingGrant has store {
+receipt VestingGrant has store, create, consume, replace, burn, relock, read_ref {
     state: u8
     beneficiary: Address
     total_amount: u64
@@ -1579,7 +1579,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -1648,7 +1648,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -1703,7 +1703,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1773,7 +1773,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource NFT {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
 }
@@ -1850,7 +1850,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -1901,11 +1901,11 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
-resource VestingReceipt has store {
+resource VestingReceipt has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     beneficiary: Address
     cliff_timepoint: u64
@@ -1979,18 +1979,18 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8]
     amount: u64
 }
 
-receipt LPReceipt has store {
+receipt LPReceipt has store, create, consume, replace, burn, relock, read_ref {
     pool_id: Hash
     lp_amount: u64
     provider: Address
 }
 
-shared Pool has store {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -2054,9 +2054,10 @@ fn cellc_check_reports_checked_pool_invariant_families_without_runtime_blockers(
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let amm_source = std::fs::read_to_string(manifest_dir.join("examples").join("amm_pool.cell"))
-        .unwrap()
-        .replace("use cellscript::fungible_token::Token", "resource Token has store {\n    symbol: [u8; 8]\n    amount: u64\n}");
+    let amm_source = std::fs::read_to_string(manifest_dir.join("examples").join("amm_pool.cell")).unwrap().replace(
+        "use cellscript::fungible_token::Token",
+        "resource Token has store, create, consume, replace, burn, relock, read_ref {\n    symbol: [u8; 8]\n    amount: u64\n}",
+    );
 
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -2131,7 +2132,7 @@ production = true
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2181,7 +2182,7 @@ deny_ckb_runtime = true
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2457,7 +2458,7 @@ where
 // cellscript-test: expect-error: create-output:Fingerprint
 module demo::tests::policy
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2521,7 +2522,7 @@ where
 // cellscript-test: expect-no-verifier-obligation: not-present
 module demo::tests::metadata
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2982,7 +2983,7 @@ fn cellc_explain_proof_reports_covenant_proof_plan() {
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3029,7 +3030,7 @@ fn cellc_explain_proof_human_reports_macro_provenance() {
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3067,7 +3068,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3121,7 +3122,7 @@ invariant token_conservation {
     assert_conserved(Token.amount, scope = group)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3172,7 +3173,7 @@ invariant lock_scans_transaction {
     assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3246,7 +3247,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3287,7 +3288,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Ticket has store {
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8
     note: String
 }
@@ -3462,6 +3463,59 @@ out_dir = "artifacts"
 }
 
 #[test]
+fn cellc_add_git_requires_full_rev_and_records_pin() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let missing_rev = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("add")
+        .arg("--git")
+        .arg("https://example.com/math.git")
+        .arg("math")
+        .output()
+        .unwrap();
+    assert!(!missing_rev.status.success(), "unexpected success: {}", String::from_utf8_lossy(&missing_rev.stdout));
+    assert!(
+        String::from_utf8_lossy(&missing_rev.stderr).contains("must specify --rev"),
+        "stderr: {}",
+        String::from_utf8_lossy(&missing_rev.stderr)
+    );
+
+    let pinned_rev = "0123456789abcdef0123456789abcdef01234567";
+    let add_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("add")
+        .arg("--git")
+        .arg("https://example.com/math.git")
+        .arg("--rev")
+        .arg(pinned_rev)
+        .arg("--json")
+        .arg("math")
+        .output()
+        .unwrap();
+    assert!(add_output.status.success(), "stderr: {}", String::from_utf8_lossy(&add_output.stderr));
+
+    let add_summary: serde_json::Value = serde_json::from_slice(&add_output.stdout).unwrap();
+    assert_eq!(add_summary["dependency"]["git"], "https://example.com/math.git");
+    assert_eq!(add_summary["dependency"]["rev"], pinned_rev);
+
+    let manifest: toml::Value = std::fs::read_to_string(root.join("Cell.toml")).unwrap().parse().unwrap();
+    assert_eq!(manifest["dependencies"]["math"]["git"].as_str().unwrap(), "https://example.com/math.git");
+    assert_eq!(manifest["dependencies"]["math"]["rev"].as_str().unwrap(), pinned_rev);
+}
+
+#[test]
 fn cellc_install_path_updates_lockfile_and_remove_prunes_it() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -3556,11 +3610,11 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -3727,7 +3781,7 @@ target_profile = "ckb"
         r#"
 module demo::main
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3888,7 +3942,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
 }
 
@@ -4228,7 +4282,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 

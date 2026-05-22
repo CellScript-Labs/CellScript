@@ -39,6 +39,28 @@ impl CompileError {
         Self { message: message.into(), span, file: None, code: None }
     }
 
+    pub fn aggregate(errors: Vec<Self>) -> Self {
+        let mut errors = errors.into_iter();
+        let Some(first) = errors.next() else {
+            return Self::without_span("no compile errors to aggregate");
+        };
+        let rest = errors.collect::<Vec<_>>();
+        if rest.is_empty() {
+            return first;
+        }
+
+        let total = rest.len() + 1;
+        let mut message = format!("{} compile errors:\n1. {}", total, first.message);
+        for (index, error) in rest.iter().enumerate() {
+            message.push_str(&format!("\n{}. {}", index + 2, error.message));
+            if error.span != Span::default() {
+                message.push_str(&format!(" (line {}, column {})", error.span.line, error.span.column));
+            }
+        }
+
+        Self { message, span: first.span, file: first.file, code: first.code }
+    }
+
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
         self.code = Some(code.into());
         self

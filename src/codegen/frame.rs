@@ -26,7 +26,10 @@ use super::{
 
 impl CodeGenerator {
     pub(crate) fn emit_prologue(&mut self) {
-        self.emit_large_addi("sp", "sp", -(self.frame_size as i64));
+        let Some(frame_size) = self.usize_to_i64_codegen_offset(self.frame_size, "stack frame") else {
+            return;
+        };
+        self.emit_large_addi("sp", "sp", -frame_size);
         self.emit_stack_store("ra", self.frame_size - 8);
         self.emit_stack_store("fp", self.frame_size - 16);
         self.emit_sp_addi("fp", self.frame_size);
@@ -68,7 +71,10 @@ impl CodeGenerator {
     pub(crate) fn emit_epilogue_body(&mut self) {
         self.emit_stack_load("ra", self.frame_size - 8);
         self.emit_stack_load("fp", self.frame_size - 16);
-        self.emit_large_addi("sp", "sp", self.frame_size as i64);
+        let Some(frame_size) = self.usize_to_i64_codegen_offset(self.frame_size, "stack frame") else {
+            return;
+        };
+        self.emit_large_addi("sp", "sp", frame_size);
         self.emit("ret");
     }
 
@@ -104,7 +110,9 @@ impl CodeGenerator {
     }
 
     fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
-        let offset = i64::try_from(offset).expect("stack offset should fit in i64");
+        let Some(offset) = self.usize_to_i64_codegen_offset(offset, "stack") else {
+            return;
+        };
         if small_signed_immediate(offset) {
             self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
         } else {
@@ -120,7 +128,10 @@ impl CodeGenerator {
         if offset <= 2047 {
             self.emit(format!("addi {}, sp, {}", rd, offset));
         } else if rd == "sp" {
-            self.emit_large_addi("sp", "sp", offset as i64);
+            let Some(offset) = self.usize_to_i64_codegen_offset(offset, "stack pointer") else {
+                return;
+            };
+            self.emit_large_addi("sp", "sp", offset);
         } else {
             self.emit(format!("li {}, {}", rd, offset));
             self.emit(format!("add {}, sp, {}", rd, rd));

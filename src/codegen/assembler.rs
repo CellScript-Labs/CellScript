@@ -27,7 +27,6 @@ pub(crate) const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const ELF_PROGRAM_HEADER_SIZE: usize = 56;
 pub(crate) const ELF_SEGMENT_ALIGN: usize = 0x1000;
 pub(crate) const ELF_BASE_ADDR: u64 = 0x10000;
-pub(crate) const START_TRAMPOLINE_SIZE: usize = 28;
 pub(crate) const CKB_SCRIPT_STACK_TOP: i64 = 0x3f0000;
 pub(crate) const EXIT_SYSCALL_NUMBER: i64 = 93;
 
@@ -62,10 +61,11 @@ pub(crate) struct SectionLayout {
 
 impl SectionLayout {
     fn for_text_user_size(text_user_size: usize) -> Self {
-        let rodata_offset = align_up(START_TRAMPOLINE_SIZE + text_user_size, 8);
+        let trampoline_size = start_trampoline_size();
+        let rodata_offset = align_up(trampoline_size + text_user_size, 8);
         Self {
             text_base: ELF_BASE_ADDR,
-            text_user_base: ELF_BASE_ADDR + START_TRAMPOLINE_SIZE as u64,
+            text_user_base: ELF_BASE_ADDR + trampoline_size as u64,
             rodata_base: ELF_BASE_ADDR + rodata_offset as u64,
         }
     }
@@ -260,17 +260,29 @@ pub(crate) fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let text_user_size = plan.metrics.text_size;
     let rodata_size = plan.metrics.rodata_size;
     let rodata_offset = layout.rodata_offset()?;
-    let mut text_bytes = Vec::with_capacity(START_TRAMPOLINE_SIZE + text_user_size);
+    let trampoline_size = start_trampoline_size();
+    let mut text_bytes = Vec::with_capacity(trampoline_size + text_user_size);
     encode_li_sequence(&mut text_bytes, 2, i128::from(CKB_SCRIPT_STACK_TOP))?;
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         encode_li_sequence(&mut text_bytes, 10, 25)?;
     } else {
         let entry_addr = parsed.symbol_address(entry_label, &layout)?;
-        encode_call_sequence(&mut text_bytes, layout.text_base + 8, entry_addr)?;
+        let call_pc = layout.text_base + text_bytes.len() as u64;
+        encode_call_sequence(&mut text_bytes, call_pc, entry_addr)?;
     }
     encode_li_sequence(&mut text_bytes, 17, i128::from(EXIT_SYSCALL_NUMBER))?;
     text_bytes.extend_from_slice(&encode_ecall().to_le_bytes());
-    parsed.encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)?;
+    if text_bytes.len() != trampoline_size {
+        return Err(CompileError::new(
+            format!(
+                "internal ELF trampoline size mismatch: emitted {} bytes, layout reserved {} bytes",
+                text_bytes.len(),
+                trampoline_size
+            ),
+            crate::error::Span::default(),
+        ));
+    }
+    parsed.encode_section(SectionKind::Text, &mut text_bytes, &layout, trampoline_size)?;
 
     let mut rodata_bytes = Vec::with_capacity(rodata_size);
     parsed.encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0)?;
@@ -562,7 +574,7 @@ impl ParsedAssembly {
         let mut entry_label = None;
         let mut fallback_entry = None;
 
-        for line in lines {
+        for (line_index, line) in lines.iter().enumerate() {
             let Some(clean) = strip_comment(line) else {
                 continue;
             };
@@ -570,7 +582,7 @@ impl ParsedAssembly {
                 continue;
             }
 
-            if let Some(section) = parse_section_directive(clean)? {
+            if let Some(section) = parse_section_directive(clean).map_err(|err| assembly_line_error(line_index + 1, clean, err))? {
                 current_section = section;
                 continue;
             }
@@ -592,7 +604,10 @@ impl ParsedAssembly {
                 let label = label.trim().to_string();
                 let symbol = SymbolDef { section: current_section, offset: *offset };
                 if symbols.insert(label.clone(), symbol).is_some() {
-                    return Err(CompileError::new(format!("duplicate assembly label '{}'", label), crate::error::Span::default()));
+                    return Err(CompileError::new(
+                        format!("assembly line {} duplicate label '{}': {}", line_index + 1, label, clean),
+                        crate::error::Span::default(),
+                    ));
                 }
                 if current_section == SectionKind::Text && globals.contains(&label) {
                     if fallback_entry.is_none() {
@@ -606,7 +621,7 @@ impl ParsedAssembly {
                 continue;
             }
 
-            let op = parse_asm_op(clean)?;
+            let op = parse_asm_op(clean).map_err(|err| assembly_line_error(line_index + 1, clean, err))?;
             *offset += op_size(&op, *offset, current_section, op_index, branch_size_mode);
             ops.push(op);
         }
@@ -1100,6 +1115,10 @@ fn parse_section_directive(line: &str) -> Result<Option<SectionKind>> {
     Ok(None)
 }
 
+fn assembly_line_error(line_number: usize, line: &str, error: CompileError) -> CompileError {
+    CompileError::new(format!("assembly line {} '{}': {}", line_number, line, error.message), error.span)
+}
+
 fn parse_asm_op(line: &str) -> Result<AsmOp> {
     if let Some(value) = line.strip_prefix(".word ") {
         let value = parse_immediate(value.trim())?;
@@ -1131,7 +1150,8 @@ fn parse_asm_op(line: &str) -> Result<AsmOp> {
 
 fn parse_instruction(line: &str) -> Result<Instruction> {
     let mut parts = line.splitn(2, char::is_whitespace);
-    let opcode = parts.next().unwrap().trim();
+    let opcode =
+        parts.next().ok_or_else(|| CompileError::new("malformed assembly instruction", crate::error::Span::default()))?.trim();
     let args = parts.next().unwrap_or("").trim();
     let args = if args.is_empty() { Vec::new() } else { args.split(',').map(|arg| arg.trim().to_string()).collect() };
 
@@ -1280,7 +1300,7 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
                 "bge" => Ok(Instruction::Bge { rs1, rs2, label }),
                 "bltu" => Ok(Instruction::Bltu { rs1, rs2, label }),
                 "bgeu" => Ok(Instruction::Bgeu { rs1, rs2, label }),
-                _ => unreachable!("branch opcode matched above"),
+                _ => Err(CompileError::new(format!("unsupported branch opcode '{}'", opcode), crate::error::Span::default())),
             }
         }
         "beqz" => Ok(Instruction::Beqz { rs: parse_register(arg(&args, 0)?)?, label: arg(&args, 1)?.to_string() }),
@@ -1328,15 +1348,15 @@ fn conditional_branch_parts(inst: &Instruction) -> Option<(u8, u8, &str, u32)> {
     }
 }
 
-fn inverse_branch_funct3(funct3: u32) -> u32 {
+fn inverse_branch_funct3(funct3: u32) -> Option<u32> {
     match funct3 {
-        0b000 => 0b001,
-        0b001 => 0b000,
-        0b100 => 0b101,
-        0b101 => 0b100,
-        0b110 => 0b111,
-        0b111 => 0b110,
-        _ => unreachable!("unsupported branch funct3"),
+        0b000 => Some(0b001),
+        0b001 => Some(0b000),
+        0b100 => Some(0b101),
+        0b101 => Some(0b100),
+        0b110 => Some(0b111),
+        0b111 => Some(0b110),
+        _ => None,
     }
 }
 
@@ -1437,10 +1457,14 @@ fn encode_instruction(
         | Instruction::Bgeu { .. }
         | Instruction::Beqz { .. }
         | Instruction::Bnez { .. } => {
-            let (rs1, rs2, label, funct3) = conditional_branch_parts(inst).expect("conditional branch parts");
+            let Some((rs1, rs2, label, funct3)) = conditional_branch_parts(inst) else {
+                return Err(CompileError::new("malformed conditional branch instruction", crate::error::Span::default()));
+            };
             let target = parsed.symbol_address(label, layout)?;
             if relaxed_branch {
-                out.extend_from_slice(&encode_b_type(0x63, inverse_branch_funct3(funct3), rs1, rs2, 12)?.to_le_bytes());
+                let inverse = inverse_branch_funct3(funct3)
+                    .ok_or_else(|| CompileError::new("unsupported conditional branch function", crate::error::Span::default()))?;
+                out.extend_from_slice(&encode_b_type(0x63, inverse, rs1, rs2, 12)?.to_le_bytes());
                 encode_long_jump_sequence(out, pc + 4, target)?;
             } else {
                 out.extend_from_slice(&encode_b_type(0x63, funct3, rs1, rs2, relative_offset(pc, target)?)?.to_le_bytes());
@@ -1497,18 +1521,21 @@ fn encode_address_sequence(out: &mut Vec<u8>, rd: u8, pc: u64, target: u64) -> R
 }
 
 fn encode_call_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
-    let (hi, lo) = split_hi_lo(relative_offset(pc, target)?)?;
+    let offset = relative_offset(pc, target)?;
+    ensure_uncompressed_instruction_alignment(offset, "call target")?;
+    let (hi, lo) = split_hi_lo(offset)?;
     out.extend_from_slice(&encode_u_type(0x17, 1, hi).to_le_bytes());
     out.extend_from_slice(&encode_i_type(0x67, 1, 0b000, 1, lo)?.to_le_bytes());
     Ok(())
 }
 
 fn encode_long_jump_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
+    // Relaxed long jumps use t6 as a dedicated assembler scratch. Codegen's
+    // stack-machine contract must not keep t6 live across labels that can be
+    // reached by a branch or jump relaxation.
     let scratch = 31;
     let offset = relative_offset(pc, target)?;
-    if offset % 2 != 0 {
-        return Err(CompileError::new("jump target is not 2-byte aligned", crate::error::Span::default()));
-    }
+    ensure_uncompressed_instruction_alignment(offset, "jump target")?;
     let (hi, lo) = split_hi_lo(offset)?;
     out.extend_from_slice(&encode_u_type(0x17, scratch, hi).to_le_bytes());
     out.extend_from_slice(&encode_i_type(0x67, 0, 0b000, scratch, lo)?.to_le_bytes());
@@ -1554,6 +1581,10 @@ fn li_sequence_size(imm: i128) -> usize {
     } else {
         60
     }
+}
+
+fn start_trampoline_size() -> usize {
+    li_sequence_size(i128::from(CKB_SCRIPT_STACK_TOP)) + 8 + li_sequence_size(i128::from(EXIT_SYSCALL_NUMBER)) + 4
 }
 
 fn write_elf_header(out: &mut [u8], entry: u64, program_header_count: u16) -> Result<()> {
@@ -1685,7 +1716,9 @@ pub(crate) fn small_signed_immediate(value: i64) -> bool {
 
 pub(crate) fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
     for candidate in ["t6", "t5", "t3", "t2", "t1", "t0"] {
-        let candidate_id = parse_register(candidate).expect("scratch register name should be valid");
+        let Ok(candidate_id) = parse_register(candidate) else {
+            continue;
+        };
         if registers.iter().all(|register| parse_register(register).ok() != Some(candidate_id)) {
             return candidate;
         }
@@ -1798,9 +1831,7 @@ pub(crate) fn encode_s_type(opcode: u32, funct3: u32, rs1: u8, rs2: u8, imm: i64
 }
 
 fn encode_b_type(opcode: u32, funct3: u32, rs1: u8, rs2: u8, imm: i64) -> Result<u32> {
-    if imm % 2 != 0 {
-        return Err(CompileError::new("branch target is not 2-byte aligned", crate::error::Span::default()));
-    }
+    ensure_uncompressed_instruction_alignment(imm, "branch target")?;
     let imm = encode_signed_bits(imm, 13)?;
     let bit12 = (imm >> 12) & 0x1;
     let bits10_5 = (imm >> 5) & 0x3f;
@@ -1821,9 +1852,7 @@ fn encode_u_type(opcode: u32, rd: u8, imm: i64) -> u32 {
 }
 
 fn encode_j_type(opcode: u32, rd: u8, imm: i64) -> Result<u32> {
-    if imm % 2 != 0 {
-        return Err(CompileError::new("jump target is not 2-byte aligned", crate::error::Span::default()));
-    }
+    ensure_uncompressed_instruction_alignment(imm, "jump target")?;
     let imm = encode_signed_bits(imm, 21)?;
     let bit20 = (imm >> 20) & 0x1;
     let bits10_1 = (imm >> 1) & 0x3ff;
@@ -1847,9 +1876,16 @@ fn encode_signed_bits(value: i64, bits: u32) -> Result<u32> {
 }
 
 pub(crate) fn signed_bits_fit(value: i64, bits: u32) -> bool {
-    let min = -(1i64 << (bits - 1));
-    let max = (1i64 << (bits - 1)) - 1;
-    value >= min && value <= max
+    match bits {
+        0 => false,
+        1..=63 => {
+            let min = -(1i64 << (bits - 1));
+            let max = (1i64 << (bits - 1)) - 1;
+            value >= min && value <= max
+        }
+        64 => true,
+        _ => false,
+    }
 }
 
 fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
@@ -1859,7 +1895,12 @@ fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
             crate::error::Span::default(),
         ));
     }
-    let hi = (value + 0x800) >> 12;
+    let hi = lui_addi_hi20(value).ok_or_else(|| {
+        CompileError::new(
+            format!("value '{}' is outside the supported RV64 LUI/ADDI immediate range", value),
+            crate::error::Span::default(),
+        )
+    })?;
     let lo = value - (hi << 12);
     if !(-2048..=2047).contains(&lo) {
         return Err(CompileError::new(format!("low immediate '{}' is out of range after split", lo), crate::error::Span::default()));
@@ -1868,11 +1909,27 @@ fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
 }
 
 fn li_fits_lui_addi_rv64(value: i64) -> bool {
+    lui_addi_hi20(value).is_some_and(|hi| (-2048..=2047).contains(&(value - (hi << 12))))
+}
+
+fn lui_addi_hi20(value: i64) -> Option<i64> {
     if !(i32::MIN as i64..=i32::MAX as i64).contains(&value) {
-        return false;
+        return None;
     }
-    let hi = (value + 0x800) >> 12;
-    (-0x80000..=0x7ffff).contains(&hi)
+    let hi_bits = (((value as i32).wrapping_add(0x800) as u32) >> 12) & 0x000f_ffff;
+    Some(sign_extend_u32_to_i64(hi_bits, 20))
+}
+
+fn sign_extend_u32_to_i64(value: u32, bits: u32) -> i64 {
+    let shift = 32 - bits;
+    ((value << shift) as i32 >> shift) as i64
+}
+
+fn ensure_uncompressed_instruction_alignment(offset: i64, context: &str) -> Result<()> {
+    if offset % 4 != 0 {
+        return Err(CompileError::new(format!("{} is not 4-byte aligned", context), crate::error::Span::default()));
+    }
+    Ok(())
 }
 
 fn relative_offset(pc: u64, target: u64) -> Result<i64> {
@@ -1958,16 +2015,32 @@ mod tests {
         assert!(encode_i_type(0x13, 1, 0, 0, 2048).is_err());
 
         assert!(encode_b_type(0x63, 0, 0, 0, -4096).is_ok());
-        assert!(encode_b_type(0x63, 0, 0, 0, 4094).is_ok());
+        assert!(encode_b_type(0x63, 0, 0, 0, 4092).is_ok());
         assert!(encode_b_type(0x63, 0, 0, 0, -4098).is_err());
         assert!(encode_b_type(0x63, 0, 0, 0, 4096).is_err());
+        assert!(encode_b_type(0x63, 0, 0, 0, 2).is_err());
         assert!(encode_b_type(0x63, 0, 0, 0, 3).is_err());
 
         assert!(encode_j_type(0x6f, 0, -1_048_576).is_ok());
-        assert!(encode_j_type(0x6f, 0, 1_048_574).is_ok());
+        assert!(encode_j_type(0x6f, 0, 1_048_572).is_ok());
         assert!(encode_j_type(0x6f, 0, -1_048_578).is_err());
         assert!(encode_j_type(0x6f, 0, 1_048_576).is_err());
+        assert!(encode_j_type(0x6f, 0, 2).is_err());
         assert!(encode_j_type(0x6f, 0, 3).is_err());
+    }
+
+    #[test]
+    fn strict_audit_li_split_handles_negative_32_bit_boundaries() {
+        assert!(li_fits_lui_addi_rv64(i32::MIN as i64));
+        assert_eq!(split_hi_lo(i32::MIN as i64).unwrap(), (-0x80000, 0));
+        assert_eq!(split_hi_lo(-2_147_481_600).unwrap(), (-0x7ffff, -2048));
+        assert_eq!(split_hi_lo(-2049).unwrap(), (-1, 2047));
+
+        let mut bytes = Vec::new();
+        encode_li_sequence(&mut bytes, 10, -2_147_481_600).unwrap();
+        assert_eq!(bytes.len(), 8, "negative 32-bit boundary should use LUI/ADDI");
+
+        assert!(!li_fits_lui_addi_rv64(2_147_481_600));
     }
 
     #[test]

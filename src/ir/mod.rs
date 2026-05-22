@@ -612,10 +612,10 @@ impl IrGenerator {
                 Item::Use(_) => {}
             }
         }
-        if let Some(error) = self.errors.into_iter().next() {
-            Err(error)
-        } else {
+        if self.errors.is_empty() {
             Ok(self.module)
+        } else {
+            Err(CompileError::aggregate(self.errors))
         }
     }
 
@@ -1785,10 +1785,10 @@ impl IrGenerator {
                         if owned.ty == declared_ty {
                             owned
                         } else {
-                            self.materialize_operand_with_type(name, IrOperand::Var(owned), declared_ty, block)
+                            self.materialize_operand_with_type(name, IrOperand::Var(owned), declared_ty, block, let_stmt.span)
                         }
                     } else {
-                        self.materialize_operand_with_type(name, lowered.operand, declared_ty, block)
+                        self.materialize_operand_with_type(name, lowered.operand, declared_ty, block, let_stmt.span)
                     };
                     if transition_coverable && var.ty == IrType::U64 {
                         self.transition_coverable_value_ids.insert(var.id);
@@ -1804,9 +1804,8 @@ impl IrGenerator {
                     vars.insert(name.clone(), var);
                     return Some(active);
                 }
-                let bound = self.bind_pattern(&let_stmt.pattern, lowered.operand, block, vars);
-                if transition_coverable && bound.as_ref().is_some_and(|var| var.ty == IrType::U64) {
-                    let bound = bound.expect("checked above");
+                let bound = self.bind_pattern(&let_stmt.pattern, lowered.operand, block, vars, let_stmt.span);
+                if let Some(bound) = bound.as_ref().filter(|var| transition_coverable && var.ty == IrType::U64) {
                     self.transition_coverable_value_ids.insert(bound.id);
                 }
                 Some(active)
@@ -1838,6 +1837,7 @@ impl IrGenerator {
         value: IrOperand,
         block: &mut IrBlock,
         vars: &mut HashMap<String, IrVar>,
+        span: Span,
     ) -> Option<IrVar> {
         match pattern {
             BindingPattern::Name(name) => {
@@ -1873,9 +1873,9 @@ impl IrGenerator {
                         });
 
                     if let Some(projected) = projected {
-                        self.bind_pattern(item, projected, block, vars);
+                        self.bind_pattern(item, projected, block, vars, span);
                     } else {
-                        self.record_error("tuple binding requires a lowered tuple aggregate", Span::default());
+                        self.record_error("tuple binding requires a lowered tuple aggregate", span);
                     }
                 }
                 base_var
@@ -1896,7 +1896,7 @@ impl IrGenerator {
         }
     }
 
-    fn materialize_operand_with_type(&mut self, name: &str, operand: IrOperand, ty: IrType, block: &mut IrBlock) -> IrVar {
+    fn materialize_operand_with_type(&mut self, name: &str, operand: IrOperand, ty: IrType, block: &mut IrBlock, span: Span) -> IrVar {
         match operand {
             IrOperand::Var(var) if var.ty == ty => var,
             IrOperand::Var(var) => {
@@ -1911,10 +1911,7 @@ impl IrGenerator {
                 if let Some(value) = Self::cast_const(&value, &dest.ty) {
                     block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value });
                 } else {
-                    self.record_error(
-                        format!("constant materialization from {:?} to {:?} is not supported", value, dest.ty),
-                        Span::default(),
-                    );
+                    self.record_error(format!("constant materialization from {:?} to {:?} is not supported", value, dest.ty), span);
                     block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value: IrConst::U64(0) });
                 }
                 dest
@@ -1953,7 +1950,7 @@ impl IrGenerator {
             Expr::Identifier(name, _) => {
                 if let Some(var) = vars.get(name).cloned() {
                     LoweredExpr { operand: IrOperand::Var(var), current: Some(current) }
-                } else if let Some(constant) = self.lower_constant(name, Span::default()) {
+                } else if let Some(constant) = self.lower_constant(name, expr.span()) {
                     LoweredExpr { operand: constant, current: Some(current) }
                 } else if let Some(zero) = self.lower_zero_value(name) {
                     LoweredExpr { operand: zero, current: Some(current) }
@@ -1962,7 +1959,7 @@ impl IrGenerator {
                 } else if let Some(flow_state) = self.lower_flow_state_name(name) {
                     LoweredExpr { operand: flow_state, current: Some(current) }
                 } else {
-                    self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), Span::default());
+                    self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), expr.span());
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             }
@@ -2101,15 +2098,15 @@ impl IrGenerator {
                     }
                     operand => {
                         let block = self.block_mut(blocks, active);
-                        let dest = self.materialize_operand_with_type("cast", operand.clone(), target_ty, block);
+                        let dest = self.materialize_operand_with_type("cast", operand.clone(), target_ty, block, cast.span);
                         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
                     }
                 }
             }
-            Expr::Array(items, _) => self.lower_array_expr(items, current, blocks, vars),
+            Expr::Array(items, span) => self.lower_array_expr(items, *span, current, blocks, vars),
             Expr::Tuple(items, _) => self.lower_tuple_expr(items, current, blocks, vars),
             Expr::String(..) => {
-                self.record_error("string literals are only supported in metadata positions such as assert messages", Span::default());
+                self.record_error("string literals are only supported in metadata positions such as assert messages", expr.span());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
             Expr::ByteString(bytes, _) => LoweredExpr {
@@ -2117,7 +2114,7 @@ impl IrGenerator {
                 current: Some(current),
             },
             Expr::Range(_) => {
-                self.record_error("range expressions are only supported as for-loop iterables", Span::default());
+                self.record_error("range expressions are only supported as for-loop iterables", expr.span());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
             Expr::StdlibCall(call) => self.lower_stdlib_call(call, current, blocks, vars),
@@ -2664,7 +2661,13 @@ impl IrGenerator {
         });
 
         let mut body_vars = vars.clone();
-        self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, body_block), &mut body_vars);
+        self.bind_pattern(
+            &for_stmt.pattern,
+            IrOperand::Var(item_var),
+            self.block_mut(blocks, body_block),
+            &mut body_vars,
+            for_stmt.span,
+        );
         let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, None);
         if let Some(exit) = body_exit {
             let next_index = self.new_var("iter_next", IrType::U64);
@@ -2705,7 +2708,13 @@ impl IrGenerator {
             });
 
             let mut body_vars = vars.clone();
-            self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
+            self.bind_pattern(
+                &for_stmt.pattern,
+                IrOperand::Var(item_var),
+                self.block_mut(blocks, current),
+                &mut body_vars,
+                for_stmt.span,
+            );
             current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, None)?;
         }
 
@@ -2728,7 +2737,13 @@ impl IrGenerator {
             self.copy_aggregate_metadata(&IrOperand::Var(element_var), item_var.id);
 
             let mut body_vars = vars.clone();
-            self.bind_pattern(&for_stmt.pattern, IrOperand::Var(item_var), self.block_mut(blocks, current), &mut body_vars);
+            self.bind_pattern(
+                &for_stmt.pattern,
+                IrOperand::Var(item_var),
+                self.block_mut(blocks, current),
+                &mut body_vars,
+                for_stmt.span,
+            );
             current = self.lower_stmts(&for_stmt.body, current, blocks, &mut body_vars, None)?;
         }
 
@@ -2779,7 +2794,13 @@ impl IrGenerator {
             IrTerminator::Branch { cond: IrOperand::Var(cond_var), then_block: body_block, else_block: exit_block };
 
         let mut body_vars = vars.clone();
-        self.bind_pattern(&for_stmt.pattern, IrOperand::Var(index_var.clone()), self.block_mut(blocks, body_block), &mut body_vars);
+        self.bind_pattern(
+            &for_stmt.pattern,
+            IrOperand::Var(index_var.clone()),
+            self.block_mut(blocks, body_block),
+            &mut body_vars,
+            for_stmt.span,
+        );
         let body_exit = self.lower_stmts(&for_stmt.body, body_block, blocks, &mut body_vars, None);
         if let Some(exit) = body_exit {
             let next_index = self.new_var("for_next", IrType::U64);
@@ -3705,12 +3726,13 @@ impl IrGenerator {
     fn lower_array_expr(
         &mut self,
         items: &[Expr],
+        span: Span,
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         if items.is_empty() {
-            self.record_error("empty array literal reached IR lowering without a declared array type", Span::default());
+            self.record_error("empty array literal reached IR lowering without a declared array type", span);
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
         }
 
@@ -3739,7 +3761,7 @@ impl IrGenerator {
         }
 
         let Some(element_ty) = element_ty else {
-            self.record_error("non-empty array literal did not produce an element type during IR lowering", Span::default());
+            self.record_error("non-empty array literal did not produce an element type during IR lowering", span);
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) };
         };
         let array_ty = IrType::Array(Box::new(element_ty), items.len());
@@ -3760,14 +3782,14 @@ impl IrGenerator {
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         match expr {
-            Expr::Integer(value, _) => match Self::integer_const_for_ir_type(*value, expected_ty) {
+            Expr::Integer(value, span) => match Self::integer_const_for_ir_type(*value, expected_ty) {
                 Some(value) => LoweredExpr { operand: IrOperand::Const(value), current: Some(current) },
                 None => {
-                    self.record_error(format!("integer literal {} is out of range for {:?}", value, expected_ty), Span::default());
+                    self.record_error(format!("integer literal {} is out of range for {:?}", value, expected_ty), *span);
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             },
-            Expr::ByteString(bytes, _) => match expected_ty {
+            Expr::ByteString(bytes, span) => match expected_ty {
                 IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) && *len == bytes.len() => LoweredExpr {
                     operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
                     current: Some(current),
@@ -3775,20 +3797,20 @@ impl IrGenerator {
                 IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => {
                     self.record_error(
                         format!("byte string literal has length {}, expected fixed byte array length {}", bytes.len(), len),
-                        Span::default(),
+                        *span,
                     );
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
                 _ => {
-                    self.record_error("byte string literals require an expected [u8; N] type", Span::default());
+                    self.record_error("byte string literals require an expected [u8; N] type", *span);
                     LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
                 }
             },
-            Expr::Array(items, _) if collection_item_ir_type(expected_ty).is_some() => {
-                self.lower_vec_literal_expr(items, expected_ty.clone(), current, blocks, vars)
+            Expr::Array(items, span) if collection_item_ir_type(expected_ty).is_some() => {
+                self.lower_vec_literal_expr(items, *span, expected_ty.clone(), current, blocks, vars)
             }
-            Expr::Array(items, _) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
-                self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), current, blocks)
+            Expr::Array(items, span) if items.is_empty() && matches!(expected_ty, IrType::Array(_, 0)) => {
+                self.lower_empty_array_expr_with_ir_type(expected_ty.clone(), *span, current, blocks)
             }
             Expr::Block(stmts, _) => self.lower_tail_block_value(stmts, current, blocks, vars, Some(expected_ty)),
             Expr::If(if_expr) => self.lower_if_expr_with_expected_type(if_expr, expected_ty, current, blocks, vars),
@@ -3909,13 +3931,14 @@ impl IrGenerator {
     fn lower_vec_literal_expr(
         &mut self,
         items: &[Expr],
+        span: Span,
         vec_ty: IrType,
         current: BlockId,
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
         let Some(item_ty) = collection_item_ir_type(&vec_ty) else {
-            self.record_error("Vec literal requires an expected Vec<T> type", Span::default());
+            self.record_error("Vec literal requires an expected Vec<T> type", span);
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
         };
 
@@ -3936,10 +3959,7 @@ impl IrGenerator {
 
             let actual_ty = self.operand_type(&lowered.operand);
             if actual_ty != item_ty {
-                self.record_error(
-                    format!("Vec literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
-                    Span::default(),
-                );
+                self.record_error(format!("Vec literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty), item.span());
             }
 
             self.block_mut(blocks, active)
@@ -3950,9 +3970,15 @@ impl IrGenerator {
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
-    fn lower_empty_array_expr_with_ir_type(&mut self, ir_ty: IrType, current: BlockId, blocks: &mut Vec<IrBlock>) -> LoweredExpr {
+    fn lower_empty_array_expr_with_ir_type(
+        &mut self,
+        ir_ty: IrType,
+        span: Span,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+    ) -> LoweredExpr {
         if !matches!(ir_ty, IrType::Array(_, 0)) {
-            self.record_error("empty array literal requires a zero-length declared array type", Span::default());
+            self.record_error("empty array literal requires a zero-length declared array type", span);
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
         }
 
@@ -4392,7 +4418,9 @@ impl IrGenerator {
                     let ty = self.operand_type(&lowered_value.operand);
                     result_dest = Some(self.new_var("match_tmp", ty));
                 }
-                let dest = result_dest.as_ref().expect("match result destination must be initialized");
+                let Some(dest) = result_dest.as_ref() else {
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(join) };
+                };
                 self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
                 self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
                 self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
@@ -4436,7 +4464,9 @@ impl IrGenerator {
                 let ty = self.operand_type(&lowered_value.operand);
                 result_dest = Some(self.new_var("match_tmp", ty));
             }
-            let dest = result_dest.as_ref().expect("match result destination must be initialized");
+            let Some(dest) = result_dest.as_ref() else {
+                return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(join) };
+            };
             self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
             self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
             self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
@@ -7820,7 +7850,7 @@ mod tests {
             r#"
 module ir::branch_create_certificate
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -7844,7 +7874,7 @@ where
             r#"
 module ir::duplicate_consume_certificate
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -7884,7 +7914,7 @@ where
             r#"
 module ir::missing_create_metadata
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -7933,7 +7963,7 @@ where
             r#"
 module ir::stale_write_intents
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -8224,11 +8254,30 @@ where
     }
 
     #[test]
+    fn ir_generation_aggregates_lowering_errors_with_source_spans() {
+        let err = parse_and_generate_without_typecheck(
+            r#"
+module ir::aggregate_errors
+
+action bad() -> u64
+where
+    return missing_one + missing_two
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("2 compile errors"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("missing_one"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("missing_two"), "unexpected error: {}", err.message);
+        assert!(err.span.line > 0, "aggregated error should preserve the first source span: {}", err.message);
+    }
+
+    #[test]
     fn preserve_sugar_populates_preserved_fields() {
         let source = r#"
 module test
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     seller: u64
     price: u64
     payment_symbol: u64
@@ -8414,7 +8463,7 @@ where
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -8449,11 +8498,11 @@ where
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
-receipt Voucher -> Coin has destroy {
+receipt Voucher -> Coin has destroy, consume {
     amount: u64
     holder: Address
 }
@@ -8489,7 +8538,7 @@ where
         let source = r#"
 module test
 
-resource Coin has store, transfer, destroy {
+resource Coin has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
     owner: Address
 }

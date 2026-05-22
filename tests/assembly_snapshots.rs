@@ -107,6 +107,7 @@ fn snapshot_lock_args_assembly() {
         "missing witness-load ABI comment:\n{}",
         n
     );
+    assert!(!n.contains("entry_args_group_output"), "lock entry wrapper must not fall back to GroupOutput witness args:\n{}", n);
     assert!(n.contains("# cellscript entry abi: witness magic CSARGv1"), "missing witness magic ABI comment:\n{}", n);
     assert!(
         n.contains("# cellscript entry abi: lock_args parameters are decoded from the executing Script.args bytes"),
@@ -162,6 +163,9 @@ fn snapshot_blake2b_helper_assembly() {
 // ---------------------------------------------------------------------------
 
 const WITNESS_SOURCE: &str = include_str!("../examples/language/v0_14_witness_source.cell");
+const COLLECTION_SOURCE: &str = include_str!("../examples/language/registry.cell");
+const SPAWN_IPC_SOURCE: &str = include_str!("../examples/language/v0_14_multi_step_pipeline.cell");
+const TYPE_ID_SOURCE: &str = include_str!("../examples/language/v0_14_ckb_type_id_create.cell");
 
 #[test]
 fn snapshot_witness_schema_syscall_assembly() {
@@ -197,6 +201,79 @@ fn snapshot_witness_schema_syscall_assembly() {
     assert!(n.contains("# cellscript runtime error 2 bounds-check-failed"), "should have bounds-check-failed error path:\n{}", n);
     assert!(n.contains("# cellscript runtime error 4 exact-size-mismatch"), "should have exact-size-mismatch error path:\n{}", n);
     assert!(n.contains("# cellscript runtime error 5 assertion-failed"), "should have assertion-failed error path:\n{}", n);
+}
+
+#[test]
+fn snapshot_collection_lowering_assembly() {
+    let assembly = compile_to_asm(COLLECTION_SOURCE);
+    let n = normalise_assembly(&assembly);
+
+    for marker in [
+        "# cellscript abi: stack collection push element_size=32",
+        "# cellscript abi: stack collection insert element_size=32",
+        "# cellscript abi: stack collection remove element_size=32",
+        "# cellscript abi: stack collection contains element_size=32",
+        "# cellscript abi: stack collection swap element_size=32",
+        "# cellscript abi: stack collection truncate",
+    ] {
+        assert!(n.contains(marker), "registry collection assembly should contain marker {marker}:\n{}", n);
+    }
+    assert!(
+        n.contains("sltu t5, t3, t2\n    beqz t5, .Lstack_collection_push_used_bytes_ok_"),
+        "collection push should check used_bytes <= capacity before subtracting remaining capacity:\n{}",
+        n
+    );
+}
+
+#[test]
+fn snapshot_spawn_ipc_fail_closed_stub_assembly() {
+    let assembly = compile_to_asm(SPAWN_IPC_SOURCE);
+    let n = normalise_assembly(&assembly);
+
+    for helper in ["__ckb_pipe", "__ckb_pipe_write", "__ckb_spawn", "__ckb_wait", "__ckb_pipe_read", "__ckb_close"] {
+        assert!(n.contains(&format!("call {helper}")), "pipeline action should call {helper}:\n{}", n);
+        let after_call = n.split_once(&format!("\n    call {helper}")).map(|(_, after)| after).expect("helper call should be present");
+        let status_check = after_call.find("beqz a1").unwrap_or_else(|| panic!("{helper} status should be checked"));
+        let epilogue_jump = after_call.find("j .Lpipe_to_delegate_epilogue").unwrap_or_else(|| panic!("{helper} failure should exit"));
+        assert!(status_check < epilogue_jump, "{helper} status must be checked before continuing or returning:\n{}", after_call);
+    }
+
+    let spawn_helper = n.split_once("__ckb_spawn:").map(|(_, after)| after).expect("spawn helper body should be present");
+    let spawn_helper = spawn_helper.split_once(".global ").map(|(body, _)| body).unwrap_or(spawn_helper);
+    assert!(
+        spawn_helper.contains("withheld raw syscall 2601") && !spawn_helper.contains("ecall"),
+        "spawn helper should remain a fail-closed VM2 stub without issuing ecall:\n{}",
+        spawn_helper
+    );
+}
+
+#[test]
+fn snapshot_type_id_create_output_assembly() {
+    let assembly = compile_to_asm(TYPE_ID_SOURCE);
+    let n = normalise_assembly(&assembly);
+
+    assert!(n.contains("__type_desc_IdentityToken:"), "TYPE_ID assembly should materialize the type descriptor:\n{}", n);
+    assert!(
+        n.contains("# cellscript entry abi: action entries fall back to GroupOutput witness args for output-only type scripts"),
+        "TYPE_ID action entry should keep the output-only witness fallback visible:\n{}",
+        n
+    );
+    assert!(
+        n.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_group_output source=GroupOutput index=0"),
+        "TYPE_ID action entry should try GroupOutput witness args after GroupInput absence:\n{}",
+        n
+    );
+    assert!(
+        n.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0"),
+        "TYPE_ID create output verifier should load output cell data:\n{}",
+        n
+    );
+    assert!(
+        n.contains("# cellscript abi: output field verification deferred to ordered create constraint"),
+        "TYPE_ID create output assembly should retain ordered create verification marker:\n{}",
+        n
+    );
+    assert!(n.contains("li a7, 2092"), "TYPE_ID output data load should use LOAD_CELL_DATA syscall 2092:\n{}", n);
 }
 
 #[test]
@@ -292,6 +369,9 @@ fn snapshot_assemblies_contain_no_leaked_overflow_diagnostics() {
         ("lock_args", LOCK_ARGS_SOURCE),
         ("blake2b", BLAKE2B_SOURCE),
         ("witness", WITNESS_SOURCE),
+        ("collections", COLLECTION_SOURCE),
+        ("spawn_ipc", SPAWN_IPC_SOURCE),
+        ("type_id", TYPE_ID_SOURCE),
     ];
     for (name, source) in &sources {
         let assembly = compile_to_asm(source);

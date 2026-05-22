@@ -1,7 +1,7 @@
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::Result;
 use crate::fmt::format_default;
-use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
+use crate::package::{validate_git_revision, Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
@@ -131,6 +131,7 @@ pub struct AddArgs {
     pub dev: bool,
     pub build: bool,
     pub git: Option<String>,
+    pub rev: Option<String>,
     pub path: Option<PathBuf>,
     pub json: bool,
 }
@@ -304,6 +305,7 @@ pub struct InstallArgs {
     pub crate_name: Option<String>,
     pub version: Option<String>,
     pub git: Option<String>,
+    pub rev: Option<String>,
     pub path: Option<PathBuf>,
 }
 
@@ -834,13 +836,11 @@ impl CommandExecutor {
 
     fn add(args: AddArgs) -> Result<()> {
         validate_dependency_target_flags(args.dev, args.build)?;
-        if args.git.is_some() && args.path.is_some() {
-            return Err(crate::error::CompileError::without_span("cellc add accepts either --git or --path, not both"));
-        }
+        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
 
         let pm = PackageManager::new(".");
         let mut manifest = pm.read_manifest()?;
-        let dependency = dependency_from_add_args(&args);
+        let dependency = dependency_from_add_args(&args)?;
         let target = dependency_target_label(args.dev, args.build);
         let mut added = Vec::new();
 
@@ -2119,6 +2119,7 @@ impl CommandExecutor {
 
     fn install(args: InstallArgs) -> Result<()> {
         let pm = PackageManager::new(".");
+        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
 
         let _manifest = pm.read_manifest()?;
 
@@ -2132,7 +2133,7 @@ impl CommandExecutor {
                 git: Some(git_url.clone()),
                 branch: None,
                 tag: None,
-                rev: None,
+                rev: args.rev.clone(),
                 path: None,
                 optional: false,
                 features: Vec::new(),
@@ -2681,6 +2682,23 @@ fn validate_dependency_target_flags(dev: bool, build: bool) -> Result<()> {
     Ok(())
 }
 
+fn validate_dependency_source_args(git: Option<&str>, path: Option<&Path>, rev: Option<&str>) -> Result<()> {
+    if git.is_some() && path.is_some() {
+        return Err(crate::error::CompileError::without_span("dependency source accepts either --git or --path, not both"));
+    }
+    if path.is_some() && rev.is_some() {
+        return Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies"));
+    }
+    match (git, rev) {
+        (Some(_), Some(rev)) => validate_git_revision(rev),
+        (Some(_), None) => Err(crate::error::CompileError::without_span(
+            "git dependencies must specify --rev with a full commit hash; branch/tag/default-branch dependencies are not accepted",
+        )),
+        (None, Some(_)) => Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies")),
+        (None, None) => Ok(()),
+    }
+}
+
 fn dependency_target_label(dev: bool, build: bool) -> &'static str {
     if build {
         "build-dependencies"
@@ -2701,20 +2719,20 @@ fn dependency_map_mut(manifest: &mut crate::package::PackageManifest, dev: bool,
     }
 }
 
-fn dependency_from_add_args(args: &AddArgs) -> Dependency {
+fn dependency_from_add_args(args: &AddArgs) -> Result<Dependency> {
     match (&args.git, &args.path) {
-        (Some(git), _) => Dependency::Detailed(DetailedDependency {
+        (Some(git), _) => Ok(Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
             git: Some(git.clone()),
             branch: None,
             tag: None,
-            rev: None,
+            rev: args.rev.clone(),
             path: None,
             optional: false,
             features: Vec::new(),
             default_features: true,
-        }),
-        (_, Some(path)) => Dependency::Detailed(DetailedDependency {
+        })),
+        (_, Some(path)) => Ok(Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
             git: None,
             branch: None,
@@ -2724,8 +2742,8 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
             optional: false,
             features: Vec::new(),
             default_features: true,
-        }),
-        _ => Dependency::Simple("*".to_string()),
+        })),
+        _ => Ok(Dependency::Simple("*".to_string())),
     }
 }
 
@@ -3989,6 +4007,13 @@ impl CliParser {
                     .arg(Arg::new("dev").long("dev").action(ArgAction::SetTrue).help("Add as dev dependency"))
                     .arg(Arg::new("build").long("build").action(ArgAction::SetTrue).help("Add as build dependency"))
                     .arg(Arg::new("git").long("git").value_name("URL").help("Add a git dependency source"))
+                    .arg(
+                        Arg::new("rev")
+                            .long("rev")
+                            .value_name("COMMIT")
+                            .requires("git")
+                            .help("Pin a git dependency to a full commit hash"),
+                    )
                     .arg(Arg::new("path").long("path").value_name("PATH").help("Add a local path dependency source"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON add summary")),
             )
@@ -4291,6 +4316,13 @@ impl CliParser {
                     .arg(Arg::new("crate").value_name("CRATE"))
                     .arg(Arg::new("version").long("version").value_name("VERSION"))
                     .arg(Arg::new("git").long("git").value_name("URL"))
+                    .arg(
+                        Arg::new("rev")
+                            .long("rev")
+                            .value_name("COMMIT")
+                            .requires("git")
+                            .help("Pin a git dependency to a full commit hash"),
+                    )
                     .arg(Arg::new("path").long("path").value_name("PATH")),
             )
             .subcommand(ClapCommand::new("update").about("Experimental: update dependencies"))
@@ -4367,6 +4399,7 @@ impl CliParser {
                 dev: m.get_flag("dev"),
                 build: m.get_flag("build"),
                 git: m.get_one::<String>("git").cloned(),
+                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
@@ -4503,6 +4536,7 @@ impl CliParser {
                 crate_name: m.get_one::<String>("crate").cloned(),
                 version: m.get_one::<String>("version").cloned(),
                 git: m.get_one::<String>("git").cloned(),
+                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
             }),
             Some(("update", _)) => Command::Update,

@@ -2,19 +2,23 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::TokenKind;
 use crate::resolve::ModuleResolver;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod server;
 
 const LSP_MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
 const LSP_MAX_OPEN_DOCUMENTS: usize = 1_000;
+const LSP_MAX_WORKSPACE_MODULES: usize = 256;
+const LSP_MAX_WORKSPACE_BYTES: usize = 20 * 1024 * 1024;
+const LSP_MAX_REFERENCE_LOCATIONS: usize = 2_048;
 
 pub struct LspServer {
     documents: HashMap<String, String>,
     ast_cache: HashMap<String, Module>,
     diagnostics: HashMap<String, Vec<Diagnostic>>,
+    primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,7 +148,11 @@ impl Default for LspServer {
 
 impl LspServer {
     pub fn new() -> Self {
-        Self { documents: HashMap::new(), ast_cache: HashMap::new(), diagnostics: HashMap::new() }
+        Self { documents: HashMap::new(), ast_cache: HashMap::new(), diagnostics: HashMap::new(), primitive_compat: None }
+    }
+
+    pub fn set_primitive_compat(&mut self, primitive_compat: Option<String>) {
+        self.primitive_compat = primitive_compat;
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
@@ -261,6 +269,14 @@ impl LspServer {
             }
         };
 
+        let primitive_strict = self.primitive_strict_for_uri(uri);
+        if primitive_strict {
+            if let Err(error) = crate::check_primitive_strict_015(&ast) {
+                self.diagnostics.insert(uri.to_string(), vec![diagnostic_from_error(content, &error)]);
+                return;
+            }
+        }
+
         self.ast_cache.insert(uri.to_string(), ast.clone());
         let resolver = match self.document_resolver(uri) {
             Ok(resolver) => resolver,
@@ -271,8 +287,8 @@ impl LspServer {
         };
 
         let type_check = match resolver.as_ref() {
-            Some(resolver) => crate::types::check_with_resolver(&ast, resolver, &ast.name),
-            None => crate::types::check(&ast),
+            Some(resolver) => crate::types::check_with_resolver_and_primitive_strict(&ast, resolver, &ast.name, primitive_strict),
+            None => crate::types::check_with_primitive_strict(&ast, primitive_strict),
         };
         let diagnostics = match type_check.and_then(|_| crate::flow::check(&ast)) {
             Ok(()) => {
@@ -292,7 +308,7 @@ impl LspServer {
     }
 
     fn document_resolver(&self, uri: &str) -> Result<Option<ModuleResolver>> {
-        let modules = self.workspace_modules(uri);
+        let modules = self.workspace_modules_result(uri)?;
         if modules.is_empty() {
             return Ok(None);
         }
@@ -891,37 +907,19 @@ impl LspServer {
     pub fn goto_definition(&self, uri: &str, position: Position) -> Option<Location> {
         let symbol = self.symbol_at_position(uri, position)?;
 
-        // 1. Try top-level symbol in the current file.
-        if let Some(loc) = self.find_top_level_symbol(uri, &symbol) {
-            return Some(loc);
-        }
-
-        // 2. Try field definition if inside a type reference (e.g. `token.amount`).
+        // 1. Prefer the most local semantic scopes. A local variable named
+        // `Token` or a field named `amount` must not jump to a top-level item
+        // with the same text.
         if let Some(loc) = self.find_field_definition(uri, position, &symbol) {
             return Some(loc);
         }
 
-        // 3. Try local variable / parameter definition.
         if let Some(loc) = self.find_local_definition(uri, position, &symbol) {
             return Some(loc);
         }
 
-        // 4. Try workspace modules (cross-file).
-        for module in self.workspace_modules(uri) {
-            let module_uri = utf8_path_to_file_uri(&module.path);
-            if let Some(loc) = module.ast.items.iter().find_map(|item| {
-                let name = item_name(item)?;
-                if name == symbol {
-                    Some(Location { uri: module_uri.clone(), range: span_to_range(&module.source, item_span(item)) })
-                } else {
-                    None
-                }
-            }) {
-                return Some(loc);
-            }
-        }
-
-        None
+        // 2. Then try top-level symbols in the current file and workspace.
+        self.find_top_level_symbol(uri, &symbol)
     }
 
     /// Find a field definition for `symbol` when accessed via `expr.field`.
@@ -994,11 +992,44 @@ impl LspServer {
         None
     }
 
+    fn find_enclosing_callable_range(&self, uri: &str, position: Position) -> Option<Range> {
+        let content = self.documents.get(uri)?;
+        let ast = self.ast_cache.get(uri)?;
+        for item in &ast.items {
+            let span = match item {
+                Item::Action(action) => action.span,
+                Item::Function(function) => function.span,
+                Item::Lock(lock) => lock.span,
+                _ => continue,
+            };
+            let range = span_to_range(content, span);
+            if position_in_range(position, range) {
+                return Some(range);
+            }
+        }
+        None
+    }
+
     pub fn find_references(&self, uri: &str, position: Position) -> Vec<Location> {
         let Some(symbol) = self.symbol_at_position(uri, position) else {
             return Vec::new();
         };
         let mut refs = Vec::new();
+
+        if self.find_local_definition(uri, position, &symbol).is_some() {
+            if let (Some(content), Some(scope)) = (self.documents.get(uri), self.find_enclosing_callable_range(uri, position)) {
+                for (start, end) in word_occurrences_in_range(content, &symbol, scope) {
+                    refs.push(Location {
+                        uri: uri.to_string(),
+                        range: Range { start: offset_to_position(content, start), end: offset_to_position(content, end) },
+                    });
+                    if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                        break;
+                    }
+                }
+            }
+            return refs;
+        }
 
         let workspace_modules = self.workspace_modules(uri);
         if !workspace_modules.is_empty() {
@@ -1012,6 +1043,9 @@ impl LspServer {
                             end: offset_to_position(&module.source, end),
                         },
                     });
+                    if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                        return refs;
+                    }
                 }
             }
             return refs;
@@ -1023,6 +1057,9 @@ impl LspServer {
                     uri: uri.to_string(),
                     range: Range { start: offset_to_position(content, start), end: offset_to_position(content, end) },
                 });
+                if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                    break;
+                }
             }
         }
         refs
@@ -1654,11 +1691,15 @@ impl LspServer {
     }
 
     fn workspace_modules(&self, uri: &str) -> Vec<crate::LoadedModule> {
+        self.workspace_modules_result(uri).unwrap_or_default()
+    }
+
+    fn workspace_modules_result(&self, uri: &str) -> Result<Vec<crate::LoadedModule>> {
         let Some(path) = file_uri_to_utf8_path(uri) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
 
-        let mut modules = crate::load_modules_for_input(&path).unwrap_or_default();
+        let mut modules = lsp_load_workspace_modules_for_path(&path)?;
 
         if let (Some(content), Some(ast)) = (self.documents.get(uri), self.ast_cache.get(uri)) {
             if let Some(module) = modules.iter_mut().find(|module| same_workspace_path(&module.path, &path)) {
@@ -1669,7 +1710,17 @@ impl LspServer {
             }
         }
 
-        modules
+        Ok(modules)
+    }
+
+    fn primitive_strict_for_uri(&self, uri: &str) -> bool {
+        if matches!(self.primitive_compat.as_deref(), Some("0.15")) {
+            return true;
+        }
+        let Some(path) = file_uri_to_utf8_path(uri) else {
+            return false;
+        };
+        lsp_manifest_primitive_compat(&path).as_deref() == Some("0.15")
     }
 }
 
@@ -2242,6 +2293,203 @@ fn word_occurrences(source: &str, symbol: &str) -> Vec<(usize, usize)> {
     matches
 }
 
+fn word_occurrences_in_range(source: &str, symbol: &str, range: Range) -> Vec<(usize, usize)> {
+    let Some((scope_start, scope_end)) = range_to_offsets(source, range) else {
+        return Vec::new();
+    };
+    word_occurrences(source, symbol).into_iter().filter(|(start, end)| *start >= scope_start && *end <= scope_end).collect()
+}
+
+fn range_to_offsets(source: &str, range: Range) -> Option<(usize, usize)> {
+    let start = position_to_offset(source, range.start)?;
+    let end = position_to_offset(source, range.end)?;
+    (start <= end).then_some((start, end))
+}
+
+fn lsp_load_workspace_modules_for_path(path: &Utf8Path) -> Result<Vec<crate::LoadedModule>> {
+    let files = lsp_workspace_cell_files(path)?;
+    let mut modules = Vec::new();
+    let mut total_bytes = 0usize;
+    for path in files {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| CompileError::new(format!("failed to read module '{}': {}", path, error), Span::default()))?;
+        total_bytes = total_bytes
+            .checked_add(source.len())
+            .ok_or_else(|| CompileError::new("LSP workspace source size overflow while loading modules", Span::default()))?;
+        if total_bytes > LSP_MAX_WORKSPACE_BYTES {
+            return Err(CompileError::new(
+                format!(
+                    "LSP workspace source size exceeds {} bytes; narrow Cell.toml package.source_roots or close large workspace files",
+                    LSP_MAX_WORKSPACE_BYTES
+                ),
+                Span::default(),
+            ));
+        }
+        let tokens = crate::lexer::lex(&source).map_err(|error| error.with_file(path.clone()))?;
+        let ast = crate::parser::parse(&tokens).map_err(|error| error.with_file(path.clone()))?;
+        modules.push(crate::LoadedModule { path, source, ast });
+    }
+    Ok(modules)
+}
+
+fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let path = lsp_canonical_utf8_path(path)?;
+    let Some(package_root) = lsp_find_package_root(&path)? else {
+        return Ok(vec![path]);
+    };
+
+    let manifest = lsp_read_manifest_value(&package_root)?;
+    let mut roots = Vec::new();
+    let mut seen_roots = HashSet::new();
+    for source_root in lsp_manifest_source_roots(&manifest) {
+        let root = lsp_package_child_path(&package_root, &source_root)?;
+        if root.is_dir() && seen_roots.insert(root.clone()) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        let src_root = package_root.join("src");
+        if src_root.is_dir() {
+            let src_root = lsp_canonical_utf8_path(&src_root)?;
+            if seen_roots.insert(src_root.clone()) {
+                roots.push(src_root);
+            }
+        }
+    }
+    if let Some(entry) = lsp_manifest_entry(&manifest) {
+        let entry_path = lsp_package_child_path(&package_root, &entry)?;
+        if let Some(parent) = entry_path.parent() {
+            let parent = lsp_canonical_utf8_path(parent)?;
+            if parent.is_dir() && seen_roots.insert(parent.clone()) {
+                roots.push(parent);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    let mut seen_files = HashSet::new();
+    for root in roots {
+        lsp_collect_cell_files_recursive(&root, &mut files, &mut seen_files)?;
+    }
+    if seen_files.insert(path.clone()) {
+        files.push(path);
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn lsp_collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>, seen: &mut HashSet<Utf8PathBuf>) -> Result<()> {
+    if files.len() >= LSP_MAX_WORKSPACE_MODULES {
+        return Err(CompileError::new(
+            format!("LSP workspace module count exceeds {}; narrow Cell.toml package.source_roots", LSP_MAX_WORKSPACE_MODULES),
+            Span::default(),
+        ));
+    }
+    let entries = std::fs::read_dir(root)
+        .map_err(|error| CompileError::new(format!("failed to read module directory '{}': {}", root, error), Span::default()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| CompileError::new(format!("failed to read directory entry: {}", error), Span::default()))?;
+        let Ok(candidate) = Utf8PathBuf::from_path_buf(entry.path()) else {
+            continue;
+        };
+        if candidate.is_dir() {
+            if matches!(candidate.file_name(), Some(".git" | ".cell" | "target")) {
+                continue;
+            }
+            lsp_collect_cell_files_recursive(&candidate, files, seen)?;
+            continue;
+        }
+        if candidate.extension() == Some("cell") {
+            let candidate = lsp_canonical_utf8_path(&candidate)?;
+            if seen.insert(candidate.clone()) {
+                files.push(candidate);
+                if files.len() > LSP_MAX_WORKSPACE_MODULES {
+                    return Err(CompileError::new(
+                        format!(
+                            "LSP workspace module count exceeds {}; narrow Cell.toml package.source_roots",
+                            LSP_MAX_WORKSPACE_MODULES
+                        ),
+                        Span::default(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn lsp_find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
+    let mut cursor = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+    loop {
+        if cursor.join("Cell.toml").is_file() {
+            return Ok(Some(lsp_canonical_utf8_path(cursor)?));
+        }
+        let Some(parent) = cursor.parent() else {
+            return Ok(None);
+        };
+        cursor = parent;
+    }
+}
+
+fn lsp_manifest_primitive_compat(path: &Utf8Path) -> Option<String> {
+    let package_root = lsp_find_package_root(path).ok().flatten()?;
+    let manifest = lsp_read_manifest_value(&package_root).ok()?;
+    let build = manifest.get("build")?;
+    if let Some(mode) = build.get("primitive_compat").and_then(toml::Value::as_str) {
+        return Some(mode.to_string());
+    }
+    match build.get("primitive_strict") {
+        Some(value) if value.as_bool() == Some(true) => Some("0.15".to_string()),
+        Some(value) => value.as_str().map(str::to_string),
+        None => None,
+    }
+}
+
+fn lsp_read_manifest_value(package_root: &Utf8Path) -> Result<toml::Value> {
+    let manifest_path = package_root.join("Cell.toml");
+    let source = std::fs::read_to_string(&manifest_path)
+        .map_err(|error| CompileError::new(format!("failed to read Cell.toml '{}': {}", manifest_path, error), Span::default()))?;
+    toml::from_str(&source)
+        .map_err(|error| CompileError::new(format!("failed to parse Cell.toml '{}': {}", manifest_path, error), Span::default()))
+}
+
+fn lsp_manifest_source_roots(manifest: &toml::Value) -> Vec<String> {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("source_roots"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+fn lsp_manifest_entry(manifest: &toml::Value) -> Option<String> {
+    manifest.get("package").and_then(|package| package.get("entry")).and_then(toml::Value::as_str).map(str::to_string)
+}
+
+fn lsp_package_child_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf8PathBuf> {
+    let candidate = package_root.join(raw_path);
+    let canonical = lsp_canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(package_root) {
+        return Err(CompileError::new(
+            format!("Cell.toml path '{}' resolves outside package root '{}'", raw_path, package_root),
+            Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn lsp_canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|error| CompileError::new(format!("failed to canonicalize '{}': {}", path, error), Span::default()))?;
+    Utf8PathBuf::from_path_buf(canonical)
+        .map_err(|path| CompileError::new(format!("path is not valid UTF-8: {}", path.display()), Span::default()))
+}
+
 fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     let path = uri.strip_prefix("file://")?;
     let decoded = percent_decode(path)?;
@@ -2606,6 +2854,55 @@ where
     }
 
     #[test]
+    fn lsp_primitive_strict_rejects_legacy_capabilities() {
+        let mut server = LspServer::new();
+        server.set_primitive_compat(Some("0.15".to_string()));
+        let uri = "file:///strict.cell".to_string();
+        let source = r#"
+module strict
+
+resource Coin has store, transfer {
+    amount: u64,
+}
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("CS0150")),
+            "strict LSP diagnostics should reject legacy transfer capability: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn lsp_reads_primitive_strict_from_manifest() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n\n[build]\nprimitive_compat = \"0.15\"\n")
+            .unwrap();
+        let source = r#"
+module strict_manifest
+
+resource Coin has store, transfer {
+    amount: u64,
+}
+"#;
+        let main_path = root.join("src/main.cell");
+        std::fs::write(&main_path, source).unwrap();
+
+        let mut server = LspServer::new();
+        let uri = utf8_path_to_file_uri(&main_path);
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("CS0150")),
+            "manifest strict LSP diagnostics should reject legacy transfer capability: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
     fn test_goto_definition_and_references() {
         let mut server = LspServer::new();
         let uri = "file:///defs.cell".to_string();
@@ -2618,6 +2915,57 @@ where
 
         let refs = server.find_references(&uri, Position { line: 8, character: 16 });
         assert!(refs.len() >= 2);
+    }
+
+    #[test]
+    fn goto_definition_prefers_local_scope_over_top_level_symbol() {
+        let mut server = LspServer::new();
+        let uri = "file:///shadow.cell".to_string();
+        let source = r#"
+module shadow
+
+resource Token {
+    amount: u64,
+}
+
+action inspect() -> u64
+where
+    let Token = 1
+    return Token
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let token_use = source.find("return Token").expect("return Token") + "return ".len();
+        let definition =
+            server.goto_definition(&uri, offset_to_position(source, token_use)).expect("local shadow definition should resolve");
+        assert_eq!(definition.range.start.line, 9, "local binding should win over top-level resource: {:?}", definition);
+    }
+
+    #[test]
+    fn find_references_for_locals_stays_in_enclosing_callable_scope() {
+        let mut server = LspServer::new();
+        let uri = "file:///local_refs.cell".to_string();
+        let source = r#"
+module local_refs
+
+action first() -> u64
+where
+    let value = 1
+    return value
+
+action second() -> u64
+where
+    let value = 2
+    return value
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let first_value_use = source.find("return value").expect("first return value") + "return ".len();
+        let refs = server.find_references(&uri, offset_to_position(source, first_value_use));
+        assert_eq!(refs.len(), 2, "local reference search should include only first action let/use: {:?}", refs);
+        assert!(
+            refs.iter().all(|location| location.range.start.line < 8),
+            "second action references leaked into first action: {:?}",
+            refs
+        );
     }
 
     #[test]
@@ -2638,7 +2986,7 @@ where
         let source = r#"
 module metadata_hover
 
-shared Config {
+shared Config has store, read_ref {
     threshold: u64,
 }
 
@@ -2710,7 +3058,7 @@ where
         let source = r#"
 module metadata_diagnostic
 
-shared Config {
+shared Config has store, read_ref {
     threshold: u64,
 }
 
@@ -2741,7 +3089,7 @@ where
         let source = r#"
 module metadata_action
 
-resource NFT {
+resource NFT has store, create {
     token_id: u64,
 }
 

@@ -269,6 +269,14 @@ pub struct CodeGenerator {
     abort_handler_codes: BTreeSet<CellScriptRuntimeError>,
     /// Unique label counter for runtime checks.
     next_runtime_label: usize,
+    /// First non-recoverable codegen invariant failure observed while emitting assembly.
+    fatal_error: Option<CompileError>,
+}
+
+struct Entrypoint<'a> {
+    name: &'a str,
+    params: &'a [IrParam],
+    kind: EntrypointKind,
 }
 
 impl CodeGenerator {
@@ -372,6 +380,7 @@ impl CodeGenerator {
             fail_handler_codes: BTreeSet::new(),
             abort_handler_codes: BTreeSet::new(),
             next_runtime_label: 0,
+            fatal_error: None,
         }
     }
 
@@ -402,11 +411,11 @@ impl CodeGenerator {
         }
 
         self.emit_section(".text");
-        if let Some((entry_name, entry_params)) = first_entrypoint(ir) {
-            if entry_params.is_empty() {
-                self.emit_entry_direct_wrapper(entry_name);
+        if let Some(entrypoint) = first_entrypoint(ir) {
+            if entrypoint.params.is_empty() {
+                self.emit_entry_direct_wrapper(entrypoint.name);
             } else {
-                self.emit_entry_witness_wrapper(entry_name, entry_params)?;
+                self.emit_entry_witness_wrapper(entrypoint.name, entrypoint.params, entrypoint.kind)?;
             }
         }
 
@@ -431,7 +440,40 @@ impl CodeGenerator {
         self.generate_runtime_support(ir);
         self.emit_const_data_pool();
 
+        self.check_fatal_error()?;
         self.assemble(format)
+    }
+
+    pub(crate) fn record_fatal_error(&mut self, message: impl Into<String>) {
+        if self.fatal_error.is_none() {
+            self.fatal_error = Some(CompileError::without_span(message));
+        }
+    }
+
+    pub(crate) fn check_fatal_error(&mut self) -> Result<()> {
+        if let Some(error) = self.fatal_error.take() {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn usize_to_i64_codegen_offset(&mut self, offset: usize, context: &str) -> Option<i64> {
+        match i64::try_from(offset) {
+            Ok(offset) => Some(offset),
+            Err(_) => {
+                self.record_fatal_error(format!("{} offset {} does not fit in signed 64-bit codegen offsets", context, offset));
+                None
+            }
+        }
+    }
+
+    pub(crate) fn runtime_expr_temp_offset_or_record(&mut self, depth: usize) -> Option<usize> {
+        let offset = self.runtime_expr_temp_offset(depth);
+        if offset.is_none() {
+            self.record_fatal_error(format!("runtime expression temp slot {} is unavailable in the current frame layout", depth));
+        }
+        offset
     }
 
     fn emit_header(&mut self) {
@@ -899,7 +941,9 @@ impl CodeGenerator {
                         self.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
                     }
                     IrInstruction::Call { dest: Some(dest), func, .. } if self.pure_const_returns.contains_key(func) => {
-                        let value = self.pure_const_returns.get(func).cloned().expect("guarded pure const return");
+                        let Some(value) = self.pure_const_returns.get(func).cloned() else {
+                            continue;
+                        };
                         if let Some(value) = fixed_scalar_const_value(&value) {
                             self.prelude_scalar_immediates.insert(dest.id, value);
                             if dest.ty == IrType::U64 {
@@ -1954,7 +1998,9 @@ impl CodeGenerator {
     }
 
     fn emit_memory_load_with_avoid(&mut self, opcode: &str, dst: &str, base: &str, offset: usize, avoid: &[&str]) {
-        let offset = i64::try_from(offset).expect("memory offset should fit in i64");
+        let Some(offset) = self.usize_to_i64_codegen_offset(offset, "memory load") else {
+            return;
+        };
         if small_signed_immediate(offset) {
             self.emit(format!("{} {}, {}({})", opcode, dst, offset, base));
         } else {
@@ -2299,29 +2345,29 @@ pub fn analyze_backend_shape(assembly: &str) -> Result<BackendShapeMetrics> {
     MachineLayoutPlan::build(&lines).map(|plan| plan.metrics.into())
 }
 
-fn first_entrypoint(ir: &IrModule) -> Option<(&str, &[IrParam])> {
+fn first_entrypoint(ir: &IrModule) -> Option<Entrypoint<'_>> {
     for item in &ir.items {
         if let IrItem::Action(action) = item {
             if action.name == "main" {
-                return Some((&action.name, &action.params));
+                return Some(Entrypoint { name: &action.name, params: &action.params, kind: EntrypointKind::Action });
             }
         }
     }
     for item in &ir.items {
         if let IrItem::Action(action) = item {
             if action.params.is_empty() {
-                return Some((&action.name, &action.params));
+                return Some(Entrypoint { name: &action.name, params: &action.params, kind: EntrypointKind::Action });
             }
         }
     }
     for item in &ir.items {
         if let IrItem::Action(action) = item {
-            return Some((&action.name, &action.params));
+            return Some(Entrypoint { name: &action.name, params: &action.params, kind: EntrypointKind::Action });
         }
     }
     for item in &ir.items {
         if let IrItem::Lock(lock) = item {
-            return Some((&lock.name, &lock.params));
+            return Some(Entrypoint { name: &lock.name, params: &lock.params, kind: EntrypointKind::Lock });
         }
     }
     None
@@ -2340,7 +2386,7 @@ mod schema;
 #[allow(unused_imports)]
 pub(crate) use abi::{
     abi_arg_label, call_abi_arg_count, call_param_abi_arg_count, entry_abi_arg_count, entry_witness_payload_layout, CallLengthKind,
-    CallableAbi, ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, ENTRY_SCRIPT_ARGS_LEN_OFFSET, ENTRY_SCRIPT_ARGS_START_OFFSET,
+    CallableAbi, EntrypointKind, ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, ENTRY_SCRIPT_ARGS_LEN_OFFSET, ENTRY_SCRIPT_ARGS_START_OFFSET,
     ENTRY_SCRIPT_BUFFER_OFFSET, ENTRY_SCRIPT_BUFFER_SIZE, ENTRY_SCRIPT_SIZE_OFFSET, ENTRY_WITNESS_BUFFER_OFFSET,
     ENTRY_WITNESS_BUFFER_SIZE, ENTRY_WITNESS_FRAME_SIZE, ENTRY_WITNESS_HEADER_SIZE, ENTRY_WITNESS_LABEL, ENTRY_WITNESS_MAGIC,
     ENTRY_WITNESS_RA_OFFSET, ENTRY_WITNESS_SIZE_OFFSET,
@@ -2750,6 +2796,10 @@ where
 action rem(x: u64, y: u64) -> u64
 where
     return x % y
+
+action div8(x: u8, y: u8) -> u8
+where
+    return x / y
 "#;
         let result = crate::compile(
             program,
@@ -2761,6 +2811,11 @@ where
         assert!(assembly.contains("bnez t1, .L"), "division/rem should guard zero divisor:\n{}", assembly);
         assert!(assembly.contains("divu t0, t0, t1"), "division should use unsigned div:\n{}", assembly);
         assert!(assembly.contains("remu t0, t0, t1"), "modulo should use unsigned rem:\n{}", assembly);
+        assert!(
+            assembly.contains("andi t0, t0, 255") && assembly.contains("andi t1, t1, 255"),
+            "narrow division should truncate operands before dividing:\n{}",
+            assembly
+        );
     }
 
     #[test]
@@ -3199,6 +3254,18 @@ lock helpers(
         generator.emit_sp_addi("t6", 8192);
 
         assert_eq!(generator.assembly, vec!["    li t4, 4096", "    add t4, sp, t4", "    li t6, 8192", "    add t6, sp, t6",]);
+    }
+
+    #[test]
+    fn unrepresentable_stack_offsets_report_compile_error() {
+        if usize::BITS <= 63 {
+            return;
+        }
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.emit_stack_load("t0", (i64::MAX as usize) + 1);
+
+        let error = generator.check_fatal_error().expect_err("oversized stack offset should be a compile error");
+        assert!(error.message.contains("does not fit in signed 64-bit"));
     }
 
     #[test]

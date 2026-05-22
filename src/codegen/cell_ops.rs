@@ -136,7 +136,7 @@ impl CodeGenerator {
         self.emit(format!("li t0, {}", CKB_ITEM_MISSING));
         self.emit("sub t1, a0, t0");
         self.emit(format!("beqz t1, {}", next_label));
-        self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+        self.emit_fail(CellScriptRuntimeError::SyscallFailed);
 
         self.emit_label(&type_hash_label);
         self.emit_loaded_schema_exact_size_check(output_size_offset, 32, "destroy output type hash");
@@ -518,10 +518,18 @@ impl CodeGenerator {
         output_size_offset: usize,
         output_buffer_offset: usize,
     ) {
-        let input_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let input_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_start_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
-        let output_len_offset = self.runtime_expr_temp_offset(3).expect("runtime temp slot 3");
+        let Some(input_start_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return;
+        };
+        let Some(input_len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return;
+        };
+        let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(2) else {
+            return;
+        };
+        let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(3) else {
+            return;
+        };
         self.emit_dynamic_table_field_span_to_stack(
             input_size_offset,
             input_buffer_offset,
@@ -911,7 +919,9 @@ impl CodeGenerator {
             ));
             self.emit_sp_addi("t4", input_buffer_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
-            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
+            let Some(input_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 2) else {
+                return;
+            };
             self.emit("# cellscript abi: preserve mutate input scalar before transition expression");
             self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
@@ -920,13 +930,17 @@ impl CodeGenerator {
                 MutateTransitionOp::Add => self.emit("add t1, t0, t1"),
                 MutateTransitionOp::Sub => self.emit("sub t1, t0, t1"),
                 MutateTransitionOp::Set => {
-                    unreachable!("set transitions are verified by emit_mutate_replacement_set_transition_checks")
+                    self.record_fatal_error("set transition reached add/sub mutation verifier");
+                    return;
                 }
                 MutateTransitionOp::Append => {
-                    unreachable!("append transitions are verified by emit_mutate_replacement_dynamic_table_append_checks")
+                    self.record_fatal_error("append transition reached add/sub mutation verifier");
+                    return;
                 }
             }
-            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let Some(expected_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 1) else {
+                return;
+            };
             self.emit("# cellscript abi: preserve mutate expected scalar across output field load");
             self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
@@ -1003,7 +1017,9 @@ impl CodeGenerator {
             );
             self.emit("add t4, t4, t5");
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
-            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
+            let Some(input_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 2) else {
+                return false;
+            };
             self.emit("# cellscript abi: preserve mutate table input scalar before transition expression");
             self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
@@ -1014,7 +1030,9 @@ impl CodeGenerator {
                 MutateTransitionOp::Set => {}
                 MutateTransitionOp::Append => {}
             }
-            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let Some(expected_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 1) else {
+                return false;
+            };
             self.emit("# cellscript abi: preserve mutate table expected scalar across output field load");
             self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
@@ -1174,10 +1192,12 @@ impl CodeGenerator {
                     self.emit("sub t6, t3, t2"); // expected_hi = input_hi - borrow
                 }
                 MutateTransitionOp::Set => {
-                    unreachable!("set transitions are verified by emit_mutate_replacement_set_transition_checks")
+                    self.record_fatal_error("set transition reached u128 add/sub mutation verifier");
+                    return;
                 }
                 MutateTransitionOp::Append => {
-                    unreachable!("append transitions are verified by emit_mutate_replacement_dynamic_table_append_checks")
+                    self.record_fatal_error("append transition reached u128 add/sub mutation verifier");
+                    return;
                 }
             }
 
@@ -1321,8 +1341,12 @@ impl CodeGenerator {
         let Some(width) = layout_fixed_byte_width(layout) else {
             return false;
         };
-        let output_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return false;
+        };
+        let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return false;
+        };
         self.emit_dynamic_table_field_span_to_stack(
             output_size_offset,
             output_buffer_offset,
@@ -1347,7 +1371,9 @@ impl CodeGenerator {
             ));
             self.emit_stack_load("t4", output_start_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
-            let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let Some(actual_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 1) else {
+                return false;
+            };
             self.emit("# cellscript abi: preserve output table scalar before expected expression");
             self.emit_stack_store("t0", actual_value_offset);
             self.emit_expected_operand_to_t1(expected);
@@ -1391,8 +1417,12 @@ impl CodeGenerator {
         let IrOperand::Var(var) = expected else {
             return false;
         };
-        let output_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return false;
+        };
+        let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return false;
+        };
         self.emit_dynamic_table_field_span_to_stack(
             output_size_offset,
             output_buffer_offset,
@@ -2061,8 +2091,12 @@ impl CodeGenerator {
         let output_buffer_offset = self.runtime_scratch_buffer_offset();
         self.emit_load_cell_data_syscall("create_unique_identity_field", CKB_SOURCE_OUTPUT, output_index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
-        let output_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let Some(output_pointer_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return;
+        };
+        let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return;
+        };
         let context = format!("create_unique identity field {}.{}", pattern.ty, field);
         if self.type_fixed_sizes.contains_key(&pattern.ty) {
             self.emit_loaded_fixed_field_pointer_to_stack(
@@ -2193,10 +2227,18 @@ impl CodeGenerator {
         let output_buffer_offset = self.runtime_scratch_buffer_offset();
         self.emit_load_cell_data_syscall("replace_unique_identity_field_output", CKB_SOURCE_OUTPUT, output_index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
-        let input_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let input_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_pointer_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
-        let output_len_offset = self.runtime_expr_temp_offset(3).expect("runtime temp slot 3");
+        let Some(input_pointer_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return;
+        };
+        let Some(input_len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return;
+        };
+        let Some(output_pointer_offset) = self.runtime_expr_temp_offset_or_record(2) else {
+            return;
+        };
+        let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(3) else {
+            return;
+        };
         let input_context = format!("replace_unique input identity field {}.{}", pattern.ty, field);
         let output_context = format!("replace_unique output identity field {}.{}", pattern.ty, field);
         if self.type_fixed_sizes.contains_key(&pattern.ty) {

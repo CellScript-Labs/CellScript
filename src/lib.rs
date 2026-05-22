@@ -86,7 +86,7 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
 
 /// In `--primitive-strict=0.15` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
 /// in capability declarations. They must be replaced by their kernel-effect equivalents.
-fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
+pub(crate) fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
     use crate::error::MigrationDiagnostic;
     for item in &module.items {
         let (capabilities, type_name, span) = match item {
@@ -1534,10 +1534,7 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
 
 /// Extract span from an expression.
 fn expr_span(expr: &ast::Expr) -> error::Span {
-    // AST expressions don't carry their own Span in the current definition,
-    // so we fall back to a default span.
-    let _ = expr;
-    error::Span::default()
+    expr.span()
 }
 
 fn bind_source_metadata(metadata: &mut CompileMetadata, mut source_units: Vec<SourceUnitMetadata>) {
@@ -2787,37 +2784,13 @@ fn verified_source_unit_disk_path(unit: &SourceUnitMetadata, trusted_root: &Utf8
 
 pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
     validate_compile_metadata(&result.metadata, result.artifact_format)?;
-
-    if result.artifact_bytes.is_empty() {
-        return Err(CompileError::without_span("compiler produced an empty artifact"));
-    }
-
-    let computed_hash = ckb_blake2b256(&result.artifact_bytes);
-    if computed_hash != result.artifact_hash {
-        return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
-    }
-    let computed_hash_hex = hex_encode(&computed_hash);
-    match &result.metadata.artifact_hash {
-        Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
-        Some(metadata_hash) => {
-            return Err(CompileError::without_span(format!(
-                "metadata artifact_hash '{}' does not match artifact bytes '{}'",
-                metadata_hash, computed_hash_hex
-            )));
-        }
-        None => return Err(CompileError::without_span("metadata is missing artifact_hash")),
-    }
-    match result.metadata.artifact_size_bytes {
-        Some(size) if size == result.artifact_bytes.len() => {}
-        Some(size) => {
-            return Err(CompileError::without_span(format!(
-                "metadata artifact_size_bytes {} does not match artifact size {}",
-                size,
-                result.artifact_bytes.len()
-            )));
-        }
-        None => return Err(CompileError::without_span("metadata is missing artifact_size_bytes")),
-    }
+    validate_artifact_binding_metadata(
+        &result.artifact_bytes,
+        &result.artifact_hash,
+        result.artifact_format,
+        &result.metadata,
+        "compiler produced an empty artifact",
+    )?;
 
     match result.artifact_format {
         ArtifactFormat::RiscvAssembly => {
@@ -2852,6 +2825,63 @@ pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
                 None => {}
             }
         }
+    }
+
+    Ok(())
+}
+
+fn validate_artifact_binding_metadata(
+    artifact_bytes: &[u8],
+    artifact_hash: &[u8; 32],
+    artifact_format: ArtifactFormat,
+    metadata: &CompileMetadata,
+    empty_artifact_message: &'static str,
+) -> Result<()> {
+    if artifact_bytes.is_empty() {
+        return Err(CompileError::without_span(empty_artifact_message));
+    }
+
+    let computed_hash = ckb_blake2b256(artifact_bytes);
+    if &computed_hash != artifact_hash {
+        return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
+    }
+    let computed_hash_hex = hex_encode(&computed_hash);
+    match &metadata.artifact_hash {
+        Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
+        Some(metadata_hash) => {
+            return Err(CompileError::without_span(format!(
+                "metadata artifact_hash '{}' does not match artifact bytes '{}'",
+                metadata_hash, computed_hash_hex
+            )));
+        }
+        None => return Err(CompileError::without_span("metadata is missing artifact_hash")),
+    }
+
+    match metadata.artifact_size_bytes {
+        Some(size) if size == artifact_bytes.len() => {}
+        Some(size) => {
+            return Err(CompileError::without_span(format!(
+                "metadata artifact_size_bytes {} does not match artifact size {}",
+                size,
+                artifact_bytes.len()
+            )));
+        }
+        None => return Err(CompileError::without_span("metadata is missing artifact_size_bytes")),
+    }
+
+    let expected_format = artifact_format.display_name();
+    if metadata.constraints.artifact.format != expected_format {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.artifact.format '{}' does not match artifact format '{}'",
+            metadata.constraints.artifact.format, expected_format
+        )));
+    }
+    if metadata.constraints.artifact.artifact_size_bytes != artifact_bytes.len() {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.artifact.artifact_size_bytes {} does not match artifact size {}",
+            metadata.constraints.artifact.artifact_size_bytes,
+            artifact_bytes.len()
+        )));
     }
 
     Ok(())
@@ -3704,29 +3734,13 @@ impl ValidatedArtifact {
     /// Validate that artifact bytes, hash, format, and metadata agree.
     pub fn validate(&self) -> Result<()> {
         validate_compile_metadata(&self.metadata, self.artifact_format)?;
-
-        if self.artifact_bytes.is_empty() {
-            return Err(CompileError::without_span("artifact bytes are empty"));
-        }
-
-        let computed_hash = ckb_blake2b256(&self.artifact_bytes);
-        if computed_hash != self.artifact_hash {
-            return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
-        }
-        let computed_hash_hex = hex_encode(&computed_hash);
-        match &self.metadata.artifact_hash {
-            Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
-            Some(metadata_hash) => {
-                return Err(CompileError::without_span(format!(
-                    "metadata artifact_hash '{}' does not match artifact bytes '{}'",
-                    metadata_hash, computed_hash_hex
-                )));
-            }
-            None => {
-                return Err(CompileError::without_span("metadata is missing artifact_hash"));
-            }
-        }
-
+        validate_artifact_binding_metadata(
+            &self.artifact_bytes,
+            &self.artifact_hash,
+            self.artifact_format,
+            &self.metadata,
+            "artifact bytes are empty",
+        )?;
         Ok(())
     }
 }
@@ -3861,9 +3875,9 @@ fn compile_ast_with_build(
 
     // 3. Type check
     if let Some((resolver, module_name)) = resolver {
-        types::check_with_resolver(ast, resolver, module_name)?;
+        types::check_with_resolver_and_primitive_strict(ast, resolver, module_name, options.is_primitive_strict())?;
     } else {
-        types::check(ast)?;
+        types::check_with_primitive_strict(ast, options.is_primitive_strict())?;
     }
     flow::check(ast)?;
 
@@ -3871,9 +3885,9 @@ fn compile_ast_with_build(
         let mut optimized = ast.clone();
         optimize::optimize_module(&mut optimized, options.opt_level)?;
         if let Some((resolver, module_name)) = resolver {
-            types::check_with_resolver(&optimized, resolver, module_name)?;
+            types::check_with_resolver_and_primitive_strict(&optimized, resolver, module_name, options.is_primitive_strict())?;
         } else {
-            types::check(&optimized)?;
+            types::check_with_primitive_strict(&optimized, options.is_primitive_strict())?;
         }
         flow::check(&optimized)?;
         Some(optimized)
@@ -4045,6 +4059,14 @@ fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOption
         opt_level: options.opt_level,
         target: options.target.clone().unwrap_or_default(),
         debug: options.debug,
+        target_profile: options.target_profile.clone().unwrap_or_default(),
+        primitive_compat: options.primitive_compat.clone().unwrap_or_default(),
+        ckb_limit_env: incremental_env_snapshot(&[
+            "CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_BYTES",
+        ]),
+        riscv_toolchain_env: incremental_env_snapshot(&["CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"]),
     };
 
     // We must recompile from source because the incremental cache does not
@@ -4066,6 +4088,14 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
         opt_level: options.opt_level,
         target: options.target.clone().unwrap_or_default(),
         debug: options.debug,
+        target_profile: options.target_profile.clone().unwrap_or_default(),
+        primitive_compat: options.primitive_compat.clone().unwrap_or_default(),
+        ckb_limit_env: incremental_env_snapshot(&[
+            "CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_BYTES",
+        ]),
+        riscv_toolchain_env: incremental_env_snapshot(&["CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"]),
     };
 
     let output_path = parent.join(".cell/build").join(path.file_name().unwrap_or("output"));
@@ -4076,6 +4106,10 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
     if let Err(error) = compiler.save_cache() {
         warn_incremental_cache_error("save", &cache_dir, error);
     }
+}
+
+fn incremental_env_snapshot(keys: &[&str]) -> Vec<(String, Option<String>)> {
+    keys.iter().map(|key| ((*key).to_string(), std::env::var(key).ok())).collect()
 }
 
 fn warn_incremental_cache_error(context: &str, cache_dir: &Utf8Path, error: impl std::fmt::Display) {
@@ -13695,6 +13729,8 @@ mod tests {
         result.artifact_hash = crate::ckb_blake2b256(&result.artifact_bytes);
         result.metadata.artifact_hash = Some(crate::hex_encode(&result.artifact_hash));
         result.metadata.artifact_size_bytes = Some(result.artifact_bytes.len());
+        result.metadata.constraints.artifact.format = result.artifact_format.display_name().to_string();
+        result.metadata.constraints.artifact.artifact_size_bytes = result.artifact_bytes.len();
     }
 
     fn parse_module_for_test(source: &str) -> crate::ast::Module {
@@ -13924,7 +13960,7 @@ where
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -13941,7 +13977,7 @@ where
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -13957,7 +13993,7 @@ where
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13972,7 +14008,7 @@ where
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14022,7 +14058,7 @@ where
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14035,7 +14071,7 @@ where
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14064,7 +14100,7 @@ where
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14076,7 +14112,7 @@ where
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14088,7 +14124,7 @@ where
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14100,7 +14136,7 @@ where
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14113,7 +14149,7 @@ fn bad(pool: &mut Pool) -> u64 {
     const LOCK_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14126,7 +14162,7 @@ lock bad(pool: &mut Pool) -> bool {
     const MUT_REF_LOCAL_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14140,7 +14176,7 @@ where
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14154,7 +14190,7 @@ where
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14168,7 +14204,7 @@ where
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14182,7 +14218,7 @@ where
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -14196,7 +14232,7 @@ where
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14210,7 +14246,7 @@ where
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14224,7 +14260,7 @@ where
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14238,7 +14274,7 @@ where
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14252,7 +14288,7 @@ where
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14266,7 +14302,7 @@ where
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14281,7 +14317,7 @@ where
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14296,7 +14332,7 @@ where
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -14311,7 +14347,7 @@ where
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14335,7 +14371,7 @@ fn leak(point: &Point) -> &Point {
     const FUNCTION_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14347,7 +14383,7 @@ fn bad(token: Token) -> u64 {
     const FUNCTION_CELL_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14359,7 +14395,7 @@ resource Token {
     const LOCK_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14371,7 +14407,7 @@ resource Token {
     const LOCK_BARE_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14383,7 +14419,7 @@ lock bad(token: &Token) -> bool {
     const CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14395,7 +14431,7 @@ fn bad(pair: &(Token, u64)) -> u64 {
     const CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14407,7 +14443,7 @@ where
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14419,7 +14455,7 @@ fn bad(tokens: Vec<Token>) -> u64 {
     const STRUCT_VEC_REFERENCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14457,7 +14493,7 @@ fn bad(pair: (&Point, u64)) -> u64 {
     const CALLABLE_ARRAY_MUT_REFERENCE_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14480,7 +14516,7 @@ fn bad(view: &read_ref Point) -> u64 {
     const ACTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14512,7 +14548,7 @@ lock bad(ref owner: Address) -> bool {
     const SCHEMA_REFERENCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14524,7 +14560,7 @@ struct Holder {
     const ENUM_REFERENCE_PAYLOAD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14558,7 +14594,7 @@ where
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     amount: u128,
 }
@@ -14567,7 +14603,7 @@ resource Token {
     const DUPLICATE_SHARED_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
     reserve: u64,
 }
@@ -14576,7 +14612,7 @@ shared Pool {
     const DUPLICATE_RECEIPT_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Grant {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     amount: u64,
 }
@@ -14628,7 +14664,7 @@ where
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14641,7 +14677,7 @@ lock owner_guard(token: protected Token, script_owner: lock_args Address, claime
     const ACTION_PROTECTED_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14653,7 +14689,7 @@ where
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14665,7 +14701,7 @@ lock bad(protected token: Token, lock_args owner: Address) -> bool {
     const LOCK_ARGS_DYNAMIC_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14756,7 +14792,7 @@ where
     const CREATE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14771,7 +14807,7 @@ where
     const CREATE_VERIFY_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14786,7 +14822,7 @@ where
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14801,7 +14837,7 @@ where
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14816,7 +14852,7 @@ where
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     owner: Address,
 }
@@ -14831,7 +14867,7 @@ where
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14846,7 +14882,7 @@ where
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14887,7 +14923,7 @@ where
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14900,7 +14936,7 @@ where
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14916,7 +14952,7 @@ where
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14931,7 +14967,7 @@ where
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14948,7 +14984,7 @@ where
     const CONSUME_DESTROY_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, consume, destroy {
     amount: u64,
 }
 
@@ -14973,7 +15009,7 @@ where
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
 }
 
@@ -14988,7 +15024,7 @@ where
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Flags {
+shared Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -15003,7 +15039,7 @@ where
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
 module test
 
-resource Flags {
+resource Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -15021,7 +15057,7 @@ where
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Flags {
+resource Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -15041,7 +15077,7 @@ where
     const READ_REF_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -15067,7 +15103,7 @@ where
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -15081,7 +15117,7 @@ where
     const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15097,7 +15133,7 @@ where
     const IMPURE_FN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -15110,7 +15146,7 @@ fn helper() -> u64 {
     const INDIRECT_IMPURE_FN_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -15392,7 +15428,7 @@ where
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15408,7 +15444,7 @@ where
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15425,7 +15461,7 @@ where
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15437,7 +15473,7 @@ where
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15449,7 +15485,7 @@ where
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15462,7 +15498,7 @@ where
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15487,7 +15523,7 @@ where
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15499,7 +15535,7 @@ where
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15525,7 +15561,7 @@ where
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15579,7 +15615,7 @@ where
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15592,7 +15628,7 @@ where
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15620,7 +15656,7 @@ where
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15652,7 +15688,7 @@ where
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15668,7 +15704,7 @@ where
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15793,7 +15829,7 @@ fn bad() -> bool {
     const INDIRECT_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15813,7 +15849,7 @@ where
     const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15833,7 +15869,7 @@ where
     const CONSUME_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15847,7 +15883,7 @@ where
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15864,7 +15900,7 @@ where
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15884,7 +15920,7 @@ where
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15904,7 +15940,7 @@ where
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     symbol: [u8; 8],
 }
@@ -15928,7 +15964,7 @@ where
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -16197,7 +16233,7 @@ enum Flag {
     Off,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16218,7 +16254,7 @@ enum Flag {
     Off,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16380,7 +16416,7 @@ where
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
 module test
 
-resource Bad {
+resource Bad has store, create, consume, replace, burn, relock, read_ref {
     missing: MissingType,
 }
 
@@ -16401,11 +16437,11 @@ where
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-resource Vault has store {
+resource Vault has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16417,7 +16453,7 @@ where
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16440,7 +16476,7 @@ where
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
 module test
 
-resource Group {
+resource Group has store, create, consume, replace, burn, relock, read_ref {
     members: Vec<Address>,
     anchors: Vec<Hash>,
 }
@@ -16500,7 +16536,7 @@ where
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Group has store {
+resource Group has store, create, consume, replace, burn, relock, read_ref {
     members: Vec<Address>,
     labels: Vec<u8>,
 }
@@ -16878,7 +16914,7 @@ where
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
 module test
 
-resource NFT {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64,
     owner: Address,
 }
@@ -16934,7 +16970,7 @@ where
     const U128_MUTATE_PROGRAM: &str = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -16948,7 +16984,7 @@ where
     const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
 module test
 
-shared BigState has store {
+shared BigState has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
     pad: [u8; 600],
 }
@@ -16962,11 +16998,11 @@ where
     const SUMMARY_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16989,7 +17025,7 @@ lock invalid(owner: Address) -> u64 {
     const LOCK_CREATE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -17011,7 +17047,7 @@ lock bad() -> bool {
     const LOCK_READ_REF_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -17024,11 +17060,11 @@ lock guard() -> bool {
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
 module test
 
-resource Config has store {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
 }
 
-resource Fingerprint has store {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -17048,7 +17084,7 @@ where
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -17062,7 +17098,7 @@ where
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -17074,7 +17110,7 @@ where
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17091,7 +17127,7 @@ where
     const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17110,7 +17146,7 @@ where
     const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     id: u64,
 }
 
@@ -17126,7 +17162,7 @@ where
     const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: bool,
     id: u64,
 }
@@ -17143,7 +17179,7 @@ where
     const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17163,7 +17199,7 @@ where
     const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17183,7 +17219,7 @@ where
     const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17203,7 +17239,7 @@ where
     const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17224,7 +17260,7 @@ where
     const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17245,7 +17281,7 @@ where
     const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17265,7 +17301,7 @@ where
     const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17287,12 +17323,12 @@ where
     const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
 
-receipt OtherTicket has store {
+receipt OtherTicket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17956,7 +17992,7 @@ where
         let source = r#"
 module test
 
-resource Coin has store {
+resource Coin has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -18223,6 +18259,24 @@ where
             "destroy absence scan did not use Output LOAD_CELL_BY_FIELD:\n{}",
             asm
         );
+        let destroy_scan = asm
+            .split("# cellscript abi: LOAD_CELL_BY_FIELD reason=destroy_output_type_hash source=Output index=t6 field=5")
+            .nth(1)
+            .expect("destroy output scan should be present");
+        let unexpected_syscall_error_path = destroy_scan
+            .split("# cellscript abi: exact size check destroy output type hash")
+            .next()
+            .expect("destroy output scan should check the syscall status before loaded data");
+        assert!(
+            unexpected_syscall_error_path.contains("j .Lburn_fail_1"),
+            "unexpected destroy scan syscall errors must map to syscall-failed:\n{}",
+            unexpected_syscall_error_path
+        );
+        assert!(
+            !unexpected_syscall_error_path.contains("j .Lburn_fail_16"),
+            "unexpected destroy scan syscall errors must not be reported as Molecule bounds failures:\n{}",
+            unexpected_syscall_error_path
+        );
         assert!(
             asm.contains("# cellscript abi: LOAD_CELL_DATA reason=destroy source=Input index=1"),
             "destroy input data load did not use operation-specific Input LOAD_CELL ABI:\n{}",
@@ -18376,7 +18430,7 @@ resource NFT has destroy {
     owner: Address,
 }
 
-receipt Listing has destroy {
+receipt Listing has store, create, destroy {
     token_id: u64,
     seller: Address,
     price: u64,
@@ -18431,15 +18485,15 @@ where
         let program = r#"
 module test
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-receipt Grant has store {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     amount: u64,
 }
@@ -20756,7 +20810,7 @@ where
         let source = r#"
 module dynamic_len_transition
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     total_supply: u64,
     name: Vec<u8>,
 }
@@ -21107,7 +21161,7 @@ where
         let source = r#"
 module test::shared_create
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     enabled: bool,
 }
@@ -21243,7 +21297,7 @@ where
         let source = r#"
 module ckb_capacity_surface
 
-resource Receipt {
+resource Receipt has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -21346,7 +21400,7 @@ where
             r#"
 module hash_type_dsl
 
-resource Token has store, transfer
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref
 with_default_hash_type(Data1)
 {
     amount: u64,
@@ -21661,6 +21715,37 @@ where
     }
 
     #[test]
+    fn loaded_artifact_validation_rejects_metadata_artifact_size_mismatch() {
+        let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        let mut metadata = result.metadata.clone();
+        metadata.artifact_size_bytes = Some(result.artifact_bytes.len() + 1);
+
+        let err = crate::validate_artifact_metadata(result.artifact_bytes, metadata).unwrap_err();
+
+        assert!(err.message.contains("metadata artifact_size_bytes"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_constraints_artifact_size_mismatch() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.constraints.artifact.artifact_size_bytes = result.artifact_bytes.len() + 1;
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("metadata constraints.artifact.artifact_size_bytes"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_constraints_artifact_format_mismatch() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.constraints.artifact.format = ArtifactFormat::RiscvElf.display_name().to_string();
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("metadata constraints.artifact.format"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn compile_result_validation_rejects_metadata_artifact_format_mismatch() {
         let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         result.metadata.artifact_format = ArtifactFormat::RiscvElf.display_name().to_string();
@@ -21875,7 +21960,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#;
@@ -22205,7 +22290,7 @@ resource Token has store {
         let source = r#"
 module cellscript::shorthand
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     symbol: [u8; 8]
 }
@@ -22554,7 +22639,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22605,7 +22690,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22659,7 +22744,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     price: u64
     note: u64
@@ -22693,7 +22778,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     price: u64
     note: u64
@@ -22722,7 +22807,7 @@ where
         let function_source = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -22759,7 +22844,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22788,7 +22873,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22815,7 +22900,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22868,7 +22953,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22902,11 +22987,11 @@ where
         let source = r#"
 module test
 
-resource Authority has store {
+resource Authority has store, create, consume, replace, burn, relock, read_ref {
     minted: u64
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -22941,7 +23026,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22965,15 +23050,15 @@ where
         let source = r#"
 module test
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-receipt Grant has store {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     amount: u64,
 }
@@ -23004,7 +23089,7 @@ where
         let source = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23033,7 +23118,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     status: OfferState
     amount: u64
 }
@@ -23079,7 +23164,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23109,7 +23194,7 @@ enum OfferState {
     Live,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23141,7 +23226,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23173,7 +23258,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23207,7 +23292,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23238,7 +23323,7 @@ enum OfferState {
     Live(u64),
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -23408,7 +23493,7 @@ where
         let source = r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23456,7 +23541,7 @@ where
         let source = r#"
 module test
 
-resource Config {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -23529,7 +23614,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23570,7 +23655,7 @@ invariant token_conservation {
     assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23652,11 +23737,11 @@ invariant selected_token_delta {
     assert_delta(Token.amount, witness.expected_delta, scope = selected_cells)
 }
 
-resource Nft {
+resource Nft has store, create, consume, replace, burn, relock, read_ref {
     id: Hash,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23706,7 +23791,7 @@ invariant selected_token_delta {
     assert_delta(Token.amount, expected_delta, scope = selected_cells)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23731,7 +23816,7 @@ invariant selected_token_delta {
     assert_delta(Token.amount, input<Token>.amount, scope = selected_cells)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23756,7 +23841,7 @@ invariant token_supply_conserved {
     assert_conserved(Token.amount, scope = group)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23820,7 +23905,7 @@ invariant token_supply_conserved {
     assert_conserved(Token.amount, scope = group)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -24008,7 +24093,7 @@ invariant lock_scans_transaction {
     assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -24079,7 +24164,7 @@ invariant flag_distinct {
     assert_distinct(group_outputs<Flag>.enabled, scope = group)
 }
 
-resource Flag {
+resource Flag has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
 }
 
@@ -24103,7 +24188,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -24129,7 +24214,7 @@ invariant token_conservation {
     assert_invariant(1, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -24155,7 +24240,7 @@ invariant config_digest {
     assert_invariant(read_ref<Config>().digest == Hash::zero(), "config digest must be zero")
 }
 
-resource Config {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -24263,7 +24348,7 @@ where
         let source = r#"
 module test
 
-resource Token has store, consume, burn {
+resource Token has store, consume, burn, create, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -24280,7 +24365,7 @@ where
         let source = r#"
 module test
 
-resource Token has store, replace, relock {
+resource Token has store, replace, relock, create, consume, burn, read_ref {
     amount: u64,
 }
 
@@ -24395,7 +24480,7 @@ where
         let source = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
     owner: Address,
 }
@@ -24436,7 +24521,7 @@ where
         let source = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -24462,7 +24547,7 @@ where
         let source = r#"
 	module test
 
-resource NFT has store, destroy {
+resource NFT has store, destroy, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -24512,7 +24597,7 @@ where
         let source = r#"
 module test
 
-resource Collection has store {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     creator: Address,
     total_supply: u64,
@@ -24557,7 +24642,7 @@ where
         let source = r#"
 module test
 
-resource NFT has store {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64,
     owner: Address,
     metadata_hash: Hash,
@@ -24565,7 +24650,7 @@ resource NFT has store {
     royalty_bps: u16,
 }
 
-resource Collection has store {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     creator: Address,
     total_supply: u64,
     max_supply: u64,
@@ -24627,22 +24712,22 @@ where
         let source = r#"
 module test
 
-resource Authority has store {
+resource Authority has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
     minted: u64,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     symbol: [u8; 8],
 }
 
-shared Pool has store {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
     reserve: u64,
 }
 
-receipt Receipt has store {
+receipt Receipt has store, create, consume, replace, burn, relock, read_ref {
     pool_id: Hash,
     amount: u64,
 }
@@ -24752,7 +24837,7 @@ where
         let source = r#"
 module scoped_lock
 
-resource DynamicCell {
+resource DynamicCell has store, create, consume, replace, burn, relock, read_ref {
     name: String,
 }
 
@@ -24829,7 +24914,7 @@ struct Signature {
     signer: Address,
 }
 
-receipt Proposal {
+receipt Proposal has store, create, consume, replace, burn, relock, read_ref {
     signatures: Vec<Signature>,
     expires_at: u64,
 }
@@ -24868,7 +24953,7 @@ enum LockType {
     Relative,
 }
 
-resource TimeLock {
+resource TimeLock has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
     lock_type: LockType,
     unlock_height: u64,
@@ -24905,7 +24990,7 @@ enum AssetType {
     Token(Hash),
 }
 
-resource LockedAsset {
+resource LockedAsset has store, create, consume, replace, burn, relock, read_ref {
     asset_type: AssetType,
     amount: u64,
     lock_hash: Hash,
@@ -24965,7 +25050,7 @@ lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) 
         let source = r#"
 module dynamic_schema_access
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     creator: Address,
 }
@@ -25015,7 +25100,7 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
         let source = r#"
 module dynamic_vec_len
 
-receipt Emergency {
+receipt Emergency has store, create, consume, replace, burn, relock, read_ref {
     lock_hash: Hash,
     approvers: Vec<Address>,
 }
@@ -25055,7 +25140,7 @@ lock enough(protected emergency: Emergency, witness required: u8) -> bool {
         let source = r#"
 module dynamic_vec_iter
 
-resource Wallet {
+resource Wallet has store, create, consume, replace, burn, relock, read_ref {
     signers: Vec<Address>,
     threshold: u8,
 }
@@ -25105,7 +25190,7 @@ lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
         let source = r#"
 module dynamic_mutation
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     total_supply: u64,
     max_supply: u64,
@@ -25149,7 +25234,7 @@ struct Owner {
     flags: [u8; 2],
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Owner,
     pair: (u64, Owner),
     checkpoints: [(Owner, u64); 2],
@@ -25199,7 +25284,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25230,11 +25315,11 @@ where
 module audit::type_id_create
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
-resource PlainToken has store {
+resource PlainToken has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25274,7 +25359,7 @@ where
 module audit::type_id_create
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25299,7 +25384,7 @@ where
         let program = r#"
 module audit::output_data
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25360,7 +25445,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25379,7 +25464,7 @@ struct TokenSnapshot {
         let program = r#"
 module audit::identity_type_id
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(ckb_type_id)
 {
     amount: u64
@@ -25402,7 +25487,7 @@ where
         let program = r#"
 module audit::identity_none
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -25423,7 +25508,7 @@ where
         let program = r#"
 module audit::identity_field
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -25447,7 +25532,7 @@ where
         let program = r#"
 module audit::identity_singleton
 
-resource Config has store
+resource Config has store, create, consume, replace, burn, relock, read_ref
     identity(singleton_type)
 {
     value: u64
@@ -25470,7 +25555,7 @@ where
         let program = r#"
 module audit::identity_script_args
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -25493,7 +25578,7 @@ where
         let program = r#"
 module audit::create_unique_field_runtime
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -25538,12 +25623,12 @@ where
         let program = r#"
 module audit::destroy_policy_runtime
 
-resource Token has store, consume, burn
+resource Token has store, consume, burn, create, replace, relock, read_ref
 {
     amount: u64
 }
 
-resource NFT has store, consume, burn
+resource NFT has store, consume, burn, create, replace, relock, read_ref
 {
     token_id: u64,
     owner: Address
@@ -25620,7 +25705,7 @@ where
         let bad_unique = r#"
 module audit::bad_destroy_unique
 
-resource Token has store, consume, burn
+resource Token has store, consume, burn, create, replace, relock, read_ref
 {
     amount: u64
 }
@@ -25637,7 +25722,7 @@ where
         let bad_burn = r#"
 module audit::bad_burn_amount
 
-resource Flag has store, consume, burn
+resource Flag has store, consume, burn, create, replace, relock, read_ref
 {
     active: bool
 }
@@ -25657,7 +25742,7 @@ where
         let program = r#"
 module audit::replace_unique_field_runtime
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -25700,7 +25785,7 @@ where
         let create_script_args_program = r#"
 module audit::create_unique_script_args_runtime
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -25734,7 +25819,7 @@ where
         let script_args_program = r#"
 module audit::unique_script_args_runtime
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -25766,7 +25851,7 @@ where
         let singleton_program = r#"
 module audit::unique_singleton_runtime
 
-resource Config has store
+resource Config has store, create, consume, replace, burn, relock, read_ref
     identity(singleton_type)
 {
     value: u64
@@ -25801,7 +25886,7 @@ where
         let program = r#"
 module audit::dynamic_identity_field
 
-resource Note has store
+resource Note has store, create, consume, replace, burn, relock, read_ref
     identity(field(memo))
 {
     memo: Vec<u8>
@@ -25860,6 +25945,11 @@ where
         assert!(
             asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args source=GroupInput index=0"),
             "entry wrapper did not load positional arguments from GroupInput witness:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_group_output source=GroupOutput index=0"),
+            "action entry wrapper should fall back to GroupOutput witness for output-only type scripts:\n{}",
             asm
         );
         assert!(
@@ -26114,15 +26204,15 @@ where
         let program = r#"
 module vm::entry_abi
 
-resource A has store, destroy {
+resource A has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
-resource B has store, destroy {
+resource B has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
-resource C has store, destroy {
+resource C has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
@@ -26244,7 +26334,7 @@ version = "0.1.0"
             r#"
 module dep::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -26706,7 +26796,7 @@ entry = "contracts/main.cell"
             r#"
 module demo::helper
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -26816,7 +26906,7 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -26991,7 +27081,7 @@ where
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -27002,7 +27092,7 @@ resource Token has store, transfer, destroy {
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,

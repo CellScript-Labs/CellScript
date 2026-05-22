@@ -21,7 +21,6 @@ pub(crate) const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = 2082;
 pub(crate) const CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER: u64 = 2083;
 pub(crate) const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
 pub(crate) const CKB_CURRENT_CYCLES_SYSCALL_NUMBER: u64 = 2042;
-pub(crate) const CKB_DEBUG_PRINT_SYSCALL_NUMBER: u64 = 2177;
 
 pub(crate) const CKB_VM2_SPAWN_SYSCALL_NUMBER: u64 = 2601;
 pub(crate) const CKB_VM2_WAIT_SYSCALL_NUMBER: u64 = 2602;
@@ -254,19 +253,6 @@ pub(crate) fn stdlib_syscall_specs(_target_profile: TargetProfile) -> Vec<Syscal
             size_check: SyscallSizeCheck::None,
             fail_behavior: SyscallFailBehavior::ReturnStatus,
             detail: "current_cycles",
-        },
-        SyscallSpec {
-            dsl_name: "syscall_debug_print",
-            symbol: "__syscall_debug_print",
-            number: CKB_DEBUG_PRINT_SYSCALL_NUMBER,
-            kind: SyscallKind::Unit,
-            raw_status_reg: "a0",
-            semantic_status_reg: "a0",
-            return_regs: NO_RETURNS,
-            arg_comment: "a0 = msg pointer, a1 = msg length",
-            size_check: SyscallSizeCheck::None,
-            fail_behavior: SyscallFailBehavior::ReturnStatus,
-            detail: "debug_print",
         },
     ]
 }
@@ -660,6 +646,17 @@ mod tests {
             let entry = helper_inventory_entry(spec.symbol, TargetProfile::Ckb).expect("low-level syscall spec must be inventoried");
             assert_eq!(entry.coverage, HelperCoverageKind::SpecDriven, "{entry:?}");
         }
+    }
+
+    #[test]
+    fn ckb_debug_syscall_is_not_a_production_inventory_surface() {
+        assert!(
+            stdlib_syscall_specs(TargetProfile::Ckb)
+                .into_iter()
+                .all(|spec| spec.symbol != "__syscall_debug_print" && spec.number != 2177),
+            "debug syscall 2177 must stay out of the CKB production syscall spec table"
+        );
+        assert!(helper_inventory_entry("__syscall_debug_print", TargetProfile::Ckb).is_none());
     }
 
     #[test]

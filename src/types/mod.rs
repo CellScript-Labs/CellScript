@@ -341,6 +341,7 @@ pub struct TypeChecker<'a> {
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
+    primitive_strict: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -420,6 +421,32 @@ fn register_type_id(seen: &mut HashMap<String, Span>, type_name: &str, type_id: 
     register_type_id_value(seen, type_name, &type_id.value, type_id.span)
 }
 
+fn validate_module_primitive_strict_capabilities(module: &Module) -> Result<()> {
+    for item in &module.items {
+        let (capabilities, type_name, span) = match item {
+            Item::Resource(resource) => (&resource.capabilities, resource.name.as_str(), resource.span),
+            Item::Shared(shared) => (&shared.capabilities, shared.name.as_str(), shared.span),
+            Item::Receipt(receipt) => (&receipt.capabilities, receipt.name.as_str(), receipt.span),
+            _ => continue,
+        };
+
+        for capability in capabilities {
+            if capability.is_protocol_verb() {
+                return Err(CompileError::new(
+                    format!(
+                        "type '{}' declares legacy capability '{}', which is not allowed in strict primitive mode; use kernel effects '{}'",
+                        type_name,
+                        capability_name(*capability),
+                        capability.kernel_effects().iter().map(|cap| capability_name(*cap)).collect::<Vec<_>>().join(", "),
+                    ),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Default for TypeChecker<'_> {
     fn default() -> Self {
         Self::new()
@@ -446,6 +473,7 @@ impl<'a> TypeChecker<'a> {
             current_module: None,
             current_callable: None,
             current_return_type: None,
+            primitive_strict: false,
         }
     }
 
@@ -456,10 +484,24 @@ impl<'a> TypeChecker<'a> {
         checker
     }
 
+    pub fn with_primitive_strict(mut self, primitive_strict: bool) -> Self {
+        self.primitive_strict = primitive_strict;
+        self
+    }
+
+    pub fn with_resolver_and_primitive_strict(
+        resolver: &'a ModuleResolver,
+        current_module: impl Into<String>,
+        primitive_strict: bool,
+    ) -> Self {
+        Self::with_resolver(resolver, current_module).with_primitive_strict(primitive_strict)
+    }
+
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
+        self.validate_primitive_strict_capabilities(module)?;
         self.reject_imports_without_resolver(module)?;
         let mut seen_symbols = HashSet::new();
         let mut seen_type_ids = HashMap::new();
@@ -571,6 +613,21 @@ impl<'a> TypeChecker<'a> {
             self.check_item(item)?;
         }
         Ok(())
+    }
+
+    fn validate_primitive_strict_capabilities(&self, module: &Module) -> Result<()> {
+        if !self.primitive_strict {
+            return Ok(());
+        }
+
+        if let Some(resolver) = self.resolver {
+            for loaded_module in resolver.modules() {
+                validate_module_primitive_strict_capabilities(loaded_module)?;
+            }
+            Ok(())
+        } else {
+            validate_module_primitive_strict_capabilities(module)
+        }
     }
 
     fn reject_imports_without_resolver(&self, module: &Module) -> Result<()> {
@@ -2956,16 +3013,130 @@ impl<'a> TypeChecker<'a> {
 
     fn check_no_unreachable_nested(&self, stmt: &Stmt) -> Result<()> {
         match stmt {
+            Stmt::Let(let_stmt) => self.check_no_unreachable_expr(&let_stmt.value)?,
             Stmt::If(if_stmt) => {
+                self.check_no_unreachable_expr(&if_stmt.condition)?;
                 self.check_no_unreachable_stmts(&if_stmt.then_branch)?;
                 if let Some(else_branch) = &if_stmt.else_branch {
                     self.check_no_unreachable_stmts(else_branch)?;
                 }
             }
-            Stmt::For(for_stmt) => self.check_no_unreachable_stmts(&for_stmt.body)?,
-            Stmt::While(while_stmt) => self.check_no_unreachable_stmts(&while_stmt.body)?,
-            Stmt::Expr(Expr::Block(stmts, _)) => self.check_no_unreachable_stmts(stmts)?,
-            _ => {}
+            Stmt::For(for_stmt) => {
+                self.check_no_unreachable_expr(&for_stmt.iterable)?;
+                self.check_no_unreachable_stmts(&for_stmt.body)?;
+            }
+            Stmt::While(while_stmt) => {
+                self.check_no_unreachable_expr(&while_stmt.condition)?;
+                self.check_no_unreachable_stmts(&while_stmt.body)?;
+            }
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.check_no_unreachable_expr(expr)?,
+            Stmt::Return(None) => {}
+        }
+        Ok(())
+    }
+
+    fn check_no_unreachable_expr(&self, expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => {}
+            Expr::Assign(assign) => {
+                self.check_no_unreachable_expr(&assign.target)?;
+                self.check_no_unreachable_expr(&assign.value)?;
+            }
+            Expr::Binary(binary) => {
+                self.check_no_unreachable_expr(&binary.left)?;
+                self.check_no_unreachable_expr(&binary.right)?;
+            }
+            Expr::Unary(unary) => self.check_no_unreachable_expr(&unary.expr)?,
+            Expr::Call(call) => {
+                self.check_no_unreachable_expr(&call.func)?;
+                for arg in &call.args {
+                    self.check_no_unreachable_expr(arg)?;
+                }
+            }
+            Expr::FieldAccess(field) => self.check_no_unreachable_expr(&field.expr)?,
+            Expr::Index(index) => {
+                self.check_no_unreachable_expr(&index.expr)?;
+                self.check_no_unreachable_expr(&index.index)?;
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.check_no_unreachable_expr(lock)?;
+                }
+            }
+            Expr::Consume(consume) => self.check_no_unreachable_expr(&consume.expr)?,
+            Expr::Transfer(transfer) => {
+                self.check_no_unreachable_expr(&transfer.expr)?;
+                self.check_no_unreachable_expr(&transfer.to)?;
+            }
+            Expr::Destroy(destroy) => self.check_no_unreachable_expr(&destroy.expr)?,
+            Expr::ReadRef(_) => {}
+            Expr::Claim(claim) => self.check_no_unreachable_expr(&claim.receipt)?,
+            Expr::Settle(settle) => self.check_no_unreachable_expr(&settle.expr)?,
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.check_no_unreachable_expr(lock)?;
+                }
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.check_no_unreachable_expr(&replace.expr)?;
+                for (_, value) in &replace.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+            }
+            Expr::Assert(assert_expr) => {
+                self.check_no_unreachable_expr(&assert_expr.condition)?;
+                self.check_no_unreachable_expr(&assert_expr.message)?;
+            }
+            Expr::Require(require_expr) => {
+                self.check_no_unreachable_expr(&require_expr.condition)?;
+                if let Some(message) = &require_expr.message {
+                    self.check_no_unreachable_expr(message)?;
+                }
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.check_no_unreachable_expr(expr)?;
+                }
+            }
+            Expr::Preserve(_) => {}
+            Expr::Block(stmts, _) => self.check_no_unreachable_stmts(stmts)?,
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
+                for item in items {
+                    self.check_no_unreachable_expr(item)?;
+                }
+            }
+            Expr::If(if_expr) => {
+                self.check_no_unreachable_expr(&if_expr.condition)?;
+                self.check_no_unreachable_expr(&if_expr.then_branch)?;
+                self.check_no_unreachable_expr(&if_expr.else_branch)?;
+            }
+            Expr::Cast(cast) => self.check_no_unreachable_expr(&cast.expr)?,
+            Expr::Range(range) => {
+                self.check_no_unreachable_expr(&range.start)?;
+                self.check_no_unreachable_expr(&range.end)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+            }
+            Expr::Match(match_expr) => {
+                self.check_no_unreachable_expr(&match_expr.expr)?;
+                for arm in &match_expr.arms {
+                    self.check_no_unreachable_expr(&arm.value)?;
+                }
+            }
+            Expr::StdlibCall(call) => {
+                for arg in &call.args {
+                    self.check_no_unreachable_expr(arg)?;
+                }
+            }
         }
         Ok(())
     }
@@ -3218,6 +3389,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Create(create) => {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
+                self.require_type_capability(&create.ty, Capability::Create, "create", create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
                 if let Some(target) = &create.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
@@ -3245,7 +3417,8 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Named(create.ty.clone()))
             }
             Expr::Consume(consume) => {
-                let (_consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
+                let (consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
+                self.require_capability(&consume_ty, Capability::Consume, "consume", consume.span)?;
                 env.consume(&name)?;
                 Ok(Type::U64)
             }
@@ -3281,6 +3454,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::ReadRef(read_ref) => {
                 self.require_read_ref_target_cell_backed(&read_ref.ty, read_ref.span)?;
+                self.require_type_capability(&read_ref.ty, Capability::ReadRef, "read_ref", read_ref.span)?;
                 Ok(Type::Ref(Box::new(Type::Named(read_ref.ty.clone()))))
             }
             Expr::Claim(claim) => {
@@ -3288,17 +3462,20 @@ impl<'a> TypeChecker<'a> {
                 if !self.is_receipt_type(&receipt_ty) {
                     return Err(CompileError::new("claim requires a receipt value", claim.span));
                 }
+                self.require_capability(&receipt_ty, Capability::Consume, "claim", claim.span)?;
                 env.consume(&name)?;
                 let receipt_name = Self::base_type_name(&receipt_ty).unwrap_or_default();
                 Ok(self.resolve_receipt_claim_output(receipt_name).flatten().unwrap_or(Type::U64))
             }
             Expr::Settle(settle) => {
                 let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
+                self.require_capability(&settle_ty, Capability::Consume, "settle", settle.span)?;
                 env.consume(&name)?;
                 Ok(settle_ty)
             }
             Expr::CreateUnique(cu) => {
                 self.require_create_target_cell_backed(&cu.ty, cu.span)?;
+                self.require_type_capability(&cu.ty, Capability::Create, "create_unique", cu.span)?;
                 self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
                 self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
                 if let Some(lock) = &cu.lock {
@@ -3318,6 +3495,7 @@ impl<'a> TypeChecker<'a> {
                         ru.span,
                     ));
                 }
+                self.require_capability(&input_ty, Capability::Replace, "replace_unique", ru.span)?;
                 self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
                 self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
                 env.consume(&name)?;
@@ -3590,6 +3768,13 @@ impl<'a> TypeChecker<'a> {
                         call.span,
                     ));
                 }
+                self.require_capability_or_kernel_effects(
+                    &input_ty,
+                    Capability::Transfer,
+                    &[Capability::Replace, Capability::Relock],
+                    &qualified,
+                    call.span,
+                )?;
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 env.consume(&input_name)?;
@@ -3603,6 +3788,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 self.validate_receipt_claim_pattern(&input_ty, &output_ty, call.span)?;
+                self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
                 env.consume(&input_name)?;
                 Ok(Type::Bool)
             }
@@ -3613,6 +3799,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
                 env.consume(&input_name)?;
                 Ok(Type::Bool)
             }
@@ -4283,7 +4470,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn stmts_always_return(&self, stmts: &[Stmt]) -> bool {
-        stmts.iter().any(|stmt| self.stmt_always_returns(stmt))
+        stmts.last().is_some_and(|stmt| self.stmt_always_returns(stmt))
     }
 
     fn stmt_always_returns(&self, stmt: &Stmt) -> bool {
@@ -4295,7 +4482,18 @@ impl<'a> TypeChecker<'a> {
                 };
                 self.stmts_always_return(&if_stmt.then_branch) && self.stmts_always_return(else_branch)
             }
-            Stmt::Expr(Expr::Block(stmts, _)) => self.stmts_always_return(stmts),
+            Stmt::Expr(expr) => self.expr_always_returns(expr),
+            _ => false,
+        }
+    }
+
+    fn expr_always_returns(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Block(stmts, _) => self.stmts_always_return(stmts),
+            Expr::If(if_expr) => self.expr_always_returns(&if_expr.then_branch) && self.expr_always_returns(&if_expr.else_branch),
+            Expr::Match(match_expr) => {
+                !match_expr.arms.is_empty() && match_expr.arms.iter().all(|arm| self.expr_always_returns(&arm.value))
+            }
             _ => false,
         }
     }
@@ -4645,10 +4843,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_collection_item_type(&self, name: &str) -> Option<Type> {
-        if let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) {
-            return Some(self.parse_named_type_repr(inner));
-        }
-        None
+        self.vec_type_argument(name).ok().map(|inner| self.parse_named_type_repr(inner))
     }
 
     fn supports_collection_len(&self, ty: &Type) -> bool {
@@ -4669,7 +4864,30 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_type_repr(&self, repr: &str) -> Type {
-        match repr.trim() {
+        let repr = repr.trim();
+        if let Some(tuple_items) = repr.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) {
+            if tuple_items.trim().is_empty() {
+                return Type::Unit;
+            }
+            return Type::Tuple(
+                split_top_level_type_list(tuple_items).into_iter().map(|item| self.parse_named_type_repr(item)).collect(),
+            );
+        }
+        if let Some(array_items) = repr.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            if let Some((elem, len)) = split_top_level_array_type(array_items) {
+                if let Ok(len) = len.trim().parse::<usize>() {
+                    return Type::Array(Box::new(self.parse_named_type_repr(elem)), len);
+                }
+            }
+        }
+        if let Some(inner) = repr.strip_prefix("&mut ") {
+            return Type::MutRef(Box::new(self.parse_named_type_repr(inner)));
+        }
+        if let Some(inner) = repr.strip_prefix('&') {
+            return Type::Ref(Box::new(self.parse_named_type_repr(inner)));
+        }
+
+        match repr {
             "u8" => Type::U8,
             "u16" => Type::U16,
             "u32" => Type::U32,
@@ -5594,6 +5812,9 @@ impl<'a> TypeChecker<'a> {
                 Span::default(),
             ));
         }
+        if base_name == "Vec" && name.contains('<') {
+            self.validate_vec_type_argument(name)?;
+        }
 
         match base_name {
             "String" | "Range" | "Vec" | "usize" | "isize" => return Ok(()),
@@ -5613,6 +5834,27 @@ impl<'a> TypeChecker<'a> {
         } else {
             Err(CompileError::new(format!("unknown type '{}'", name), Span::default()))
         }
+    }
+
+    fn validate_vec_type_argument(&self, name: &str) -> Result<()> {
+        let inner = self.vec_type_argument(name)?;
+        let inner_ty = self.parse_named_type_repr(inner);
+        self.validate_type(&inner_ty)
+    }
+
+    fn vec_type_argument<'b>(&self, name: &'b str) -> Result<&'b str> {
+        let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) else {
+            return Err(CompileError::new(format!("malformed Vec type '{}'", name), Span::default()));
+        };
+        let inner = inner.trim();
+        if inner.is_empty() {
+            return Err(CompileError::new("Vec<T> requires exactly one type argument", Span::default()));
+        }
+        let args = split_top_level_type_list(inner);
+        if args.len() != 1 || args[0].trim() != inner {
+            return Err(CompileError::new(format!("Vec<T> requires exactly one type argument; found '{}'", inner), Span::default()));
+        }
+        Ok(inner)
     }
 
     #[allow(clippy::only_used_in_recursion)]
@@ -5734,6 +5976,32 @@ impl<'a> TypeChecker<'a> {
             TypeDef::Receipt(receipt) => Some(receipt.capabilities.into_iter().collect()),
             TypeDef::Struct(_) | TypeDef::Enum(_) => None,
         }
+    }
+
+    fn require_type_capability(&self, type_name: &str, capability: Capability, operation: &str, span: Span) -> Result<()> {
+        let base_type_name = type_name.split('<').next().unwrap_or(type_name);
+        let Some(capabilities) = self.resolve_capabilities(base_type_name) else {
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+        };
+        if capabilities.contains(&capability) {
+            return Ok(());
+        }
+        Err(CompileError::new(
+            format!(
+                "type '{}' does not declare '{}' capability required by {}",
+                base_type_name,
+                capability_name(capability),
+                operation
+            ),
+            span,
+        ))
+    }
+
+    fn require_capability(&self, ty: &Type, capability: Capability, operation: &str, span: Span) -> Result<()> {
+        let Some(type_name) = Self::base_type_name(ty) else {
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+        };
+        self.require_type_capability(type_name, capability, operation, span)
     }
 
     fn require_capability_or_kernel_effects(
@@ -6515,6 +6783,56 @@ fn push_unique_root<'a>(roots: &mut Vec<&'a str>, root: &'a str) {
     }
 }
 
+fn split_top_level_type_list(input: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                items.push(input[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    items.push(input[start..].trim());
+    items
+}
+
+fn split_top_level_array_type(input: &str) -> Option<(&str, &str)> {
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ';' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                return Some((input[..index].trim(), input[index + ch.len_utf8()..].trim()));
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn capability_name(capability: Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
@@ -6539,8 +6857,23 @@ pub fn check(module: &Module) -> Result<()> {
     checker.check_module(module)
 }
 
+pub fn check_with_primitive_strict(module: &Module, primitive_strict: bool) -> Result<()> {
+    let mut checker = TypeChecker::new().with_primitive_strict(primitive_strict);
+    checker.check_module(module)
+}
+
 pub fn check_with_resolver(module: &Module, resolver: &ModuleResolver, current_module: &str) -> Result<()> {
     let mut checker = TypeChecker::with_resolver(resolver, current_module);
+    checker.check_module(module)
+}
+
+pub fn check_with_resolver_and_primitive_strict(
+    module: &Module,
+    resolver: &ModuleResolver,
+    current_module: &str,
+    primitive_strict: bool,
+) -> Result<()> {
+    let mut checker = TypeChecker::with_resolver_and_primitive_strict(resolver, current_module, primitive_strict);
     checker.check_module(module)
 }
 
@@ -6977,7 +7310,7 @@ where
             r#"
 module types::boundary_cell_layout
 
-resource Token has store, destroy {
+resource Token has store, create, destroy {
     amount: u16,
 }
 
@@ -7319,6 +7652,198 @@ struct B {
     }
 
     #[test]
+    fn lifecycle_capability_gates_reject_undeclared_kernel_effects() {
+        let create_err = check(&source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(amount: u64) -> Token
+where
+    return create Token { amount }
+"#,
+        ))
+        .unwrap_err();
+        assert!(create_err.message.contains("does not declare 'create' capability"), "unexpected error: {}", create_err.message);
+
+        let consume_err = check(&source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(token: Token)
+where
+    consume token
+"#,
+        ))
+        .unwrap_err();
+        assert!(consume_err.message.contains("does not declare 'consume' capability"), "unexpected error: {}", consume_err.message);
+
+        let read_err = check(&source_module(
+            r#"
+module test
+
+shared Config has store {
+    threshold: u64
+}
+
+lock main() -> bool {
+    return read_ref<Config>().threshold > 0
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(read_err.message.contains("does not declare 'read_ref' capability"), "unexpected error: {}", read_err.message);
+
+        let stdlib_err = check(&source_module(
+            r#"
+module test
+
+resource Coin has store, create, consume {
+    amount: u64
+}
+
+action move_coin(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#,
+        ))
+        .unwrap_err();
+        assert!(stdlib_err.message.contains("does not declare 'transfer' capability"), "unexpected error: {}", stdlib_err.message);
+    }
+
+    #[test]
+    fn strict_mode_rejects_imported_legacy_capabilities() {
+        let legacy = source_module(
+            r#"
+module dep
+
+resource Token has store, transfer {
+    amount: u64
+}
+"#,
+        );
+        let app = source_module(
+            r#"
+module app
+
+use dep::Token
+
+action main(token: Token, to: Address) -> Token
+where
+    return transfer token to to
+"#,
+        );
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(legacy).unwrap();
+        resolver.register_module(app.clone()).unwrap();
+
+        let err = check_with_resolver_and_primitive_strict(&app, &resolver, &app.name, true).unwrap_err();
+
+        assert!(err.message.contains("legacy capability 'transfer'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn vec_type_arguments_are_validated() {
+        let unknown = check(&source_module(
+            r#"
+module test
+
+struct Holder {
+    values: Vec<UnknownType>
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(unknown.message.contains("unknown type 'UnknownType'"), "unexpected error: {}", unknown.message);
+
+        let arity = check(&source_module(
+            r#"
+module test
+
+struct Holder {
+    values: Vec<u8, u16>
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(arity.message.contains("Vec<T> requires exactly one type argument"), "unexpected error: {}", arity.message);
+    }
+
+    #[test]
+    fn expression_branch_unreachable_code_is_rejected_by_typechecker() {
+        let err = check(&source_module(
+            r#"
+module types::expr_branch_unreachable
+
+enum Choice {
+    A,
+    B,
+}
+
+fn bad(choice: Choice) -> u64 {
+    match choice {
+        A => {
+            return 1
+            let x = 3
+        },
+        B => {
+            return 2
+        },
+    }
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("unreachable statement after guaranteed return"), "unexpected error: {}", err.message);
+        assert!(err.span.line > 0, "unreachable diagnostic should preserve a source span: {}", err.message);
+    }
+
+    #[test]
+    fn tail_match_expressions_are_valid_return_values() {
+        check(&source_module(
+            r#"
+module types::tail_match
+
+enum Choice {
+    A,
+    B,
+}
+
+fn pick(choice: Choice) -> u64 {
+    match choice {
+        A => {
+            1
+        },
+        B => {
+            2
+        },
+    }
+}
+
+lock pick_lock(witness choice: Choice) -> bool {
+    match choice {
+        A => {
+            true
+        },
+        B => {
+            false
+        },
+    }
+}
+"#,
+        ))
+        .expect("tail match expressions should satisfy function and lock return checks");
+    }
+
+    #[test]
     fn recursive_enum_payloads_are_rejected() {
         let err = check(&source_module(
             r#"
@@ -7608,11 +8133,11 @@ where
             r#"
 module test
 
-resource A has store, transfer, destroy {
+resource A has store, transfer, destroy, consume {
     amount: u64
 }
 
-resource B has store, transfer, destroy {
+resource B has store, transfer, destroy, create {
     amount: bool
 }
 

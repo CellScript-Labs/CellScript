@@ -1245,8 +1245,8 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
 
 
 def audit_case(case: AuditCase, run_dir: Path, cellc: str) -> tuple[str, list[dict[str, Any]]]:
-    case_path = run_dir / "cases" / f"{case.case_id}.cell"
-    fmt_path = run_dir / "fmt" / f"{case.case_id}.cell"
+    case_path = run_dir / "cases" / case.case_id / "main.cell"
+    fmt_path = run_dir / "fmt" / case.case_id / "main.cell"
     asm_path = run_dir / "asm" / f"{case.case_id}.s"
     meta_path = run_dir / "meta" / f"{case.case_id}.json"
     for path in [case_path.parent, fmt_path.parent, asm_path.parent, meta_path.parent]:

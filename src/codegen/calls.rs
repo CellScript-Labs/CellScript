@@ -339,8 +339,14 @@ impl CodeGenerator {
             return;
         }
         let stack_slot_offset = (abi_index - 8) * 8;
-        let offset = i64::try_from(stack_slot_offset).expect("call stack slot should fit in i64")
-            - i64::try_from(outgoing_stack_arg_bytes).expect("call stack argument area should fit in i64");
+        let Some(stack_slot_offset) = self.usize_to_i64_codegen_offset(stack_slot_offset, "call stack slot") else {
+            return;
+        };
+        let Some(outgoing_stack_arg_bytes) = self.usize_to_i64_codegen_offset(outgoing_stack_arg_bytes, "call stack argument area")
+        else {
+            return;
+        };
+        let offset = stack_slot_offset - outgoing_stack_arg_bytes;
         self.emit(format!(
             "# cellscript abi: stage outgoing stack arg{} at pre-call sp{}{}",
             abi_index,

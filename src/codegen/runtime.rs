@@ -12,7 +12,7 @@ use crate::syscalls::{
     checked_runtime_helper_spec, fail_closed_helper_spec, fail_closed_runtime_helper_specs, runtime_helper_symbols,
     source_constant_specs, vm2_helper_specs, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
     CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
-    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_HEADER_DEP,
+    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_GROUP_OUTPUT, CKB_SOURCE_HEADER_DEP,
 };
 use crate::TargetProfile;
 
@@ -33,6 +33,7 @@ pub(crate) struct RuntimeSyscallAbi {
     pub(crate) load_cell_by_field: u64,
     pub(crate) load_cell_data: u64,
     pub(crate) source_group_input: u64,
+    pub(crate) source_group_output: u64,
     pub(crate) source_header_dep: u64,
 }
 
@@ -44,6 +45,7 @@ const CKB_RUNTIME_SYSCALL_ABI: RuntimeSyscallAbi = RuntimeSyscallAbi {
     load_cell_by_field: CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER,
     load_cell_data: CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
     source_group_input: CKB_SOURCE_GROUP_INPUT,
+    source_group_output: CKB_SOURCE_GROUP_OUTPUT,
     source_header_dep: CKB_SOURCE_HEADER_DEP,
 };
 

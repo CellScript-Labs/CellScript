@@ -15,7 +15,7 @@ use crate::ENTRY_WITNESS_ABI_MAGIC;
 use super::assembler::align_up;
 use super::{
     fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width, named_type_name, type_static_length,
-    CellScriptRuntimeError, CodeGenerator,
+    CellScriptRuntimeError, CodeGenerator, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING,
 };
 pub(crate) const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 pub(crate) const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
@@ -31,6 +31,15 @@ pub(crate) const ENTRY_WITNESS_FRAME_SIZE: usize = 2304;
 pub(crate) const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
 pub(crate) const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
 pub(crate) const ENTRY_WITNESS_RA_OFFSET: usize = ENTRY_WITNESS_FRAME_SIZE - 8;
+
+const _: () = assert!(ENTRY_SCRIPT_BUFFER_OFFSET + ENTRY_SCRIPT_BUFFER_SIZE <= ENTRY_WITNESS_RA_OFFSET);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntrypointKind {
+    Action,
+    Lock,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CallableAbi {
     pub(crate) params: Vec<IrParam>,
@@ -226,7 +235,7 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
-    pub(crate) fn emit_entry_witness_wrapper(&mut self, target: &str, params: &[IrParam]) -> Result<()> {
+    pub(crate) fn emit_entry_witness_wrapper(&mut self, target: &str, params: &[IrParam], kind: EntrypointKind) -> Result<()> {
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
@@ -246,6 +255,9 @@ impl CodeGenerator {
         self.emit_global(ENTRY_WITNESS_LABEL);
         self.emit_label(ENTRY_WITNESS_LABEL);
         self.emit(format!("# cellscript entry abi: {} loads GroupInput witness args for {}", ENTRY_WITNESS_LABEL, target));
+        if kind == EntrypointKind::Action {
+            self.emit("# cellscript entry abi: action entries fall back to GroupOutput witness args for output-only type scripts");
+        }
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
         self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
         self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
@@ -264,6 +276,25 @@ impl CodeGenerator {
                 ENTRY_WITNESS_BUFFER_SIZE,
             );
             self.emit(format!("beqz a0, {}", loaded_label));
+            if kind == EntrypointKind::Action {
+                let try_group_output_label = self.fresh_label("entry_witness_try_group_output");
+                self.emit(format!("li t0, {}", CKB_INDEX_OUT_OF_BOUND));
+                self.emit("sub t1, a0, t0");
+                self.emit(format!("beqz t1, {}", try_group_output_label));
+                self.emit(format!("li t0, {}", CKB_ITEM_MISSING));
+                self.emit("sub t1, a0, t0");
+                self.emit(format!("bnez t1, {}", fail_label));
+                self.emit_label(&try_group_output_label);
+                self.emit_load_witness_syscall_to_offsets(
+                    "entry_args_group_output",
+                    self.runtime_abi().source_group_output,
+                    0,
+                    ENTRY_WITNESS_SIZE_OFFSET,
+                    ENTRY_WITNESS_BUFFER_OFFSET,
+                    ENTRY_WITNESS_BUFFER_SIZE,
+                );
+                self.emit(format!("beqz a0, {}", loaded_label));
+            }
             self.emit(format!("j {}", fail_label));
             self.emit_label(&loaded_label);
 
@@ -606,8 +637,15 @@ impl CodeGenerator {
 
     fn emit_entry_outgoing_stack_arg_store(&mut self, register: &str, abi_index: usize, outgoing_stack_arg_bytes: usize) {
         let stack_slot_offset = (abi_index - 8) * 8;
-        let offset = i64::try_from(stack_slot_offset).expect("entry call stack slot should fit in i64")
-            - i64::try_from(outgoing_stack_arg_bytes).expect("entry call stack argument area should fit in i64");
+        let Some(stack_slot_offset) = self.usize_to_i64_codegen_offset(stack_slot_offset, "entry call stack slot") else {
+            return;
+        };
+        let Some(outgoing_stack_arg_bytes) =
+            self.usize_to_i64_codegen_offset(outgoing_stack_arg_bytes, "entry call stack argument area")
+        else {
+            return;
+        };
+        let offset = stack_slot_offset - outgoing_stack_arg_bytes;
         self.emit(format!(
             "# cellscript entry abi: stage stack arg{} at pre-call sp{}{}",
             abi_index,

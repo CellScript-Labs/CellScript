@@ -396,6 +396,11 @@ impl CodeGenerator {
         self.emit(format!("li t1, {}", width));
         self.emit("mul t2, t0, t1");
         self.emit(format!("li t3, {}", RUNTIME_COLLECTION_BUFFER_SIZE));
+        let used_bytes_ok = self.fresh_label("stack_collection_push_used_bytes_ok");
+        self.emit("sltu t5, t3, t2");
+        self.emit(format!("beqz t5, {}", used_bytes_ok));
+        self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
+        self.emit_label(&used_bytes_ok);
         self.emit("sub t5, t3, t2");
         self.emit("sltu t5, t5, t1");
         let capacity_ok = self.fresh_label("stack_collection_push_capacity_ok");
@@ -488,6 +493,11 @@ impl CodeGenerator {
         self.emit(format!("li t1, {}", element_width));
         self.emit("mul t2, t0, t1");
         self.emit(format!("li t3, {}", RUNTIME_COLLECTION_BUFFER_SIZE));
+        let used_bytes_ok = self.fresh_label("stack_collection_extend_used_bytes_ok");
+        self.emit("sltu t5, t3, t2");
+        self.emit(format!("beqz t5, {}", used_bytes_ok));
+        self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
+        self.emit_label(&used_bytes_ok);
         self.emit("sub t5, t3, t2");
         self.emit(format!("li t1, {}", width));
         self.emit("sltu t5, t5, t1");
@@ -578,8 +588,12 @@ impl CodeGenerator {
         self.emit("sltu t2, t0, t1");
         self.emit(format!("bnez t2, {}", done_label));
 
-        let left_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let right_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let Some(left_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return false;
+        };
+        let Some(right_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return false;
+        };
         self.emit_stack_store("zero", left_offset);
         self.emit("addi t0, t0, -1");
         self.emit_stack_store("t0", right_offset);
@@ -749,7 +763,9 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection contains element_size={}", element_width));
-        let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+        let Some(index_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return false;
+        };
         self.emit_stack_store("zero", index_offset);
         self.emit_stack_store("zero", dest.id * 8);
         let loop_label = self.fresh_label("stack_collection_contains_loop");
@@ -855,7 +871,9 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
             self.emit_stack_store("t6", dest.id * 8);
         } else {
-            let removed_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+            let Some(removed_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+                return false;
+            };
             self.emit(format!("# cellscript abi: stack collection remove snapshot fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 if byte_index <= 2047 {
@@ -871,7 +889,9 @@ impl CodeGenerator {
             self.emit_stack_store("t6", dest.id * 8);
         }
 
-        let index_offset = self.runtime_expr_temp_offset(removed_value_slots).expect("runtime temp slot");
+        let Some(index_offset) = self.runtime_expr_temp_offset_or_record(removed_value_slots) else {
+            return false;
+        };
         self.emit_stack_store("t1", index_offset);
         let shift_loop = self.fresh_label("stack_collection_remove_shift_loop");
         let shift_done = self.fresh_label("stack_collection_remove_shift_done");
@@ -1022,13 +1042,19 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
         self.emit_label(&capacity_ok);
 
-        let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let current_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let Some(index_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return false;
+        };
+        let Some(current_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return false;
+        };
         self.emit_stack_store("t1", index_offset);
         self.emit_stack_store("t0", current_offset);
         if let Some(source) = fixed_byte_source.as_ref() {
             self.emit_prepare_fixed_byte_source(source, element_width, "stack collection insert");
-            let value_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+            let Some(value_offset) = self.runtime_expr_temp_offset_or_record(2) else {
+                return false;
+            };
             self.emit(format!("# cellscript abi: stack collection insert snapshot fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 self.emit_fixed_byte_source_byte_to("t1", "t6", source, byte_index);
@@ -1093,7 +1119,9 @@ impl CodeGenerator {
                 _ => return false,
             }
         } else {
-            let value_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+            let Some(value_offset) = self.runtime_expr_temp_offset_or_record(2) else {
+                return false;
+            };
             self.emit(format!("# cellscript abi: stack collection insert copy fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 self.emit_sp_addi("t6", value_offset + byte_index);
@@ -1178,7 +1206,10 @@ impl CodeGenerator {
                 _ => return false,
             }
         } else {
-            let source = fixed_byte_source.as_ref().expect("fixed byte source");
+            let Some(source) = fixed_byte_source.as_ref() else {
+                self.record_fatal_error("stack collection set missing fixed-byte source");
+                return false;
+            };
             self.emit(format!("# cellscript abi: stack collection set copy fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 self.emit_fixed_byte_source_byte_to("t1", "t6", source, byte_index);

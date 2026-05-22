@@ -1,6 +1,7 @@
 //! CellScript formatter.
 //! Release-grade code formatter with idempotency guarantees,
-//! configurable line width, comment preservation, and whitespace normalization.
+//! configurable line width, doc-comment preservation, and whitespace normalization.
+//! Non-doc line/block comments are not represented in the AST and are not preserved.
 
 use crate::ast::*;
 use crate::error::Result;

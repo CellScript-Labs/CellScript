@@ -134,7 +134,7 @@ fn fuzzy_mutated_sources_never_panic() {
         r#"
 module cellscript::fuzz_basic
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -146,7 +146,7 @@ action mint(amount: u64) -> Token {
         r#"
 module cellscript::fuzz_lock
 
-resource Wallet has store {
+resource Wallet has store, create, consume, replace, burn, relock, read_ref {
     owner: Address
 }
 
@@ -174,6 +174,67 @@ lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: wi
         };
         assert_compile_is_controlled(&source, options, &format!("mutated-source-{index}"));
         assert_format_is_controlled(&source, &format!("mutated-source-{index}"));
+    }
+}
+
+#[test]
+fn fuzzy_semantic_codegen_mutations_reach_assembly() {
+    let comparisons = [">", ">=", "<", "<=", "==", "!="];
+    let arithmetic_ops = ["+", "-", "*", "/", "%"];
+
+    for index in 0..48 {
+        let source = if index % 2 == 0 {
+            let op = arithmetic_ops[index % arithmetic_ops.len()];
+            let comparison = comparisons[index % comparisons.len()];
+            let rhs = (index as u64 % 7) + 1;
+            format!(
+                r#"
+module cellscript::fuzz_codegen_arithmetic_{index}
+
+action main(a: u64, b: u64) -> u64
+where
+    let left = a + {rhs}
+    let right = b + {rhs}
+    assert_invariant(left {comparison} right || true, "semantic mutation remains codegen-visible")
+    return left {op} right
+"#
+            )
+        } else {
+            let comparison = comparisons[index % comparisons.len()];
+            let floor = (index as u64 % 5) + 1;
+            format!(
+                r#"
+module cellscript::fuzz_codegen_create_{index}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {{
+    amount: u64,
+    owner: Address,
+}}
+
+action mint(owner: Address, amount: u64) -> Token
+where
+    assert_invariant(amount {comparison} {floor} || true, "semantic mutation reaches create lowering")
+    create Token {{ owner: owner, amount: amount }}
+"#
+            )
+        };
+
+        let result = compile(
+            &source,
+            CompileOptions {
+                target: Some("riscv64-asm".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..CompileOptions::default()
+            },
+        )
+        .unwrap_or_else(|err| panic!("semantic codegen mutation {index} should compile to assembly: {}", err.message));
+        let assembly = String::from_utf8(result.artifact_bytes)
+            .unwrap_or_else(|err| panic!("semantic codegen mutation {index} should produce UTF-8 assembly: {err}"));
+        assert!(assembly.contains(".global"), "semantic codegen mutation {index} should reach assembly output:\n{assembly}");
+        assert!(
+            !assembly.contains("immediate '"),
+            "semantic codegen mutation {index} leaked assembler diagnostic into assembly:\n{assembly}"
+        );
     }
 }
 
@@ -232,7 +293,7 @@ fn fuzzy_entry_witness_encoding_never_panics() {
         r#"
 module cellscript::fuzz_entry_witness
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address
     amount: u64
 }

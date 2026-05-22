@@ -3,22 +3,12 @@
 // audit: contains=verifier-boundary syntax
 module cellscript::audit::seed_require_block_lifecycle
 
-resource Coin has store, create, consume, replace, burn, relock {
+receipt Voucher has consume, burn {
     amount: u64,
-    nonce: u64,
 }
 
-receipt Voucher -> Coin has create, consume, burn {
-    amount: u64,
-    nonce: u64,
-    holder: Address,
-}
-
-action bad(voucher: Voucher) -> coin: Coin
+action bad(voucher: Voucher)
 where
     require {
-        std::receipt::claim(voucher, coin, voucher.holder) {
-            amount
-            nonce
-        }
+        std::receipt::claim(voucher, voucher, voucher.amount)
     }

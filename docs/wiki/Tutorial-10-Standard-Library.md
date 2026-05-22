@@ -239,8 +239,7 @@ stdlib assembly and are not a production allocator ABI.
 
 ## Runtime And CKB Helpers
 
-The backend standard library also contains lower-level helpers used by generated
-code:
+The backend tracks production CKB syscall surfaces used by generated code:
 
 ```text
 syscall_load_tx_hash
@@ -253,7 +252,6 @@ syscall_load_cell_by_field
 syscall_load_cell_data
 syscall_load_witness
 syscall_current_cycles
-syscall_debug_print
 ```
 
 Most authors should reach these through language features, metadata commands, or

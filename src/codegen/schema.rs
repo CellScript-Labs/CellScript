@@ -643,9 +643,15 @@ impl CodeGenerator {
         output_buffer_offset: usize,
         fail_code: CellScriptRuntimeError,
     ) {
-        let start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_start_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+        let Some(start_offset) = self.runtime_expr_temp_offset_or_record(0) else {
+            return;
+        };
+        let Some(len_offset) = self.runtime_expr_temp_offset_or_record(1) else {
+            return;
+        };
+        let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(2) else {
+            return;
+        };
         if let Some(width) = layout_fixed_byte_width(layout) {
             self.emit_dynamic_table_fixed_field_pointer_to_stack(
                 input_size_offset,
@@ -677,6 +683,9 @@ impl CodeGenerator {
                 start_offset,
                 len_offset,
             );
+            let Some(output_len_offset) = self.runtime_expr_temp_offset_or_record(3) else {
+                return;
+            };
             self.emit_dynamic_table_field_span_to_stack(
                 output_size_offset,
                 output_buffer_offset,
@@ -684,10 +693,10 @@ impl CodeGenerator {
                 field_count,
                 &format!("{} output.{}", type_name, field),
                 output_start_offset,
-                self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"),
+                output_len_offset,
             );
             self.emit_stack_load("t0", len_offset);
-            self.emit_stack_load("t1", self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"));
+            self.emit_stack_load("t1", output_len_offset);
             self.emit("sub t2, t0, t1");
             let len_ok = self.fresh_label("mutate_table_field_len_ok");
             self.emit(format!("beqz t2, {}", len_ok));
@@ -760,7 +769,9 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: verify output field {} offset={} size={}", context, layout.offset, width));
         self.emit_sp_addi("t4", buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
-        let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+        let Some(actual_value_offset) = self.runtime_expr_temp_offset_or_record(RUNTIME_EXPR_TEMP_SLOTS - 1) else {
+            return;
+        };
         self.emit("# cellscript abi: preserve output scalar before expected expression");
         self.emit_stack_store("t0", actual_value_offset);
         self.emit_expected_operand_to_t1(expected);
@@ -1405,7 +1416,10 @@ impl CodeGenerator {
                 self.emit("sltu t2, t0, t1");
                 self.emit("sub t6, t3, t2");
             }
-            _ => unreachable!("guarded u128 binary op"),
+            _ => {
+                self.record_fatal_error("non add/sub operation reached u128 add/sub emitter");
+                return false;
+            }
         }
         self.emit_stack_store("t5", dest_offset);
         self.emit_stack_store("t6", dest_offset + 8);
@@ -1467,7 +1481,9 @@ impl CodeGenerator {
                         self.emit_divisor_nonzero_guard("t1");
                         self.emit("divu t1, t3, t1");
                     }
-                    _ => unreachable!("prelude u64 binary source only supports add/sub/mul/div"),
+                    _ => {
+                        self.record_fatal_error("unsupported prelude u64 binary operation reached emitter");
+                    }
                 }
             }
             PreludeU64ValueSource::Min { left, right } => {

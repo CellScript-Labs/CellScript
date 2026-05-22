@@ -490,6 +490,9 @@ Use comments where they help the reader understand Cell movement, witness
 scope, builder obligations, or a security boundary. Avoid comments that merely
 repeat arithmetic.
 
+The formatter is AST-based. It preserves action/function doc comments, but
+ordinary line comments and block comments are not retained by `cellc fmt`.
+
 ## Next
 
 With the source shape in mind, continue with

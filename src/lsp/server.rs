@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::{
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
     Location, MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams,
     RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, SymbolTag,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -46,7 +46,10 @@ impl CellScriptBackend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for CellScriptBackend {
-    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+        if let Some(primitive_compat) = lsp_primitive_compat_from_initialization_options(params.initialization_options.as_ref()) {
+            self.state().set_primitive_compat(Some(primitive_compat));
+        }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
@@ -355,6 +358,22 @@ fn convert_position(p: lsp::Position) -> Position {
     Position { line: p.line, character: p.character }
 }
 
+fn lsp_primitive_compat_from_initialization_options(options: Option<&serde_json::Value>) -> Option<String> {
+    let options = options?;
+    for key in ["primitiveCompat", "primitive_compat", "primitiveStrict", "primitive_strict"] {
+        let Some(value) = options.get(key) else {
+            continue;
+        };
+        if value.as_bool() == Some(true) {
+            return Some("0.15".to_string());
+        }
+        if let Some(mode) = value.as_str() {
+            return Some(mode.to_string());
+        }
+    }
+    None
+}
+
 fn convert_position_back(p: Position) -> lsp::Position {
     lsp::Position { line: p.line, character: p.character }
 }
@@ -437,6 +456,7 @@ fn convert_location(loc: lsp::Location) -> Location {
     Location { uri: url, range: convert_range(loc.range) }
 }
 
+#[allow(deprecated)]
 fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation {
     let kind = match sym.kind {
         lsp::SymbolKind::File => SymbolKind::FILE,
@@ -466,14 +486,14 @@ fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation 
         lsp::SymbolKind::Operator => SymbolKind::OPERATOR,
         lsp::SymbolKind::TypeParameter => SymbolKind::TYPE_PARAMETER,
     };
-    serde_json::from_value(serde_json::json!({
-        "name": sym.name,
-        "kind": kind,
-        "location": convert_location(sym.location),
-        "containerName": sym.container_name,
-        "tags": Option::<Vec<SymbolTag>>::None,
-    }))
-    .expect("symbol information JSON should match lsp-types")
+    SymbolInformation {
+        name: sym.name,
+        kind,
+        tags: None,
+        deprecated: None,
+        location: convert_location(sym.location),
+        container_name: sym.container_name,
+    }
 }
 
 fn convert_text_edit(edit: lsp::TextEdit) -> TextEdit {

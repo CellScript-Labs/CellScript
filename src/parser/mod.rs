@@ -3476,6 +3476,21 @@ action accept(input: Offer) -> output: Offer {
     }
 
     #[test]
+    fn test_rejects_typed_let_without_initializer() {
+        let input = r#"
+module test
+
+fn bad() -> u64 {
+    let x: u64
+    return x
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("expected '='"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn test_rejects_read_ref_as_type_qualifier() {
         let input = r#"
 module test
