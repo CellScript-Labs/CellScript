@@ -2939,8 +2939,19 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
     if plan.get("schema").and_then(serde_json::Value::as_str) != Some("cellscript-deploy-plan-v0.16") {
         violations.push("schema must be cellscript-deploy-plan-v0.16".to_string());
     }
-    if plan.pointer("/artifact/format").is_none() {
-        violations.push("artifact.format is required".to_string());
+    if plan.get("status").and_then(serde_json::Value::as_str) != Some("ok") {
+        violations.push("status must be ok".to_string());
+    }
+    if plan.get("module").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+        violations.push("module must be a non-empty string".to_string());
+    }
+    if plan.get("compiler_version").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+        violations.push("compiler_version must be a non-empty string".to_string());
+    }
+    match plan.pointer("/artifact/format").and_then(serde_json::Value::as_str) {
+        Some(format) if !format.is_empty() => {}
+        Some(_) => violations.push("artifact.format must be a non-empty string".to_string()),
+        None => violations.push("artifact.format is required".to_string()),
     }
     match plan.pointer("/artifact/hash").and_then(serde_json::Value::as_str) {
         Some(hash) if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => {}
@@ -2957,16 +2968,19 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
         Some(_) => violations.push("metadata_schema_version must be greater than zero".to_string()),
         None => violations.push("metadata_schema_version is required".to_string()),
     }
-    if plan.get("target_profile").is_none() {
-        violations.push("target_profile is required".to_string());
+    match plan.pointer("/target_profile/name").and_then(serde_json::Value::as_str) {
+        Some("ckb") => {}
+        Some(profile) => violations.push(format!("target_profile.name must be ckb, got {profile}")),
+        None => violations.push("target_profile.name is required".to_string()),
     }
     match plan.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
         Some("passed") => {}
         Some(status) => violations.push(format!("proof_plan_soundness.status must be passed, got {status}")),
         None => violations.push("proof_plan_soundness.status is required".to_string()),
     }
-    if plan.get("builder_assumptions").is_none() {
-        violations.push("builder_assumptions is required".to_string());
+    match plan.get("builder_assumptions").and_then(serde_json::Value::as_array) {
+        Some(_) => {}
+        None => violations.push("builder_assumptions must be an array".to_string()),
     }
     violations
 }
@@ -3062,23 +3076,60 @@ fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::V
 }
 
 fn json_diff_report(kind: &str, old: &serde_json::Value, new: &serde_json::Value) -> serde_json::Value {
-    let changed =
-        ["/artifact/hash", "/artifact/size_bytes", "/target_profile/name", "/proof_plan_soundness/status", "/metadata_schema_version"]
-            .iter()
-            .filter(|pointer| old.pointer(pointer) != new.pointer(pointer))
-            .map(|pointer| {
-                serde_json::json!({
-                    "path": pointer,
-                    "old": old.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
-                    "new": new.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
-                })
-            })
-            .collect::<Vec<_>>();
+    let mut changed = Vec::new();
+    collect_json_diffs("", old, new, &mut changed);
     serde_json::json!({
         "status": "ok",
         "schema": format!("cellscript-{}-diff-v0.16", kind),
         "changed": changed,
     })
+}
+
+fn collect_json_diffs(path: &str, old: &serde_json::Value, new: &serde_json::Value, changed: &mut Vec<serde_json::Value>) {
+    if old == new {
+        return;
+    }
+
+    match (old, new) {
+        (serde_json::Value::Object(old_object), serde_json::Value::Object(new_object)) => {
+            let keys = old_object.keys().chain(new_object.keys()).collect::<BTreeSet<_>>();
+            for key in keys {
+                let child_path = json_pointer_child(path, key);
+                collect_json_diffs(
+                    &child_path,
+                    old_object.get(key).unwrap_or(&serde_json::Value::Null),
+                    new_object.get(key).unwrap_or(&serde_json::Value::Null),
+                    changed,
+                );
+            }
+        }
+        (serde_json::Value::Array(old_items), serde_json::Value::Array(new_items)) => {
+            let max_len = old_items.len().max(new_items.len());
+            for index in 0..max_len {
+                let child_path = json_pointer_child(path, &index.to_string());
+                collect_json_diffs(
+                    &child_path,
+                    old_items.get(index).unwrap_or(&serde_json::Value::Null),
+                    new_items.get(index).unwrap_or(&serde_json::Value::Null),
+                    changed,
+                );
+            }
+        }
+        _ => changed.push(serde_json::json!({
+            "path": if path.is_empty() { "/" } else { path },
+            "old": old,
+            "new": new,
+        })),
+    }
+}
+
+fn json_pointer_child(parent: &str, token: &str) -> String {
+    let escaped = token.replace('~', "~0").replace('/', "~1");
+    if parent.is_empty() {
+        format!("/{escaped}")
+    } else {
+        format!("{parent}/{escaped}")
+    }
 }
 
 fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde_json::Value {

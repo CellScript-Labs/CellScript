@@ -302,6 +302,8 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     assert!(plan["metadata_schema_version"].as_u64().is_some_and(|version| version > 0), "{plan:#?}");
     plan["artifact"]["hash"] = json!("not-a-canonical-hash");
     plan["metadata_schema_version"] = json!(0);
+    plan["target_profile"] = json!(null);
+    plan["builder_assumptions"] = json!("not an assumption array");
     std::fs::write(&bad_plan_path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
 
     let mut verify_bad = cellc_command();
@@ -311,6 +313,8 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     let violations = verify_bad_json["violations"].as_array().expect("violations");
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("artifact.hash"))));
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("metadata_schema_version"))));
+    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("target_profile.name"))));
+    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("builder_assumptions"))));
 }
 
 #[test]
@@ -409,6 +413,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let mut deploy_plan: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&old_deploy_path).unwrap()).unwrap();
     let schema_version = deploy_plan["metadata_schema_version"].as_u64().expect("metadata_schema_version");
     deploy_plan["metadata_schema_version"] = json!(schema_version + 1);
+    deploy_plan["builder_assumptions"][0]["detail"] = json!("unit-test-tampered-builder-assumption-detail");
     std::fs::write(&new_deploy_path, serde_json::to_vec_pretty(&deploy_plan).unwrap()).unwrap();
 
     let mut diff_deploy = cellc_command();
@@ -417,6 +422,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert_eq!(diff_deploy_json["schema"], "cellscript-deploy-diff-v0.16");
     let changed = diff_deploy_json["changed"].as_array().expect("changed");
     assert!(changed.iter().any(|entry| entry["path"] == "/metadata_schema_version"), "{diff_deploy_json:#?}");
+    assert!(changed.iter().any(|entry| entry["path"] == "/builder_assumptions/0/detail"), "{diff_deploy_json:#?}");
 }
 
 #[test]
