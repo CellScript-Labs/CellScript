@@ -2730,22 +2730,35 @@ def entry_witness(*args):
             raise RuntimeError(f"unsupported entry witness arg: {arg!r}")
     return "0x" + bytes(out).hex()
 
-def get_block(block_hash):
-    block = rpc("get_block", [block_hash])
-    if block is None:
-        raise RuntimeError(f"block not found: {block_hash}")
-    return block
+def get_block(block_hash, attempts=20, delay_seconds=0.05):
+    block = None
+    for _ in range(attempts):
+        block = rpc("get_block", [block_hash])
+        if block is not None:
+            return block
+        time.sleep(delay_seconds)
+    raise RuntimeError(f"block not found: {block_hash}")
 
-def get_block_by_number(number):
-    block = rpc("get_block_by_number", [hex_u64(number)])
-    if block is None:
-        raise RuntimeError(f"block number not found: {number}")
-    return block
+def get_block_by_number(number, attempts=20, delay_seconds=0.05):
+    block = None
+    for _ in range(attempts):
+        block = rpc("get_block_by_number", [hex_u64(number)])
+        if block is not None:
+            return block
+        time.sleep(delay_seconds)
+    raise RuntimeError(f"block number not found: {number}")
 
 RESERVED_SPENDABLE_OUTPOINTS = set()
 
 def spendable_outpoint_key(tx_hash, index):
     return (tx_hash, int(index))
+
+def reserve_spendable_outpoint(tx_hash, index):
+    key = spendable_outpoint_key(tx_hash, index)
+    if key in RESERVED_SPENDABLE_OUTPOINTS:
+        return False
+    RESERVED_SPENDABLE_OUTPOINTS.add(key)
+    return True
 
 def find_spendable_cellbase(max_blocks=64):
     generated = []
@@ -2762,7 +2775,11 @@ def find_spendable_cellbase(max_blocks=64):
                     if spendable_outpoint_key(cellbase["hash"], index) in RESERVED_SPENDABLE_OUTPOINTS:
                         continue
                     live_status = wait_live_cell(cellbase["hash"], index)
-                    if live_status and live_status.get("status") == "live":
+                    if (
+                        live_status
+                        and live_status.get("status") == "live"
+                        and reserve_spendable_outpoint(cellbase["hash"], index)
+                    ):
                         return {
                             "block_hash": block_hash,
                             "tx_hash": cellbase["hash"],
@@ -2786,8 +2803,6 @@ def collect_spendable_cellbases(min_capacity, max_cells=256):
             f"collected {total_capacity:#x} capacity from {len(cells)} cellbase cells, "
             f"need at least {min_capacity:#x}"
         )
-    for cell in cells:
-        RESERVED_SPENDABLE_OUTPOINTS.add(spendable_outpoint_key(cell["tx_hash"], cell["index"]))
     return {
         "cells": cells,
         "total_capacity": total_capacity,
