@@ -52,7 +52,7 @@ check_trailing_whitespace() {
         "docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
-        "docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md"
+        "docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md"
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"

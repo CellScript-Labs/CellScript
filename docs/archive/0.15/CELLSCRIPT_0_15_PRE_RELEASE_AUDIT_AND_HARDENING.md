@@ -1,5 +1,9 @@
 # CellScript 0.15 发布前全面审计与生产验收严格加固方案
 
+> Archived on 2026-05-26 after the `v0.15.0` release. This file is retained as
+> historical release-audit evidence. Current release guidance lives in
+> `docs/releases/` and the active roadmap files.
+
 **版本**: 0.15.0
 **状态**: release gate 已通过
 **更新日期**: 2026-05-20
@@ -377,12 +381,12 @@ npm run package
 ```bash
 # 验证 roadmap 文档存在且内容正确
 rg --fixed-strings "0.15" roadmap/CELLSCRIPT_0_15_ROADMAP.md
-docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md
+docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md
 ```
 
 **Prompt**：
 > 作为发布文档审计员，验证：
-> - `docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md` 包含所有 0.15 核心特性的准确描述。
+> - `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` 包含所有 0.15 核心特性的准确描述。
 > - `roadmap/CELLSCRIPT_0_15_ROADMAP.md` 中的 "Implemented In This Branch" 表格与代码实际状态一致。
 > - "Boundaries" 章节准确描述了 metadata-only 的边界、lock_group+transaction 的风险、aggregate primitives 的 fixed-width 限制。
 > - 不存在已实现但被标记为 "Not Implemented" 的特性，也不存在未实现但被标记为 "Implemented" 的特性。

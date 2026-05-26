@@ -823,7 +823,7 @@ It does **not** support claims of:
 - registry-backed CellDep/DepGroup resolution.
 
 Those claims were downgraded in `roadmap/CELLSCRIPT_0_14_ROADMAP.md` and
-`docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md`.
+`docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md`.
 
 ## Contradictions Fixed
 

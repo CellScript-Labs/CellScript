@@ -415,11 +415,12 @@ CellScript includes production-style local language tooling for early users:
 - [Roadmap overview](roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.14 roadmap](roadmap/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.14 release notes](docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md)
 - [0.14 community update](docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
 - [0.15 roadmap](roadmap/CELLSCRIPT_0_15_ROADMAP.md)
+- [0.15 release notes](docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md)
 - [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
+- [0.16 release notes draft](docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
 
 ---
 

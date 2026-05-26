@@ -632,7 +632,7 @@ done
 
 ## 📝 Integration with Existing Plans
 
-### CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md
+### 0.13.2 Production Plan Carry-Over
 
 v0.14 **extends** the 0.13.2 production plan:
 
@@ -714,4 +714,4 @@ v0.14 delivers:
 
 *Document End.*
 *Status: Draft (Pending Team Review)*
-*Prerequisites*: [CELLSCRIPT_0_13_RELEASE_SCOPE.md](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md](../docs/CELLSCRIPT_DUAL_CHAIN_PRODUCTION_PLAN.md)
+*Prerequisites*: [CELLSCRIPT_0_13_RELEASE_SCOPE.md](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13.2 production plan carry-over](#0132-production-plan-carry-over)

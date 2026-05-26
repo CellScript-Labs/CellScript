@@ -1,5 +1,9 @@
 # CellScript 0.15 Roadmap
 
+> Archived on 2026-05-26 after the `v0.15.0` release. The canonical planning
+> tracker remains `roadmap/CELLSCRIPT_0_15_ROADMAP.md`; this file is a historical
+> branch summary.
+
 **Updated**: 2026-05-20
 
 0.15 is the scoped-invariant, Covenant ProofPlan, and soundness hardening

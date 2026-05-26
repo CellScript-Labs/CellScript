@@ -309,5 +309,5 @@ repository is not itself a package root for this command unless you create a
   metadata verification.
 - Use `Tutorial-08-Bundled-Example-Contracts` to see production-oriented example
   contracts.
-- Read `docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md` for the release boundary.
+- Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` for the release boundary.
 - Read `roadmap/CELLSCRIPT_0_16_ROADMAP.md` for future ProofPlan soundness work.

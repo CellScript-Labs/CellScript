@@ -1,8 +1,12 @@
-# CellScript 0.14 Release Notes Draft
+# CellScript 0.14 Release Notes
 
-**Status**: Release-gate draft for the `cellscript-0.14` implementation branch.
+**Status**: Released as `v0.14.0`.
 
-**Updated**: 2026-04-27.
+**Release date**: 2026-05-09.
+
+**Release tag**: `v0.14.0`.
+
+**Updated**: 2026-05-09.
 
 CellScript 0.14 is the CKB semantic-completeness milestone. It exposes more of
 CKB's concrete transaction surface in source syntax, metadata, constraints, and
