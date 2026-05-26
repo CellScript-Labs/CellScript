@@ -1,8 +1,8 @@
 # CellScript 0.16 Release Notes Draft
 
-Status: implementation branch draft for `cellscript-0.16`.
+Status: implementation branch draft for `nightly-0.16`.
 
-Updated: 2026-04-28.
+Updated: 2026-05-26.
 
 CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
 assurance toolchain. The release adds operational semantics, ProofPlan
