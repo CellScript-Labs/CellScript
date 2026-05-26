@@ -21,6 +21,31 @@ where
     } with_lock(owner)
 "#;
 
+const TWO_ACTION_IDENTITY_CREATE_UNIQUE: &str = r#"
+module v016::two_identity
+
+resource Badge has store, create, replace
+    identity(field(badge_id))
+{
+    badge_id: [u8; 32]
+    owner: Address
+}
+
+action issue_badge_a(badge_id: [u8; 32], owner: Address) -> Badge
+where
+    create_unique<Badge>(identity = field(badge_id)) {
+        badge_id,
+        owner
+    } with_lock(owner)
+
+action issue_badge_b(badge_id: [u8; 32], owner: Address) -> Badge
+where
+    create_unique<Badge>(identity = field(badge_id)) {
+        badge_id,
+        owner
+    } with_lock(owner)
+"#;
+
 const METADATA_ONLY_INVARIANT: &str = r#"
 module v016::gap
 
@@ -118,6 +143,29 @@ fn proof_plan_soundness_rejects_local_runtime_mismatches() {
     let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
     assert_eq!(report.status, "failed", "{report:#?}");
     assert!(report.issues.iter().any(|issue| issue.code == "PP0403"), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_rejects_scoped_duplicate_obligation_deletion() {
+    let result = compile(
+        TWO_ACTION_IDENTITY_CREATE_UNIQUE,
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .unwrap();
+    let mut metadata = result.metadata.clone();
+    assert!(metadata.runtime.proof_plan.iter().any(|plan| plan.origin == "action:issue_badge_b"));
+    assert!(metadata.runtime.verifier_obligations.iter().any(|obligation| obligation.scope == "action:issue_badge_b"));
+
+    metadata.runtime.proof_plan.retain(|plan| plan.origin != "action:issue_badge_b");
+    for action in &mut metadata.actions {
+        if action.name == "issue_badge_b" {
+            action.proof_plan.clear();
+        }
+    }
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0002" && issue.origin == "action:issue_badge_b"), "{report:#?}");
 }
 
 #[test]
@@ -410,6 +458,14 @@ fn standard_ckb_compat_fixture_files_parse_and_have_required_fields() {
             assert!(fixture["status"].as_str().is_some(), "fixture {} missing status", fixture_name);
             assert!(fixture["transaction_shape"].is_object(), "fixture {} missing transaction_shape", fixture_name);
             assert!(fixture["script_group"].is_object(), "fixture {} missing script_group", fixture_name);
+            if fixture["suite"] == "acp" {
+                assert_eq!(fixture["script_group"]["kind"], "lock", "ACP fixture {} must model ACP as a lock script", fixture_name);
+                assert_eq!(
+                    fixture["metadata_expectation"]["proof_plan"]["trigger"], "lock_group",
+                    "ACP fixture {} must use lock_group ProofPlan trigger",
+                    fixture_name
+                );
+            }
             assert!(
                 fixture["script_group"]["positive"].as_array().is_some_and(|cases| !cases.is_empty()),
                 "fixture {} missing ScriptGroup positive matrix",
@@ -466,6 +522,9 @@ fn ckb_stdlib_protocol_modules_exist_and_cover_required_suites() {
         assert!(!module.compatibility_fixture.is_empty(), "module {} missing compatibility_fixture", module.name);
         assert_eq!(module.stability, "schema-stub", "module {} must not be marked stable before implementation coverage", module.name);
     }
+    let acp = modules.iter().find(|module| module.name == "std::acp").expect("std::acp module");
+    assert_eq!(acp.script_type, "lock");
+    assert_eq!(acp.proof_plan_trigger, "lock_group");
 }
 
 #[test]

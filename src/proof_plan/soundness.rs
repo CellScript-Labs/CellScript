@@ -43,11 +43,11 @@ pub fn check_metadata(metadata: &CompileMetadata, strict: bool) -> ProofPlanSoun
 
     let proof_index = proof_plan
         .iter()
-        .map(|plan| (obligation_key(&plan.category, &plan.feature, &plan.status, &plan.detail), plan))
+        .map(|plan| (obligation_key(&plan.origin, &plan.category, &plan.feature, &plan.status, &plan.detail), plan))
         .collect::<BTreeMap<_, _>>();
 
     for obligation in obligations {
-        let key = obligation_key(&obligation.category, &obligation.feature, &obligation.status, &obligation.detail);
+        let key = obligation_key(&obligation.scope, &obligation.category, &obligation.feature, &obligation.status, &obligation.detail);
         if !proof_index.contains_key(&key) {
             push_issue(
                 &mut issues,
@@ -55,7 +55,7 @@ pub fn check_metadata(metadata: &CompileMetadata, strict: bool) -> ProofPlanSoun
                 "PP0002",
                 &obligation.scope,
                 &obligation.feature,
-                "runtime verifier obligation has no matching ProofPlan record with the same category, feature, status, and detail",
+                "runtime verifier obligation has no matching ProofPlan record with the same origin/scope, category, feature, status, and detail",
             );
         }
     }
@@ -268,8 +268,8 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
     }
 }
 
-fn obligation_key(category: &str, feature: &str, status: &str, detail: &str) -> String {
-    format!("{category}\u{1f}{feature}\u{1f}{status}\u{1f}{detail}")
+fn obligation_key(scope_or_origin: &str, category: &str, feature: &str, status: &str, detail: &str) -> String {
+    format!("{scope_or_origin}\u{1f}{category}\u{1f}{feature}\u{1f}{status}\u{1f}{detail}")
 }
 
 fn plan_identity_key(plan: &ProofPlanMetadata) -> String {
@@ -297,5 +297,5 @@ fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &
 
 #[allow(dead_code)]
 fn _obligation_debug_key(obligation: &VerifierObligationMetadata) -> String {
-    obligation_key(&obligation.category, &obligation.feature, &obligation.status, &obligation.detail)
+    obligation_key(&obligation.scope, &obligation.category, &obligation.feature, &obligation.status, &obligation.detail)
 }
