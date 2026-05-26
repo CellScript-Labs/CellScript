@@ -161,6 +161,11 @@ cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
 
+`proof-diff` reports added, removed, and changed ProofPlan records. For changed
+records, `changed_records[].fields` names the exact trigger, scope, reads,
+coverage, group cardinality, builder assumption, codegen coverage, or
+on-chain-check field that changed.
+
 ## Suggested Compiler CI Gate
 
 For CKB packages, a useful compiler CI gate is:

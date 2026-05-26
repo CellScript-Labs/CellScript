@@ -108,8 +108,8 @@ assurance surface:
   enforcement;
 - `runtime.builder_assumptions`, `cellc explain-assumptions`, and
   `cellc validate-tx`;
-- transaction solver templates, deployment plans, dependency locks, proof diffs,
-  profiles, transaction traces, and audit bundles;
+- transaction solver templates, deployment plans, dependency locks, field-level
+  proof diffs, profiles, transaction traces, and audit bundles;
 - standard CKB compatibility fixture manifest for sUDT, xUDT, ACP, Cheque,
   Omnilock, NervosDAO since/epoch, and Type ID.
 

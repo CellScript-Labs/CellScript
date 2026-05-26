@@ -858,7 +858,7 @@ Local deployment artifacts:
 Audit tooling:
 
 - metadata/IR-level source-to-codegen mapping;
-- proof diff;
+- field-level proof diff;
 - cycle profiler per invariant/check;
 - transaction assumption trace viewer;
 - HTML audit bundle linking source, ProofPlan, metadata, IR effect classes, and
