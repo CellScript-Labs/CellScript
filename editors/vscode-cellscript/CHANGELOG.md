@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.16.0
+
+- Updated extension package metadata for the CellScript 0.16.0 release.
+- Kept the extension aligned with `cellc --lsp` while the compiler adds the
+  v0.16 assurance surface: ProofPlan soundness, builder assumptions, transaction
+  template reports, deployment reports, and audit bundle metadata.
+- Refreshed README wording for the current 0.16 authoring surface.
+- Validated the package against the 0.16 crate version and release manifest.
+
 ## 0.15.0
 
 - Updated extension package metadata for the CellScript 0.15.0 release.

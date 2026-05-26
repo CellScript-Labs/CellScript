@@ -139,6 +139,12 @@ on-chain-check status fields.
 **Note**: Source-to-codegen mapping is at the metadata/IR level. Full
 CellScript-to-RISC-V assembly source maps are not yet available.
 
+### VS Code Extension
+
+The VS Code extension package is aligned with CellScript 0.16.0. Its README,
+changelog, package metadata, validation script, and packaged VSIX now describe
+the current `cellc --lsp` tooling surface and 0.16 authoring surface.
+
 ### Standard Compatibility Suite
 
 The compatibility manifest is:

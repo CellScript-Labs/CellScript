@@ -41,7 +41,7 @@ outside the LSP scope.
 ### Editor basics
 
 - `.cell` file association
-- TextMate syntax highlighting for the current 0.15 authoring surface (`where`
+- TextMate syntax highlighting for the current 0.16 authoring surface (`where`
   proof blocks, `transition input.state: A -> output.state: B`, `flow`, named
   output `create out = T { ... }`, and source qualifiers such as `read`,
   `protected`, `witness`, and `lock_args`)
@@ -52,7 +52,7 @@ outside the LSP scope.
   `preserve` blocks, and stdlib lifecycle/cell metadata helpers
 - 0.14 lock-boundary snippets and highlighting for `protected`, `lock_args`,
   `witness`, `require`, `source::*`, `witness::*`, and `env::sighash_all`
-- 0.15 identity, destruction-policy, and aggregate-invariant snippets for
+- identity, destruction-policy, and aggregate-invariant snippets for
   `identity`, `create_unique`, `replace_unique`, `destroy_unique`,
   `burn_amount`, `assert_sum`, `assert_delta`, `assert_distinct`, and
   `assert_singleton`
@@ -92,7 +92,7 @@ not runtime allocation. Expression-level `read_ref<T>()` still exists for
 lower-level reference reads, but action-boundary read-only Cell parameters
 should use `read name: T`.
 
-0.15 identity-aware lifecycle forms are also exposed through snippets and
+0.16 identity-aware lifecycle forms are also exposed through snippets and
 highlighting:
 
 ```cellscript

@@ -1101,7 +1101,7 @@ metadata, IR effect classes, and codegen coverage.
 | Standard compatibility | descriptive CKB standard script fixture suites | v0.16 |
 | Transaction validation | schema-bound `cellc validate-tx` | v0.16 |
 | Transaction templates | `cellc solve-tx` template emitter | v0.16 |
-| Deployment governance | local deploy plan, dep locks, proof diff, audit bundle | v0.16 |
+| Deployment governance | local deploy plan, dep locks, field-level proof diff, audit bundle | v0.16 |
 
 ---
 

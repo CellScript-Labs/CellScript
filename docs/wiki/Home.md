@@ -4,7 +4,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-05-16.
+Last updated: 2026-05-26.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -115,7 +115,7 @@ The fastest way to get oriented is to compile the token example:
 git clone https://github.com/a19q3/CellScript.git
 cd CellScript
 ./scripts/cellscript_gate.sh dev
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 cargo run --locked --bin cellc -- verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -158,7 +158,7 @@ production-ready.
 
 ## Reference Examples
 
-- [CKB hashing workflow](https://github.com/a19q3/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix](https://github.com/a19q3/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest](https://github.com/a19q3/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
+- [CKB hashing workflow](../examples/ckb_hashing.md)
+- [Collections matrix](../examples/collections_matrix.md)
+- [Deployment manifest](../examples/deployment_manifest.md)
+- [Output append](../examples/output_append.md)
