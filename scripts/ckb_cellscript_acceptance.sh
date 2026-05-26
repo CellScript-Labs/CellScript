@@ -2297,14 +2297,26 @@ def update_ckb_business_coverage(onchain_actions):
         and (report.get("production_gate") or {}).get("status") == "passed"
     )
 
+RPC_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 def rpc(method, params=None):
     body = json.dumps({"id": 42, "jsonrpc": "2.0", "method": method, "params": params or []}).encode("utf-8")
-    request = urllib.request.Request(rpc_url, data=body, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"RPC {method} failed to connect: {error}") from error
+    last_error = None
+    for attempt in range(6):
+        request = urllib.request.Request(rpc_url, data=body, headers={"Content-Type": "application/json"})
+        try:
+            with RPC_OPENER.open(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                break
+        except urllib.error.HTTPError as error:
+            if error.code not in {502, 503, 504}:
+                raise RuntimeError(f"RPC {method} failed to connect: {error}") from error
+            last_error = error
+        except urllib.error.URLError as error:
+            last_error = error
+        if attempt == 5:
+            raise RuntimeError(f"RPC {method} failed to connect after retries: {last_error}") from last_error
+        time.sleep(0.25 * (attempt + 1))
     if payload.get("error"):
         raise RuntimeError(f"RPC {method} returned error: {payload['error']}")
     return payload.get("result")
