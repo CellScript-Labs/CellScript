@@ -56,12 +56,12 @@ Each release answers a specific question:
 | v0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate includes stateful business-flow/action coverage. | [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [v0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [v0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
 | v0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
 | v0.15 release scope | Implemented P0; P1 is partial. The branch adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, cell identity, destruction policies, capability reset, and macro provenance. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
-| v0.16 release scope | Implemented for the scoped `cellscript-0.16` metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
+| v0.16 release scope | Implemented on `nightly-0.16` for the scoped metadata/tooling release. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, and descriptive standard CKB compatibility fixtures. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
-| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
+| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/a19q3/CellScript/wiki) |
 
 ---
 
@@ -73,7 +73,7 @@ Each release answers a specific question:
 | v0.13 | Performance and Expressiveness | "Write less, run faster." | Beta released; scope closed |
 | v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse." | Feature-complete beta branch |
 | v0.15 | Scoped Invariants and Covenant ProofPlan | "Show when constraints run, what they read, and who they protect." | P0 complete; P1 partial |
-| v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Implemented for scoped `cellscript-0.16` release |
+| v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Implemented on `nightly-0.16` for the scoped release |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or
@@ -1014,7 +1014,7 @@ Future work:
 
 Source documents:
 
-- [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
+- [GitHub Wiki](https://github.com/a19q3/CellScript/wiki)
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
 
 ---

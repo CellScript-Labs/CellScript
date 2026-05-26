@@ -25,14 +25,15 @@ pub mod resolve;
 pub mod runtime_errors;
 pub mod simulate;
 pub mod stdlib;
+pub(crate) mod syscalls;
 pub mod types;
 pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
-pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
+pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanEvidenceMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use error::{CompileError, Result};
 use resolve::ModuleResolver;
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,11 @@ impl CompileOptions {
         matches!(self.primitive_compat.as_deref(), Some("0.15" | "0.16"))
     }
 
+    /// Returns true when running in strict primitive mode.
+    pub fn is_primitive_strict(&self) -> bool {
+        self.is_primitive_strict_015()
+    }
+
     /// Returns true when running in v0.16 strict assurance mode.
     pub fn is_assurance_strict_016(&self) -> bool {
         self.primitive_compat.as_deref() == Some("0.16")
@@ -81,12 +87,20 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
     }
+    if let Some(mode) = options.primitive_compat.as_deref() {
+        if !matches!(mode, "0.14" | "0.15" | "0.16") {
+            return Err(CompileError::without_span(format!(
+                "unsupported primitive compatibility mode '{}'; supported values: 0.14, 0.15, 0.16",
+                mode
+            )));
+        }
+    }
     Ok(())
 }
 
 /// In `--primitive-strict=0.15` or `--primitive-strict=0.16` mode, reject v0.14 protocol verbs (`transfer`, `destroy`)
 /// in capability declarations. They must be replaced by their kernel-effect equivalents.
-fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
+pub(crate) fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
     use crate::error::MigrationDiagnostic;
     for item in &module.items {
         let (capabilities, type_name, span) = match item {
@@ -135,6 +149,7 @@ pub const METADATA_SCHEMA_VERSION: u32 = 41;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
+const ENTRY_ABI_MAX_SLOTS: usize = 1024;
 pub const CKB_DEFAULT_HASH_PERSONALIZATION: &[u8; 16] = b"ckb-default-hash";
 pub const CKB_BLANK_HASH: [u8; 32] = [
     68, 244, 198, 151, 68, 213, 248, 197, 93, 100, 32, 98, 148, 157, 202, 228, 155, 196, 231, 239, 67, 211, 136, 197, 161, 47, 66,
@@ -343,7 +358,7 @@ pub struct MoleculeSchemaManifestEntryMetadata {
     pub type_name: String,
     pub kind: String,
     pub layout: String,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub encoded_size: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
@@ -696,39 +711,37 @@ const MOLECULE_VM_ABI_VERSION: u16 = 0x8001;
 
 /// Strip CellScript's fixed VM ABI trailer before directly loading an ELF into CKB-VM.
 pub fn strip_vm_abi_trailer(bytes: &[u8]) -> &[u8] {
-    if has_vm_abi_trailer_magic(bytes) {
+    if vm_abi_trailer(bytes).is_some() {
         &bytes[..bytes.len() - VM_ABI_TRAILER_LEN]
     } else {
         bytes
     }
 }
 
-fn has_vm_abi_trailer_magic(bytes: &[u8]) -> bool {
+fn vm_abi_trailer(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.len() < VM_ABI_TRAILER_LEN {
-        return false;
+        return None;
     }
     let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    &bytes[trailer_start..trailer_start + VM_ABI_TRAILER_MAGIC.len()] == VM_ABI_TRAILER_MAGIC
+    let trailer = &bytes[trailer_start..];
+    if &trailer[..VM_ABI_TRAILER_MAGIC.len()] != VM_ABI_TRAILER_MAGIC {
+        return None;
+    }
+    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
+    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
+    (flags == 0 && reserved == 0).then_some(trailer)
 }
 
 fn vm_abi_trailer_version(bytes: &[u8]) -> Result<Option<u16>> {
-    if !has_vm_abi_trailer_magic(bytes) {
+    let Some(trailer) = vm_abi_trailer(bytes) else {
         return Ok(None);
-    }
-
-    let trailer_start = bytes.len() - VM_ABI_TRAILER_LEN;
-    let trailer = &bytes[trailer_start..];
+    };
     let version = u16::from_le_bytes([trailer[8], trailer[9]]);
-    let flags = u16::from_le_bytes([trailer[10], trailer[11]]);
-    let reserved = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
-    if flags != 0 || reserved != 0 {
-        return Err(CompileError::without_span("invalid VM ABI trailer: flags/reserved bytes must be zero"));
-    }
     Ok(Some(version))
 }
 
 fn append_vm_abi_trailer(mut artifact: Vec<u8>, abi_version: u16) -> Vec<u8> {
-    if strip_vm_abi_trailer(&artifact).len() != artifact.len() {
+    if vm_abi_trailer(&artifact).is_some() {
         artifact.truncate(artifact.len() - VM_ABI_TRAILER_LEN);
     }
     artifact.extend_from_slice(VM_ABI_TRAILER_MAGIC);
@@ -982,12 +995,13 @@ fn constraints_metadata(
         .collect();
 
     let max_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).max().unwrap_or(0);
+    let min_entry_witness_bytes = entry_abi.iter().map(|entry| entry.min_witness_bytes).min().unwrap_or(0);
     let estimated_cycles = metadata.actions.iter().map(|action| action.estimated_cycles).chain(metadata.locks.iter().map(|_| 0)).max();
     let ckb = (target_profile == TargetProfile::Ckb).then(|| {
         warnings.push(
             "CKB cycles and transaction size are not measured by the compiler; require builder dry-run for production".to_string(),
         );
-        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, estimated_cycles);
+        let ckb = ckb_constraints(metadata, artifact_size_bytes, max_entry_witness_bytes, min_entry_witness_bytes, estimated_cycles);
         if ckb.uses_input_since || ckb.uses_header_epoch {
             warnings.push(format!(
                 "CKB timelock-related runtime features are in use (input_since={}, header_epoch={}); declarative DSL policy surface is not yet first-class",
@@ -1072,14 +1086,21 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         }
 
         let slot_start = abi_index;
-        let slot_end = abi_index.saturating_add(abi_slots).saturating_sub(1);
-        let register_slots = (slot_start..slot_start + abi_slots).filter(|slot| *slot < 8).count();
+        let slot_end_exclusive = abi_index.saturating_add(abi_slots);
+        if slot_end_exclusive > ENTRY_ABI_MAX_SLOTS {
+            supported = false;
+            let reason = format!("entry ABI uses more than {} slots", ENTRY_ABI_MAX_SLOTS);
+            unsupported_reason.get_or_insert_with(|| reason.clone());
+            unsupported_reasons.push(format!("parameter '{}': {}", param.name, reason));
+        }
+        let slot_end = slot_end_exclusive.saturating_sub(1);
+        let register_slots = slot_end_exclusive.min(8).saturating_sub(slot_start.min(8));
         let stack_spill_slots = abi_slots.saturating_sub(register_slots);
-        let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_start + abi_slots > 8;
+        let pointer_pair_crosses_register_boundary = pointer_length_pair && slot_start < 8 && slot_end_exclusive > 8;
         if param.source == "lock_args" || param.cell_bound_abi || param.ty.starts_with('&') {
             witness_bytes = 0;
         }
-        witness_payload_bytes += witness_bytes;
+        witness_payload_bytes = witness_payload_bytes.saturating_add(witness_bytes);
         param_constraints.push(ParamAbiConstraintsMetadata {
             name: param.name.clone(),
             ty: param.ty.clone(),
@@ -1089,19 +1110,20 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
             slot_end,
             register_slots,
             stack_spill_slots,
-            stack_spill_bytes: stack_spill_slots * 8,
+            stack_spill_bytes: stack_spill_slots.saturating_mul(8),
             witness_bytes,
             pointer_length_pair,
             pointer_pair_crosses_register_boundary,
             supported,
             unsupported_reason,
         });
-        abi_index += abi_slots;
+        abi_index = slot_end_exclusive;
     }
 
     let register_slots_used = abi_index.min(8);
     let stack_spill_slots = abi_index.saturating_sub(8);
-    let min_witness_bytes = if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len() + witness_payload_bytes };
+    let min_witness_bytes =
+        if witness_payload_bytes == 0 { 0 } else { ENTRY_WITNESS_ABI_MAGIC.len().saturating_add(witness_payload_bytes) };
     EntryAbiConstraintsMetadata {
         entry_kind: entry_kind.to_string(),
         entry_name: entry_name.to_string(),
@@ -1109,7 +1131,7 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
         abi_slots_used: abi_index,
         register_slots_used,
         stack_spill_slots,
-        stack_spill_bytes: stack_spill_slots * 8,
+        stack_spill_bytes: stack_spill_slots.saturating_mul(8),
         witness_payload_bytes,
         min_witness_bytes,
         unsupported: !unsupported_reasons.is_empty(),
@@ -1118,17 +1140,33 @@ fn entry_abi_constraints(entry_kind: &str, entry_name: &str, params: &[ParamMeta
     }
 }
 
+fn ckb_code_cell_capacity_shannons(artifact_size_bytes: usize, overhead_bytes: u64) -> u64 {
+    u64::try_from(artifact_size_bytes).unwrap_or(u64::MAX).saturating_add(overhead_bytes).saturating_mul(CKB_SHANNONS_PER_CKB)
+}
+
 fn ckb_constraints(
     metadata: &CompileMetadata,
     artifact_size_bytes: usize,
     max_entry_witness_bytes: usize,
+    min_entry_witness_bytes: usize,
     estimated_cycles: Option<u64>,
 ) -> CkbConstraintsMetadata {
     let max_tx_verify_cycles = env_u64("CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES").unwrap_or(CKB_DEFAULT_MAX_TX_VERIFY_CYCLES);
     let max_block_cycles = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_CYCLES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_CYCLES);
     let max_block_bytes = env_u64("CELLSCRIPT_CKB_MAX_BLOCK_BYTES").unwrap_or(CKB_DEFAULT_MAX_BLOCK_BYTES);
-    let min_code_cell_data_capacity_shannons = (artifact_size_bytes as u64 + 8) * CKB_SHANNONS_PER_CKB;
-    let recommended_code_cell_capacity_shannons = (artifact_size_bytes as u64 + 1_000) * CKB_SHANNONS_PER_CKB;
+
+    // Surface obviously invalid environment overrides without changing the
+    // explicit metadata value the caller requested.
+    if max_tx_verify_cycles == 0 || max_block_cycles == 0 || max_block_bytes == 0 {
+        log::warn!(
+            "CKB limit env override produced zero: max_tx_verify_cycles={}, max_block_cycles={}, max_block_bytes={}",
+            max_tx_verify_cycles,
+            max_block_cycles,
+            max_block_bytes
+        );
+    }
+    let min_code_cell_data_capacity_shannons = ckb_code_cell_capacity_shannons(artifact_size_bytes, 8);
+    let recommended_code_cell_capacity_shannons = ckb_code_cell_capacity_shannons(artifact_size_bytes, 1_000);
     let ckb_runtime_features = metadata.runtime.ckb_runtime_features.clone();
     let uses_input_since = ckb_runtime_features.iter().any(|feature| feature == "ckb-input-since");
     let uses_header_epoch = ckb_runtime_features.iter().any(|feature| feature.starts_with("ckb-header-epoch-"));
@@ -1206,7 +1244,7 @@ fn ckb_constraints(
         cycles_status: "not-measured-by-compiler".to_string(),
         min_code_cell_data_capacity_shannons,
         recommended_code_cell_capacity_shannons,
-        min_witness_bytes: ENTRY_WITNESS_ABI_MAGIC.len(),
+        min_witness_bytes: min_entry_witness_bytes,
         max_entry_witness_bytes,
         dry_run_required_for_production: true,
         tx_size_bytes: None,
@@ -1515,10 +1553,7 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
 
 /// Extract span from an expression.
 fn expr_span(expr: &ast::Expr) -> error::Span {
-    // AST expressions don't carry their own Span in the current definition,
-    // so we fall back to a default span.
-    let _ = expr;
-    error::Span::default()
+    expr.span()
 }
 
 fn bind_source_metadata(metadata: &mut CompileMetadata, mut source_units: Vec<SourceUnitMetadata>) {
@@ -2506,17 +2541,17 @@ fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
         }
         match schema.layout.as_str() {
             "fixed-struct-v1" => {
-                if ty.encoded_size != Some(schema.fixed_size) {
+                if ty.encoded_size != schema.fixed_size {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} does not match encoded_size {:?}",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} does not match encoded_size {:?}",
                         ty.name, schema.fixed_size, ty.encoded_size
                     )));
                 }
             }
             "molecule-table-v1" => {
-                if schema.fixed_size != 0 {
+                if schema.fixed_size.is_some() {
                     return Err(CompileError::without_span(format!(
-                        "metadata type '{}' molecule_schema.fixed_size {} must be 0 for molecule-table-v1",
+                        "metadata type '{}' molecule_schema.fixed_size {:?} must be null for molecule-table-v1",
                         ty.name, schema.fixed_size
                     )));
                 }
@@ -2658,21 +2693,19 @@ fn validate_molecule_schema_manifest_metadata(metadata: &CompileMetadata) -> Res
 }
 
 pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
+    let root = current_source_verification_root()?;
+    validate_source_units_on_disk_under(metadata, &root)
+}
+
+pub fn validate_source_units_on_disk_under(metadata: &CompileMetadata, trusted_root: &Utf8Path) -> Result<()> {
     validate_source_metadata(metadata)?;
     if metadata.source_units.is_empty() {
         return Err(CompileError::without_span("metadata has no source_units to verify"));
     }
 
     for unit in &metadata.source_units {
-        if unit.path.starts_with('<') && unit.path.ends_with('>') {
-            return Err(CompileError::without_span(format!(
-                "source unit '{}' is not backed by a disk file and cannot be verified",
-                unit.path
-            )));
-        }
-
-        let path = Utf8Path::new(&unit.path);
-        let bytes = std::fs::read(path)
+        let path = verified_source_unit_disk_path(unit, trusted_root)?;
+        let bytes = std::fs::read(&path)
             .map_err(|error| CompileError::without_span(format!("failed to read source unit '{}': {}", unit.path, error)))?;
         if bytes.len() != unit.size_bytes {
             return Err(CompileError::without_span(format!(
@@ -2695,39 +2728,88 @@ pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_source_units_primitive_mode(metadata: &CompileMetadata, primitive_compat: Option<String>) -> Result<()> {
+    let root = current_source_verification_root()?;
+    validate_source_units_primitive_mode_under(metadata, primitive_compat, &root)
+}
+
+pub fn validate_source_units_primitive_mode_under(
+    metadata: &CompileMetadata,
+    primitive_compat: Option<String>,
+    trusted_root: &Utf8Path,
+) -> Result<()> {
+    let options = CompileOptions { primitive_compat, ..CompileOptions::default() };
+    validate_compile_options(&options)?;
+    if !options.is_primitive_strict() {
+        return Ok(());
+    }
+
+    for unit in &metadata.source_units {
+        let path = verified_source_unit_disk_path(unit, trusted_root)?;
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| CompileError::without_span(format!("failed to read source unit '{}': {}", unit.path, error)))?;
+        let tokens = lexer::lex(&source).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+        let ast = parser::parse(&tokens).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+        check_primitive_strict_015(&ast).map_err(|error| {
+            CompileError::without_span(format!("primitive mode source verification failed for '{}': {}", unit.path, error.message))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn current_source_verification_root() -> Result<Utf8PathBuf> {
+    let cwd = std::env::current_dir()
+        .map_err(|error| CompileError::without_span(format!("failed to resolve source verification root: {}", error)))?;
+    Utf8PathBuf::from_path_buf(cwd)
+        .map_err(|path| CompileError::without_span(format!("source verification root is not valid UTF-8: {}", path.display())))
+}
+
+fn verified_source_unit_disk_path(unit: &SourceUnitMetadata, trusted_root: &Utf8Path) -> Result<Utf8PathBuf> {
+    if unit.path.starts_with('<') && unit.path.ends_with('>') {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' is not backed by a disk file and cannot be verified",
+            unit.path
+        )));
+    }
+    if unit.path.is_empty() {
+        return Err(CompileError::without_span("source unit path must not be empty"));
+    }
+
+    let path = Utf8Path::new(&unit.path);
+    if path.components().any(|component| matches!(component, Utf8Component::ParentDir | Utf8Component::Prefix(_))) {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' must not contain parent-directory or platform-prefix components",
+            unit.path
+        )));
+    }
+
+    let trusted_root = canonical_utf8_path(trusted_root)?;
+    let candidate = if path.is_absolute() { path.to_path_buf() } else { trusted_root.join(path) };
+    let canonical = canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(&trusted_root) {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' resolves outside trusted source root '{}'",
+            unit.path, trusted_root
+        )));
+    }
+
+    Ok(canonical)
+}
+
 pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
     validate_compile_metadata(&result.metadata, result.artifact_format)?;
-
-    if result.artifact_bytes.is_empty() {
-        return Err(CompileError::without_span("compiler produced an empty artifact"));
-    }
-
-    let computed_hash = ckb_blake2b256(&result.artifact_bytes);
-    if computed_hash != result.artifact_hash {
-        return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
-    }
-    let computed_hash_hex = hex_encode(&computed_hash);
-    match &result.metadata.artifact_hash {
-        Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
-        Some(metadata_hash) => {
-            return Err(CompileError::without_span(format!(
-                "metadata artifact_hash '{}' does not match artifact bytes '{}'",
-                metadata_hash, computed_hash_hex
-            )));
-        }
-        None => return Err(CompileError::without_span("metadata is missing artifact_hash")),
-    }
-    match result.metadata.artifact_size_bytes {
-        Some(size) if size == result.artifact_bytes.len() => {}
-        Some(size) => {
-            return Err(CompileError::without_span(format!(
-                "metadata artifact_size_bytes {} does not match artifact size {}",
-                size,
-                result.artifact_bytes.len()
-            )));
-        }
-        None => return Err(CompileError::without_span("metadata is missing artifact_size_bytes")),
-    }
+    validate_artifact_binding_metadata(
+        &result.artifact_bytes,
+        &result.artifact_hash,
+        result.artifact_format,
+        &result.metadata,
+        "compiler produced an empty artifact",
+    )?;
 
     match result.artifact_format {
         ArtifactFormat::RiscvAssembly => {
@@ -2762,6 +2844,63 @@ pub fn validate_compile_result(result: &CompileResult) -> Result<()> {
                 None => {}
             }
         }
+    }
+
+    Ok(())
+}
+
+fn validate_artifact_binding_metadata(
+    artifact_bytes: &[u8],
+    artifact_hash: &[u8; 32],
+    artifact_format: ArtifactFormat,
+    metadata: &CompileMetadata,
+    empty_artifact_message: &'static str,
+) -> Result<()> {
+    if artifact_bytes.is_empty() {
+        return Err(CompileError::without_span(empty_artifact_message));
+    }
+
+    let computed_hash = ckb_blake2b256(artifact_bytes);
+    if &computed_hash != artifact_hash {
+        return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
+    }
+    let computed_hash_hex = hex_encode(&computed_hash);
+    match &metadata.artifact_hash {
+        Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
+        Some(metadata_hash) => {
+            return Err(CompileError::without_span(format!(
+                "metadata artifact_hash '{}' does not match artifact bytes '{}'",
+                metadata_hash, computed_hash_hex
+            )));
+        }
+        None => return Err(CompileError::without_span("metadata is missing artifact_hash")),
+    }
+
+    match metadata.artifact_size_bytes {
+        Some(size) if size == artifact_bytes.len() => {}
+        Some(size) => {
+            return Err(CompileError::without_span(format!(
+                "metadata artifact_size_bytes {} does not match artifact size {}",
+                size,
+                artifact_bytes.len()
+            )));
+        }
+        None => return Err(CompileError::without_span("metadata is missing artifact_size_bytes")),
+    }
+
+    let expected_format = artifact_format.display_name();
+    if metadata.constraints.artifact.format != expected_format {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.artifact.format '{}' does not match artifact format '{}'",
+            metadata.constraints.artifact.format, expected_format
+        )));
+    }
+    if metadata.constraints.artifact.artifact_size_bytes != artifact_bytes.len() {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.artifact.artifact_size_bytes {} does not match artifact size {}",
+            metadata.constraints.artifact.artifact_size_bytes,
+            artifact_bytes.len()
+        )));
     }
 
     Ok(())
@@ -2936,7 +3075,7 @@ pub struct MoleculeSchemaMetadata {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_fields: Vec<String>,
-    pub fixed_size: usize,
+    pub fixed_size: Option<usize>,
     pub schema_hash: String,
     pub schema: String,
 }
@@ -3488,6 +3627,8 @@ pub struct CellPatternMetadata {
     pub type_hash: Option<String>,
     pub binding: String,
     pub fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destruction_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3612,29 +3753,13 @@ impl ValidatedArtifact {
     /// Validate that artifact bytes, hash, format, and metadata agree.
     pub fn validate(&self) -> Result<()> {
         validate_compile_metadata(&self.metadata, self.artifact_format)?;
-
-        if self.artifact_bytes.is_empty() {
-            return Err(CompileError::without_span("artifact bytes are empty"));
-        }
-
-        let computed_hash = ckb_blake2b256(&self.artifact_bytes);
-        if computed_hash != self.artifact_hash {
-            return Err(CompileError::without_span("artifact_hash does not match artifact_bytes"));
-        }
-        let computed_hash_hex = hex_encode(&computed_hash);
-        match &self.metadata.artifact_hash {
-            Some(metadata_hash) if metadata_hash == &computed_hash_hex => {}
-            Some(metadata_hash) => {
-                return Err(CompileError::without_span(format!(
-                    "metadata artifact_hash '{}' does not match artifact bytes '{}'",
-                    metadata_hash, computed_hash_hex
-                )));
-            }
-            None => {
-                return Err(CompileError::without_span("metadata is missing artifact_hash"));
-            }
-        }
-
+        validate_artifact_binding_metadata(
+            &self.artifact_bytes,
+            &self.artifact_hash,
+            self.artifact_format,
+            &self.metadata,
+            "artifact bytes are empty",
+        )?;
         Ok(())
     }
 }
@@ -3700,11 +3825,40 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<CompileResult> {
 pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
     let ast = parser::parse(&tokens)?;
+    compile_metadata_for_ast(source, &ast, target, None)
+}
+
+/// Only generate compile metadata using an already-built module resolver.
+pub fn compile_metadata_with_resolver(
+    source: &str,
+    target: Option<String>,
+    resolver: &ModuleResolver,
+    current_module: &str,
+) -> Result<CompileMetadata> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    compile_metadata_for_ast(source, &ast, target, Some((resolver, current_module)))
+}
+
+fn compile_metadata_for_ast(
+    source: &str,
+    ast: &ast::Module,
+    target: Option<String>,
+    resolver: Option<(&ModuleResolver, &str)>,
+) -> Result<CompileMetadata> {
     let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
     let target_profile = TargetProfile::Ckb;
-    types::check(&ast)?;
-    flow::check(&ast)?;
-    let ir = ir::generate(&ast)?;
+    if let Some((resolver, module_name)) = resolver {
+        types::check_with_resolver(ast, resolver, module_name)?;
+    } else {
+        types::check(ast)?;
+    }
+    flow::check(ast)?;
+    let ir = if let Some((resolver, module_name)) = resolver {
+        ir::generate_with_resolver(ast, resolver, module_name)?
+    } else {
+        ir::generate(ast)?
+    };
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
@@ -3734,15 +3888,15 @@ fn compile_ast_with_build(
     let artifact_format = ArtifactFormat::from_target(resolve_target(options, build))?;
 
     // 2.5. Primitive compat/strict mode: reject v0.14 protocol verbs in strict mode
-    if options.is_primitive_strict_015() {
+    if options.is_primitive_strict() {
         check_primitive_strict_015(ast)?;
     };
 
     // 3. Type check
     if let Some((resolver, module_name)) = resolver {
-        types::check_with_resolver(ast, resolver, module_name)?;
+        types::check_with_resolver_and_primitive_strict(ast, resolver, module_name, options.is_primitive_strict())?;
     } else {
-        types::check(ast)?;
+        types::check_with_primitive_strict(ast, options.is_primitive_strict())?;
     }
     flow::check(ast)?;
 
@@ -3750,9 +3904,9 @@ fn compile_ast_with_build(
         let mut optimized = ast.clone();
         optimize::optimize_module(&mut optimized, options.opt_level)?;
         if let Some((resolver, module_name)) = resolver {
-            types::check_with_resolver(&optimized, resolver, module_name)?;
+            types::check_with_resolver_and_primitive_strict(&optimized, resolver, module_name, options.is_primitive_strict())?;
         } else {
-            types::check(&optimized)?;
+            types::check_with_primitive_strict(&optimized, options.is_primitive_strict())?;
         }
         flow::check(&optimized)?;
         Some(optimized)
@@ -3772,6 +3926,7 @@ fn compile_ast_with_build(
         None => None,
     };
     let ir = scoped_ir.as_ref().unwrap_or(&ir);
+    ir::verify_module(ir)?;
 
     let mut metadata = compile_metadata_from_ir(ir, artifact_format, target_profile);
     let target_policy_violations = target_profile_artifact_policy_violations(&metadata, target_profile);
@@ -3911,26 +4066,37 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
 }
 
 /// Check incremental compilation cache for a previous compile result.
-/// Returns `Some(result)` if the cache is valid and the source has not changed.
+/// Currently returns `None` because the incremental cache only tracks whether
+/// recompilation is needed, not the full `CompileResult`. The `needs_recompile`
+/// check is still performed so that the cache file is maintained, but the
+/// actual result must be produced by a full recompile.
 fn incremental_cache_hit(path: &Utf8Path, _source: &str, options: &CompileOptions) -> Option<CompileResult> {
+    // Maintain the incremental cache file so that record_compilation timestamps
+    // stay up to date, even though we cannot return a cached CompileResult yet.
     let cache_dir = path.parent()?.join(".cell/build/cache");
     let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+    if let Err(error) = compiler.load_cache() {
+        warn_incremental_cache_error("load", &cache_dir, error);
+    }
 
     let inc_options = incremental::CompileOptions {
         opt_level: options.opt_level,
         target: options.target.clone().unwrap_or_default(),
         debug: options.debug,
+        target_profile: options.target_profile.clone().unwrap_or_default(),
+        primitive_compat: options.primitive_compat.clone().unwrap_or_default(),
+        ckb_limit_env: incremental_env_snapshot(&[
+            "CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_BYTES",
+        ]),
+        riscv_toolchain_env: incremental_env_snapshot(&["CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"]),
     };
 
-    if !compiler.needs_recompile(path.as_std_path(), &inc_options) {
-        // Cache hit — recompile not needed, but we still need to recompile
-        // from source because we do not cache the full CompileResult.
-        // A full incremental cache would serialize CompileResult to disk.
-        None
-    } else {
-        None
-    }
+    // We must recompile from source because the incremental cache does not
+    // serialize the full CompileResult. A future improvement could cache it.
+    compiler.needs_recompile(path.as_std_path(), &inc_options);
+    None
 }
 
 /// Store compile result metadata to incremental cache after a successful compile.
@@ -3938,17 +4104,40 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
     let Some(parent) = path.parent() else { return };
     let cache_dir = parent.join(".cell/build/cache");
     let mut compiler = incremental::IncrementalCompiler::new(&cache_dir);
-    let _ = compiler.load_cache();
+    if let Err(error) = compiler.load_cache() {
+        warn_incremental_cache_error("load", &cache_dir, error);
+    }
 
     let inc_options = incremental::CompileOptions {
         opt_level: options.opt_level,
         target: options.target.clone().unwrap_or_default(),
         debug: options.debug,
+        target_profile: options.target_profile.clone().unwrap_or_default(),
+        primitive_compat: options.primitive_compat.clone().unwrap_or_default(),
+        ckb_limit_env: incremental_env_snapshot(&[
+            "CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_CYCLES",
+            "CELLSCRIPT_CKB_MAX_BLOCK_BYTES",
+        ]),
+        riscv_toolchain_env: incremental_env_snapshot(&["CELLSCRIPT_RISCV_CC", "CELLSCRIPT_RISCV_AS", "CELLSCRIPT_RISCV_LD"]),
     };
 
     let output_path = parent.join(".cell/build").join(path.file_name().unwrap_or("output"));
-    let _ = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options);
-    let _ = compiler.save_cache();
+    if let Err(error) = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options) {
+        warn_incremental_cache_error("record compilation", &cache_dir, error);
+        return;
+    }
+    if let Err(error) = compiler.save_cache() {
+        warn_incremental_cache_error("save", &cache_dir, error);
+    }
+}
+
+fn incremental_env_snapshot(keys: &[&str]) -> Vec<(String, Option<String>)> {
+    keys.iter().map(|key| ((*key).to_string(), std::env::var(key).ok())).collect()
+}
+
+fn warn_incremental_cache_error(context: &str, cache_dir: &Utf8Path, error: impl std::fmt::Display) {
+    log::warn!("incremental cache {} failed for '{}': {}", context, cache_dir, error);
 }
 
 fn source_unit_from_bytes(path: impl Into<String>, role: impl Into<String>, bytes: &[u8]) -> SourceUnitMetadata {
@@ -3965,10 +4154,13 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut source_paths = BTreeSet::new();
     let package_root = find_package_root(&entry_path)?;
+    let mut dependency_roots = BTreeSet::new();
 
     if let Some(package_root) = &package_root {
         let mut visited_roots = HashSet::new();
         collect_package_source_paths_recursive(package_root, &mut visited_roots, &mut source_paths)?;
+        let mut visited_dependency_roots = HashSet::new();
+        collect_package_dependency_roots_recursive(package_root, &mut visited_dependency_roots, &mut dependency_roots)?;
     } else if let Some(parent) = entry_path.parent() {
         for source_path in collect_cell_files(parent)? {
             source_paths.insert(source_path);
@@ -3981,6 +4173,8 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
         .map(|source_path| {
             let role = if source_path == entry_path {
                 "entry"
+            } else if dependency_roots.iter().any(|root| source_path.starts_with(root)) {
+                "dependency"
             } else if package_root.as_ref().is_some_and(|root| source_path.starts_with(root)) {
                 "package"
             } else {
@@ -3989,6 +4183,24 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
             source_unit_from_file(&source_path, role)
         })
         .collect()
+}
+
+fn collect_package_dependency_roots_recursive(
+    package_root: &Utf8Path,
+    visited_roots: &mut HashSet<Utf8PathBuf>,
+    dependency_roots: &mut BTreeSet<Utf8PathBuf>,
+) -> Result<()> {
+    let package_root = canonical_utf8_path(package_root)?;
+    if !visited_roots.insert(package_root.clone()) {
+        return Ok(());
+    }
+
+    for dep_root in local_dependency_roots(&package_root)? {
+        dependency_roots.insert(dep_root.clone());
+        collect_package_dependency_roots_recursive(&dep_root, visited_roots, dependency_roots)?;
+    }
+
+    Ok(())
 }
 
 fn collect_package_source_paths_recursive(
@@ -4029,6 +4241,7 @@ fn build_module_resolver(path: &Utf8Path, current_module: &ast::Module) -> Resul
         }
     }
 
+    resolver.check_circular_deps()?;
     Ok(resolver)
 }
 
@@ -4203,7 +4416,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 };
 
-                let dep_root = package_root.join(path);
+                let dep_root = canonical_package_child_path(package_root, path, &format!("dependency '{}' path", name))?;
                 let dep_manifest = dep_root.join("Cell.toml");
                 if !dep_manifest.exists() {
                     return Err(CompileError::new(
@@ -4212,7 +4425,7 @@ fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
                     ));
                 }
 
-                roots.push(canonical_utf8_path(&dep_root)?);
+                roots.push(dep_root);
             }
         }
     }
@@ -4249,12 +4462,7 @@ fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let manifest = load_manifest(package_root)?;
 
     let entry = manifest.package.as_ref().and_then(|package| package.entry.clone()).unwrap_or_else(default_package_entry);
-    let entry_path = package_root.join(entry);
-    if !entry_path.exists() {
-        return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-    }
-
-    canonical_utf8_path(&entry_path)
+    canonical_package_child_path(package_root, &entry, "package entry")
 }
 
 fn default_output_path_from_input(
@@ -4276,7 +4484,7 @@ fn default_output_path_from_input(
         })?;
         let manifest = load_manifest(&package_root)?;
         let out_dir = manifest.build.out_dir.as_deref().unwrap_or("build");
-        return Ok(package_root.join(out_dir).join(format!("{}.{}", stem, artifact_format.file_extension())));
+        return Ok(package_output_dir_path(&package_root, out_dir)?.join(format!("{}.{}", stem, artifact_format.file_extension())));
     }
 
     Ok(resolved_input.with_extension(artifact_format.file_extension()))
@@ -4830,7 +5038,7 @@ fn collect_body_scope(body: &ir::IrBody, used_types: &mut BTreeSet<String>, pend
             ir::IrTerminator::Return(Some(operand)) | ir::IrTerminator::Branch { cond: operand, .. } => {
                 collect_operand_named_types(operand, used_types);
             }
-            ir::IrTerminator::Return(None) | ir::IrTerminator::Jump(_) => {}
+            ir::IrTerminator::Return(None) | ir::IrTerminator::Abort(_) | ir::IrTerminator::Jump(_) => {}
         }
     }
 }
@@ -4850,7 +5058,8 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
         | ir::IrInstruction::Index { dest, arr: operand, .. }
         | ir::IrInstruction::Length { dest, operand }
         | ir::IrInstruction::TypeHash { dest, operand }
-        | ir::IrInstruction::Move { dest, src: operand } => {
+        | ir::IrInstruction::Move { dest, src: operand }
+        | ir::IrInstruction::Cast { dest, src: operand } => {
             collect_ir_type_named_types(&dest.ty, used_types);
             collect_operand_named_types(operand, used_types);
         }
@@ -5428,6 +5637,7 @@ fn module_proof_plan_metadata(
             ir::IrItem::TypeDef(_) => {}
         }
     }
+    crate::proof_plan::link_invariant_action_coverage(&mut proof_plan);
     proof_plan
 }
 
@@ -6161,26 +6371,13 @@ fn body_transaction_resource_obligations(
                         checks.push(check);
                     }
                 }
-                ir::IrInstruction::Destroy { operand, .. } => {
+                ir::IrInstruction::Destroy { operand, policy } => {
                     if let Some(check) = operation_input_data_obligation(body, "destroy", operand) {
                         checks.push(check);
                     }
                     if let Some(type_name) = operand_named_type_name(operand) {
                         let binding = operand_var_name(operand).unwrap_or(&type_name);
-                        let scan_detail = if destroy_group_output_absence_scan_is_checked(body, &type_name, binding) {
-                            "; destroy-output-absence=checked-runtime; destroy-output-scan=checked-runtime"
-                        } else {
-                            ""
-                        };
-                        checks.push(TransactionResourceObligation {
-                            category: "transaction-invariant",
-                            feature: format!("destroy-output-scan:{}", type_name),
-                            status: if scan_detail.is_empty() { "runtime-required" } else { "checked-runtime" },
-                            detail: format!(
-                                "Runtime verifier must scan transaction outputs to prove the destroyed '{}' instance is not recreated by the same state transition{}",
-                                type_name, scan_detail
-                            ),
-                        });
+                        checks.push(destroy_policy_obligation(body, &type_name, binding, policy));
                     }
                 }
                 _ => {}
@@ -6332,22 +6529,108 @@ fn unique_identity_obligation(
     }
     let identity_policy = metadata_identity_policy(identity).unwrap_or_else(|| "none".to_string());
     let operation_feature = operation.replace('_', "-");
-    let local_boundary = match (operation, identity) {
-        ("create_unique", ir::IrIdentityPolicy::Field(_)) => {
-            "; global field uniqueness remains a builder/indexer obligation outside CKB-VM"
-        }
-        ("create_unique", ir::IrIdentityPolicy::CkbTypeId) => "; TYPE_ID uniqueness remains bound to the CKB TYPE_ID builder plan",
-        _ => "",
+    let create_unique = operation == "create_unique";
+    let status = if create_unique { "runtime-required" } else { "checked-runtime" };
+    let detail = if create_unique {
+        let boundary = match identity {
+            ir::IrIdentityPolicy::CkbTypeId => "TYPE_ID uniqueness remains bound to the CKB TYPE_ID builder plan",
+            ir::IrIdentityPolicy::Field(_) => "global field uniqueness remains a builder/indexer obligation outside CKB-VM",
+            ir::IrIdentityPolicy::ScriptArgs => "script-args uniqueness remains a builder/indexer obligation outside CKB-VM",
+            ir::IrIdentityPolicy::SingletonType => {
+                "singleton creation exclusivity remains a builder/indexer obligation outside CKB-VM"
+            }
+            ir::IrIdentityPolicy::None => "no identity policy is declared",
+        };
+        format!(
+            "Compiler-emitted runtime verifier anchors create_unique identity policy '{}' for '{}' bound to '{}', but {}; {}-identity=runtime-required; {}-local-anchor=checked-runtime",
+            identity_policy, type_name, binding, boundary, operation_feature, operation_feature
+        )
+    } else {
+        format!(
+            "Compiler-emitted runtime verifier checks {} identity policy '{}' for '{}' bound to '{}'; {}-identity=checked-runtime",
+            operation, identity_policy, type_name, binding, operation_feature
+        )
     };
     Some(TransactionResourceObligation {
         category: "transaction-invariant",
         feature: format!("{}-identity:{}:{}", operation_feature, type_name, identity_policy),
-        status: "checked-runtime",
-        detail: format!(
-            "Compiler-emitted runtime verifier checks {} identity policy '{}' for '{}' bound to '{}'; {}-identity=checked-runtime{}",
-            operation, identity_policy, type_name, binding, operation_feature, local_boundary
-        ),
+        status,
+        detail,
     })
+}
+
+fn destruction_policy_metadata(policy: &ir::IrDestructionPolicy) -> String {
+    match policy {
+        ir::IrDestructionPolicy::Default => "default".to_string(),
+        ir::IrDestructionPolicy::SingletonType => "singleton_type".to_string(),
+        ir::IrDestructionPolicy::Unique { identity } => format!("unique({})", identity),
+        ir::IrDestructionPolicy::Instance { identity_field } => format!("instance({})", identity_field),
+        ir::IrDestructionPolicy::BurnAmount { field } => format!("burn_amount({})", field),
+    }
+}
+
+fn destroy_policy_uses_output_absence_scan(policy: &ir::IrDestructionPolicy) -> bool {
+    match policy {
+        ir::IrDestructionPolicy::Default | ir::IrDestructionPolicy::SingletonType => true,
+        ir::IrDestructionPolicy::Unique { identity } => matches!(identity.as_str(), "type_id" | "ckb_type_id"),
+        ir::IrDestructionPolicy::Instance { .. } | ir::IrDestructionPolicy::BurnAmount { .. } => false,
+    }
+}
+
+fn destroy_policy_obligation(
+    body: &ir::IrBody,
+    type_name: &str,
+    binding: &str,
+    policy: &ir::IrDestructionPolicy,
+) -> TransactionResourceObligation {
+    match policy {
+        ir::IrDestructionPolicy::Default | ir::IrDestructionPolicy::SingletonType => {
+            let scan_checked = destroy_group_output_absence_scan_is_checked(body, type_name, binding);
+            let scan_detail = if scan_checked { "; destroy-output-absence=checked-runtime; destroy-output-scan=checked-runtime" } else { "" };
+            TransactionResourceObligation {
+                category: "transaction-invariant",
+                feature: format!("destroy-output-scan:{}", type_name),
+                status: if scan_checked { "checked-runtime" } else { "runtime-required" },
+                detail: format!(
+                    "Runtime verifier must scan transaction outputs to prove the destroyed '{}' singleton/type cell is not recreated by the same state transition; destroy-policy={}{}",
+                    type_name,
+                    destruction_policy_metadata(policy),
+                    scan_detail
+                ),
+            }
+        }
+        ir::IrDestructionPolicy::Unique { identity } => {
+            let scan_checked = destroy_group_output_absence_scan_is_checked(body, type_name, binding);
+            let scan_detail = if scan_checked { "; destroy-unique-type-id=checked-runtime; destroy-output-scan=checked-runtime" } else { "" };
+            TransactionResourceObligation {
+                category: "transaction-invariant",
+                feature: format!("destroy-unique:{}:{}", type_name, identity),
+                status: if scan_checked { "checked-runtime" } else { "runtime-required" },
+                detail: format!(
+                    "Runtime verifier must prove destroyed TYPE_ID-backed '{}' bound to '{}' has no continuation output for identity '{}'{}",
+                    type_name, binding, identity, scan_detail
+                ),
+            }
+        }
+        ir::IrDestructionPolicy::Instance { identity_field } => TransactionResourceObligation {
+            category: "transaction-invariant",
+            feature: format!("destroy-instance:{}:{}", type_name, identity_field),
+            status: "runtime-required",
+            detail: format!(
+                "Runtime verifier must prove destroyed '{}' instance bound to '{}' has no output with the same identity field '{}'; destroy-instance=runtime-required",
+                type_name, binding, identity_field
+            ),
+        },
+        ir::IrDestructionPolicy::BurnAmount { field } => TransactionResourceObligation {
+            category: "transaction-invariant",
+            feature: format!("burn-amount:{}:{}", type_name, field),
+            status: "runtime-required",
+            detail: format!(
+                "Runtime verifier must prove burn amount delta for '{}' bound to '{}' using numeric field '{}'; burn-amount=runtime-required",
+                type_name, binding, field
+            ),
+        },
+    }
 }
 
 fn body_linear_collection_obligations(
@@ -6450,7 +6733,8 @@ fn body_resource_conservation_obligations(
                     }
                 }
                 ir::IrInstruction::Create { pattern, .. }
-                    if pattern.operation == "create" && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
+                    if matches!(pattern.operation.as_str(), "create" | "output")
+                        && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
                 {
                     created_outputs.entry(pattern.ty.clone()).or_default().push(pattern.clone());
                 }
@@ -6791,9 +7075,11 @@ fn canonical_metadata_field_equality(
 }
 
 fn block_returns_error(body: &ir::IrBody, block_id: ir::BlockId) -> bool {
-    body.blocks.iter().find(|block| block.id == block_id).is_some_and(
-        |block| matches!(block.terminator, ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code != 0),
-    )
+    body.blocks.iter().find(|block| block.id == block_id).is_some_and(|block| match &block.terminator {
+        ir::IrTerminator::Abort(_) => true,
+        ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code != 0,
+        _ => false,
+    })
 }
 
 fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlias> {
@@ -6962,6 +7248,8 @@ fn transaction_runtime_input_requirements_from_obligations(
 
         let include_checked_destroy_scan =
             obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-output-scan:");
+        let include_checked_destroy_unique =
+            obligation.status == "checked-runtime" && obligation.feature.starts_with("destroy-unique:");
         let include_checked_operation_input =
             obligation.status == "checked-runtime" && operation_input_feature(obligation.feature.as_str()).is_some();
         let include_checked_read_ref = obligation.status == "checked-runtime" && obligation.feature.starts_with("read-ref:");
@@ -6978,6 +7266,7 @@ fn transaction_runtime_input_requirements_from_obligations(
         if obligation.category != "transaction-invariant"
             || (obligation.status != "runtime-required"
                 && !include_checked_destroy_scan
+                && !include_checked_destroy_unique
                 && !include_checked_operation_input
                 && !include_checked_read_ref
                 && !include_checked_create_output
@@ -7022,6 +7311,74 @@ fn transaction_runtime_input_requirements_from_obligations(
                 binding,
                 Some("outputs"),
                 "destroy-output-scan-transaction-boundary",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("destroy-unique:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let identity_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-unique-type-id") {
+                "checked-runtime"
+            } else {
+                "runtime-required"
+            };
+            let output_scan_status = if transaction_obligation_has_checked_subcondition(obligation, "destroy-output-scan") {
+                "checked-runtime"
+            } else {
+                "runtime-required"
+            };
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-unique-type-id",
+                identity_status,
+                (identity_status == "runtime-required")
+                    .then_some("destroy_unique lowering has no executable TYPE_ID continuation scan"),
+                (identity_status == "runtime-required").then_some("destroy-unique-type-id-gap"),
+                "Output",
+                binding,
+                Some("ckb_type_script_hash-absence"),
+                "destroy-unique-type-id-output-scan",
+                None,
+            ));
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-output-scan",
+                output_scan_status,
+                (output_scan_status == "runtime-required")
+                    .then_some("destroy_unique lowering does not bind transaction output scan boundaries"),
+                (output_scan_status == "runtime-required").then_some("output-scan-boundary-gap"),
+                "Transaction",
+                binding,
+                Some("outputs"),
+                "destroy-output-scan-transaction-boundary",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("destroy-instance:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let field = rest.rsplit_once(':').map(|(_, field)| field).unwrap_or("identity");
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "destroy-instance-identity",
+                "runtime-required",
+                Some("destroy_instance identity-field output scan is not yet executable"),
+                Some("destroy-instance-identity-gap"),
+                "Output",
+                binding,
+                Some(field),
+                "destroy-instance-identity-output-scan",
+                None,
+            ));
+        } else if let Some(rest) = obligation.feature.strip_prefix("burn-amount:") {
+            let binding = rest.rsplit_once(':').map(|(type_name, _)| type_name).unwrap_or(rest);
+            let field = rest.rsplit_once(':').map(|(_, field)| field).unwrap_or("amount");
+            requirements.push(transaction_runtime_input_requirement(
+                obligation,
+                "burn-amount-delta",
+                "runtime-required",
+                Some("burn_amount delta proof is not yet executable"),
+                Some("burn-amount-delta-gap"),
+                "Transaction",
+                binding,
+                Some(field),
+                "burn-amount-delta-proof",
                 None,
             ));
         } else if let Some((operation, binding)) = operation_input_feature(obligation.feature.as_str()) {
@@ -7157,9 +7514,9 @@ fn transaction_runtime_input_requirements_from_obligations(
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
                 &format!("{operation}-identity"),
-                "checked-runtime",
-                None,
-                None,
+                obligation.status.as_str(),
+                (obligation.status == "runtime-required").then_some("create_unique global identity proof is outside this verifier"),
+                (obligation.status == "runtime-required").then_some("unique-identity-global-proof-gap"),
                 "Output",
                 output_binding,
                 Some("identity"),
@@ -7246,7 +7603,12 @@ fn transaction_runtime_input_requirement(
 }
 
 fn destroy_group_output_absence_scan_is_checked(body: &ir::IrBody, _type_name: &str, binding: &str) -> bool {
-    body.consume_set.iter().any(|pattern| pattern.operation == "destroy" && pattern.binding == binding && pattern.type_hash.is_some())
+    body.consume_set.iter().any(|pattern| {
+        pattern.operation == "destroy"
+            && pattern.binding == binding
+            && pattern.type_hash.is_some()
+            && pattern.destruction_policy.as_ref().is_none_or(destroy_policy_uses_output_absence_scan)
+    })
 }
 
 fn body_mutable_cell_state_obligations(
@@ -8146,11 +8508,10 @@ fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str,
     let assert_fail_blocks = body
         .blocks
         .iter()
-        .filter(|block| {
-            matches!(
-                block.terminator,
-                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-            )
+        .filter(|block| match &block.terminator {
+            ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+            ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+            _ => false,
         })
         .map(|block| block.id)
         .collect::<HashSet<_>>();
@@ -9648,11 +10009,10 @@ fn body_assert_invariant_count(body: &ir::IrBody) -> usize {
             let ir::IrTerminator::Branch { else_block, .. } = &block.terminator else {
                 return false;
             };
-            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| {
-                matches!(
-                    candidate.terminator,
-                    ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) if code == assertion_failed_code
-                )
+            body.blocks.iter().find(|candidate| candidate.id == *else_block).is_some_and(|candidate| match &candidate.terminator {
+                ir::IrTerminator::Abort(runtime_errors::CellScriptRuntimeError::AssertionFailed) => true,
+                ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+                _ => false,
             })
         })
         .count()
@@ -9752,7 +10112,7 @@ fn body_state_transition_checks(
                 feature: pattern.ty.clone(),
                 field: state_field,
                 status: "checked-runtime".to_string(),
-                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier".to_string(),
+                detail: "Compiler emits runtime state graph and input/output state range checks, and the state output is already fully covered by the fixed-field verifier; state-transition=checked-runtime; state-output-field-verifier=checked-runtime".to_string(),
             });
         } else {
             checks.push(StateTransitionCheck {
@@ -10124,7 +10484,7 @@ fn body_fail_closed_runtime_features(
                 ir::IrInstruction::Create { .. } => {}
                 ir::IrInstruction::CreateUnique { dest, pattern, identity } => {
                     if !metadata_output_operation_is_verifier_covered(body, "create_unique", dest, type_layouts, &prelude_availability)
-                        || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                        || !metadata_unique_identity_policy_has_local_runtime_anchor(pattern, identity, type_layouts)
                     {
                         features.insert("create-unique-expression".to_string());
                     }
@@ -10136,7 +10496,7 @@ fn body_fail_closed_runtime_features(
                         dest,
                         type_layouts,
                         &prelude_availability,
-                    ) || !metadata_unique_identity_policy_is_executable(pattern, identity, type_layouts)
+                    ) || !metadata_unique_identity_policy_has_local_runtime_anchor(pattern, identity, type_layouts)
                     {
                         features.insert("replace-unique-expression".to_string());
                     }
@@ -10192,7 +10552,7 @@ fn metadata_output_operation_is_verifier_covered(
     })
 }
 
-fn metadata_unique_identity_policy_is_executable(
+fn metadata_unique_identity_policy_has_local_runtime_anchor(
     pattern: &ir::CreatePattern,
     identity: &ir::IrIdentityPolicy,
     type_layouts: &MetadataTypeLayouts,
@@ -10618,13 +10978,19 @@ fn metadata_prelude_availability(
                         if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                             availability.schema_pointer_vars.insert(dest.id);
                         }
-                        if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.dynamic_collection_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.dynamic_collection_vars.insert(dest.id);
                         }
-                        if availability.stack_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.stack_collection_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.stack_collection_vars.insert(dest.id);
                         }
-                        if availability.empty_molecule_vector_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                        if availability.empty_molecule_vector_vars.contains(&src_var.id)
+                            && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                        {
                             availability.empty_molecule_vector_vars.insert(dest.id);
                         }
                         if let Some(byte_count) = availability.constructed_byte_vector_vars.get(&src_var.id).copied() {
@@ -10643,13 +11009,16 @@ fn metadata_prelude_availability(
                     if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                         availability.schema_pointer_vars.insert(dest.id);
                     }
-                    if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.dynamic_collection_vars.contains(&src_var.id) && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                    {
                         availability.dynamic_collection_vars.insert(dest.id);
                     }
-                    if availability.stack_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.stack_collection_vars.contains(&src_var.id) && metadata_same_storage_type(&dest.ty, &src_var.ty) {
                         availability.stack_collection_vars.insert(dest.id);
                     }
-                    if availability.empty_molecule_vector_vars.contains(&src_var.id) && dest.ty == src_var.ty {
+                    if availability.empty_molecule_vector_vars.contains(&src_var.id)
+                        && metadata_same_storage_type(&dest.ty, &src_var.ty)
+                    {
                         availability.empty_molecule_vector_vars.insert(dest.id);
                     }
                     if let Some(byte_count) = availability.constructed_byte_vector_vars.get(&src_var.id).copied() {
@@ -11237,7 +11606,19 @@ fn metadata_fixed_aggregate_pointer_size(ty: &ir::IrType) -> Option<usize> {
     }
 }
 
+fn metadata_storage_type(ty: &ir::IrType) -> &ir::IrType {
+    match ty {
+        ir::IrType::Ref(inner) | ir::IrType::MutRef(inner) => metadata_storage_type(inner),
+        ty => ty,
+    }
+}
+
+fn metadata_same_storage_type(left: &ir::IrType, right: &ir::IrType) -> bool {
+    metadata_storage_type(left) == metadata_storage_type(right)
+}
+
 fn metadata_molecule_vector_element_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    let ty = metadata_storage_type(ty);
     let ir::IrType::Named(name) = ty else {
         return None;
     };
@@ -11265,14 +11646,15 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
 }
 
 fn metadata_ir_type_fixed_width(ty: &ir::IrType, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
-    type_static_length(ty).or_else(|| match ty {
+    let storage_ty = metadata_storage_type(ty);
+    type_static_length(ty).or_else(|| match storage_ty {
         ir::IrType::Named(name) => metadata_inline_type_fixed_width(name, type_layouts),
         _ => None,
     })
 }
 
 fn metadata_aggregate_field_layout(ty: &ir::IrType, field: &str) -> Option<MetadataFieldLayout> {
-    match ty {
+    match metadata_storage_type(ty) {
         ir::IrType::Tuple(items) => {
             let index = field.parse::<usize>().ok()?;
             let field_ty = items.get(index)?.clone();
@@ -11309,7 +11691,10 @@ fn metadata_tuple_return_field_type(ty: &ir::IrType, field: &str) -> Option<ir::
         return None;
     };
     let index = field.parse::<usize>().ok()?;
-    (index < 8).then(|| items.get(index).cloned()).flatten()
+    // ABI register limit is 8 (a0-a7); fields beyond index 7 cannot be
+    // returned via registers, but we still report their type in metadata
+    // so the manifest is complete.
+    items.get(index).cloned()
 }
 
 fn const_usize_operand(operand: &ir::IrOperand) -> Option<usize> {
@@ -11325,6 +11710,7 @@ fn const_usize_operand(operand: &ir::IrOperand) -> Option<usize> {
 fn metadata_fixed_byte_const_len(value: &ir::IrConst) -> Option<usize> {
     match value {
         ir::IrConst::Address(_) | ir::IrConst::Hash(_) => Some(32),
+        ir::IrConst::U128(_) => Some(16),
         ir::IrConst::Array(items) if items.iter().all(|item| matches!(item, ir::IrConst::U8(_))) => Some(items.len()),
         _ => None,
     }
@@ -12048,7 +12434,6 @@ fn type_molecule_schema_metadata(
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
 ) -> Option<MoleculeSchemaMetadata> {
     let encoded_size = type_encoded_size(type_def, type_defs);
-    let fixed_size = encoded_size.unwrap_or(0);
     let mut aliases = BTreeMap::new();
     let mut structs = Vec::new();
     let mut emitted = BTreeSet::new();
@@ -12078,7 +12463,7 @@ fn type_molecule_schema_metadata(
         layout: if encoded_size.is_some() { "fixed-struct-v1" } else { "molecule-table-v1" }.to_string(),
         name: type_def.name.clone(),
         dynamic_fields: if encoded_size.is_some() { Vec::new() } else { molecule_dynamic_fields(type_def, type_defs) },
-        fixed_size,
+        fixed_size: encoded_size,
         schema_hash,
         schema,
     })
@@ -12124,7 +12509,7 @@ fn molecule_schema_manifest_metadata(types: &[TypeMetadata], target_profile: Tar
         canonical.push('|');
         canonical.push_str(&entry.layout);
         canonical.push('|');
-        canonical.push_str(&entry.fixed_size.to_string());
+        canonical.push_str(&entry.fixed_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
         canonical.push_str(&entry.encoded_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
         canonical.push('|');
@@ -12753,8 +13138,10 @@ fn operand_fixed_byte_width(operand: &ir::IrOperand) -> Option<usize> {
     match operand {
         ir::IrOperand::Const(ir::IrConst::Address(_) | ir::IrConst::Hash(_)) => Some(32),
         ir::IrOperand::Const(ir::IrConst::Array(items)) => Some(items.len()),
-        ir::IrOperand::Var(var) => match &var.ty {
+        ir::IrOperand::Const(ir::IrConst::U128(_)) => Some(16),
+        ir::IrOperand::Var(var) => match metadata_storage_type(&var.ty) {
             ir::IrType::Address | ir::IrType::Hash => Some(32),
+            ir::IrType::U128 => Some(16),
             ir::IrType::Array(inner, len) if matches!(inner.as_ref(), ir::IrType::U8) => Some(*len),
             _ => None,
         },
@@ -12856,6 +13243,7 @@ fn cell_pattern_metadata(pattern: &ir::CellPattern) -> CellPatternMetadata {
         type_hash: pattern.type_hash.as_ref().map(hex_hash),
         binding: pattern.binding.clone(),
         fields: pattern.fields.iter().map(|(field, _)| field.clone()).collect(),
+        destruction_policy: pattern.destruction_policy.as_ref().map(destruction_policy_metadata),
     }
 }
 
@@ -13153,20 +13541,15 @@ fn hex_bytes(bytes: &[u8]) -> String {
 }
 
 fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(package_root)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let manifest = load_manifest(&package_root)?;
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
     if let Some(package) = &manifest.package {
         if !package.source_roots.is_empty() {
             for source_root in &package.source_roots {
-                let root = package_root.join(source_root);
-                if !root.exists() {
-                    return Err(CompileError::new(
-                        format!("configured source root '{}' does not exist", root),
-                        error::Span::default(),
-                    ));
-                }
+                let root = canonical_package_child_path(&package_root, source_root, "configured source root")?;
                 if !root.is_dir() {
                     return Err(CompileError::new(
                         format!("configured source root '{}' is not a directory", root),
@@ -13174,7 +13557,6 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
                     ));
                 }
 
-                let root = canonical_utf8_path(&root)?;
                 if seen_roots.insert(root.clone()) {
                     roots.push(root);
                 }
@@ -13194,11 +13576,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
 
     let mut explicit_entry = None;
     if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.clone()) {
-        let entry_path = package_root.join(entry);
-        if !entry_path.exists() {
-            return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
-        }
-        let entry_path = canonical_utf8_path(&entry_path)?;
+        let entry_path = canonical_package_child_path(&package_root, &entry, "package entry")?;
         if let Some(entry_parent) = entry_path.parent() {
             let entry_parent = canonical_utf8_path(entry_parent)?;
             if seen_roots.insert(entry_parent.clone()) {
@@ -13281,6 +13659,74 @@ fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map_err(|non_utf8| CompileError::new(format!("path is not valid UTF-8: {}", non_utf8.display()), error::Span::default()))
 }
 
+fn canonical_package_child_path(package_root: &Utf8Path, raw_path: &str, label: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, label)?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+    if !candidate.exists() {
+        return Err(CompileError::new(format!("{} '{}' does not exist", label, candidate), error::Span::default()));
+    }
+    let canonical = canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("{} '{}' resolves outside package root '{}'", label, raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn package_output_dir_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf8PathBuf> {
+    reject_package_path_escape(raw_path, "build output directory")?;
+    let package_root = canonical_utf8_path(package_root)?;
+    let candidate = package_root.join(raw_path);
+
+    let existing_anchor = if candidate.exists() {
+        candidate.clone()
+    } else {
+        let mut anchor = candidate.as_path();
+        while !anchor.exists() {
+            anchor = anchor.parent().ok_or_else(|| {
+                CompileError::new(
+                    format!("build output directory '{}' has no existing package-root ancestor", raw_path),
+                    error::Span::default(),
+                )
+            })?;
+        }
+        anchor.to_path_buf()
+    };
+
+    let canonical_anchor = canonical_utf8_path(&existing_anchor)?;
+    if !canonical_anchor.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("build output directory '{}' resolves outside package root '{}'", raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+
+    Ok(candidate)
+}
+
+fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
+    let path = Utf8Path::new(raw_path);
+    if path.as_str().is_empty() {
+        return Err(CompileError::new(format!("{} path must not be empty", label), error::Span::default()));
+    }
+    if path.is_absolute() {
+        return Err(CompileError::new(
+            format!("{} '{}' must be relative to the package root", label, raw_path),
+            error::Span::default(),
+        ));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Utf8Component::ParentDir | Utf8Component::Prefix(_) | Utf8Component::RootDir))
+    {
+        return Err(CompileError::new(format!("{} '{}' must stay inside the package root", label, raw_path), error::Span::default()));
+    }
+    Ok(())
+}
+
 fn default_package_entry() -> String {
     "src/main.cell".to_string()
 }
@@ -13323,10 +13769,11 @@ pub const NAME: &str = "cellc";
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
-        decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, load_modules_for_input,
-        resolve_input_path, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC,
-        SCHEDULER_WITNESS_ABI_MOLECULE,
+        bind_source_metadata, ckb_code_cell_capacity_shannons, compile, compile_file, compile_file_with_entry_action,
+        compile_file_with_entry_lock, compile_path, decode_scheduler_witness_hex, default_output_path_for_input,
+        encode_entry_witness_args_for_params, entry_abi_constraints, load_modules_for_input, resolve_input_path,
+        source_unit_from_file, validate_source_units_on_disk_under, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
+        ParamMetadata, ENTRY_ABI_MAX_SLOTS, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -13336,6 +13783,8 @@ mod tests {
         result.artifact_hash = crate::ckb_blake2b256(&result.artifact_bytes);
         result.metadata.artifact_hash = Some(crate::hex_encode(&result.artifact_hash));
         result.metadata.artifact_size_bytes = Some(result.artifact_bytes.len());
+        result.metadata.constraints.artifact.format = result.artifact_format.display_name().to_string();
+        result.metadata.constraints.artifact.artifact_size_bytes = result.artifact_bytes.len();
     }
 
     fn parse_module_for_test(source: &str) -> crate::ast::Module {
@@ -13404,13 +13853,13 @@ where
 
     fn decode_molecule_table(bytes: &[u8], expected_fields: usize) -> Vec<&[u8]> {
         assert!(bytes.len() >= 8, "molecule table header is too short: {}", bytes.len());
-        let total_size = read_u32(&bytes[..4], "total_size") as usize;
+        let total_size = read_u32_usize(&bytes[..4], "total_size");
         assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
-        let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
+        let first_offset = read_u32_usize(&bytes[4..8], "first_offset");
         assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
         let field_count = first_offset / 4 - 1;
         assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
-        let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();
+        let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32_usize(chunk, "offset")).collect::<Vec<_>>();
         offsets.push(total_size);
         for pair in offsets.windows(2) {
             assert!(pair[0] <= pair[1], "molecule offsets must be monotonic: {:?}", offsets);
@@ -13420,8 +13869,11 @@ where
     }
 
     fn read_scheduler_accesses(bytes: &[u8]) -> Vec<SchedulerAccessWitness> {
-        let count = read_u32(&bytes[..4], "access_count") as usize;
-        assert_eq!(bytes.len(), 4 + count * 38, "access fixvec byte length mismatch");
+        let count = read_u32_usize(&bytes[..4], "access_count");
+        let expected_len = 4usize
+            .checked_add(count.checked_mul(38).expect("access fixvec byte length overflow"))
+            .expect("access fixvec byte length overflow");
+        assert_eq!(bytes.len(), expected_len, "access fixvec byte length mismatch");
         bytes[4..]
             .chunks_exact(38)
             .map(|chunk| SchedulerAccessWitness {
@@ -13434,8 +13886,11 @@ where
     }
 
     fn read_fixvec_byte32(bytes: &[u8]) -> Vec<[u8; 32]> {
-        let count = read_u32(&bytes[..4], "byte32_count") as usize;
-        assert_eq!(bytes.len(), 4 + count * 32, "byte32 fixvec byte length mismatch");
+        let count = read_u32_usize(&bytes[..4], "byte32_count");
+        let expected_len = 4usize
+            .checked_add(count.checked_mul(32).expect("byte32 fixvec byte length overflow"))
+            .expect("byte32 fixvec byte length overflow");
+        assert_eq!(bytes.len(), expected_len, "byte32 fixvec byte length mismatch");
         bytes[4..].chunks_exact(32).map(|chunk| chunk.try_into().expect("byte32 width")).collect()
     }
 
@@ -13460,6 +13915,10 @@ where
     fn read_u32(bytes: &[u8], field: &str) -> u32 {
         assert_eq!(bytes.len(), 4, "{field} should be a molecule u32");
         u32::from_le_bytes(bytes.try_into().expect("u32 width"))
+    }
+
+    fn read_u32_usize(bytes: &[u8], field: &str) -> usize {
+        usize::try_from(read_u32(bytes, field)).unwrap_or_else(|_| panic!("{field} does not fit this target"))
     }
 
     fn read_u64(bytes: &[u8], field: &str) -> u64 {
@@ -13555,7 +14014,7 @@ where
     const LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -13572,7 +14031,7 @@ where
     const LOOP_DROPPED_LOCAL_LINEAR_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -13588,7 +14047,7 @@ where
     const FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13603,7 +14062,7 @@ where
     const WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13653,7 +14112,7 @@ where
     const READ_REF_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -13666,7 +14125,7 @@ where
     const READ_REF_BINDING_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -13695,7 +14154,7 @@ where
     const MUT_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -13707,7 +14166,7 @@ where
     const MUT_READ_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -13719,7 +14178,7 @@ where
     const REDUNDANT_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13731,7 +14190,7 @@ where
     const FUNCTION_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13744,7 +14203,7 @@ fn bad(pool: &mut Pool) -> u64 {
     const LOCK_MUT_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13757,7 +14216,7 @@ lock bad(pool: &mut Pool) -> bool {
     const MUT_REF_LOCAL_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13771,7 +14230,7 @@ where
     const MUT_REF_TUPLE_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13785,7 +14244,7 @@ where
     const MUT_REF_IF_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13799,7 +14258,7 @@ where
     const MUT_REF_ASSIGN_ALIAS_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -13813,7 +14272,7 @@ where
     const OWNED_LINEAR_FIELD_ASSIGN_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -13827,7 +14286,7 @@ where
     const LINEAR_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13841,7 +14300,7 @@ where
     const LINEAR_FIELD_LOCAL_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13855,7 +14314,7 @@ where
     const LINEAR_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13869,7 +14328,7 @@ where
     const LINEAR_ARRAY_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13883,7 +14342,7 @@ where
     const LINEAR_IF_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13897,7 +14356,7 @@ where
     const LINEAR_ASSIGN_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13912,7 +14371,7 @@ where
     const LINEAR_ASSIGN_TUPLE_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13927,7 +14386,7 @@ where
     const LINEAR_ASSIGN_TUPLE_FIELD_REF_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, destroy, read_ref {
     amount: u64,
 }
 
@@ -13942,7 +14401,7 @@ where
     const ACTION_RETURN_REF_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -13966,7 +14425,7 @@ fn leak(point: &Point) -> &Point {
     const FUNCTION_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -13978,7 +14437,7 @@ fn bad(token: Token) -> u64 {
     const FUNCTION_CELL_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -13990,7 +14449,7 @@ resource Token {
     const LOCK_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14002,7 +14461,7 @@ resource Token {
     const LOCK_BARE_REF_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14014,7 +14473,7 @@ lock bad(token: &Token) -> bool {
     const CALLABLE_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14026,7 +14485,7 @@ fn bad(pair: &(Token, u64)) -> u64 {
     const CALLABLE_MUT_REFERENCE_TO_CELL_AGGREGATE_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14038,7 +14497,7 @@ where
     const FUNCTION_VEC_CELL_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14050,7 +14509,7 @@ fn bad(tokens: Vec<Token>) -> u64 {
     const STRUCT_VEC_REFERENCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14088,7 +14547,7 @@ fn bad(pair: (&Point, u64)) -> u64 {
     const CALLABLE_ARRAY_MUT_REFERENCE_PARAM_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
 }
 
@@ -14111,7 +14570,7 @@ fn bad(view: &read_ref Point) -> u64 {
     const ACTION_REF_PARAM_MODIFIER_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14143,7 +14602,7 @@ lock bad(ref owner: Address) -> bool {
     const SCHEMA_REFERENCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14155,7 +14614,7 @@ struct Holder {
     const ENUM_REFERENCE_PAYLOAD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14189,7 +14648,7 @@ where
     const DUPLICATE_RESOURCE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     amount: u128,
 }
@@ -14198,7 +14657,7 @@ resource Token {
     const DUPLICATE_SHARED_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Pool {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     reserve: u64,
     reserve: u64,
 }
@@ -14207,7 +14666,7 @@ shared Pool {
     const DUPLICATE_RECEIPT_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Grant {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     amount: u64,
 }
@@ -14259,7 +14718,7 @@ where
     const LOCK_BOUNDARY_CLASSIFICATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14272,7 +14731,7 @@ lock owner_guard(token: protected Token, script_owner: lock_args Address, claime
     const ACTION_PROTECTED_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14284,7 +14743,7 @@ where
     const LOCK_ARGS_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14296,7 +14755,7 @@ lock bad(protected token: Token, lock_args owner: Address) -> bool {
     const LOCK_ARGS_DYNAMIC_PARAM_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -14387,7 +14846,7 @@ where
     const CREATE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14402,7 +14861,7 @@ where
     const CREATE_VERIFY_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14417,7 +14876,7 @@ where
     const CREATE_UNSUPPORTED_OUTPUT_EXPR_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14432,7 +14891,7 @@ where
     const CREATE_DUPLICATE_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14447,7 +14906,7 @@ where
     const CREATE_MISSING_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     owner: Address,
 }
@@ -14462,7 +14921,7 @@ where
     const CREATE_UNKNOWN_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14477,7 +14936,7 @@ where
     const CREATE_FIELD_TYPE_MISMATCH_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14518,7 +14977,7 @@ where
     const CONSUME_NON_NAMED_CELL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14531,7 +14990,7 @@ where
     const IF_BOTH_BRANCHES_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14547,7 +15006,7 @@ where
     const IF_PARTIAL_BRANCH_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14562,7 +15021,7 @@ where
     const IF_MISMATCHED_BRANCH_CONSUME_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14579,7 +15038,7 @@ where
     const CONSUME_DESTROY_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, consume, destroy {
     amount: u64,
 }
 
@@ -14604,7 +15063,7 @@ where
     const FIXED_BYTE_FIELD_COMPARISON_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
 }
 
@@ -14619,7 +15078,7 @@ where
     const PACKED_SCALAR_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Flags {
+shared Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -14634,7 +15093,7 @@ where
     const CREATE_SCALAR_VERIFY_PROGRAM: &str = r#"
 module test
 
-resource Flags {
+resource Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -14652,7 +15111,7 @@ where
     const CONSUME_CREATE_SCALAR_ALIAS_PROGRAM: &str = r#"
 module test
 
-resource Flags {
+resource Flags has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
     nonce: u32,
 }
@@ -14672,7 +15131,7 @@ where
     const READ_REF_FIELD_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14698,7 +15157,7 @@ where
     const READ_ONLY_EFFECT_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14712,7 +15171,7 @@ where
     const UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -14728,7 +15187,7 @@ where
     const IMPURE_FN_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -14741,7 +15200,7 @@ fn helper() -> u64 {
     const INDIRECT_IMPURE_FN_PROGRAM: &str = r#"
 module test
 
-resource Token has destroy {
+resource Token has store, create, destroy {
     amount: u64,
 }
 
@@ -15023,7 +15482,7 @@ where
     const LINEAR_BRANCH_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15039,7 +15498,7 @@ where
     const LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15056,7 +15515,7 @@ where
     const LINEAR_TAIL_IF_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15068,7 +15527,7 @@ where
     const LINEAR_TAIL_IF_INCONSISTENT_RETURN_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15080,7 +15539,7 @@ where
     const LINEAR_IF_EXPR_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15093,7 +15552,7 @@ where
     const LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15118,7 +15577,7 @@ where
     const LINEAR_TUPLE_BINDING_DROPPED_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15130,7 +15589,7 @@ where
     const LINEAR_ARRAY_BINDING_DROPPED_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15156,7 +15615,7 @@ where
     const LINEAR_WILDCARD_DISCARD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15210,7 +15669,7 @@ where
     const LINEAR_BLOCK_EXPR_LET_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15223,7 +15682,7 @@ where
     const LINEAR_BLOCK_EXPR_PREFIX_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15251,7 +15710,7 @@ where
     const LINEAR_BLOCK_EXPR_DROPPED_LOCAL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15283,7 +15742,7 @@ where
     const LINEAR_BLOCK_TAIL_IF_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15299,7 +15758,7 @@ where
     const LINEAR_BLOCK_TAIL_IF_INCONSISTENT_MOVE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15424,7 +15883,7 @@ fn bad() -> bool {
     const INDIRECT_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15444,7 +15903,7 @@ where
     const QUALIFIED_UNDERDECLARED_EFFECT_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15464,7 +15923,7 @@ where
     const CONSUME_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15478,7 +15937,7 @@ where
     const CONSUME_CREATE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15495,7 +15954,7 @@ where
     const CONSUME_CREATE_MERGE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15515,28 +15974,27 @@ where
     const CONSUME_CREATE_SPLIT_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-action split(token: Token, fee: u64) -> (Token, Token)
+action split(token: Token, fee: u64) -> (change: Token, paid_fee: Token)
 where
     let amount = token.amount
     let remaining = amount - fee
     consume token
-    let change = create Token {
+    create change = Token {
         amount: remaining
     }
-    let paid_fee = create Token {
+    create paid_fee = Token {
         amount: fee
     }
-    return (change, paid_fee)
 "#;
 
     const CONSUME_CREATE_IDENTITY_FIELD_MERGE_CONSERVATION_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     symbol: [u8; 8],
 }
@@ -15560,7 +16018,7 @@ where
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -15829,7 +16287,7 @@ enum Flag {
     Off,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15850,7 +16308,7 @@ enum Flag {
     Off,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -15951,6 +16409,22 @@ where
     }
 "#;
 
+    const WILDCARD_NON_LAST_MATCH_PROGRAM: &str = r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action select(flag: Flag) -> u64
+where
+    return match flag {
+        _ => { 1 }
+        Flag::Off => { 2 }
+    }
+"#;
+
     const ENUM_PAYLOAD_VARIANT_PROGRAM: &str = r#"
 module test
 
@@ -15996,7 +16470,7 @@ where
     const UNKNOWN_NAMED_TYPE_PROGRAM: &str = r#"
 module test
 
-resource Bad {
+resource Bad has store, create, consume, replace, burn, relock, read_ref {
     missing: MissingType,
 }
 
@@ -16017,11 +16491,11 @@ where
     const USER_GENERIC_TYPE_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-resource Vault has store {
+resource Vault has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16033,7 +16507,7 @@ where
     const DUPLICATE_TOP_LEVEL_SYMBOL_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16056,7 +16530,7 @@ where
     const FIXED_WIDTH_VEC_CREATE_PROGRAM: &str = r#"
 module test
 
-resource Group {
+resource Group has store, create, consume, replace, burn, relock, read_ref {
     members: Vec<Address>,
     anchors: Vec<Hash>,
 }
@@ -16116,7 +16590,7 @@ where
     const CREATE_VEC_LITERAL_FIELD_PROGRAM: &str = r#"
 module test
 
-resource Group has store {
+resource Group has store, create, consume, replace, burn, relock, read_ref {
     members: Vec<Address>,
     labels: Vec<u8>,
 }
@@ -16494,7 +16968,7 @@ where
     const CELL_BACKED_VEC_PROGRAM: &str = r#"
 module test
 
-resource NFT {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64,
     owner: Address,
 }
@@ -16550,7 +17024,7 @@ where
     const U128_MUTATE_PROGRAM: &str = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -16564,7 +17038,7 @@ where
     const LARGE_PRESERVED_MUTATE_PROGRAM: &str = r#"
 module test
 
-shared BigState has store {
+shared BigState has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
     pad: [u8; 600],
 }
@@ -16578,11 +17052,11 @@ where
     const SUMMARY_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16605,7 +17079,7 @@ lock invalid(owner: Address) -> u64 {
     const LOCK_CREATE_PROGRAM: &str = r#"
 module test
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16627,7 +17101,7 @@ lock bad() -> bool {
     const LOCK_READ_REF_PROGRAM: &str = r#"
 module test
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 
@@ -16640,11 +17114,11 @@ lock guard() -> bool {
     const FIXED_BYTE_PARAM_AND_CONST_OUTPUT_PROGRAM: &str = r#"
 module test
 
-resource Config has store {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
 }
 
-resource Fingerprint has store {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -16664,7 +17138,7 @@ where
     const CONST_LOCK_OUTPUT_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -16678,7 +17152,7 @@ where
     const MISSING_DESTROY_CAPABILITY_PROGRAM: &str = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -16690,7 +17164,7 @@ where
     const STATE_MACHINE_NOOP_TRANSITION_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16707,7 +17181,7 @@ where
     const FLOW_MISSING_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16726,7 +17200,7 @@ where
     const FLOW_MISSING_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     id: u64,
 }
 
@@ -16742,7 +17216,7 @@ where
     const FLOW_BAD_STATE_TYPE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: bool,
     id: u64,
 }
@@ -16759,7 +17233,7 @@ where
     const FLOW_OUT_OF_RANGE_STATE_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16779,7 +17253,7 @@ where
     const FLOW_NON_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16799,7 +17273,7 @@ where
     const FLOW_DYNAMIC_INITIAL_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16819,7 +17293,7 @@ where
     const FLOW_RESET_UPDATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16840,7 +17314,7 @@ where
     const FLOW_STATIC_UPDATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16861,7 +17335,7 @@ where
     const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16881,7 +17355,7 @@ where
     const FLOW_QUALIFIED_STATE_NAME_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -16903,12 +17377,12 @@ where
     const FLOW_WRONG_QUALIFIED_STATE_FIELD_PROGRAM: &str = r#"
 module test
 
-receipt Ticket has store {
+receipt Ticket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
 
-receipt OtherTicket has store {
+receipt OtherTicket has store, create, consume, replace, burn, relock, read_ref {
     state: u8,
     id: u64,
 }
@@ -17018,7 +17492,7 @@ where
         assert!(asm.contains(".Lvisit_block_1:"), "missing for-loop condition block:\n{}", asm);
         assert!(asm.contains(".Lvisit_block_2:"), "missing for-loop body block:\n{}", asm);
         assert!(asm.contains(".Lvisit_block_3:"), "missing for-loop exit block:\n{}", asm);
-        assert!(asm.contains("slt t0, t0, t1"), "missing range bound comparison:\n{}", asm);
+        assert!(asm.contains("sltu t0, t0, t1"), "missing range bound comparison:\n{}", asm);
         assert!(asm.contains("li t1, 1"), "missing range increment constant:\n{}", asm);
         assert!(asm.contains("j .Lvisit_block_1"), "missing for-loop back edge:\n{}", asm);
     }
@@ -17035,21 +17509,29 @@ where
 
     #[test]
     fn compile_rejects_linear_state_changes_hidden_inside_loops() {
-        compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap();
+        let local = compile(LOOP_LOCAL_LINEAR_COMPLETE_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(local.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", local.message);
 
         let dropped = compile(LOOP_DROPPED_LOCAL_LINEAR_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(dropped.message.contains("linear resource 'out' was not consumed"), "unexpected error: {}", dropped.message);
+        assert!(
+            dropped.message.contains("branch-local lifecycle operation 'create'")
+                || dropped.message.contains("linear resource 'out' was not consumed"),
+            "unexpected error: {}",
+            dropped.message
+        );
 
         let for_err = compile(FOR_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            for_err.message.contains("branch-local lifecycle operation")
+                || for_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             for_err.message
         );
 
         let while_err = compile(WHILE_LOOP_PARENT_LINEAR_CHANGE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
+            while_err.message.contains("branch-local lifecycle operation")
+                || while_err.message.contains("linear resource 'token' cannot change ownership state inside a loop body"),
             "unexpected error: {}",
             while_err.message
         );
@@ -17382,8 +17864,41 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0"), "assert condition did not branch on failure:\n{}", asm);
-        assert!(asm.contains("li a0, 5"), "assert failure path did not return assertion-failed code:\n{}", asm);
+        assert!(
+            asm.contains("cellscript runtime error 5 assertion-failed"),
+            "assert failure path lost its runtime error code:\n{}",
+            asm
+        );
         assert!(!asm.contains("assert_invariant"), "assert was not lowered out of source form:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_pure_function_assert_failure_to_abort() {
+        let result = compile(
+            r#"
+module test
+
+fn checked(value: u64) -> u64 {
+    assert_invariant(value > 0, "positive")
+    return value
+}
+
+action run(value: u64) -> bool
+where
+    checked(value) > 0
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(asm.contains(".global checked"), "missing checked helper:\n{}", asm);
+        assert!(asm.contains("cellscript runtime error 5 assertion-failed"), "assert failure lost its error code:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript abi: abort to entry failure context"),
+            "pure helper assert failure must abort instead of returning ordinary u64:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -17484,7 +17999,9 @@ where
         let owner = lock.params.iter().find(|param| param.name == "owner").expect("owner param");
         assert_eq!(owner.source, "lock_args");
         assert!(owner.lock_args_data_source);
-        assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
+        let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
+        assert_eq!(ckb_constraints.min_witness_bytes, 0);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, 0);
     }
 
     #[test]
@@ -17529,7 +18046,7 @@ where
         let source = r#"
 module test
 
-resource Coin has store {
+resource Coin has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -17759,18 +18276,21 @@ where
 
     #[test]
     fn compile_merges_if_branch_linear_states_conservatively() {
-        compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap();
+        let both = compile(IF_BOTH_BRANCHES_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(both.message.contains("branch-local lifecycle operation 'consume'"), "unexpected error: {}", both.message);
 
         let partial = compile(IF_PARTIAL_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            partial.message.contains("branch-local lifecycle operation 'consume'")
+                || partial.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             partial.message
         );
 
         let mismatched = compile(IF_MISMATCHED_BRANCH_CONSUME_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            mismatched.message.contains("branch-local lifecycle operation 'consume'")
+                || mismatched.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             mismatched.message
         );
@@ -17792,6 +18312,24 @@ where
             asm.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=destroy_output_type_hash source=Output index=t6 field=5"),
             "destroy absence scan did not use Output LOAD_CELL_BY_FIELD:\n{}",
             asm
+        );
+        let destroy_scan = asm
+            .split("# cellscript abi: LOAD_CELL_BY_FIELD reason=destroy_output_type_hash source=Output index=t6 field=5")
+            .nth(1)
+            .expect("destroy output scan should be present");
+        let unexpected_syscall_error_path = destroy_scan
+            .split("# cellscript abi: exact size check destroy output type hash")
+            .next()
+            .expect("destroy output scan should check the syscall status before loaded data");
+        assert!(
+            unexpected_syscall_error_path.contains("j .Lburn_fail_1"),
+            "unexpected destroy scan syscall errors must map to syscall-failed:\n{}",
+            unexpected_syscall_error_path
+        );
+        assert!(
+            !unexpected_syscall_error_path.contains("j .Lburn_fail_16"),
+            "unexpected destroy scan syscall errors must not be reported as Molecule bounds failures:\n{}",
+            unexpected_syscall_error_path
         );
         assert!(
             asm.contains("# cellscript abi: LOAD_CELL_DATA reason=destroy source=Input index=1"),
@@ -17946,7 +18484,7 @@ resource NFT has destroy {
     owner: Address,
 }
 
-receipt Listing has destroy {
+receipt Listing has store, create, destroy {
     token_id: u64,
     seller: Address,
     price: u64,
@@ -18001,15 +18539,15 @@ where
         let program = r#"
 module test
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-receipt Grant has store {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     amount: u64,
 }
@@ -18732,6 +19270,82 @@ where
     }
 
     #[test]
+    fn compile_preserves_if_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let pair = if flag { (1, 2) } else { (3, 4) }
+    return pair.0
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .0 (unresolved)"), "if tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "if tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if tuple then field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if tuple else field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_match_tuple_aggregate_slots() {
+        let source = r#"
+module test
+
+enum Flag {
+    Off,
+    On,
+}
+
+action pick(flag: Flag) -> u64
+where
+    let pair = match flag {
+        Flag::Off => { (1, 2) },
+        _ => { (3, 4) },
+    }
+    return pair.1
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# field access .1 (unresolved)"), "match tuple projection lost aggregate slots:\n{}", asm);
+        assert!(!asm.contains("dynamic-field-bounds-invalid"), "match tuple projection fell into fail-closed field path:\n{}", asm);
+        assert!(asm.contains("li t0, 2"), "match tuple first arm field was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 4"), "match tuple wildcard arm field was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_preserves_if_array_aggregate_slots() {
+        let source = r#"
+module test
+
+action pick(flag: bool) -> u64
+where
+    let values = if flag { [1, 2] } else { [3, 4] }
+    return values[0]
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(!asm.contains("# index access"), "if fixed-array projection fell back to runtime indexing:\n{}", asm);
+        assert!(asm.contains("li t0, 1"), "if array then element was not materialized:\n{}", asm);
+        assert!(asm.contains("li t0, 3"), "if array else element was not materialized:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_byte_string_literals_with_expected_array_type() {
+        let source = r#"
+module test
+
+action symbol() -> [u8; 4]
+where
+    return b"TEST"
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn compile_lowers_match_expression_into_branch_cfg() {
         let result = compile(MATCH_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
@@ -18747,13 +19361,22 @@ where
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("seqz t0, t0"), "exhaustive match lowering missing equality check:\n{}", asm);
-        assert!(asm.contains("li a0, 8"), "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript runtime error 20 numeric-or-discriminant-invalid") && asm.contains("li a0, 20"),
+            "exhaustive match did not retain invalid-discriminant fail-closed branch:\n{}",
+            asm
+        );
     }
 
     #[test]
     fn compile_merges_linear_transfers_inside_match_expressions() {
         compile(LINEAR_MATCH_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful_arms = compile(LINEAR_MATCH_EXPR_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            stateful_arms.message.contains("branch-local lifecycle operation 'destroy'"),
+            "unexpected error: {}",
+            stateful_arms.message
+        );
 
         let moved_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -18765,7 +19388,8 @@ where
 
         let stateful_err = compile(LINEAR_MATCH_EXPR_INCONSISTENT_STATEFUL_ARMS_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
+            stateful_err.message.contains("branch-local lifecycle operation 'destroy'")
+                || stateful_err.message.contains("linear resource 'token' has inconsistent ownership state across match arms"),
             "unexpected error: {}",
             stateful_err.message
         );
@@ -18790,6 +19414,13 @@ where
             non_exhaustive.message
         );
         assert!(non_exhaustive.message.contains("Off"), "unexpected error: {}", non_exhaustive.message);
+
+        let wildcard_non_last = compile(WILDCARD_NON_LAST_MATCH_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(
+            wildcard_non_last.message.contains("wildcard pattern '_' must be the last match arm"),
+            "unexpected error: {}",
+            wildcard_non_last.message
+        );
     }
 
     #[test]
@@ -20233,7 +20864,7 @@ where
         let source = r#"
 module dynamic_len_transition
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     total_supply: u64,
     name: Vec<u8>,
 }
@@ -20584,7 +21215,7 @@ where
         let source = r#"
 module test::shared_create
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     enabled: bool,
 }
@@ -20720,7 +21351,7 @@ where
         let source = r#"
 module ckb_capacity_surface
 
-resource Receipt {
+resource Receipt has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -20736,6 +21367,8 @@ where
 
         assert_eq!(ckb_constraints.created_output_count, 1, "ckb constraints must count created outputs");
         assert_eq!(ckb_constraints.mutated_output_count, 0, "create-only action must not report mutated outputs");
+        assert_eq!(ckb_constraints.min_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
+        assert_eq!(ckb_constraints.max_entry_witness_bytes, ENTRY_WITNESS_ABI_MAGIC.len() + 8);
         assert!(ckb_constraints.capacity_planning_required, "create outputs must mark capacity planning as required");
         assert!(
             ckb_constraints.occupied_capacity_measurement_required,
@@ -20821,7 +21454,7 @@ where
             r#"
 module hash_type_dsl
 
-resource Token has store, transfer
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref
 with_default_hash_type(Data1)
 {
     amount: u64,
@@ -21057,8 +21690,14 @@ where
         .unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(asm.contains("# cellscript entry abi: _cellscript_entry tail-calls no-arg main"), "missing entry wrapper:\n{}", asm);
-        assert!(asm.contains("    j main"), "entry wrapper must tail-call main without clobbering ra:\n{}", asm);
+        assert!(asm.contains("# cellscript entry abi: _cellscript_entry calls no-arg main"), "missing entry wrapper:\n{}", asm);
+        assert!(asm.contains("    mv s10, sp"), "entry wrapper must stage the direct-wrapper stack base:\n{}", asm);
+        assert!(
+            asm.contains("    la s11, .Lentry_direct_done_"),
+            "entry wrapper must stage the direct-wrapper return label:\n{}",
+            asm
+        );
+        assert!(asm.contains("    call main"), "entry wrapper must call main through the direct wrapper:\n{}", asm);
         assert!(
             asm.find("_cellscript_entry:").unwrap() < asm.find("needs_arg:").unwrap(),
             "entry wrapper must precede actions:\n{}",
@@ -21130,6 +21769,37 @@ where
     }
 
     #[test]
+    fn loaded_artifact_validation_rejects_metadata_artifact_size_mismatch() {
+        let result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        let mut metadata = result.metadata.clone();
+        metadata.artifact_size_bytes = Some(result.artifact_bytes.len() + 1);
+
+        let err = crate::validate_artifact_metadata(result.artifact_bytes, metadata).unwrap_err();
+
+        assert!(err.message.contains("metadata artifact_size_bytes"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_constraints_artifact_size_mismatch() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.constraints.artifact.artifact_size_bytes = result.artifact_bytes.len() + 1;
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("metadata constraints.artifact.artifact_size_bytes"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_constraints_artifact_format_mismatch() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.constraints.artifact.format = ArtifactFormat::RiscvElf.display_name().to_string();
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("metadata constraints.artifact.format"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn compile_result_validation_rejects_metadata_artifact_format_mismatch() {
         let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         result.metadata.artifact_format = ArtifactFormat::RiscvElf.display_name().to_string();
@@ -21172,6 +21842,25 @@ where
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn vm_abi_trailer_detection_requires_complete_zero_reserved_trailer() {
+        let mut artifact = b"\x7fELFpayload".to_vec();
+        artifact.extend_from_slice(crate::VM_ABI_TRAILER_MAGIC);
+        artifact.extend_from_slice(&crate::MOLECULE_VM_ABI_VERSION.to_le_bytes());
+        artifact.extend_from_slice(&1u16.to_le_bytes());
+        artifact.extend_from_slice(&0u32.to_le_bytes());
+
+        assert_eq!(crate::strip_vm_abi_trailer(&artifact).len(), artifact.len());
+        assert_eq!(crate::vm_abi_trailer_version(&artifact).unwrap(), None);
+
+        let appended = crate::append_vm_abi_trailer(artifact.clone(), crate::MOLECULE_VM_ABI_VERSION);
+        assert_eq!(appended.len(), artifact.len() + crate::VM_ABI_TRAILER_LEN);
+        assert_eq!(&appended[..artifact.len()], artifact.as_slice());
+
+        let stripped = crate::strip_vm_abi_trailer(&appended);
+        assert_eq!(stripped, artifact.as_slice());
     }
 
     #[test]
@@ -21219,6 +21908,77 @@ where
     }
 
     #[test]
+    fn source_unit_disk_verification_rejects_paths_outside_trusted_root() {
+        let trusted = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let trusted_root = Utf8Path::from_path(trusted.path()).unwrap();
+        let outside_root = Utf8Path::from_path(outside.path()).unwrap();
+        let source_path = outside_root.join("outside.cell");
+        std::fs::write(&source_path, SIMPLE_PROGRAM).unwrap();
+
+        let mut metadata = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap().metadata;
+        metadata.source_units = vec![source_unit_from_file(&source_path, "entry").unwrap()];
+        let source_units = metadata.source_units.clone();
+        bind_source_metadata(&mut metadata, source_units);
+
+        let err = validate_source_units_on_disk_under(&metadata, trusted_root).unwrap_err();
+
+        assert!(err.message.contains("outside trusted source root"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn source_unit_disk_verification_accepts_paths_inside_trusted_root() {
+        let trusted = tempdir().unwrap();
+        let trusted_root = Utf8Path::from_path(trusted.path()).unwrap();
+        let source_path = trusted_root.join("main.cell");
+        std::fs::write(&source_path, SIMPLE_PROGRAM).unwrap();
+
+        let mut metadata = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap().metadata;
+        metadata.source_units = vec![source_unit_from_file(&source_path, "entry").unwrap()];
+        let source_units = metadata.source_units.clone();
+        bind_source_metadata(&mut metadata, source_units);
+
+        validate_source_units_on_disk_under(&metadata, trusted_root).unwrap();
+    }
+
+    #[test]
+    fn entry_abi_constraints_mark_extreme_slot_counts_unsupported() {
+        fn scalar_param(index: usize) -> ParamMetadata {
+            ParamMetadata {
+                name: format!("p{index}"),
+                ty: "u64".to_string(),
+                is_mut: false,
+                is_ref: false,
+                source: "default".to_string(),
+                protected_spend_surface: false,
+                witness_data_source: true,
+                lock_args_data_source: false,
+                cell_bound_abi: false,
+                schema_pointer_abi: false,
+                schema_length_abi: false,
+                fixed_byte_pointer_abi: false,
+                fixed_byte_length_abi: false,
+                fixed_byte_len: None,
+                type_hash_pointer_abi: false,
+                type_hash_length_abi: false,
+                type_hash_len: None,
+            }
+        }
+
+        let params = (0..=ENTRY_ABI_MAX_SLOTS).map(scalar_param).collect::<Vec<_>>();
+
+        let constraints = entry_abi_constraints("action", "huge", &params);
+
+        assert!(constraints.unsupported);
+        assert!(constraints.unsupported_reasons.iter().any(|reason| reason.contains("more than 1024 slots")));
+    }
+
+    #[test]
+    fn ckb_capacity_calculation_saturates_on_extreme_sizes() {
+        assert_eq!(ckb_code_cell_capacity_shannons(usize::MAX, u64::MAX), u64::MAX);
+    }
+
+    #[test]
     fn compile_result_validation_rejects_metadata_schema_version_mismatch() {
         let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
         result.metadata.metadata_schema_version = crate::METADATA_SCHEMA_VERSION + 1;
@@ -21254,7 +22014,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#;
@@ -21584,7 +22344,7 @@ resource Token has store {
         let source = r#"
 module cellscript::shorthand
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     symbol: [u8; 8]
 }
@@ -21614,7 +22374,8 @@ where
 
         let err = compile(LINEAR_BRANCH_INCONSISTENT_RETURN_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
+            err.message.contains("branch-local lifecycle operation 'consume'")
+                || err.message.contains("linear resource 'token' has inconsistent ownership state across if branches"),
             "unexpected error: {}",
             err.message
         );
@@ -21636,7 +22397,8 @@ where
     #[test]
     fn compile_merges_linear_transfers_inside_if_expressions() {
         compile(LINEAR_IF_EXPR_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap();
-        compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap();
+        let stateful = compile(LINEAR_IF_EXPR_STATEFUL_BRANCHES_PROGRAM, CompileOptions::default()).unwrap_err();
+        assert!(stateful.message.contains("branch-local lifecycle operation 'destroy'"), "unexpected error: {}", stateful.message);
 
         let err = compile(LINEAR_IF_EXPR_INCONSISTENT_LET_MOVE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
@@ -21857,6 +22619,19 @@ where
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
         }));
+        let state_transition_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.category == "state-transition" && plan.feature == "Ticket.state")
+            .expect("state transition ProofPlan record");
+        assert_eq!(state_transition_plan.codegen_coverage_status, "covered");
+        assert!(
+            state_transition_plan.executable_evidence.iter().any(|evidence| evidence.layer == "runtime"),
+            "{:?}",
+            state_transition_plan.executable_evidence
+        );
         assert!(asm.contains("state_count=2"), "qualified flow state names should preserve verifier metadata:\n{}", asm);
     }
 
@@ -21918,7 +22693,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -21969,7 +22744,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22023,7 +22798,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     price: u64
     note: u64
@@ -22057,7 +22832,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     price: u64
     note: u64
@@ -22086,7 +22861,7 @@ where
         let function_source = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -22123,7 +22898,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22152,7 +22927,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22179,7 +22954,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22232,7 +23007,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22266,11 +23041,11 @@ where
         let source = r#"
 module test
 
-resource Authority has store {
+resource Authority has store, create, consume, replace, burn, relock, read_ref {
     minted: u64
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -22305,7 +23080,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22329,15 +23104,15 @@ where
         let source = r#"
 module test
 
-shared Config has store {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-receipt Grant has store {
+receipt Grant has store, create, consume, replace, burn, relock, read_ref {
     admin: Address,
     amount: u64,
 }
@@ -22368,7 +23143,7 @@ where
         let source = r#"
 module test
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -22397,7 +23172,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     status: OfferState
     amount: u64
 }
@@ -22443,7 +23218,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22473,7 +23248,7 @@ enum OfferState {
     Live,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22505,7 +23280,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22537,7 +23312,7 @@ enum OfferState {
     Cancelled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22571,7 +23346,7 @@ enum OfferState {
     Filled,
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22602,7 +23377,7 @@ enum OfferState {
     Live(u64),
 }
 
-resource Offer has store {
+resource Offer has store, create, consume, replace, burn, relock, read_ref {
     state: OfferState
     amount: u64
 }
@@ -22678,6 +23453,56 @@ source_roots = ["src", "shared"]
     }
 
     #[test]
+    fn compile_package_import_alias_emits_matching_external_callable() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src", "shared"]
+
+[build]
+target = "riscv64-elf"
+target_profile = "ckb"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("shared/math.cell"),
+            r#"
+module demo::math
+
+fn inc(value: u64) -> u64 {
+    return value + 1
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/main.cell"),
+            r#"
+module demo::main
+
+use demo::math::inc as plus_one
+
+action run() -> u64
+where
+    return plus_one(41)
+"#,
+        )
+        .unwrap();
+
+        let result = compile_path(root, CompileOptions::default()).unwrap();
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
     fn ir_summary_captures_cell_runtime_accesses() {
         let tokens = lexer::lex(SUMMARY_PROGRAM).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -22722,7 +23547,7 @@ source_roots = ["src", "shared"]
         let source = r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -22770,7 +23595,7 @@ where
         let source = r#"
 module test
 
-resource Config {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -22843,7 +23668,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -22884,7 +23709,7 @@ invariant token_conservation {
     assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -22962,15 +23787,15 @@ invariant nft_uniqueness {
 invariant selected_token_delta {
     trigger: explicit_entry
     scope: selected_cells
-    reads: input<Token>.amount, output<Token>.amount
-    assert_delta(Token.amount, expected_delta, scope = selected_cells)
+    reads: input<Token>.amount, output<Token>.amount, witness.expected_delta
+    assert_delta(Token.amount, witness.expected_delta, scope = selected_cells)
 }
 
-resource Nft {
+resource Nft has store, create, consume, replace, burn, relock, read_ref {
     id: Hash,
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -22996,12 +23821,318 @@ where
             .runtime
             .proof_plan
             .iter()
-            .find(|plan| plan.feature == "assert_delta:Token.amount:expected_delta")
+            .find(|plan| plan.feature == "assert_delta:Token.amount:witness.expected_delta")
             .expect("selected cell delta aggregate ProofPlan");
         assert_eq!(delta.category, "aggregate-invariant");
         assert_eq!(delta.scope, "selected_cells");
-        assert_eq!(delta.input_output_relation_checks, vec!["assert_delta:Token.amount:expected_delta=metadata-only"]);
+        assert!(delta.reads.contains(&"input".to_string()), "{:?}", delta.reads);
+        assert!(delta.reads.contains(&"output".to_string()), "{:?}", delta.reads);
+        assert!(delta.reads.contains(&"witness.expected_delta".to_string()), "{:?}", delta.reads);
+        assert!(delta.witness_fields.contains(&"witness.expected_delta".to_string()), "{:?}", delta.witness_fields);
+        assert_eq!(delta.input_output_relation_checks, vec!["assert_delta:Token.amount:witness.expected_delta=metadata-only"]);
         assert_eq!(delta.codegen_coverage_status, "gap:metadata-only");
+    }
+
+    #[test]
+    fn compile_rejects_unbound_assert_delta_argument() {
+        let source = r#"
+module test
+
+invariant selected_token_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: input<Token>.amount, output<Token>.amount
+    assert_delta(Token.amount, expected_delta, scope = selected_cells)
+}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action run() -> u64
+where
+    return 0
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("uses unbound delta 'expected_delta'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_assert_delta_argument_from_cell_read() {
+        let source = r#"
+module test
+
+invariant selected_token_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: input<Token>.amount, output<Token>.amount
+    assert_delta(Token.amount, input<Token>.amount, scope = selected_cells)
+}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action run() -> u64
+where
+    return 0
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("uses unbound delta 'input<Token>.amount'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn proof_plan_cross_references_matching_action_obligation_for_invariant() {
+        let source = r#"
+module test
+
+invariant token_supply_conserved {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token {
+        amount: amount
+    }
+    return out
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+        assert!(
+            aggregate.coverage.iter().any(|coverage| coverage
+                == "invariant_coverage:matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"),
+            "missing action coverage cross-reference: {:?}",
+            aggregate.coverage
+        );
+        assert!(
+            aggregate
+                .on_chain_checked_obligations
+                .iter()
+                .any(|obligation| obligation == "matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"),
+            "missing checked obligation cross-reference: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+        assert_eq!(aggregate.codegen_coverage_status, "gap:metadata-only");
+
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_evidence_matches=1/1"),
+            "missing declared invariant coverage summary: {:?}",
+            declared.coverage
+        );
+    }
+
+    #[test]
+    fn proof_plan_marks_invariant_action_evidence_as_non_exhaustive() {
+        let source = r#"
+module test
+
+invariant token_supply_conserved {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token { amount: amount }
+    return out
+
+action mint(amount: u64) -> Token
+where
+    let out = create Token { amount: amount }
+    return out
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+
+        assert!(
+            aggregate
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption == "declared(action_coverage_evidence_is_existential_not_exhaustive)"),
+            "missing existential evidence caveat: {:?}",
+            aggregate.builder_assumptions
+        );
+        assert!(
+            aggregate
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption.starts_with("declared(unmatched_related_action_obligation_count:1:action:mint")),
+            "mint action should remain unmatched related evidence: {:?}",
+            aggregate.builder_assumptions
+        );
+        assert!(
+            aggregate
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == "warning" && diagnostic.message.contains("related action origin")),
+            "missing non-exhaustive warning: {:?}",
+            aggregate.diagnostics
+        );
+
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_supply_conserved" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage == "invariant_coverage:aggregate_action_evidence_matches=1/1"),
+            "missing declared invariant evidence summary: {:?}",
+            declared.coverage
+        );
+        assert!(
+            !declared
+                .builder_assumptions
+                .iter()
+                .any(|assumption| assumption.starts_with("declared(all_aggregate_action_coverage_matched:")),
+            "declared invariant must not claim exhaustive action coverage: {:?}",
+            declared.builder_assumptions
+        );
+    }
+
+    #[test]
+    fn proof_plan_checked_static_excluded_from_on_chain_checked_obligations() {
+        // Regression test for Bug 7: checked-static obligations must NOT be
+        // conflated with on-chain-checked status, and must NOT satisfy aggregate
+        // invariant coverage matches.
+        let source = r#"
+module test
+
+resource Token has destroy {
+    amount: u64,
+}
+
+invariant token_amount_non_increasing {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
+
+        // The burn action should carry a checked-static obligation for destroy,
+        // NOT a checked-runtime obligation.
+        let burn_action = result.metadata.actions.iter().find(|action| action.name == "burn").expect("burn action metadata");
+        assert!(
+            burn_action.verifier_obligations.iter().any(|obligation| {
+                obligation.category == "resource-operation"
+                    && obligation.feature == "destroy:Token"
+                    && obligation.status == "checked-static"
+            }),
+            "expected checked-static destroy obligation: {:?}",
+            burn_action.verifier_obligations
+        );
+        assert!(
+            !burn_action.verifier_obligations.iter().any(|obligation| {
+                obligation.category == "resource-operation"
+                    && obligation.feature == "destroy:Token"
+                    && obligation.status == "checked-runtime"
+            }),
+            "destroy must NOT be checked-runtime: {:?}",
+            burn_action.verifier_obligations
+        );
+
+        // The corresponding ProofPlan for the action must NOT set on_chain_checked.
+        let action_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "action:burn" && plan.feature == "destroy:Token")
+            .expect("action ProofPlan for destroy");
+        assert!(!action_plan.on_chain_checked, "checked-static action plan must have on_chain_checked=false");
+        assert!(
+            action_plan.on_chain_checked_obligations.is_empty(),
+            "checked-static action plan must have empty on_chain_checked_obligations: {:?}",
+            action_plan.on_chain_checked_obligations
+        );
+
+        // The aggregate invariant must NOT match the checked-static obligation
+        // as a coverage-closing cross-reference.
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_amount_non_increasing#aggregate:0")
+            .expect("aggregate invariant ProofPlan");
+        assert!(
+            !aggregate.on_chain_checked_obligations.iter().any(|obligation| obligation.contains("destroy:Token")),
+            "aggregate invariant must NOT include checked-static destroy in on_chain_checked_obligations: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+        // Because the destroy action also emits a checked-runtime transaction-invariant
+        // obligation (destroy-output-scan), the aggregate WILL match that runtime
+        // obligation. The critical regression check is that the checked-static
+        // resource-operation obligation does NOT leak in, which we verified above.
+        assert!(
+            aggregate.on_chain_checked_obligations.iter().any(|obligation| obligation.contains("destroy-output-scan:Token")),
+            "aggregate invariant SHOULD match the checked-runtime destroy-output-scan obligation: {:?}",
+            aggregate.on_chain_checked_obligations
+        );
+
+        // Declared invariant must report full action coverage (1/1) because the
+        // checked-runtime destroy-output-scan satisfies the aggregate.
+        let declared = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:token_amount_non_increasing" && plan.category == "declared-invariant")
+            .expect("declared invariant ProofPlan");
+        assert!(
+            declared.coverage.iter().any(|coverage| coverage.contains("aggregate_action_evidence_matches=1/1")),
+            "declared invariant should report aggregate action evidence via checked-runtime obligation: {:?}",
+            declared.coverage
+        );
     }
 
     #[test]
@@ -23016,7 +24147,7 @@ invariant lock_scans_transaction {
     assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23087,7 +24218,7 @@ invariant flag_distinct {
     assert_distinct(group_outputs<Flag>.enabled, scope = group)
 }
 
-resource Flag {
+resource Flag has store, create, consume, replace, burn, relock, read_ref {
     enabled: bool,
 }
 
@@ -23111,7 +24242,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23137,7 +24268,7 @@ invariant token_conservation {
     assert_invariant(1, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -23163,7 +24294,7 @@ invariant config_digest {
     assert_invariant(read_ref<Config>().digest == Hash::zero(), "config digest must be zero")
 }
 
-resource Config {
+resource Config has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -23248,11 +24379,31 @@ where
     }
 
     #[test]
+    fn primitive_compat_predicates_match_validator_modes() {
+        let default_options = CompileOptions::default();
+        assert!(default_options.is_primitive_compat_014());
+        assert!(!default_options.is_primitive_strict());
+
+        let compat_options = CompileOptions { primitive_compat: Some("0.14".to_string()), ..Default::default() };
+        assert!(compat_options.is_primitive_compat_014());
+        assert!(!compat_options.is_primitive_strict());
+
+        let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() };
+        assert!(!strict_options.is_primitive_compat_014());
+        assert!(strict_options.is_primitive_strict());
+
+        let assurance_options = CompileOptions { primitive_compat: Some("0.16".to_string()), ..Default::default() };
+        assert!(!assurance_options.is_primitive_compat_014());
+        assert!(assurance_options.is_primitive_strict());
+        assert!(assurance_options.is_assurance_strict_016());
+    }
+
+    #[test]
     fn compile_accepts_kernel_effect_capabilities_for_destroy() {
         let source = r#"
 module test
 
-resource Token has store, consume, burn {
+resource Token has store, consume, burn, create, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -23269,7 +24420,7 @@ where
         let source = r#"
 module test
 
-resource Token has store, replace, relock {
+resource Token has store, replace, relock, create, consume, burn, read_ref {
     amount: u64,
 }
 
@@ -23384,7 +24535,7 @@ where
         let source = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
     owner: Address,
 }
@@ -23425,7 +24576,7 @@ where
         let source = r#"
 module test
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -23451,7 +24602,7 @@ where
         let source = r#"
 	module test
 
-resource NFT has store, destroy {
+resource NFT has store, destroy, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -23501,7 +24652,7 @@ where
         let source = r#"
 module test
 
-resource Collection has store {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     creator: Address,
     total_supply: u64,
@@ -23546,7 +24697,7 @@ where
         let source = r#"
 module test
 
-resource NFT has store {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64,
     owner: Address,
     metadata_hash: Hash,
@@ -23554,7 +24705,7 @@ resource NFT has store {
     royalty_bps: u16,
 }
 
-resource Collection has store {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     creator: Address,
     total_supply: u64,
     max_supply: u64,
@@ -23572,7 +24723,7 @@ where
         metadata_hash: metadata_hashes[0],
         royalty_recipient: collection_before.creator,
         royalty_bps: 250,
-    }
+    } with_lock(recipients[0])
 "#;
 
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -23592,6 +24743,11 @@ where
             "prelude must not compare against recipients[0] before body temporaries are assigned:\n{}",
             asm
         );
+        assert!(
+            !prelude.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "prelude must not compare output locks against recipients[0] before body temporaries are assigned:\n{}",
+            asm
+        );
         assert!(ordered_create > body_start, "named output create check should stay in body order:\n{}", asm);
         assert!(
             ordered_section.contains("# cellscript abi: verify output bytes field NFT.owner")
@@ -23599,29 +24755,34 @@ where
             "ordered create constraint must verify dynamic indexed expected byte fields after body lowering:\n{}",
             asm
         );
+        assert!(
+            ordered_section.contains("# cellscript abi: LOAD_CELL_BY_FIELD reason=output_lock_hash"),
+            "ordered create constraint must verify dynamic indexed output locks after body lowering:\n{}",
+            asm
+        );
     }
 
     #[test]
-    fn anonymous_creates_after_named_outputs_get_distinct_output_indices() {
+    fn branch_local_anonymous_creates_are_rejected_until_effects_are_cfg_aware() {
         let source = r#"
 module test
 
-resource Authority has store {
+resource Authority has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
     minted: u64,
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
     symbol: [u8; 8],
 }
 
-shared Pool has store {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8],
     reserve: u64,
 }
 
-receipt Receipt has store {
+receipt Receipt has store, create, consume, replace, burn, relock, read_ref {
     pool_id: Hash,
     amount: u64,
 }
@@ -23640,26 +24801,9 @@ where
     create receipt = Receipt { pool_id: pool.type_hash(), amount: seed.amount } with_lock(creator)
 "#;
 
-        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes).unwrap();
-
-        assert!(
-            asm.contains("LOAD_CELL_DATA reason=create source=Output index=3")
-                && asm.contains("LOAD_CELL_DATA reason=create source=Output index=4"),
-            "distinct anonymous creates after three named outputs must bind Output#3 and Output#4:\n{}",
-            asm
-        );
-        assert_eq!(
-            asm.matches("LOAD_CELL_DATA reason=create source=Output index=3").count(),
-            1,
-            "anonymous creates must not all collapse to the first anonymous output index:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("LOAD_CELL_BY_FIELD reason=output_type_hash source=Output index=1 field=5"),
-            "type_hash() of named output `pool` must read the signature-bound Pool output index:\n{}",
-            asm
-        );
+        let err =
+            compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("branch-local lifecycle operation 'create'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -23677,10 +24821,19 @@ where
         let molecule_schema = snapshot.molecule_schema.as_ref().expect("Snapshot molecule schema metadata");
         assert_eq!(molecule_schema.abi, "molecule");
         assert_eq!(molecule_schema.layout, "fixed-struct-v1");
-        assert_eq!(molecule_schema.fixed_size, 8);
+        assert_eq!(molecule_schema.fixed_size, Some(8));
         assert!(molecule_schema.schema.contains("struct Snapshot"));
         assert!(molecule_schema.schema.contains("amount: CellScriptUint64"));
         assert_eq!(molecule_schema.schema_hash, crate::hex_encode(&crate::ckb_blake2b256(molecule_schema.schema.as_bytes())));
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Snapshot")
+            .expect("Snapshot manifest entry");
+        assert_eq!(manifest_entry.fixed_size, Some(8));
+        assert_eq!(manifest_entry.encoded_size, Some(8));
         let amount = snapshot.fields.iter().find(|field| field.name == "amount").expect("amount field metadata");
         assert_eq!(amount.ty, "u64");
         assert_eq!(amount.offset, 0);
@@ -23739,7 +24892,7 @@ where
         let source = r#"
 module scoped_lock
 
-resource DynamicCell {
+resource DynamicCell has store, create, consume, replace, burn, relock, read_ref {
     name: String,
 }
 
@@ -23816,7 +24969,7 @@ struct Signature {
     signer: Address,
 }
 
-receipt Proposal {
+receipt Proposal has store, create, consume, replace, burn, relock, read_ref {
     signatures: Vec<Signature>,
     expires_at: u64,
 }
@@ -23855,7 +25008,7 @@ enum LockType {
     Relative,
 }
 
-resource TimeLock {
+resource TimeLock has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
     lock_type: LockType,
     unlock_height: u64,
@@ -23877,7 +25030,7 @@ where
         assert_eq!(lock_type.encoded_size, Some(1));
         let schema = time_lock.molecule_schema.as_ref().expect("TimeLock molecule schema");
         assert_eq!(schema.layout, "fixed-struct-v1");
-        assert_eq!(schema.fixed_size, 41);
+        assert_eq!(schema.fixed_size, Some(41));
         assert!(schema.schema.contains("array CellScriptEnumTag [byte; 1];"));
         assert!(schema.schema.contains("lock_type: CellScriptEnumTag"));
     }
@@ -23892,7 +25045,7 @@ enum AssetType {
     Token(Hash),
 }
 
-resource LockedAsset {
+resource LockedAsset has store, create, consume, replace, burn, relock, read_ref {
     asset_type: AssetType,
     amount: u64,
     lock_hash: Hash,
@@ -23952,7 +25105,7 @@ lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) 
         let source = r#"
 module dynamic_schema_access
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     creator: Address,
 }
@@ -23966,8 +25119,17 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
         let schema = collection.molecule_schema.as_ref().expect("dynamic Collection molecule schema");
         assert_eq!(collection.encoded_size, None);
         assert_eq!(schema.layout, "molecule-table-v1");
-        assert_eq!(schema.fixed_size, 0);
+        assert_eq!(schema.fixed_size, None);
         assert_eq!(schema.dynamic_fields, vec!["name".to_string()]);
+        let manifest_entry = result
+            .metadata
+            .molecule_schema_manifest
+            .entries
+            .iter()
+            .find(|entry| entry.type_name == "Collection")
+            .expect("Collection manifest entry");
+        assert_eq!(manifest_entry.fixed_size, None);
+        assert_eq!(manifest_entry.encoded_size, None);
         assert!(schema.schema.contains("vector CellScriptString <byte>;"));
         assert!(schema.schema.contains("table Collection"));
         assert!(schema.schema.contains("name: CellScriptString"));
@@ -23993,7 +25155,7 @@ lock collection_creator(protected collection: Collection, witness claimed_creato
         let source = r#"
 module dynamic_vec_len
 
-receipt Emergency {
+receipt Emergency has store, create, consume, replace, burn, relock, read_ref {
     lock_hash: Hash,
     approvers: Vec<Address>,
 }
@@ -24033,7 +25195,7 @@ lock enough(protected emergency: Emergency, witness required: u8) -> bool {
         let source = r#"
 module dynamic_vec_iter
 
-resource Wallet {
+resource Wallet has store, create, consume, replace, burn, relock, read_ref {
     signers: Vec<Address>,
     threshold: u8,
 }
@@ -24083,7 +25245,7 @@ lock signer(protected wallet: Wallet, witness addr: Address) -> bool {
         let source = r#"
 module dynamic_mutation
 
-resource Collection {
+resource Collection has store, create, consume, replace, burn, relock, read_ref {
     name: String,
     total_supply: u64,
     max_supply: u64,
@@ -24127,7 +25289,7 @@ struct Owner {
     flags: [u8; 2],
 }
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     owner: Owner,
     pair: (u64, Owner),
     checkpoints: [(Owner, u64); 2],
@@ -24159,7 +25321,7 @@ where
         assert_eq!(amount_field.encoded_size, Some(8));
 
         let molecule_schema = token.molecule_schema.as_ref().expect("Token molecule schema metadata");
-        assert_eq!(molecule_schema.fixed_size, 168);
+        assert_eq!(molecule_schema.fixed_size, Some(168));
         assert!(molecule_schema.schema.contains("struct Owner"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenPair"));
         assert!(molecule_schema.schema.contains("struct CellScriptTupleTokenCheckpoints"));
@@ -24177,7 +25339,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24208,11 +25370,11 @@ where
 module audit::type_id_create
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
-resource PlainToken has store {
+resource PlainToken has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24252,7 +25414,7 @@ where
 module audit::type_id_create
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24277,7 +25439,7 @@ where
         let program = r#"
 module audit::output_data
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24338,7 +25500,7 @@ where
 module audit::type_id
 
 #[type_id("cellscript::asset::Token:v1")]
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24357,7 +25519,7 @@ struct TokenSnapshot {
         let program = r#"
 module audit::identity_type_id
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(ckb_type_id)
 {
     amount: u64
@@ -24380,7 +25542,7 @@ where
         let program = r#"
 module audit::identity_none
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -24401,7 +25563,7 @@ where
         let program = r#"
 module audit::identity_field
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -24425,7 +25587,7 @@ where
         let program = r#"
 module audit::identity_singleton
 
-resource Config has store
+resource Config has store, create, consume, replace, burn, relock, read_ref
     identity(singleton_type)
 {
     value: u64
@@ -24448,7 +25610,7 @@ where
         let program = r#"
 module audit::identity_script_args
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -24471,7 +25633,7 @@ where
         let program = r#"
 module audit::create_unique_field_runtime
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -24498,11 +25660,136 @@ where
                 .verifier_obligations
                 .iter()
                 .any(|obligation| obligation.feature == "create-unique-identity:NFT:field(token_id)"
+                    && obligation.status == "runtime-required"
                     && obligation.detail.contains("global field uniqueness remains")),
             "missing create_unique field identity proof obligation"
         );
+        assert!(result.metadata.actions[0].transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-unique-identity:NFT:field(token_id)"
+                && requirement.status == "runtime-required"
+                && requirement.component == "create-unique-identity"
+        }));
         assert!(asm.contains("create_unique identity policy field(token_id)"), "missing identity policy runtime marker:\n{}", asm);
         assert!(asm.contains("create_unique field identity anchored"), "missing field identity output anchor:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_destroy_policies_are_policy_aware() {
+        let program = r#"
+module audit::destroy_policy_runtime
+
+resource Token has store, consume, burn, create, replace, relock, read_ref
+{
+    amount: u64
+}
+
+resource NFT has store, consume, burn, create, replace, relock, read_ref
+{
+    token_id: u64,
+    owner: Address
+}
+
+action burn_token(token: Token) -> u64
+where
+    burn_amount(token, field = amount)
+
+action destroy_nft(nft_instance: NFT) -> u64
+where
+    destroy_instance(nft_instance, identity_field = token_id)
+
+action destroy_unique_nft(unique_nft: NFT) -> u64
+where
+    destroy_unique(unique_nft, identity = type_id)
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        let burn = result.metadata.actions.iter().find(|action| action.name == "burn_token").expect("burn action");
+        assert!(burn.consume_set.iter().any(|pattern| {
+            pattern.operation == "destroy"
+                && pattern.binding == "token"
+                && pattern.destruction_policy.as_deref() == Some("burn_amount(amount)")
+        }));
+        assert!(burn
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "burn-amount:Token:amount" && obligation.status == "runtime-required" }));
+        assert!(burn.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "burn-amount:Token:amount"
+                && requirement.component == "burn-amount-delta"
+                && requirement.status == "runtime-required"
+        }));
+        assert!(
+            !asm.contains("destroy output type-hash absence scan binding=token"),
+            "burn_amount must not emit singleton TypeHash absence scan:\n{}",
+            asm
+        );
+
+        let instance = result.metadata.actions.iter().find(|action| action.name == "destroy_nft").expect("instance action");
+        assert!(instance.consume_set.iter().any(|pattern| {
+            pattern.operation == "destroy"
+                && pattern.binding == "nft_instance"
+                && pattern.destruction_policy.as_deref() == Some("instance(token_id)")
+        }));
+        assert!(instance
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "destroy-instance:NFT:token_id" && obligation.status == "runtime-required" }));
+        assert!(
+            !asm.contains("destroy output type-hash absence scan binding=nft_instance"),
+            "destroy_instance must not reject every same-TypeHash output:\n{}",
+            asm
+        );
+
+        let unique = result.metadata.actions.iter().find(|action| action.name == "destroy_unique_nft").expect("unique action");
+        assert!(unique
+            .verifier_obligations
+            .iter()
+            .any(|obligation| { obligation.feature == "destroy-unique:NFT:type_id" && obligation.status == "checked-runtime" }));
+        assert!(
+            asm.contains("destroy output type-hash absence scan binding=unique_nft"),
+            "destroy_unique(type_id) should keep executable output absence scan:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_rejects_invalid_destroy_policy_shapes() {
+        let bad_unique = r#"
+module audit::bad_destroy_unique
+
+resource Token has store, consume, burn, create, replace, relock, read_ref
+{
+    amount: u64
+}
+
+action burn(token: Token) -> u64
+where
+    destroy_unique(token, identity = serial)
+"#;
+
+        let err =
+            compile(bad_unique, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("expected type_id or ckb_type_id"), "unexpected error: {}", err.message);
+
+        let bad_burn = r#"
+module audit::bad_burn_amount
+
+resource Flag has store, consume, burn, create, replace, relock, read_ref
+{
+    active: bool
+}
+
+action burn(flag: Flag) -> u64
+where
+    burn_amount(flag, field = active)
+"#;
+
+        let err =
+            compile(bad_burn, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap_err();
+        assert!(err.message.contains("must be a fixed-width numeric scalar"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24510,7 +25797,7 @@ where
         let program = r#"
 module audit::replace_unique_field_runtime
 
-resource NFT has store
+resource NFT has store, create, consume, replace, burn, relock, read_ref
     identity(field(token_id))
 {
     token_id: u64,
@@ -24553,7 +25840,7 @@ where
         let create_script_args_program = r#"
 module audit::create_unique_script_args_runtime
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -24587,7 +25874,7 @@ where
         let script_args_program = r#"
 module audit::unique_script_args_runtime
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
     identity(script_args)
 {
     amount: u64
@@ -24619,7 +25906,7 @@ where
         let singleton_program = r#"
 module audit::unique_singleton_runtime
 
-resource Config has store
+resource Config has store, create, consume, replace, burn, relock, read_ref
     identity(singleton_type)
 {
     value: u64
@@ -24654,7 +25941,7 @@ where
         let program = r#"
 module audit::dynamic_identity_field
 
-resource Note has store
+resource Note has store, create, consume, replace, burn, relock, read_ref
     identity(field(memo))
 {
     memo: Vec<u8>
@@ -24716,6 +26003,11 @@ where
             asm
         );
         assert!(
+            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_group_output source=GroupOutput index=0"),
+            "action entry wrapper should fall back to GroupOutput witness for output-only type scripts:\n{}",
+            asm
+        );
+        assert!(
             asm.contains("# cellscript entry abi: scalar param amount -> a0 size=8"),
             "entry wrapper did not lower u64 witness payload into the action ABI register:\n{}",
             asm
@@ -24737,6 +26029,78 @@ where
     }
 
     #[test]
+    fn entry_witness_bool_params_are_canonicalized() {
+        let program = r#"
+module vm::entry_bool
+
+lock gate(flag: witness bool) -> bool {
+    return flag
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(asm.contains("entry_bool_canonical_ok"), "entry wrapper should reject non-canonical bool payload bytes:\n{}", asm);
+        assert!(asm.contains("lock_predicate_true"), "lock return path should still lower through the predicate check:\n{}", asm);
+    }
+
+    #[test]
+    fn v014_runtime_helpers_fail_closed_when_not_executable() {
+        let program = r#"
+module vm::v014_runtime_fail_closed
+
+action timed() -> u64
+where
+    require_maturity(100)
+    return 0
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("__ckb_require_maturity")
+                && asm.contains("helper is not executable yet; fail closed instead of returning a forged success value"),
+            "unimplemented v0.14 runtime helper should not return forged success:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn ckb_u64_syscall_helpers_check_return_code_and_size() {
+        let program = r#"
+module vm::ckb_syscall_checks
+
+action epoch() -> u64
+where
+    return ckb::header_epoch_number()
+"#;
+
+        let result =
+            compile(program, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("runtime_header_field_fail") && asm.contains("bne t0, t1,"),
+            "header field helper should check syscall success and exact u64 size:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn tuple_return_abi_rejects_more_than_eight_fields() {
+        let program = r#"
+module vm::wide_tuple_return
+
+action wide() -> (u64, u64, u64, u64, u64, u64, u64, u64, u64)
+where
+    return (0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let err = compile(program, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("tuple return ABI supports at most 8 fields"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn entry_witness_encoder_matches_u64_wrapper_abi() {
         let program = r#"
 module vm::entry_abi
@@ -24754,6 +26118,9 @@ where
         expected.extend_from_slice(&77u64.to_le_bytes());
         assert_eq!(witness, expected);
         assert_eq!(encode_entry_witness_args_for_params(&action.params, &[EntryWitnessArg::U64(77)]).unwrap(), expected);
+
+        let err = action.entry_witness_args(&[EntryWitnessArg::U16(77)]).unwrap_err();
+        assert!(err.message.contains("expects scalar payload for type 'u64'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24780,19 +26147,127 @@ where
     }
 
     #[test]
+    fn internal_calls_keep_outgoing_stack_area_abi_aligned() {
+        let program = r#"
+module vm::call_stack_align
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(
+            asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript abi: reserve 16 bytes for outgoing stack call arguments"),
+            "internal calls must keep sp 16-byte aligned at RISC-V call boundaries:\n{}",
+            asm
+        );
+        assert!(asm.contains("sd t0, -16(sp)"), "internal call did not stage arg8 in the aligned outgoing area:\n{}", asm);
+    }
+
+    #[test]
+    fn generated_outgoing_stack_reservations_are_psabi_aligned() {
+        let program = r#"
+module vm::call_stack_align_matrix
+
+fn ninth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64) -> u64 {
+    return a8
+}
+
+fn tenth(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64) -> u64 {
+    return a8 + a9
+}
+
+fn eleventh(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64, a10: u64) -> u64 {
+    return a8 + a9 + a10
+}
+
+action run() -> u64
+where
+    return ninth(0, 1, 2, 3, 4, 5, 6, 7, 8) + tenth(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) + eleventh(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let reservations = asm
+            .lines()
+            .filter_map(|line| {
+                let marker = "reserve ";
+                let start = line.find(marker)? + marker.len();
+                let rest = &line[start..];
+                let value = rest.split_whitespace().next()?.parse::<usize>().ok()?;
+                line.contains("outgoing stack call arguments").then_some(value)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(reservations, vec![16, 16, 32], "unexpected outgoing stack reservations:\n{}", asm);
+        assert!(
+            reservations.iter().all(|bytes| bytes % 16 == 0),
+            "all outgoing call stack reservations must preserve RISC-V psABI sp alignment:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn strict_audit_codegen_emits_only_aligned_stack_pointer_deltas() {
+        let program = r#"
+module vm::sp_delta_contract
+
+fn wide(
+    a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64,
+    a8: u64, a9: u64, a10: u64, a11: u64, a12: u64, a13: u64, a14: u64, a15: u64,
+    a16: u64, a17: u64, a18: u64, a19: u64
+) -> u64 {
+    return a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19
+}
+
+action run() -> u64
+where
+    return wide(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let sp_deltas = asm
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("addi sp, sp, "))
+            .filter_map(|value| value.parse::<i64>().ok())
+            .collect::<Vec<_>>();
+
+        assert!(!sp_deltas.is_empty(), "expected stack pointer adjustments:\n{}", asm);
+        assert!(
+            sp_deltas.iter().all(|delta| delta % 16 == 0),
+            "every emitted sp delta must preserve RISC-V psABI alignment; got {:?}\n{}",
+            sp_deltas,
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: reserve 96 bytes for outgoing stack call arguments"),
+            "20 ABI args require a 96-byte aligned outgoing area:\n{}",
+            asm
+        );
+    }
+
+    #[test]
     fn entry_witness_wrapper_supports_scalar_stack_args() {
         let program = r#"
 module vm::entry_abi
 
-resource A has store, destroy {
+resource A has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
-resource B has store, destroy {
+resource B has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
-resource C has store, destroy {
+resource C has store, destroy, create, consume, replace, burn, relock, read_ref {
     value: u64,
 }
 
@@ -24812,12 +26287,12 @@ where
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
-                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript entry abi: reserve 16 bytes for outgoing stack call arguments"),
             "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -16(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];
@@ -24894,8 +26369,8 @@ where
     fn compile_file_loads_local_path_dependencies_from_cell_manifest() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -24914,7 +26389,7 @@ version = "0.1.0"
             r#"
 module dep::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -24929,7 +26404,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -25254,7 +26729,7 @@ name = "demo"
 version = "0.1.0"
 
 [dependencies]
-token_std = { path = "../missing_dep" }
+token_std = { path = "missing_dep" }
 "#,
         )
         .unwrap();
@@ -25271,8 +26746,54 @@ where
         .unwrap();
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("expected manifest"));
+        assert!(err.message.contains("does not exist"));
         assert!(err.message.contains("token_std"));
+    }
+
+    #[test]
+    fn compile_path_rejects_path_dependency_traversal() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        let outside = root.join("outside");
+        let app = root.join("app");
+
+        std::fs::create_dir_all(outside.join("src")).unwrap();
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+outside = { path = "../outside" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("src").join("main.cell"),
+            r#"
+module app::main
+
+action ping() -> u64
+where
+    1
+"#,
+        )
+        .unwrap();
+
+        let err = compile_path(app, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -25330,7 +26851,7 @@ entry = "contracts/main.cell"
             r#"
 module demo::helper
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -25359,8 +26880,8 @@ where
     fn compile_path_rejects_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        let dep_root = root.join("dep_pkg");
         let app_root = root.join("app_pkg");
+        let dep_root = app_root.join("deps").join("dep_pkg");
 
         std::fs::create_dir_all(dep_root.join("src")).unwrap();
         std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -25373,7 +26894,7 @@ name = "dep_pkg"
 version = "0.1.0"
 
 [dependencies]
-app_pkg = { path = "../app_pkg" }
+app_pkg = { path = "../.." }
 "#,
         )
         .unwrap();
@@ -25397,7 +26918,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
         )
         .unwrap();
@@ -25414,7 +26935,7 @@ where
         .unwrap();
 
         let err = compile_path(app_root, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("path dependency cycle detected"));
+        assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -25440,7 +26961,7 @@ source_roots = ["contracts", "shared"]
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -25500,6 +27021,88 @@ where
     }
 
     #[test]
+    fn package_entry_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "../outside/main.cell"
+"#,
+        )
+        .unwrap();
+        std::fs::write(outside.join("main.cell"), "module outside\n").unwrap();
+
+        let err = resolve_input_path(&root).unwrap_err();
+
+        assert!(err.message.contains("package entry"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_source_roots_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["../outside"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+        std::fs::write(outside.join("leak.cell"), "module outside\n").unwrap();
+
+        let err = load_modules_for_input(&root).unwrap_err();
+
+        assert!(err.message.contains("configured source root"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
+    fn package_out_dir_must_stay_inside_package_root() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+out_dir = "../outside"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+
+        let resolved = resolve_input_path(root).unwrap();
+        let err = default_output_path_for_input(root, &resolved, ArtifactFormat::RiscvAssembly).unwrap_err();
+
+        assert!(err.message.contains("build output directory"));
+        assert!(err.message.contains("package root"));
+    }
+
+    #[test]
     fn compile_path_rejects_duplicate_modules_across_source_roots() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
@@ -25533,7 +27136,7 @@ where
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -25544,7 +27147,7 @@ resource Token has store, transfer, destroy {
             r#"
 module demo::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,

@@ -5,11 +5,11 @@ fn v0_14_exposes_spawn_ipc_source_witness_time_capacity_metadata() {
     let source = r#"
 module cellscript::v0_14_surface
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
-resource Wallet has store {
+resource Wallet has store, create, consume, replace, burn, relock, read_ref {
     owner: Address,
 }
 
@@ -185,7 +185,7 @@ fn v0_14_exposes_declarative_capacity_floor_metadata() {
     let source = r#"
 module cellscript::v0_14_capacity_floor
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
 with_capacity_floor(6100000000)
 {
     amount: u64,
@@ -251,7 +251,7 @@ where
         r#"
 module cellscript::bad_capacity_floor
 
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
 with_capacity_floor(0)
 {
     amount: u64,
@@ -269,7 +269,7 @@ fn v0_14_exposes_type_id_create_output_plan_and_output_data_boundary() {
 module cellscript::v0_14_type_id
 
 #[type_id("cellscript::v0_14_type_id::Token:v1")]
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
 with_default_hash_type(Type)
 {
     amount: u64,
@@ -335,7 +335,7 @@ fn v0_14_rejects_tampered_type_id_output_data_and_script_reference_metadata() {
 module cellscript::v0_14_type_id_tamper
 
 #[type_id("cellscript::v0_14_type_id_tamper::Token:v1")]
-resource Token has store
+resource Token has store, create, consume, replace, burn, relock, read_ref
 with_default_hash_type(Type)
 {
     amount: u64,
@@ -462,7 +462,7 @@ fn v0_14_rejects_tampered_runtime_access_and_script_group_metadata() {
     let source = r#"
 module cellscript::v0_14_script_group_tamper
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 

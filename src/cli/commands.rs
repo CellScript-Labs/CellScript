@@ -1,15 +1,15 @@
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::Result;
 use crate::fmt::format_default;
-use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
+use crate::package::{validate_git_revision, Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
-    TargetProfile, ENTRY_WITNESS_ABI,
+    validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat, CompileMetadata, CompileOptions,
+    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
 };
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
 use ckb_vm::{
     cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
@@ -17,7 +17,12 @@ use ckb_vm::{
 };
 use colored::Colorize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug)]
 pub enum Command {
@@ -63,6 +68,7 @@ pub enum Command {
     Update,
     Info(InfoArgs),
     Login(LoginArgs),
+    Invalid(String),
 }
 
 #[derive(Debug, Default)]
@@ -136,6 +142,7 @@ pub struct AddArgs {
     pub dev: bool,
     pub build: bool,
     pub git: Option<String>,
+    pub rev: Option<String>,
     pub path: Option<PathBuf>,
     pub json: bool,
 }
@@ -396,6 +403,7 @@ pub struct InstallArgs {
     pub crate_name: Option<String>,
     pub version: Option<String>,
     pub git: Option<String>,
+    pub rev: Option<String>,
     pub path: Option<PathBuf>,
 }
 
@@ -454,10 +462,21 @@ impl CommandExecutor {
             Command::Update => Self::update(),
             Command::Info(args) => Self::info(args),
             Command::Login(args) => Self::login(args),
+            Command::Invalid(message) => Err(crate::error::CompileError::without_span(message)),
         }
     }
 
     fn build(args: BuildArgs) -> Result<()> {
+        if let Some(jobs) = args.jobs {
+            if jobs == 0 {
+                return Err(crate::error::CompileError::without_span("cellc build --jobs must be at least 1"));
+            }
+            if jobs != 1 {
+                return Err(crate::error::CompileError::without_span(
+                    "cellc build --jobs is reserved for future parallel package builds; current builds compile one package entry, so omit --jobs or use --jobs 1",
+                ));
+            }
+        }
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
@@ -691,6 +710,12 @@ impl CommandExecutor {
     fn doc(args: DocArgs) -> Result<()> {
         let output = Self::generate_docs(&args)?;
         let output_size_bytes = std::fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
+        let opened = if args.open {
+            open_doc_output(&output)?;
+            true
+        } else {
+            false
+        };
 
         if args.json {
             let summary = serde_json::json!({
@@ -698,25 +723,17 @@ impl CommandExecutor {
                 "format": display_doc_output_format(&args.output_format),
                 "output": output.display().to_string(),
                 "output_size_bytes": output_size_bytes,
-                "opened": args.open,
+                "opened": opened,
             });
             let json = serde_json::to_string_pretty(&summary)
                 .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize doc summary: {}", error)))?;
             println!("{}", json);
-
-            if args.open {
-                let _ = std::process::Command::new("open").arg(&output).status();
-            }
 
             return Ok(());
         }
 
         println!("{}", "Documentation generated".green());
         println!("  Output: {}", output.display());
-
-        if args.open {
-            let _ = std::process::Command::new("open").arg(&output).status();
-        }
 
         Ok(())
     }
@@ -928,13 +945,11 @@ impl CommandExecutor {
 
     fn add(args: AddArgs) -> Result<()> {
         validate_dependency_target_flags(args.dev, args.build)?;
-        if args.git.is_some() && args.path.is_some() {
-            return Err(crate::error::CompileError::without_span("cellc add accepts either --git or --path, not both"));
-        }
+        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
 
         let pm = PackageManager::new(".");
         let mut manifest = pm.read_manifest()?;
-        let dependency = dependency_from_add_args(&args);
+        let dependency = dependency_from_add_args(&args)?;
         let target = dependency_target_label(args.dev, args.build);
         let mut added = Vec::new();
 
@@ -1019,7 +1034,7 @@ impl CommandExecutor {
                 if !args.json {
                     println!("  Removing {}", path);
                 }
-                std::fs::remove_dir_all(path)?;
+                remove_clean_path(Path::new(path))?;
                 removed_paths.push(path.to_string());
             }
         }
@@ -1431,9 +1446,7 @@ impl CommandExecutor {
         let bytes = if let Some(hex) = args.hex.as_deref() {
             decode_hex_arg("ckb-hash", hex, None)?
         } else if let Some(path) = args.file.as_ref() {
-            std::fs::read(path).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
-            })?
+            read_ckb_hash_file(path)?
         } else {
             args.input.unwrap_or_default().into_bytes()
         };
@@ -2125,8 +2138,14 @@ impl CommandExecutor {
             crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", metadata_path.display(), error))
         })?;
         let result = validate_artifact_metadata(artifact_bytes, metadata)?;
-        if args.verify_sources {
-            validate_source_units_on_disk(&result.metadata)?;
+        let primitive_compat = args.primitive_compat.clone();
+        let sources_verified = args.verify_sources || primitive_compat.is_some();
+        let source_verification_root = source_verification_root_for_artifact(artifact_path);
+        if sources_verified {
+            validate_source_units_on_disk_under(&result.metadata, &source_verification_root)?;
+        }
+        if primitive_compat.is_some() {
+            validate_source_units_primitive_mode_under(&result.metadata, primitive_compat.clone(), &source_verification_root)?;
         }
         validate_expected_target_profile(result.metadata.target_profile.name.as_str(), args.expect_target_profile.as_deref())?;
         validate_expected_metadata_hash(
@@ -2193,7 +2212,8 @@ impl CommandExecutor {
                 "runtime_required_pool_invariant_blocker_class_summaries": pool_invariant_family_blocker_class_summaries(&result.metadata, "runtime-required"),
                 "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
                 "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
-                "sources_verified": args.verify_sources,
+                "sources_verified": sources_verified,
+                "primitive_mode_verified": primitive_compat.is_some(),
                 "expected_target_profile_verified": expected_target_profile_verified,
                 "expected_hashes_verified": expected_hashes_verified,
                 "policy_verified": policy_verified,
@@ -2221,8 +2241,11 @@ impl CommandExecutor {
         if expected_hashes_verified {
             println!("  Expected hashes: verified");
         }
-        if args.verify_sources {
+        if sources_verified {
             println!("  Sources: verified {} unit(s)", result.metadata.source_units.len());
+        }
+        if primitive_compat.is_some() {
+            println!("  Primitive mode: verified");
         }
         if policy_verified {
             println!("  Policy: verified");
@@ -2262,32 +2285,23 @@ impl CommandExecutor {
                 .chain(result.metadata.locks.iter().filter(|lock| !lock.params.is_empty()).map(|lock| format!("lock {}", lock.name)))
                 .collect::<Vec<_>>();
             if !parameterized_entries.is_empty() {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Warning: {} requires transaction/parameter ABI context; falling back to simulate mode",
-                        parameterized_entries.join(", ")
-                    )
-                    .yellow()
-                );
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(format!(
+                    "cellc run only supports no-argument pure ELF entrypoints; {} requires transaction/parameter ABI context; use `cellc run --simulate` for AST-level simulation or build a transaction witness with `cellc entry-witness`",
+                    parameterized_entries.join(", ")
+                )));
             }
 
             if result.metadata.runtime.ckb_runtime_required {
-                eprintln!(
-                    "{}",
-                    format!(
-                        "Warning: CKB runtime required ({}); falling back to simulate mode",
-                        result.metadata.runtime.ckb_runtime_features.join(", ")
-                    )
-                    .yellow()
-                );
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(format!(
+                    "cellc run cannot provide CKB transaction/syscall context ({}); use `cellc run --simulate` for AST-level simulation or run builder-backed CKB acceptance",
+                    result.metadata.runtime.ckb_runtime_features.join(", ")
+                )));
             }
 
             if !result.metadata.runtime.standalone_runner_compatible {
-                eprintln!("{}", "Warning: ELF is not standalone-compatible; falling back to simulate mode".yellow());
-                return Self::run_simulate(&result, &args);
+                return Err(crate::error::CompileError::without_span(
+                    "cellc run only supports standalone-compatible no-argument pure ELF entrypoints; use `cellc run --simulate` for AST-level simulation",
+                ));
             }
 
             let vm_args = args.args.into_iter().map(|arg| arg.into_bytes()).collect::<Vec<_>>();
@@ -2428,6 +2442,7 @@ impl CommandExecutor {
 
     fn install(args: InstallArgs) -> Result<()> {
         let pm = PackageManager::new(".");
+        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
 
         let _manifest = pm.read_manifest()?;
 
@@ -2441,7 +2456,7 @@ impl CommandExecutor {
                 git: Some(git_url.clone()),
                 branch: None,
                 tag: None,
-                rev: None,
+                rev: args.rev.clone(),
                 path: None,
                 optional: false,
                 features: Vec::new(),
@@ -2616,7 +2631,18 @@ impl CommandExecutor {
         credentials.insert(registry.clone(), RegistryCredential { registry: registry.clone(), token });
 
         let content = toml::to_string_pretty(&credentials)?;
-        std::fs::write(&credentials_path, content)?;
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+
+            let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&credentials_path)?;
+            file.write_all(content.as_bytes())?;
+            std::fs::set_permissions(&credentials_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&credentials_path, content)?;
+        }
 
         println!("{}", format!("Login credentials saved for {}", registry).green());
         println!("  Config directory: {}", config_dir.display());
@@ -3241,6 +3267,7 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
     let record_count = proof_plan.len();
     let on_chain_checked_count = proof_plan.iter().filter(|plan| plan.on_chain_checked).count();
     let runtime_required_count = proof_plan.iter().filter(|plan| plan.status == "runtime-required").count();
+    let checked_partial_count = proof_plan.iter().filter(|plan| plan.status == "checked-partial").count();
     let metadata_only_gap_count = proof_plan.iter().filter(|plan| plan.codegen_coverage_status == "gap:metadata-only").count();
     let fail_closed_count =
         proof_plan.iter().filter(|plan| plan.status == "fail-closed" || plan.codegen_coverage_status == "fail-closed").count();
@@ -3250,22 +3277,74 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         proof_plan.iter().flat_map(|plan| &plan.diagnostics).filter(|diagnostic| diagnostic.severity == "warning").count();
     let macro_provenance_count =
         proof_plan.iter().flat_map(|plan| &plan.coverage).filter(|coverage| coverage.starts_with("macro_expansion:")).count();
+    let invariant_action_match_count = invariant_action_coverage_match_count(proof_plan);
+    let invariant_unmatched_action_coverage_count = invariant_unmatched_action_coverage_count(proof_plan);
     let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
+    let has_partial_gaps = proof_plan.iter().any(|plan| plan.status == "checked-partial" && !plan.on_chain_checked);
     let has_fail_closed_gaps = fail_closed_count > 0;
 
     serde_json::json!({
         "record_count": record_count,
         "on_chain_checked_count": on_chain_checked_count,
         "runtime_required_count": runtime_required_count,
+        "checked_partial_count": checked_partial_count,
         "metadata_only_gap_count": metadata_only_gap_count,
         "fail_closed_count": fail_closed_count,
         "diagnostic_error_count": diagnostic_error_count,
         "diagnostic_warning_count": diagnostic_warning_count,
         "macro_provenance_count": macro_provenance_count,
+        "invariant_action_match_count": invariant_action_match_count,
+        "invariant_unmatched_action_coverage_count": invariant_unmatched_action_coverage_count,
         "has_runtime_required_gaps": has_runtime_required_gaps,
+        "has_partial_gaps": has_partial_gaps,
         "has_fail_closed_gaps": has_fail_closed_gaps,
-        "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
+        "has_unmatched_invariant_action_coverage": invariant_unmatched_action_coverage_count > 0,
+        "has_blocking_diagnostics": has_runtime_required_gaps || has_partial_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
     })
+}
+
+fn invariant_action_coverage_match_count(proof_plan: &[ProofPlanMetadata]) -> usize {
+    proof_plan
+        .iter()
+        .flat_map(|plan| &plan.coverage)
+        .filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:"))
+        .count()
+}
+
+fn invariant_unmatched_action_coverage_count(proof_plan: &[ProofPlanMetadata]) -> usize {
+    proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.category == "aggregate-invariant"
+                && plan.builder_assumptions.iter().any(|assumption| {
+                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
+                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
+                })
+        })
+        .count()
+}
+
+fn invariant_unmatched_action_coverage_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
+    proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.category == "aggregate-invariant"
+                && plan.builder_assumptions.iter().any(|assumption| {
+                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
+                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
+                })
+        })
+        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+        .collect()
+}
+
+fn checked_runtime_proof_plan_evidence_gap_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
+    proof_plan
+        .iter()
+        .filter(|plan| plan.status == "checked-runtime" || plan.on_chain_checked)
+        .filter(|plan| plan.executable_evidence.is_empty() || plan.codegen_coverage_status.starts_with("gap:"))
+        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+        .collect()
 }
 
 fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
@@ -3274,11 +3353,14 @@ fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     println!("    records: {}", summary["record_count"]);
     println!("    on_chain_checked: {}", summary["on_chain_checked_count"]);
     println!("    runtime_required: {}", summary["runtime_required_count"]);
+    println!("    checked_partial: {}", summary["checked_partial_count"]);
     println!("    metadata_only_gaps: {}", summary["metadata_only_gap_count"]);
     println!("    fail_closed: {}", summary["fail_closed_count"]);
     println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
     println!("    diagnostic_warnings: {}", summary["diagnostic_warning_count"]);
     println!("    macro_provenance_records: {}", summary["macro_provenance_count"]);
+    println!("    invariant_action_matches: {}", summary["invariant_action_match_count"]);
+    println!("    invariant_unmatched_action_coverage: {}", summary["invariant_unmatched_action_coverage_count"]);
 }
 
 fn print_proof_plan_record(plan: &ProofPlanMetadata) {
@@ -3422,6 +3504,38 @@ fn display_doc_output_format(format: &OutputFormat) -> &'static str {
     }
 }
 
+fn open_doc_output(output: &Path) -> Result<()> {
+    let status = std::process::Command::new("open").arg(output).status().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to open documentation '{}': {}", output.display(), error))
+    })?;
+    if !status.success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "failed to open documentation '{}': open exited with {}",
+            output.display(),
+            status
+        )));
+    }
+    Ok(())
+}
+
+fn read_ckb_hash_file(path: &Path) -> Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
+    })?;
+    let mut bytes = Vec::new();
+    file.by_ref().take(CKB_HASH_FILE_SIZE_LIMIT_BYTES + 1).read_to_end(&mut bytes).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
+    })?;
+    if bytes.len() as u64 > CKB_HASH_FILE_SIZE_LIMIT_BYTES {
+        return Err(crate::error::CompileError::without_span(format!(
+            "CKB hash input '{}' is too large: limit is {} bytes",
+            path.display(),
+            CKB_HASH_FILE_SIZE_LIMIT_BYTES
+        )));
+    }
+    Ok(bytes)
+}
+
 fn ensure_new_package_destination(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -3437,7 +3551,7 @@ fn ensure_new_package_destination(path: &Path) -> Result<()> {
 }
 
 fn init_git_repo(path: &Path) -> Result<bool> {
-    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg(path).output().map_err(|error| {
+    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg("--").arg(path).output().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to run git init for '{}': {}", path.display(), error))
     })?;
     if !output.status.success() {
@@ -3445,6 +3559,33 @@ fn init_git_repo(path: &Path) -> Result<bool> {
         return Err(crate::error::CompileError::without_span(format!("git init failed for '{}': {}", path.display(), stderr.trim())));
     }
     Ok(true)
+}
+
+fn remove_clean_path(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        std::fs::remove_file(path)?;
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let canonical = path.canonicalize()?;
+    if !canonical.starts_with(&cwd) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to remove '{}' because it resolves outside the current directory",
+            path.display()
+        )));
+    }
+
+    if !metadata.is_dir() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to clean '{}' because it is not a directory",
+            path.display()
+        )));
+    }
+
+    std::fs::remove_dir_all(path)?;
+    Ok(())
 }
 
 fn runtime_error_info_from_query(query: &str) -> Option<CellScriptRuntimeErrorInfo> {
@@ -3468,6 +3609,23 @@ fn validate_dependency_target_flags(dev: bool, build: bool) -> Result<()> {
     Ok(())
 }
 
+fn validate_dependency_source_args(git: Option<&str>, path: Option<&Path>, rev: Option<&str>) -> Result<()> {
+    if git.is_some() && path.is_some() {
+        return Err(crate::error::CompileError::without_span("dependency source accepts either --git or --path, not both"));
+    }
+    if path.is_some() && rev.is_some() {
+        return Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies"));
+    }
+    match (git, rev) {
+        (Some(_), Some(rev)) => validate_git_revision(rev),
+        (Some(_), None) => Err(crate::error::CompileError::without_span(
+            "git dependencies must specify --rev with a full commit hash; branch/tag/default-branch dependencies are not accepted",
+        )),
+        (None, Some(_)) => Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies")),
+        (None, None) => Ok(()),
+    }
+}
+
 fn dependency_target_label(dev: bool, build: bool) -> &'static str {
     if build {
         "build-dependencies"
@@ -3488,20 +3646,20 @@ fn dependency_map_mut(manifest: &mut crate::package::PackageManifest, dev: bool,
     }
 }
 
-fn dependency_from_add_args(args: &AddArgs) -> Dependency {
+fn dependency_from_add_args(args: &AddArgs) -> Result<Dependency> {
     match (&args.git, &args.path) {
-        (Some(git), _) => Dependency::Detailed(DetailedDependency {
+        (Some(git), _) => Ok(Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
             git: Some(git.clone()),
             branch: None,
             tag: None,
-            rev: None,
+            rev: args.rev.clone(),
             path: None,
             optional: false,
             features: Vec::new(),
             default_features: true,
-        }),
-        (_, Some(path)) => Dependency::Detailed(DetailedDependency {
+        })),
+        (_, Some(path)) => Ok(Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
             git: None,
             branch: None,
@@ -3511,8 +3669,8 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
             optional: false,
             features: Vec::new(),
             default_features: true,
-        }),
-        _ => Dependency::Simple("*".to_string()),
+        })),
+        _ => Ok(Dependency::Simple("*".to_string())),
     }
 }
 
@@ -3558,7 +3716,7 @@ fn validate_expected_metadata_hash(field: &str, actual: Option<&str>, expected: 
         )));
     }
     match actual {
-        Some(actual) if actual.eq_ignore_ascii_case(expected) => Ok(()),
+        Some(actual) if actual == expected => Ok(()),
         Some(actual) => Err(crate::error::CompileError::without_span(format!(
             "metadata {} '{}' does not match expected '{}'",
             field, actual, expected
@@ -3622,6 +3780,13 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         violations.push(format!("CKB runtime features: {}", metadata.runtime.ckb_runtime_features.join(", ")));
     }
 
+    if args.production || args.deny_runtime_obligations {
+        let checked_runtime_evidence_gaps = checked_runtime_proof_plan_evidence_gap_summaries(&metadata.runtime.proof_plan);
+        if !checked_runtime_evidence_gaps.is_empty() {
+            violations.push(format!("evidence-missing checked-runtime ProofPlan gaps: {}", checked_runtime_evidence_gaps.join(", ")));
+        }
+    }
+
     if args.deny_runtime_obligations {
         let runtime_required_obligations = metadata
             .runtime
@@ -3634,6 +3799,17 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             violations.push(format!("runtime-required verifier obligations: {}", runtime_required_obligations.join(", ")));
         }
 
+        let partial_obligations = metadata
+            .runtime
+            .verifier_obligations
+            .iter()
+            .filter(|obligation| obligation.status == "checked-partial")
+            .map(|obligation| format!("{}:{} ({})", obligation.scope, obligation.feature, obligation.category))
+            .collect::<Vec<_>>();
+        if !partial_obligations.is_empty() {
+            violations.push(format!("partial verifier obligations: {}", partial_obligations.join(", ")));
+        }
+
         let runtime_required_proof_plan = metadata
             .runtime
             .proof_plan
@@ -3643,6 +3819,22 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             .collect::<Vec<_>>();
         if !runtime_required_proof_plan.is_empty() {
             violations.push(format!("runtime-required ProofPlan gaps: {}", runtime_required_proof_plan.join(", ")));
+        }
+
+        let partial_proof_plan = metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .filter(|plan| plan.status == "checked-partial" && !plan.on_chain_checked)
+            .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+            .collect::<Vec<_>>();
+        if !partial_proof_plan.is_empty() {
+            violations.push(format!("partial ProofPlan gaps: {}", partial_proof_plan.join(", ")));
+        }
+
+        let unmatched_invariant_action_coverage = invariant_unmatched_action_coverage_summaries(&metadata.runtime.proof_plan);
+        if !unmatched_invariant_action_coverage.is_empty() {
+            violations.push(format!("unmatched invariant action coverage: {}", unmatched_invariant_action_coverage.join(", ")));
         }
 
         let transaction_invariants = transaction_invariant_checked_subcondition_summaries(metadata);
@@ -4332,6 +4524,14 @@ fn compile_test_obligation_summary(metadata: &crate::CompileMetadata, status: Op
         .join("\n")
 }
 
+fn source_verification_root_for_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
+    let artifact_dir = artifact_path.parent().unwrap_or_else(|| Utf8Path::new("."));
+    match artifact_dir.file_name() {
+        Some("artifacts" | "build" | "target") => artifact_dir.parent().unwrap_or(artifact_dir).to_path_buf(),
+        _ => artifact_dir.to_path_buf(),
+    }
+}
+
 fn collect_cell_files(root: &Path) -> Result<Vec<PathBuf>> {
     if !root.exists() {
         return Ok(Vec::new());
@@ -4629,7 +4829,14 @@ impl CliParser {
                             .conflicts_with("entry-action")
                             .help("Compile only this lock as the artifact entrypoint"),
                     )
-                    .arg(Arg::new("jobs").long("jobs").short('j').value_name("N").help("Number of parallel jobs"))
+                    .arg(
+                        Arg::new("jobs")
+                            .long("jobs")
+                            .short('j')
+                            .value_name("N")
+                            .value_parser(clap::value_parser!(usize))
+                            .help("Reserved for future parallel package builds; only 1 is currently accepted"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON build summary"))
                     .arg(
                         Arg::new("production")
@@ -4735,6 +4942,13 @@ impl CliParser {
                     .arg(Arg::new("dev").long("dev").action(ArgAction::SetTrue).help("Add as dev dependency"))
                     .arg(Arg::new("build").long("build").action(ArgAction::SetTrue).help("Add as build dependency"))
                     .arg(Arg::new("git").long("git").value_name("URL").help("Add a git dependency source"))
+                    .arg(
+                        Arg::new("rev")
+                            .long("rev")
+                            .value_name("COMMIT")
+                            .requires("git")
+                            .help("Pin a git dependency to a full commit hash"),
+                    )
                     .arg(Arg::new("path").long("path").value_name("PATH").help("Add a local path dependency source"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON add summary")),
             )
@@ -5124,6 +5338,13 @@ impl CliParser {
                     .arg(Arg::new("crate").value_name("CRATE"))
                     .arg(Arg::new("version").long("version").value_name("VERSION"))
                     .arg(Arg::new("git").long("git").value_name("URL"))
+                    .arg(
+                        Arg::new("rev")
+                            .long("rev")
+                            .value_name("COMMIT")
+                            .requires("git")
+                            .help("Pin a git dependency to a full commit hash"),
+                    )
                     .arg(Arg::new("path").long("path").value_name("PATH")),
             )
             .subcommand(ClapCommand::new("update").about("Experimental: update dependencies"))
@@ -5146,7 +5367,7 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 entry_action: m.get_one::<String>("entry-action").cloned(),
                 entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                jobs: m.get_one::<String>("jobs").and_then(|s| s.parse().ok()),
+                jobs: m.get_one::<usize>("jobs").copied(),
                 json: m.get_flag("json"),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
@@ -5200,6 +5421,7 @@ impl CliParser {
                 dev: m.get_flag("dev"),
                 build: m.get_flag("build"),
                 git: m.get_one::<String>("git").cloned(),
+                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
@@ -5401,12 +5623,14 @@ impl CliParser {
                 crate_name: m.get_one::<String>("crate").cloned(),
                 version: m.get_one::<String>("version").cloned(),
                 git: m.get_one::<String>("git").cloned(),
+                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
             }),
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
-            _ => unreachable!(),
+            Some((name, _)) => Command::Invalid(format!("internal CLI parser missing handler for subcommand '{}'", name)),
+            None => Command::Invalid("internal CLI parser did not receive a subcommand".to_string()),
         }
     }
 }
@@ -5426,8 +5650,84 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 mod tests {
     use super::*;
 
+    fn proof_plan_record(status: &str, coverage: &str, evidence: Vec<crate::ProofPlanEvidenceMetadata>) -> ProofPlanMetadata {
+        ProofPlanMetadata {
+            name: "test".to_string(),
+            origin: "action:test".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            source_span: None,
+            trigger: "action".to_string(),
+            scope: "group".to_string(),
+            reads: Vec::new(),
+            coverage: Vec::new(),
+            input_output_relation_checks: Vec::new(),
+            group_cardinality: "single".to_string(),
+            identity_lifecycle_policy: "none".to_string(),
+            preserved_fields: Vec::new(),
+            witness_fields: Vec::new(),
+            lock_args_fields: Vec::new(),
+            on_chain_checked: status == "checked-runtime",
+            on_chain_checked_obligations: Vec::new(),
+            executable_evidence: evidence,
+            builder_assumptions: Vec::new(),
+            codegen_coverage_status: coverage.to_string(),
+            status: status.to_string(),
+            detail: "test detail".to_string(),
+            diagnostics: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn invalid_parser_mapping_returns_error_instead_of_panicking() {
+        let err = CommandExecutor::execute(Command::Invalid("missing parser mapping".to_string()))
+            .expect_err("invalid parser mapping should be reported");
+
+        assert!(err.to_string().contains("missing parser mapping"));
+    }
+
+    #[test]
+    fn ckb_hash_file_rejects_inputs_above_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("too-large.bin");
+        std::fs::write(&path, vec![0u8; CKB_HASH_FILE_SIZE_LIMIT_BYTES as usize + 1]).unwrap();
+
+        let err = read_ckb_hash_file(&path).expect_err("oversized ckb-hash input should fail");
+
+        assert!(err.to_string().contains("too large"));
+    }
+
+    #[test]
+    fn expected_metadata_hash_comparison_is_case_sensitive() {
+        let expected = "ab".repeat(32);
+        let actual = expected.to_uppercase();
+
+        let err = validate_expected_metadata_hash("artifact_hash", Some(&actual), Some(&expected)).unwrap_err();
+
+        assert!(err.message.contains("does not match expected"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn production_policy_finds_evidence_less_checked_runtime_proof_plan_gap() {
+        let proof_plan = vec![proof_plan_record("checked-runtime", "gap:evidence-missing", Vec::new())];
+
+        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
+
+        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
+    }
+
+    #[test]
+    fn production_policy_finds_evidence_less_on_chain_checked_proof_plan_gap() {
+        let mut proof_plan = vec![proof_plan_record("metadata-only", "gap:evidence-missing", Vec::new())];
+        proof_plan[0].on_chain_checked = true;
+
+        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
+
+        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
     }
 }

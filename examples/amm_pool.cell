@@ -2,13 +2,13 @@ module cellscript::amm_pool
 
 use cellscript::fungible_token::Token
 
-receipt LPReceipt has store {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash,
     lp_amount: u64,
     provider: Address,
 }
 
-shared Pool has store {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8],
     token_b_symbol: [u8; 8],
     reserve_a: u64,

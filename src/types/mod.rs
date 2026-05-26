@@ -21,9 +21,47 @@ struct FunctionSignature {
 struct FlowSpec {
     type_name: String,
     field_name: String,
+    field_ty: Type,
     field_enum_type: Option<String>,
     states: Vec<String>,
     transitions: Vec<StateTransition>,
+}
+
+#[derive(Debug, Clone)]
+struct ResourceEffectOccurrence {
+    span: Span,
+    label: &'static str,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ResourceEffectPath {
+    bindings: HashMap<String, ResourceEffectOccurrence>,
+}
+
+#[derive(Debug, Clone)]
+struct ResourceEffectSummary {
+    paths: Vec<ResourceEffectPath>,
+}
+
+impl ResourceEffectSummary {
+    fn single_path() -> Self {
+        Self { paths: vec![ResourceEffectPath::default()] }
+    }
+
+    fn record_effect(&mut self, key: String, occurrence: ResourceEffectOccurrence) -> Result<()> {
+        for path in &mut self.paths {
+            if let Some(previous) = path.bindings.insert(key.clone(), occurrence.clone()) {
+                return Err(CompileError::new(
+                    format!(
+                        "duplicate lifecycle binding '{}' is rejected until resource effects are CFG-aware; previous '{}' binding starts at byte {}",
+                        key, previous.label, previous.span.start
+                    ),
+                    occurrence.span,
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +74,18 @@ enum CellTypeKind {
     Resource,
     Shared,
     Receipt,
+}
+
+#[derive(Debug, Clone)]
+struct TypeDependencyEdge {
+    target: String,
+    span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeGraphVisitState {
+    Visiting,
+    Done,
 }
 
 pub struct TypeEnv {
@@ -291,6 +341,7 @@ pub struct TypeChecker<'a> {
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
+    primitive_strict: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -370,6 +421,32 @@ fn register_type_id(seen: &mut HashMap<String, Span>, type_name: &str, type_id: 
     register_type_id_value(seen, type_name, &type_id.value, type_id.span)
 }
 
+fn validate_module_primitive_strict_capabilities(module: &Module) -> Result<()> {
+    for item in &module.items {
+        let (capabilities, type_name, span) = match item {
+            Item::Resource(resource) => (&resource.capabilities, resource.name.as_str(), resource.span),
+            Item::Shared(shared) => (&shared.capabilities, shared.name.as_str(), shared.span),
+            Item::Receipt(receipt) => (&receipt.capabilities, receipt.name.as_str(), receipt.span),
+            _ => continue,
+        };
+
+        for capability in capabilities {
+            if capability.is_protocol_verb() {
+                return Err(CompileError::new(
+                    format!(
+                        "type '{}' declares legacy capability '{}', which is not allowed in strict primitive mode; use kernel effects '{}'",
+                        type_name,
+                        capability_name(*capability),
+                        capability.kernel_effects().iter().map(|cap| capability_name(*cap)).collect::<Vec<_>>().join(", "),
+                    ),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Default for TypeChecker<'_> {
     fn default() -> Self {
         Self::new()
@@ -396,6 +473,7 @@ impl<'a> TypeChecker<'a> {
             current_module: None,
             current_callable: None,
             current_return_type: None,
+            primitive_strict: false,
         }
     }
 
@@ -406,10 +484,25 @@ impl<'a> TypeChecker<'a> {
         checker
     }
 
+    pub fn with_primitive_strict(mut self, primitive_strict: bool) -> Self {
+        self.primitive_strict = primitive_strict;
+        self
+    }
+
+    pub fn with_resolver_and_primitive_strict(
+        resolver: &'a ModuleResolver,
+        current_module: impl Into<String>,
+        primitive_strict: bool,
+    ) -> Self {
+        Self::with_resolver(resolver, current_module).with_primitive_strict(primitive_strict)
+    }
+
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
+        self.validate_primitive_strict_capabilities(module)?;
+        self.reject_imports_without_resolver(module)?;
         let mut seen_symbols = HashSet::new();
         let mut seen_type_ids = HashMap::new();
         for item in &module.items {
@@ -514,11 +607,45 @@ impl<'a> TypeChecker<'a> {
         self.register_imported_type_ids(&mut seen_type_ids)?;
         self.register_flows(module)?;
         self.validate_flow_action_edges(module)?;
+        self.validate_local_schema_type_graph_acyclic(module)?;
 
         for item in &module.items {
             self.check_item(item)?;
         }
         Ok(())
+    }
+
+    fn validate_primitive_strict_capabilities(&self, module: &Module) -> Result<()> {
+        if !self.primitive_strict {
+            return Ok(());
+        }
+
+        if let Some(resolver) = self.resolver {
+            for loaded_module in resolver.modules() {
+                validate_module_primitive_strict_capabilities(loaded_module)?;
+            }
+            Ok(())
+        } else {
+            validate_module_primitive_strict_capabilities(module)
+        }
+    }
+
+    fn reject_imports_without_resolver(&self, module: &Module) -> Result<()> {
+        if self.resolver.is_some() {
+            return Ok(());
+        }
+
+        let Some(use_stmt) = module.items.iter().find_map(|item| match item {
+            Item::Use(use_stmt) => Some(use_stmt),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+
+        Err(CompileError::new(
+            "module imports require resolver-aware type checking; compile from a file/package or call check_with_resolver",
+            use_stmt.span,
+        ))
     }
 
     fn register_imported_type_ids(&self, seen_type_ids: &mut HashMap<String, Span>) -> Result<()> {
@@ -625,7 +752,14 @@ impl<'a> TypeChecker<'a> {
             self.flow_state_fields.insert(type_name.clone(), field_name.clone());
             self.flows.insert(
                 type_name.clone(),
-                FlowSpec { type_name, field_name, field_enum_type, states, transitions: normalized_transitions },
+                FlowSpec {
+                    type_name,
+                    field_name,
+                    field_ty: field_ty.clone(),
+                    field_enum_type,
+                    states,
+                    transitions: normalized_transitions,
+                },
             );
         }
 
@@ -945,6 +1079,9 @@ impl<'a> TypeChecker<'a> {
                         aggregate.span,
                     ));
                 }
+                if let Some(argument) = &aggregate.argument {
+                    self.validate_delta_argument_binding(invariant, aggregate, argument)?;
+                }
                 self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
             }
             AggregateInvariantKind::Sum => {
@@ -967,6 +1104,29 @@ impl<'a> TypeChecker<'a> {
         }
 
         Ok(())
+    }
+
+    fn validate_delta_argument_binding(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, argument: &str) -> Result<()> {
+        if argument.chars().all(|ch| ch.is_ascii_digit()) || argument.starts_with('"') {
+            return Ok(());
+        }
+
+        let bound = invariant.reads.iter().any(|read| {
+            let read_source = read.split(['.', '<']).next();
+            let read_is_delta_source = matches!(read_source, Some("witness" | "lock_args"));
+            read_is_delta_source && (read == argument || read.rsplit('.').next().is_some_and(|field| field == argument))
+        });
+        if bound {
+            return Ok(());
+        }
+
+        Err(CompileError::new(
+            format!(
+                "assert_delta in invariant '{}' uses unbound delta '{}'; bind it through reads, for example `reads: witness.{}` and `assert_delta({}, witness.{}, scope = {})`",
+                invariant.name, argument, argument, aggregate.target, argument, aggregate.scope
+            ),
+            aggregate.span,
+        ))
     }
 
     fn validate_aggregate_field_target(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, target: &str) -> Result<()> {
@@ -1034,6 +1194,60 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn validate_local_schema_type_graph_acyclic(&self, module: &Module) -> Result<()> {
+        let mut local_types = HashSet::new();
+        let mut type_order = Vec::new();
+
+        for item in &module.items {
+            let name = match item {
+                Item::Resource(def) => &def.name,
+                Item::Shared(def) => &def.name,
+                Item::Receipt(def) => &def.name,
+                Item::Struct(def) => &def.name,
+                Item::Enum(def) => &def.name,
+                _ => continue,
+            };
+
+            if local_types.insert(name.clone()) {
+                type_order.push(name.clone());
+            }
+        }
+
+        let mut graph = type_order.iter().map(|name| (name.clone(), Vec::<TypeDependencyEdge>::new())).collect::<HashMap<_, _>>();
+
+        for item in &module.items {
+            match item {
+                Item::Resource(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Shared(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Receipt(def) => {
+                    collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph);
+                    if let Some(output) = &def.claim_output {
+                        collect_type_dependencies(&def.name, output, def.span, &local_types, &mut graph);
+                    }
+                }
+                Item::Struct(def) => collect_field_type_dependencies(&def.name, &def.fields, &local_types, &mut graph),
+                Item::Enum(def) => {
+                    for variant in &def.variants {
+                        for field_ty in &variant.fields {
+                            collect_type_dependencies(&def.name, field_ty, variant.span, &local_types, &mut graph);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut states = HashMap::new();
+        let mut stack = Vec::new();
+        for name in type_order {
+            if !states.contains_key(&name) {
+                visit_type_dependency_graph(&name, &graph, &mut states, &mut stack)?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn check_enum(&mut self, enum_def: &EnumDef) -> Result<()> {
         let mut seen = HashSet::new();
         for variant in &enum_def.variants {
@@ -1053,8 +1267,20 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
+        if self.type_contains_cell_backed_value(&const_def.ty) {
+            return Err(CompileError::new(
+                format!(
+                    "const '{}' cannot have Cell-backed linear type {}; Cell lifecycle values must be produced inside actions",
+                    const_def.name,
+                    type_repr(&const_def.ty)
+                ),
+                const_def.span,
+            ));
+        }
+        self.validate_const_initializer(&const_def.name, &const_def.value)?;
+
         let mut env = self.env.clone();
-        let value_ty = self.infer_expr(&mut env, &const_def.value)?;
+        let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
             return Err(CompileError::new(
                 format!("const '{}' has type mismatch: expected {:?}, found {:?}", const_def.name, const_def.ty, value_ty),
@@ -1062,6 +1288,62 @@ impl<'a> TypeChecker<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn validate_const_initializer(&self, const_name: &str, expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) => Ok(()),
+            Expr::Identifier(name, _) => {
+                if self.resolve_constant(name).is_some() || self.enum_variant_expr_type(name, expr_span(expr))?.is_some() {
+                    Ok(())
+                } else {
+                    Err(CompileError::new(
+                        format!("runtime variable '{}' is not allowed in const initializer '{}'", name, const_name),
+                        expr_span(expr),
+                    ))
+                }
+            }
+            Expr::Array(elems, _) | Expr::Tuple(elems, _) => {
+                for elem in elems {
+                    self.validate_const_initializer(const_name, elem)?;
+                }
+                Ok(())
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_const_initializer(const_name, value)?;
+                }
+                Ok(())
+            }
+            Expr::Create(_)
+            | Expr::Consume(_)
+            | Expr::Transfer(_)
+            | Expr::Destroy(_)
+            | Expr::ReadRef(_)
+            | Expr::Claim(_)
+            | Expr::Settle(_)
+            | Expr::CreateUnique(_)
+            | Expr::ReplaceUnique(_)
+            | Expr::Require(_)
+            | Expr::RequireBlock(_)
+            | Expr::Preserve(_) => {
+                Err(CompileError::new("cell lifecycle expression is not allowed in const initializer", expr_span(expr)))
+            }
+            Expr::Call(_) | Expr::StdlibCall(_) => {
+                Err(CompileError::new("function or runtime call is not allowed in const initializer", expr_span(expr)))
+            }
+            Expr::Assign(_)
+            | Expr::Binary(_)
+            | Expr::Unary(_)
+            | Expr::FieldAccess(_)
+            | Expr::Index(_)
+            | Expr::Assert(_)
+            | Expr::Block(..)
+            | Expr::If(_)
+            | Expr::Cast(_)
+            | Expr::Range(_)
+            | Expr::Match(_) => Err(CompileError::new("computed expressions are not const-evaluable yet", expr_span(expr))),
+        }
     }
 
     fn check_action(&mut self, action: &ActionDef) -> Result<()> {
@@ -1076,6 +1358,7 @@ impl<'a> TypeChecker<'a> {
             self.validate_action_state_edges(action, &env)?;
             self.validate_action_create_targets(action)?;
             self.validate_action_branch_obligations(action)?;
+            self.validate_action_lifecycle_effects(action)?;
             if let Some(return_type) = &action.return_type {
                 self.validate_callable_return_type("action", &action.name, return_type, action.span)?;
             }
@@ -1150,6 +1433,173 @@ impl<'a> TypeChecker<'a> {
 
         self.validate_branch_obligations_in_stmts(&action.body, &outputs, HashSet::new())?;
         Ok(())
+    }
+
+    fn validate_action_lifecycle_effects(&self, action: &ActionDef) -> Result<()> {
+        let mut summary = ResourceEffectSummary::single_path();
+        self.validate_lifecycle_effects_in_stmts(&action.body, false, &mut summary)
+    }
+
+    fn validate_lifecycle_effects_in_stmts(
+        &self,
+        stmts: &[Stmt],
+        branch_local: bool,
+        summary: &mut ResourceEffectSummary,
+    ) -> Result<()> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(let_stmt) => self.validate_lifecycle_effects_in_expr(&let_stmt.value, branch_local, summary)?,
+                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                    self.validate_lifecycle_effects_in_expr(expr, branch_local, summary)?;
+                }
+                Stmt::Return(None) => {}
+                Stmt::If(if_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&if_stmt.condition, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&if_stmt.then_branch, true, summary)?;
+                    if let Some(else_branch) = &if_stmt.else_branch {
+                        self.validate_lifecycle_effects_in_stmts(else_branch, true, summary)?;
+                    }
+                }
+                Stmt::For(for_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&for_stmt.iterable, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&for_stmt.body, true, summary)?;
+                }
+                Stmt::While(while_stmt) => {
+                    self.validate_lifecycle_effects_in_expr(&while_stmt.condition, branch_local, summary)?;
+                    self.validate_lifecycle_effects_in_stmts(&while_stmt.body, true, summary)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_lifecycle_effects_in_expr(&self, expr: &Expr, branch_local: bool, summary: &mut ResourceEffectSummary) -> Result<()> {
+        for (key, span, label) in lifecycle_effect_keys(expr) {
+            if branch_local {
+                return Err(CompileError::new(
+                    format!("branch-local lifecycle operation '{}' is rejected until resource effects are CFG-aware", label),
+                    span,
+                ));
+            }
+            summary.record_effect(key, ResourceEffectOccurrence { span, label })?;
+        }
+
+        match expr {
+            Expr::Assign(assign) => {
+                self.validate_lifecycle_effects_in_expr(&assign.target, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&assign.value, branch_local, summary)
+            }
+            Expr::Binary(binary) => {
+                self.validate_lifecycle_effects_in_expr(&binary.left, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&binary.right, branch_local, summary)
+            }
+            Expr::Unary(unary) => self.validate_lifecycle_effects_in_expr(&unary.expr, branch_local, summary),
+            Expr::Call(call) => {
+                self.validate_lifecycle_effects_in_expr(&call.func, branch_local, summary)?;
+                for arg in &call.args {
+                    self.validate_lifecycle_effects_in_expr(arg, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::FieldAccess(field) => self.validate_lifecycle_effects_in_expr(&field.expr, branch_local, summary),
+            Expr::Index(index) => {
+                self.validate_lifecycle_effects_in_expr(&index.expr, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&index.index, branch_local, summary)
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_lifecycle_effects_in_expr(lock, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Consume(consume) => self.validate_lifecycle_effects_in_expr(&consume.expr, branch_local, summary),
+            Expr::Transfer(transfer) => {
+                self.validate_lifecycle_effects_in_expr(&transfer.expr, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&transfer.to, branch_local, summary)
+            }
+            Expr::Destroy(destroy) => self.validate_lifecycle_effects_in_expr(&destroy.expr, branch_local, summary),
+            Expr::Claim(claim) => self.validate_lifecycle_effects_in_expr(&claim.receipt, branch_local, summary),
+            Expr::Settle(settle) => self.validate_lifecycle_effects_in_expr(&settle.expr, branch_local, summary),
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.validate_lifecycle_effects_in_expr(lock, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.validate_lifecycle_effects_in_expr(&replace.expr, branch_local, summary)?;
+                for (_, value) in &replace.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Assert(assert_expr) => {
+                self.validate_lifecycle_effects_in_expr(&assert_expr.condition, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&assert_expr.message, branch_local, summary)
+            }
+            Expr::Require(require_expr) => {
+                self.validate_lifecycle_effects_in_expr(&require_expr.condition, branch_local, summary)?;
+                if let Some(message) = &require_expr.message {
+                    self.validate_lifecycle_effects_in_expr(message, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.validate_lifecycle_effects_in_expr(expr, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Block(stmts, _) => self.validate_lifecycle_effects_in_stmts(stmts, branch_local, summary),
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
+                for item in items {
+                    self.validate_lifecycle_effects_in_expr(item, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::If(if_expr) => {
+                self.validate_lifecycle_effects_in_expr(&if_expr.condition, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&if_expr.then_branch, true, summary)?;
+                self.validate_lifecycle_effects_in_expr(&if_expr.else_branch, true, summary)
+            }
+            Expr::Cast(cast) => self.validate_lifecycle_effects_in_expr(&cast.expr, branch_local, summary),
+            Expr::Range(range) => {
+                self.validate_lifecycle_effects_in_expr(&range.start, branch_local, summary)?;
+                self.validate_lifecycle_effects_in_expr(&range.end, branch_local, summary)
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.validate_lifecycle_effects_in_expr(value, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Match(match_expr) => {
+                self.validate_lifecycle_effects_in_expr(&match_expr.expr, branch_local, summary)?;
+                for arm in &match_expr.arms {
+                    self.validate_lifecycle_effects_in_expr(&arm.value, true, summary)?;
+                }
+                Ok(())
+            }
+            Expr::StdlibCall(call) => {
+                for arg in &call.args {
+                    self.validate_lifecycle_effects_in_expr(arg, branch_local, summary)?;
+                }
+                Ok(())
+            }
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
+            | Expr::ReadRef(_)
+            | Expr::Preserve(_) => Ok(()),
+        }
     }
 
     fn validate_branch_obligations_in_stmts(
@@ -1236,7 +1686,7 @@ impl<'a> TypeChecker<'a> {
                 };
                 Ok(iter.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect()))
             }
-            Expr::Block(stmts) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
+            Expr::Block(stmts, _) => self.validate_branch_obligations_in_stmts(stmts, outputs, guaranteed),
             Expr::Assign(assign) => {
                 self.validate_branch_obligations_in_expr(&assign.target, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assign.value, outputs, guaranteed)
@@ -1295,7 +1745,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_branch_obligations_in_expr(&assert_expr.condition, outputs, guaranteed.clone())?;
                 self.validate_branch_obligations_in_expr(&assert_expr.message, outputs, guaranteed)
             }
-            Expr::Tuple(elems) | Expr::Array(elems) => {
+            Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
                 for elem in elems {
                     self.validate_branch_obligations_in_expr(elem, outputs, guaranteed.clone())?;
                 }
@@ -1312,11 +1762,11 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(guaranteed)
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_)
             | Expr::StdlibCall(_) => Ok(guaranteed),
             Expr::RequireBlock(require_block) => {
@@ -1472,8 +1922,8 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(message, outputs)?;
                 }
             }
-            Expr::Block(stmts) => self.validate_create_targets_in_stmts(stmts, outputs)?,
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Block(stmts, _) => self.validate_create_targets_in_stmts(stmts, outputs)?,
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.validate_create_targets_in_expr(item, outputs)?;
                 }
@@ -1499,11 +1949,11 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(&arm.value, outputs)?;
                 }
             }
-            Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_)
             | Expr::StdlibCall(_) => {}
             Expr::RequireBlock(require_block) => {
@@ -1723,6 +2173,15 @@ impl<'a> TypeChecker<'a> {
                     callable_kind,
                     callable_name,
                     type_repr(return_type)
+                ),
+                span,
+            ));
+        }
+        if matches!(return_type, Type::U128) {
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' cannot return u128; the current callable ABI only supports u128 as fixed-byte fields and locals",
+                    callable_kind, callable_name
                 ),
                 span,
             ));
@@ -2142,10 +2601,10 @@ impl<'a> TypeChecker<'a> {
             return Ok(None);
         };
         for stmt in prefix {
-            self.check_stmt(env, stmt)?;
+            self.check_stmt_with_context(env, stmt, false)?;
         }
         let tail_base = env.clone();
-        self.check_stmt(env, last)?;
+        self.check_stmt_with_context(env, last, true)?;
         Ok(Some((tail_base, last)))
     }
 
@@ -2269,12 +2728,12 @@ impl<'a> TypeChecker<'a> {
                     self.validate_spawn_ipc_fd_usage_expr(message, state)?;
                 }
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let mut block_state = state.clone();
                 self.validate_spawn_ipc_fd_usage_statements(stmts, &mut block_state)?;
                 *state = block_state;
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.validate_spawn_ipc_fd_usage_expr(item, state)?;
                 }
@@ -2331,11 +2790,11 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Preserve(_)
-            | Expr::Integer(_)
-            | Expr::Bool(_)
-            | Expr::String(_)
-            | Expr::ByteString(_)
-            | Expr::Identifier(_)
+            | Expr::Integer(..)
+            | Expr::Bool(..)
+            | Expr::String(..)
+            | Expr::ByteString(..)
+            | Expr::Identifier(..)
             | Expr::ReadRef(_) => {}
         }
         Ok(())
@@ -2390,9 +2849,9 @@ impl<'a> TypeChecker<'a> {
 
     fn spawn_ipc_fd_key(&self, expr: &Expr, state: &SpawnIpcFdState) -> Option<String> {
         match expr {
-            Expr::Identifier(name) => state.aliases.get(name).cloned(),
+            Expr::Identifier(name, _) => state.aliases.get(name).cloned(),
             Expr::FieldAccess(field) => {
-                let Expr::Identifier(base) = field.expr.as_ref() else {
+                let Expr::Identifier(base, _) = field.expr.as_ref() else {
                     return None;
                 };
                 let (read_fd, write_fd) = state.pipe_tuples.get(base)?;
@@ -2429,7 +2888,21 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn check_stmt_list(&mut self, env: &mut TypeEnv, stmts: &[Stmt], allow_tail_expr: bool) -> Result<()> {
+        let Some((last, prefix)) = stmts.split_last() else {
+            return Ok(());
+        };
+        for stmt in prefix {
+            self.check_stmt_with_context(env, stmt, false)?;
+        }
+        self.check_stmt_with_context(env, last, allow_tail_expr)
+    }
+
     fn check_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<()> {
+        self.check_stmt_with_context(env, stmt, false)
+    }
+
+    fn check_stmt_with_context(&mut self, env: &mut TypeEnv, stmt: &Stmt, allow_tail_expr: bool) -> Result<()> {
         match stmt {
             Stmt::Let(let_stmt) => {
                 let ty = self.infer_let_value_type(env, let_stmt)?;
@@ -2452,7 +2925,16 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
             Stmt::Expr(expr) => {
-                self.infer_expr(env, expr)?;
+                let ty = self.infer_expr(env, expr)?;
+                if self.is_linear_type(&ty) && !allow_tail_expr && !Self::linear_expr_statement_has_effect(expr) {
+                    return Err(CompileError::new(
+                        format!(
+                            "linear expression result of type {} must be bound, returned, or consumed by an explicit lifecycle operation",
+                            type_repr(&ty)
+                        ),
+                        expr_span(expr),
+                    ));
+                }
                 Ok(())
             }
             Stmt::Return(None) => {
@@ -2465,7 +2947,11 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
             Stmt::Return(Some(expr)) => {
-                let ty = self.infer_expr(env, expr)?;
+                let expected_return = self.current_return_type.clone();
+                let ty = match &expected_return {
+                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, expected, expr_span(expr))?,
+                    _ => self.infer_expr(env, expr)?,
+                };
                 match &self.current_return_type {
                     Some(Some(expected)) if !self.types_equal(expected, &ty) => {
                         return Err(CompileError::new(
@@ -2490,15 +2976,11 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("if condition must be boolean", if_stmt.span));
                 }
                 let mut then_env = env.child();
-                for stmt in &if_stmt.then_branch {
-                    self.check_stmt(&mut then_env, stmt)?;
-                }
+                self.check_stmt_list(&mut then_env, &if_stmt.then_branch, allow_tail_expr)?;
                 let then_returns = self.stmts_always_return(&if_stmt.then_branch);
                 if let Some(ref else_branch) = if_stmt.else_branch {
                     let mut else_env = env.child();
-                    for stmt in else_branch {
-                        self.check_stmt(&mut else_env, stmt)?;
-                    }
+                    self.check_stmt_list(&mut else_env, else_branch, allow_tail_expr)?;
                     let else_returns = self.stmts_always_return(else_branch);
                     env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span)?;
                 } else {
@@ -2511,9 +2993,7 @@ impl<'a> TypeChecker<'a> {
                 let mut loop_env = env.child();
                 let item_ty = self.iter_item_type(&iter_ty, for_stmt.span)?;
                 self.bind_pattern(&mut loop_env, &for_stmt.pattern, &item_ty, false, for_stmt.span)?;
-                for stmt in &for_stmt.body {
-                    self.check_stmt(&mut loop_env, stmt)?;
-                }
+                self.check_stmt_list(&mut loop_env, &for_stmt.body, false)?;
                 loop_env.check_linear_complete()?;
                 env.reject_loop_linear_state_changes(&loop_env, for_stmt.span)?;
                 env.merge_existing_type_refinements_from(&loop_env);
@@ -2525,9 +3005,7 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("while condition must be boolean", while_stmt.span));
                 }
                 let mut while_env = env.child();
-                for stmt in &while_stmt.body {
-                    self.check_stmt(&mut while_env, stmt)?;
-                }
+                self.check_stmt_list(&mut while_env, &while_stmt.body, false)?;
                 while_env.check_linear_complete()?;
                 env.reject_loop_linear_state_changes(&while_env, while_stmt.span)?;
                 env.merge_existing_type_refinements_from(&while_env);
@@ -2550,27 +3028,139 @@ impl<'a> TypeChecker<'a> {
 
     fn check_no_unreachable_nested(&self, stmt: &Stmt) -> Result<()> {
         match stmt {
+            Stmt::Let(let_stmt) => self.check_no_unreachable_expr(&let_stmt.value)?,
             Stmt::If(if_stmt) => {
+                self.check_no_unreachable_expr(&if_stmt.condition)?;
                 self.check_no_unreachable_stmts(&if_stmt.then_branch)?;
                 if let Some(else_branch) = &if_stmt.else_branch {
                     self.check_no_unreachable_stmts(else_branch)?;
                 }
             }
-            Stmt::For(for_stmt) => self.check_no_unreachable_stmts(&for_stmt.body)?,
-            Stmt::While(while_stmt) => self.check_no_unreachable_stmts(&while_stmt.body)?,
-            Stmt::Expr(Expr::Block(stmts)) => self.check_no_unreachable_stmts(stmts)?,
-            _ => {}
+            Stmt::For(for_stmt) => {
+                self.check_no_unreachable_expr(&for_stmt.iterable)?;
+                self.check_no_unreachable_stmts(&for_stmt.body)?;
+            }
+            Stmt::While(while_stmt) => {
+                self.check_no_unreachable_expr(&while_stmt.condition)?;
+                self.check_no_unreachable_stmts(&while_stmt.body)?;
+            }
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.check_no_unreachable_expr(expr)?,
+            Stmt::Return(None) => {}
+        }
+        Ok(())
+    }
+
+    fn check_no_unreachable_expr(&self, expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => {}
+            Expr::Assign(assign) => {
+                self.check_no_unreachable_expr(&assign.target)?;
+                self.check_no_unreachable_expr(&assign.value)?;
+            }
+            Expr::Binary(binary) => {
+                self.check_no_unreachable_expr(&binary.left)?;
+                self.check_no_unreachable_expr(&binary.right)?;
+            }
+            Expr::Unary(unary) => self.check_no_unreachable_expr(&unary.expr)?,
+            Expr::Call(call) => {
+                self.check_no_unreachable_expr(&call.func)?;
+                for arg in &call.args {
+                    self.check_no_unreachable_expr(arg)?;
+                }
+            }
+            Expr::FieldAccess(field) => self.check_no_unreachable_expr(&field.expr)?,
+            Expr::Index(index) => {
+                self.check_no_unreachable_expr(&index.expr)?;
+                self.check_no_unreachable_expr(&index.index)?;
+            }
+            Expr::Create(create) => {
+                for (_, value) in &create.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.check_no_unreachable_expr(lock)?;
+                }
+            }
+            Expr::Consume(consume) => self.check_no_unreachable_expr(&consume.expr)?,
+            Expr::Transfer(transfer) => {
+                self.check_no_unreachable_expr(&transfer.expr)?;
+                self.check_no_unreachable_expr(&transfer.to)?;
+            }
+            Expr::Destroy(destroy) => self.check_no_unreachable_expr(&destroy.expr)?,
+            Expr::ReadRef(_) => {}
+            Expr::Claim(claim) => self.check_no_unreachable_expr(&claim.receipt)?,
+            Expr::Settle(settle) => self.check_no_unreachable_expr(&settle.expr)?,
+            Expr::CreateUnique(create) => {
+                for (_, value) in &create.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+                if let Some(lock) = &create.lock {
+                    self.check_no_unreachable_expr(lock)?;
+                }
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.check_no_unreachable_expr(&replace.expr)?;
+                for (_, value) in &replace.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+            }
+            Expr::Assert(assert_expr) => {
+                self.check_no_unreachable_expr(&assert_expr.condition)?;
+                self.check_no_unreachable_expr(&assert_expr.message)?;
+            }
+            Expr::Require(require_expr) => {
+                self.check_no_unreachable_expr(&require_expr.condition)?;
+                if let Some(message) = &require_expr.message {
+                    self.check_no_unreachable_expr(message)?;
+                }
+            }
+            Expr::RequireBlock(require_block) => {
+                for expr in &require_block.expressions {
+                    self.check_no_unreachable_expr(expr)?;
+                }
+            }
+            Expr::Preserve(_) => {}
+            Expr::Block(stmts, _) => self.check_no_unreachable_stmts(stmts)?,
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
+                for item in items {
+                    self.check_no_unreachable_expr(item)?;
+                }
+            }
+            Expr::If(if_expr) => {
+                self.check_no_unreachable_expr(&if_expr.condition)?;
+                self.check_no_unreachable_expr(&if_expr.then_branch)?;
+                self.check_no_unreachable_expr(&if_expr.else_branch)?;
+            }
+            Expr::Cast(cast) => self.check_no_unreachable_expr(&cast.expr)?,
+            Expr::Range(range) => {
+                self.check_no_unreachable_expr(&range.start)?;
+                self.check_no_unreachable_expr(&range.end)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    self.check_no_unreachable_expr(value)?;
+                }
+            }
+            Expr::Match(match_expr) => {
+                self.check_no_unreachable_expr(&match_expr.expr)?;
+                for arm in &match_expr.arms {
+                    self.check_no_unreachable_expr(&arm.value)?;
+                }
+            }
+            Expr::StdlibCall(call) => {
+                for arg in &call.args {
+                    self.check_no_unreachable_expr(arg)?;
+                }
+            }
         }
         Ok(())
     }
 
     fn infer_let_value_type(&mut self, env: &mut TypeEnv, let_stmt: &LetStmt) -> Result<Type> {
         if let Some(declared_ty) = &let_stmt.ty {
-            if matches!(let_stmt.value, Expr::Array(_)) {
-                return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
-            }
+            return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
         }
-        if let Expr::Array(elems) = &let_stmt.value {
+        if let Expr::Array(elems, _) = &let_stmt.value {
             if elems.is_empty() {
                 return match &let_stmt.ty {
                     Some(declared @ Type::Array(_, 0)) => Ok(declared.clone()),
@@ -2588,8 +3178,29 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
-            Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
-            _ => self.infer_expr(env, expr),
+            Expr::Integer(value, _) => self.infer_integer_literal_with_expected_type(*value, expected_ty, span),
+            Expr::Array(elems, _) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
+            _ => {
+                let actual_ty = self.infer_expr(env, expr)?;
+                Ok(actual_ty)
+            }
+        }
+    }
+
+    fn infer_integer_literal_with_expected_type(&self, value: u64, expected_ty: &Type, span: Span) -> Result<Type> {
+        let fits = match expected_ty {
+            Type::U8 => value <= u8::MAX as u64,
+            Type::U16 => value <= u16::MAX as u64,
+            Type::U32 => value <= u32::MAX as u64,
+            Type::U64 | Type::U128 => true,
+            Type::Named(name) if name == "usize" || name == "isize" => true,
+            _ => return Ok(Type::U64),
+        };
+
+        if fits {
+            Ok(expected_ty.clone())
+        } else {
+            Err(CompileError::new(format!("integer literal {} is out of range for {}", value, type_repr(expected_ty)), span))
         }
     }
 
@@ -2603,7 +3214,7 @@ impl<'a> TypeChecker<'a> {
         if let Type::Named(name) = expected_ty {
             if let Some(item_ty) = self.parse_named_collection_item_type(name) {
                 for elem in elems {
-                    let actual_ty = self.infer_expr(env, elem)?;
+                    let actual_ty = self.infer_expr_with_expected_type(env, elem, &item_ty, expr_span(elem))?;
                     if self.type_contains_reference(&actual_ty) {
                         return Err(CompileError::new(
                             format!(
@@ -2638,7 +3249,7 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             for elem in elems {
-                let actual_ty = self.infer_expr(env, elem)?;
+                let actual_ty = self.infer_expr_with_expected_type(env, elem, item_ty, expr_span(elem))?;
                 if !self.types_equal(&actual_ty, item_ty) {
                     return Err(CompileError::new(
                         format!("array literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
@@ -2649,17 +3260,17 @@ impl<'a> TypeChecker<'a> {
             return Ok(expected_ty.clone());
         }
 
-        self.infer_expr(env, &Expr::Array(elems.to_vec()))
+        self.infer_expr(env, &Expr::Array(elems.to_vec(), span))
     }
 
     fn infer_expr(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
         self.validate_expr_allowed_in_current_callable(expr)?;
         match expr {
-            Expr::Integer(_) => Ok(Type::U64),
-            Expr::Bool(_) => Ok(Type::Bool),
-            Expr::String(_) => Ok(Type::Named("String".to_string())),
-            Expr::ByteString(_) => Ok(Type::Array(Box::new(Type::U8), 0)),
-            Expr::Identifier(name) => {
+            Expr::Integer(..) => Ok(Type::U64),
+            Expr::Bool(..) => Ok(Type::Bool),
+            Expr::String(..) => Ok(Type::Named("String".to_string())),
+            Expr::ByteString(bytes, _) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
+            Expr::Identifier(name, _) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     Ok(ty)
                 } else if let Some(constant) = self.resolve_constant(name) {
@@ -2668,26 +3279,49 @@ impl<'a> TypeChecker<'a> {
                     Ok(ty)
                 } else if let Some(ty) = self.flow_state_expr_type(name, expr_span(expr))? {
                     Ok(ty)
-                } else if let Some((prefix, _)) = name.split_once("::") {
-                    Ok(Type::Named(prefix.to_string()))
+                } else if let Some(ty) = Self::qualified_value_constructor_type(name) {
+                    Ok(ty)
+                } else if name.contains("::") {
+                    Err(CompileError::new(
+                        format!("qualified identifier '{}' does not resolve to a value in this expression context", name),
+                        expr_span(expr),
+                    ))
                 } else {
-                    Err(CompileError::new(format!("undefined variable '{}'", name), Span::default()))
+                    Err(CompileError::new(format!("undefined variable '{}'", name), expr_span(expr)))
                 }
             }
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
             Expr::Binary(bin) => {
                 let left_ty = self.infer_expr(env, &bin.left)?;
-                let right_ty = self.infer_expr(env, &bin.right)?;
+                let right_ty = if matches!(bin.right.as_ref(), Expr::Integer(..)) {
+                    let expected = self.contextual_integer_type_for_binary_right(bin.op, &left_ty);
+                    self.infer_expr_with_expected_type(env, &bin.right, &expected, bin.span)?
+                } else {
+                    self.infer_expr(env, &bin.right)?
+                };
+                let left_ty = if matches!(bin.left.as_ref(), Expr::Integer(..)) {
+                    let expected = self.contextual_integer_type_for_binary_left(bin.op, &right_ty);
+                    self.infer_expr_with_expected_type(env, &bin.left, &expected, bin.span)?
+                } else {
+                    left_ty
+                };
 
                 match bin.op {
                     BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("arithmetic operations require numeric types", bin.span));
                         }
-                        Ok(left_ty)
+                        if matches!(bin.op, BinaryOp::Div | BinaryOp::Mod) && self.const_integer_value(&bin.right) == Some(0) {
+                            return Err(CompileError::new("division or modulo by zero is not allowed", bin.span));
+                        }
+                        self.validate_numeric_binary_types(bin.op, &left_ty, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
-                        if !self.types_equal(&left_ty, &right_ty) {
+                        let same_or_widenable = self.types_equal(&left_ty, &right_ty)
+                            || (Self::widen_to(&left_ty, &right_ty).is_some()
+                                && !matches!(left_ty, Type::U128)
+                                && !matches!(right_ty, Type::U128));
+                        if !same_or_widenable {
                             return Err(CompileError::new("comparison requires matching types", bin.span));
                         }
                         Ok(Type::Bool)
@@ -2695,6 +3329,12 @@ impl<'a> TypeChecker<'a> {
                     BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("ordering comparison requires numeric types", bin.span));
+                        }
+                        if !self.numeric_types_equal(&left_ty, &right_ty) && Self::widen_to(&left_ty, &right_ty).is_none() {
+                            return Err(CompileError::new("ordering comparison requires matching numeric types", bin.span));
+                        }
+                        if matches!(left_ty, Type::U128) || matches!(right_ty, Type::U128) {
+                            return Err(CompileError::new("ordering comparison is not supported for u128", bin.span));
                         }
                         Ok(Type::Bool)
                     }
@@ -2710,10 +3350,10 @@ impl<'a> TypeChecker<'a> {
                 let expr_ty = self.infer_expr(env, &unary.expr)?;
                 match unary.op {
                     UnaryOp::Neg => {
-                        if !self.is_numeric_type(&expr_ty) {
-                            return Err(CompileError::new("negation requires numeric type", unary.span));
+                        if self.is_numeric_type(&expr_ty) {
+                            return Err(CompileError::new("unary negation is not supported for unsigned integer types", unary.span));
                         }
-                        Ok(expr_ty)
+                        Err(CompileError::new("negation requires numeric type", unary.span))
                     }
                     UnaryOp::Not => {
                         if !self.is_bool_type(&expr_ty) {
@@ -2769,6 +3409,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Create(create) => {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
+                self.require_type_capability(&create.ty, Capability::Create, "create", create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
                 if let Some(target) = &create.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
@@ -2796,7 +3437,8 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Named(create.ty.clone()))
             }
             Expr::Consume(consume) => {
-                let (_consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
+                let (consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
+                self.require_capability(&consume_ty, Capability::Consume, "consume", consume.span)?;
                 env.consume(&name)?;
                 Ok(Type::U64)
             }
@@ -2825,11 +3467,14 @@ impl<'a> TypeChecker<'a> {
                     "destroy",
                     destroy.span,
                 )?;
+                let type_name = Self::base_type_name(&destroy_ty).unwrap_or_default();
+                self.validate_destroy_policy(type_name, &destroy.policy, destroy.span)?;
                 env.destroy(&name)?;
                 Ok(Type::U64)
             }
             Expr::ReadRef(read_ref) => {
                 self.require_read_ref_target_cell_backed(&read_ref.ty, read_ref.span)?;
+                self.require_type_capability(&read_ref.ty, Capability::ReadRef, "read_ref", read_ref.span)?;
                 Ok(Type::Ref(Box::new(Type::Named(read_ref.ty.clone()))))
             }
             Expr::Claim(claim) => {
@@ -2837,17 +3482,20 @@ impl<'a> TypeChecker<'a> {
                 if !self.is_receipt_type(&receipt_ty) {
                     return Err(CompileError::new("claim requires a receipt value", claim.span));
                 }
+                self.require_capability(&receipt_ty, Capability::Consume, "claim", claim.span)?;
                 env.consume(&name)?;
                 let receipt_name = Self::base_type_name(&receipt_ty).unwrap_or_default();
                 Ok(self.resolve_receipt_claim_output(receipt_name).flatten().unwrap_or(Type::U64))
             }
             Expr::Settle(settle) => {
                 let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
+                self.require_capability(&settle_ty, Capability::Consume, "settle", settle.span)?;
                 env.consume(&name)?;
                 Ok(settle_ty)
             }
             Expr::CreateUnique(cu) => {
                 self.require_create_target_cell_backed(&cu.ty, cu.span)?;
+                self.require_type_capability(&cu.ty, Capability::Create, "create_unique", cu.span)?;
                 self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
                 self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
                 if let Some(lock) = &cu.lock {
@@ -2867,6 +3515,7 @@ impl<'a> TypeChecker<'a> {
                         ru.span,
                     ));
                 }
+                self.require_capability(&input_ty, Capability::Replace, "replace_unique", ru.span)?;
                 self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
                 self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
                 env.consume(&name)?;
@@ -2877,7 +3526,7 @@ impl<'a> TypeChecker<'a> {
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("assert condition must be boolean", assert_expr.span));
                 }
-                if !matches!(assert_expr.message.as_ref(), Expr::String(_)) {
+                if !matches!(assert_expr.message.as_ref(), Expr::String(..)) {
                     return Err(CompileError::new("assert message must be a string literal", expr_span(&assert_expr.message)));
                 }
                 Ok(Type::Unit)
@@ -2889,27 +3538,27 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("require condition must be boolean", require_expr.span));
                 }
                 if let Some(message) = &require_expr.message {
-                    if !matches!(message.as_ref(), Expr::String(_)) {
+                    if !matches!(message.as_ref(), Expr::String(..)) {
                         return Err(CompileError::new("require message must be a string literal", expr_span(message)));
                     }
                 }
                 Ok(Type::Bool)
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let mut block_env = env.child();
                 let last_ty = self.infer_tail_block_value(&mut block_env, stmts)?;
                 block_env.check_linear_complete()?;
                 env.merge_existing_linear_states_from(&block_env);
                 Ok(last_ty)
             }
-            Expr::Tuple(elems) => {
+            Expr::Tuple(elems, _) => {
                 let mut types = Vec::new();
                 for elem in elems {
                     types.push(self.infer_expr(env, elem)?);
                 }
                 Ok(Type::Tuple(types))
             }
-            Expr::Array(elems) => {
+            Expr::Array(elems, _) => {
                 if elems.is_empty() {
                     return Err(CompileError::new("empty array literal requires an explicit array type annotation", expr_span(expr)));
                 }
@@ -2942,7 +3591,9 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Cast(cast) => {
-                self.infer_expr(env, &cast.expr)?;
+                self.validate_type(&cast.ty)?;
+                let source_ty = self.infer_expr(env, &cast.expr)?;
+                self.validate_cast(&source_ty, &cast.ty, cast.expr.as_ref(), cast.span)?;
                 Ok(cast.ty.clone())
             }
             Expr::Range(range) => {
@@ -3047,7 +3698,7 @@ impl<'a> TypeChecker<'a> {
                 )
                 .with_code("E1005"));
             }
-            Expr::If(_) | Expr::Match(_) | Expr::Block(_) => {
+            Expr::If(_) | Expr::Match(_) | Expr::Block(..) => {
                 return Err(CompileError::new(
                     format!("{} contains control flow; require expressions must be pure boolean constraints", context),
                     expr_span(expr),
@@ -3081,7 +3732,7 @@ impl<'a> TypeChecker<'a> {
                 Self::validate_require_condition_is_pure(&assert_expr.condition, context)?;
                 Self::validate_require_condition_is_pure(&assert_expr.message, context)?;
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     Self::validate_require_condition_is_pure(item, context)?;
                 }
@@ -3096,7 +3747,7 @@ impl<'a> TypeChecker<'a> {
                     Self::validate_require_condition_is_pure(value, context)?;
                 }
             }
-            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
+            Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) => {}
         }
         Ok(())
     }
@@ -3137,6 +3788,13 @@ impl<'a> TypeChecker<'a> {
                         call.span,
                     ));
                 }
+                self.require_capability_or_kernel_effects(
+                    &input_ty,
+                    Capability::Transfer,
+                    &[Capability::Replace, Capability::Relock],
+                    &qualified,
+                    call.span,
+                )?;
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 env.consume(&input_name)?;
@@ -3150,6 +3808,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 self.validate_receipt_claim_pattern(&input_ty, &output_ty, call.span)?;
+                self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
                 env.consume(&input_name)?;
                 Ok(Type::Bool)
             }
@@ -3160,6 +3819,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_stdlib_lock_arg(&qualified, &call.args[2], env)?;
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
+                self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
                 env.consume(&input_name)?;
                 Ok(Type::Bool)
             }
@@ -3178,12 +3838,20 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn qualified_value_constructor_type(name: &str) -> Option<Type> {
+        match name {
+            "Address::zero" => Some(Type::Address),
+            "Hash::zero" => Some(Type::Hash),
+            _ => None,
+        }
+    }
+
     fn require_named_cell_identifier(&mut self, env: &mut TypeEnv, expr: &Expr, operation: &str, role: &str) -> Result<Type> {
         let ty = self.infer_expr(env, expr)?;
         if !self.is_linear_type(&ty) {
             return Err(CompileError::new(format!("{} {} must be a cell-backed value", operation, role), expr_span(expr)));
         }
-        if !matches!(expr, Expr::Identifier(_)) {
+        if !matches!(expr, Expr::Identifier(..)) {
             return Err(CompileError::new(format!("{} {} must be a named cell-backed binding", operation, role), expr_span(expr)));
         }
         Ok(ty)
@@ -3274,7 +3942,7 @@ impl<'a> TypeChecker<'a> {
             return Ok(Type::Unit);
         };
         for stmt in prefix {
-            self.check_stmt(env, stmt)?;
+            self.check_stmt_with_context(env, stmt, false)?;
         }
         match last {
             Stmt::Expr(expr) => {
@@ -3286,7 +3954,7 @@ impl<'a> TypeChecker<'a> {
             }
             Stmt::If(if_stmt) if if_stmt.else_branch.is_some() => self.infer_tail_if_stmt_value(env, if_stmt),
             stmt => {
-                self.check_stmt(env, stmt)?;
+                self.check_stmt_with_context(env, stmt, true)?;
                 Ok(Type::Unit)
             }
         }
@@ -3322,17 +3990,29 @@ impl<'a> TypeChecker<'a> {
 
     fn check_match_patterns(&self, scrutinee_ty: &Type, match_expr: &MatchExpr) -> Result<()> {
         let Type::Named(enum_name) = scrutinee_ty else {
-            return Ok(());
+            return Err(CompileError::new(
+                format!("match expression requires an enum scrutinee, found {}", type_repr(scrutinee_ty)),
+                expr_span(&match_expr.expr),
+            ));
         };
         let Some(variants) = self.resolve_enum_variants(enum_name) else {
-            return Ok(());
+            return Err(CompileError::new(
+                format!("match expression requires an enum scrutinee, found {}", type_repr(scrutinee_ty)),
+                expr_span(&match_expr.expr),
+            ));
         };
         let variant_set = variants.iter().map(String::as_str).collect::<HashSet<_>>();
         let mut seen = HashSet::new();
         let mut has_wildcard = false;
 
-        for arm in &match_expr.arms {
+        for (index, arm) in match_expr.arms.iter().enumerate() {
             if arm.pattern == "_" {
+                if index + 1 < match_expr.arms.len() {
+                    return Err(CompileError::new(
+                        "wildcard pattern '_' must be the last match arm; subsequent arms are unreachable",
+                        arm.span,
+                    ));
+                }
                 has_wildcard = true;
                 continue;
             }
@@ -3452,7 +4132,7 @@ impl<'a> TypeChecker<'a> {
         if self.flow_state_fields.get(type_name).is_none_or(|state_field| state_field != field_name) {
             return Ok(None);
         }
-        let Expr::Identifier(state_name) = value else {
+        let Expr::Identifier(state_name, _) = value else {
             return Ok(None);
         };
         if let Type::Named(enum_name) = expected_ty {
@@ -3497,8 +4177,16 @@ impl<'a> TypeChecker<'a> {
             return Ok(None);
         };
         if states.iter().any(|state| state == state_name) {
-            if let Some(spec) = self.flows.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
-                return Ok(Some(Type::Named(spec.clone())));
+            if let Some(spec) = self.flows.get(type_name) {
+                if let Some(enum_name) = &spec.field_enum_type {
+                    return Ok(Some(Type::Named(enum_name.clone())));
+                }
+                return Ok(Some(spec.field_ty.clone()));
+            }
+            if let Some(field_name) = self.flow_state_fields.get(type_name) {
+                if let Some(field_ty) = self.resolve_named_type_fields(type_name).and_then(|fields| fields.get(field_name).cloned()) {
+                    return Ok(Some(field_ty));
+                }
             }
             return Ok(Some(Type::U64));
         }
@@ -3545,6 +4233,50 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
         }
+    }
+
+    fn validate_destroy_policy(&self, type_name: &str, policy: &DestructionPolicy, span: Span) -> Result<()> {
+        match policy {
+            DestructionPolicy::Default | DestructionPolicy::SingletonType => Ok(()),
+            DestructionPolicy::Unique { identity } if matches!(identity.as_str(), "type_id" | "ckb_type_id") => Ok(()),
+            DestructionPolicy::Unique { identity } => Err(CompileError::new(
+                format!("destroy_unique identity '{}' is not supported; expected type_id or ckb_type_id", identity),
+                span,
+            )),
+            DestructionPolicy::Instance { identity_field } => {
+                let field_ty = self.destroy_policy_field_type(type_name, identity_field, span, "destroy_instance identity field")?;
+                if Self::identity_static_width(&field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "destroy_instance identity field '{}.{}' must be fixed-width so CKB runtime can compare it",
+                            type_name, identity_field
+                        ),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+            DestructionPolicy::BurnAmount { field } => {
+                let field_ty = self.destroy_policy_field_type(type_name, field, span, "burn_amount field")?;
+                if !self.is_numeric_type(&field_ty) || Self::identity_static_width(&field_ty).is_none() {
+                    return Err(CompileError::new(
+                        format!("burn_amount field '{}.{}' must be a fixed-width numeric scalar", type_name, field),
+                        span,
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn destroy_policy_field_type(&self, type_name: &str, field: &str, span: Span, label: &str) -> Result<Type> {
+        let Some(expected_fields) = self.resolve_named_type_fields(type_name) else {
+            return Err(CompileError::new(format!("{} target type '{}' has no declared fields", label, type_name), span));
+        };
+        expected_fields
+            .get(field)
+            .cloned()
+            .ok_or_else(|| CompileError::new(format!("{} '{}' does not exist on '{}'", label, field, type_name), span))
     }
 
     fn require_create_target_cell_backed(&self, type_name: &str, span: Span) -> Result<()> {
@@ -3662,7 +4394,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         match call.func.as_ref() {
-            Expr::Identifier(name)
+            Expr::Identifier(name, _)
                 if name.starts_with("env::")
                     || name.starts_with("ckb::")
                     || name.starts_with("source::")
@@ -3763,16 +4495,16 @@ impl<'a> TypeChecker<'a> {
             return Ok(branch_env);
         };
         for stmt in prefix {
-            self.check_stmt(&mut branch_env, stmt)?;
+            self.check_stmt_with_context(&mut branch_env, stmt, false)?;
         }
         let tail_base = branch_env.clone();
-        self.check_stmt(&mut branch_env, last)?;
+        self.check_stmt_with_context(&mut branch_env, last, true)?;
         self.mark_stmt_as_returned(&mut branch_env, &tail_base, last)?;
         Ok(branch_env)
     }
 
     fn stmts_always_return(&self, stmts: &[Stmt]) -> bool {
-        stmts.iter().any(|stmt| self.stmt_always_returns(stmt))
+        stmts.last().is_some_and(|stmt| self.stmt_always_returns(stmt))
     }
 
     fn stmt_always_returns(&self, stmt: &Stmt) -> bool {
@@ -3784,7 +4516,18 @@ impl<'a> TypeChecker<'a> {
                 };
                 self.stmts_always_return(&if_stmt.then_branch) && self.stmts_always_return(else_branch)
             }
-            Stmt::Expr(Expr::Block(stmts)) => self.stmts_always_return(stmts),
+            Stmt::Expr(expr) => self.expr_always_returns(expr),
+            _ => false,
+        }
+    }
+
+    fn expr_always_returns(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Block(stmts, _) => self.stmts_always_return(stmts),
+            Expr::If(if_expr) => self.expr_always_returns(&if_expr.then_branch) && self.expr_always_returns(&if_expr.else_branch),
+            Expr::Match(match_expr) => {
+                !match_expr.arms.is_empty() && match_expr.arms.iter().all(|arm| self.expr_always_returns(&arm.value))
+            }
             _ => false,
         }
     }
@@ -3815,11 +4558,11 @@ impl<'a> TypeChecker<'a> {
         };
         let mut tail_env = env.clone();
         for stmt in prefix {
-            self.check_stmt(&mut tail_env, stmt)?;
+            self.check_stmt_with_context(&mut tail_env, stmt, false)?;
         }
 
         if let Stmt::Expr(expr) = last {
-            let tail_ty = self.infer_expr(&mut tail_env, expr)?;
+            let tail_ty = self.infer_expr_with_expected_type(&mut tail_env, expr, return_type, expr_span(expr))?;
             if self.types_equal(&tail_ty, return_type) {
                 return Ok(true);
             }
@@ -3883,7 +4626,7 @@ impl<'a> TypeChecker<'a> {
 
     fn mark_expr_as_moved(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<()> {
         match expr {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     if self.is_linear_type(&ty) {
                         env.consume(name)?;
@@ -3891,7 +4634,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.mark_expr_as_moved(env, item)?;
                 }
@@ -3917,6 +4660,7 @@ impl<'a> TypeChecker<'a> {
                 env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)
             }
             Expr::Match(match_expr) => {
+                self.mark_expr_as_moved(env, &match_expr.expr)?;
                 let mut arm_envs = Vec::with_capacity(match_expr.arms.len());
                 for arm in &match_expr.arms {
                     let mut arm_env = env.child();
@@ -3925,9 +4669,16 @@ impl<'a> TypeChecker<'a> {
                 }
                 env.merge_match_linear_states(&arm_envs, match_expr.span)
             }
-            Expr::Block(_) => Ok(()),
+            Expr::Block(..) => Ok(()),
             _ => Ok(()),
         }
+    }
+
+    fn linear_expr_statement_has_effect(expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Create(_) | Expr::CreateUnique(_) | Expr::ReplaceUnique(_) | Expr::Transfer(_) | Expr::Claim(_) | Expr::Settle(_)
+        )
     }
 
     fn reject_local_reference_to_linear_root(&self, env: &TypeEnv, value: &Expr, ty: &Type, span: Span) -> Result<()> {
@@ -3956,7 +4707,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Tuple(items) | Expr::Array(items) => {
+            Expr::Tuple(items, _) | Expr::Array(items, _) => {
                 for item in items {
                     self.reject_stored_linear_reference_alias(env, item, span)?;
                 }
@@ -3973,7 +4724,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Expr::Block(stmts) => self.reject_stored_linear_reference_alias_in_tail_stmt(env, stmts, span),
+            Expr::Block(stmts, _) => self.reject_stored_linear_reference_alias_in_tail_stmt(env, stmts, span),
             _ => Ok(()),
         }
     }
@@ -4026,7 +4777,7 @@ impl<'a> TypeChecker<'a> {
         self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
 
         match assign.target.as_ref() {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 let Some(target_ty) = env.lookup(name).cloned() else {
                     return Err(CompileError::new(format!("undefined variable '{}'", name), assign.span));
                 };
@@ -4043,9 +4794,7 @@ impl<'a> TypeChecker<'a> {
                         }
                     }
                     AssignOp::AddAssign => {
-                        if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
-                            return Err(CompileError::new("'+=' requires numeric types", assign.span));
-                        }
+                        self.validate_compound_assign_types(&target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -4084,9 +4833,7 @@ impl<'a> TypeChecker<'a> {
                         }
                     }
                     AssignOp::AddAssign => {
-                        if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
-                            return Err(CompileError::new("'+=' requires numeric types", assign.span));
-                        }
+                        self.validate_compound_assign_types(&target_ty, &value_ty, assign.span)?;
                     }
                 }
                 Ok(target_ty)
@@ -4137,10 +4884,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_collection_item_type(&self, name: &str) -> Option<Type> {
-        if let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) {
-            return Some(self.parse_named_type_repr(inner));
-        }
-        None
+        self.vec_type_argument(name).ok().map(|inner| self.parse_named_type_repr(inner))
     }
 
     fn supports_collection_len(&self, ty: &Type) -> bool {
@@ -4161,7 +4905,30 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_type_repr(&self, repr: &str) -> Type {
-        match repr.trim() {
+        let repr = repr.trim();
+        if let Some(tuple_items) = repr.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) {
+            if tuple_items.trim().is_empty() {
+                return Type::Unit;
+            }
+            return Type::Tuple(
+                split_top_level_type_list(tuple_items).into_iter().map(|item| self.parse_named_type_repr(item)).collect(),
+            );
+        }
+        if let Some(array_items) = repr.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            if let Some((elem, len)) = split_top_level_array_type(array_items) {
+                if let Ok(len) = len.trim().parse::<usize>() {
+                    return Type::Array(Box::new(self.parse_named_type_repr(elem)), len);
+                }
+            }
+        }
+        if let Some(inner) = repr.strip_prefix("&mut ") {
+            return Type::MutRef(Box::new(self.parse_named_type_repr(inner)));
+        }
+        if let Some(inner) = repr.strip_prefix('&') {
+            return Type::Ref(Box::new(self.parse_named_type_repr(inner)));
+        }
+
+        match repr {
             "u8" => Type::U8,
             "u16" => Type::U16,
             "u32" => Type::U32,
@@ -4226,7 +4993,7 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
         match call.func.as_ref() {
-            Expr::Identifier(name) => {
+            Expr::Identifier(name, _) => {
                 if let Some(signature) = self.functions.get(name).cloned() {
                     self.validate_call_allowed(name, signature.kind, call.span)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
@@ -4323,13 +5090,20 @@ impl<'a> TypeChecker<'a> {
                         self.validate_static_spawn_target_expr(&call.args[0], call.span)?;
                         return Ok(Type::U64);
                     }
-                    "wait" | "process_id" | "pipe_read" | "inherited_fd" | "close" => {
+                    "wait" | "process_id" | "pipe_read" | "inherited_fd" => {
                         let expected = if matches!(name.as_str(), "wait" | "process_id") { 0 } else { 1 };
                         self.validate_builtin_arity(name, expected, arg_types, call.span)?;
                         if expected == 1 && arg_types[0] != Type::U64 {
                             return Err(CompileError::new(format!("{} expects a u64 file descriptor or index", name), call.span));
                         }
                         return Ok(Type::U64);
+                    }
+                    "close" => {
+                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                        if arg_types[0] != Type::U64 {
+                            return Err(CompileError::new("close expects a u64 file descriptor", call.span));
+                        }
+                        return Ok(Type::Unit);
                     }
                     "pipe" => {
                         self.validate_builtin_arity(name, 0, arg_types, call.span)?;
@@ -4340,7 +5114,7 @@ impl<'a> TypeChecker<'a> {
                         if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
                             return Err(CompileError::new("pipe_write expects (fd: u64, value: u64)", call.span));
                         }
-                        return Ok(Type::U64);
+                        return Ok(Type::Unit);
                     }
                     "require_maturity" | "require_time" => {
                         self.validate_builtin_arity(name, 1, arg_types, call.span)?;
@@ -4450,7 +5224,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         if let Type::Named(name) = &receiver_ty {
                             if name == "Vec" {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 return Ok(Type::Unit);
@@ -4514,7 +5288,7 @@ impl<'a> TypeChecker<'a> {
                         let arg_ty = &arg_types[0];
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Bool)
@@ -4584,7 +5358,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -4621,7 +5395,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(arg_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -4657,7 +5431,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         match &receiver_ty {
                             Type::Named(name) if name == "Vec" => {
-                                if let Expr::Identifier(receiver_name) = field.expr.as_ref() {
+                                if let Expr::Identifier(receiver_name, _) = field.expr.as_ref() {
                                     env.update_type(receiver_name, Type::Named(format!("Vec<{}>", type_repr(&slice_item_ty))));
                                 }
                                 Ok(Type::Unit)
@@ -4796,8 +5570,8 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_static_spawn_target_expr(&self, expr: &Expr, span: Span) -> Result<()> {
         match expr {
-            Expr::String(_) => Ok(()),
-            Expr::Identifier(name) if self.is_string_constant(name) => {
+            Expr::String(..) => Ok(()),
+            Expr::Identifier(name, _) if self.is_string_constant(name) => {
                 Ok(())
             }
             _ => Err(CompileError::new(
@@ -4873,6 +5647,181 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn contextual_integer_type_for_binary_right(&self, op: BinaryOp, left_ty: &Type) -> Type {
+        if matches!(left_ty, Type::U128) && matches!(op, BinaryOp::Add | BinaryOp::Sub) {
+            Type::U64
+        } else {
+            left_ty.clone()
+        }
+    }
+
+    fn contextual_integer_type_for_binary_left(&self, op: BinaryOp, right_ty: &Type) -> Type {
+        if matches!(right_ty, Type::U128) && matches!(op, BinaryOp::Add) {
+            Type::U64
+        } else {
+            right_ty.clone()
+        }
+    }
+
+    fn numeric_width(ty: &Type) -> Option<u32> {
+        match ty {
+            Type::U8 => Some(8),
+            Type::U16 => Some(16),
+            Type::U32 => Some(32),
+            Type::U64 => Some(64),
+            Type::U128 => Some(128),
+            _ => None,
+        }
+    }
+
+    fn widen_to(left_ty: &Type, right_ty: &Type) -> Option<Type> {
+        let lw = Self::numeric_width(left_ty)?;
+        let rw = Self::numeric_width(right_ty)?;
+        if lw >= rw {
+            Some(left_ty.clone())
+        } else {
+            Some(right_ty.clone())
+        }
+    }
+
+    fn validate_numeric_binary_types(&self, op: BinaryOp, left_ty: &Type, right_ty: &Type, span: Span) -> Result<Type> {
+        if self.numeric_types_equal(left_ty, right_ty) {
+            if matches!(left_ty, Type::U128) {
+                return Err(CompileError::new(
+                    "generic u128 arithmetic is not supported; only u128 +/- u64 deltas are supported",
+                    span,
+                ));
+            }
+            return Ok(left_ty.clone());
+        }
+
+        // u128 +/- u64 delta is explicitly allowed.
+        let allowed_u128_delta = match op {
+            BinaryOp::Add => {
+                (matches!(left_ty, Type::U128) && matches!(right_ty, Type::U64))
+                    || (matches!(left_ty, Type::U64) && matches!(right_ty, Type::U128))
+            }
+            BinaryOp::Sub => matches!(left_ty, Type::U128) && matches!(right_ty, Type::U64),
+            _ => false,
+        };
+        if allowed_u128_delta {
+            return Ok(Type::U128);
+        }
+
+        // Implicit integer widening: u8/u16/u32 operands are promoted to the
+        // wider type so that mixed-width arithmetic like `u64 * u16` compiles.
+        if let Some(promoted) = Self::widen_to(left_ty, right_ty) {
+            if matches!(promoted, Type::U128) {
+                return Err(CompileError::new(
+                    "generic u128 arithmetic is not supported; only u128 +/- u64 deltas are supported",
+                    span,
+                ));
+            }
+            return Ok(promoted);
+        }
+
+        Err(CompileError::new("arithmetic operations require matching numeric types", span))
+    }
+
+    /// Validate compound assignment (+=): the RHS must be same width or
+    /// narrower than the target so that the result does not silently narrow.
+    /// u16 += u8 is fine (widens u8 to u16, result fits in u16).
+    /// u16 += u64 is rejected (u16 + u64 -> u64, silently truncating to u16).
+    fn validate_compound_assign_types(&self, target_ty: &Type, value_ty: &Type, span: Span) -> Result<()> {
+        if !self.is_numeric_type(target_ty) || !self.is_numeric_type(value_ty) {
+            return Err(CompileError::new("'+=' requires numeric types", span));
+        }
+
+        let result_ty = self.validate_numeric_binary_types(BinaryOp::Add, target_ty, value_ty, span)?;
+        if self.types_equal(&result_ty, target_ty) {
+            return Ok(());
+        }
+
+        Err(CompileError::new(
+            "compound assignment would implicitly narrow the result; use an explicit `as` cast after verifying the value fits the target width",
+            span,
+        ))
+    }
+
+    fn validate_cast(&self, source_ty: &Type, target_ty: &Type, source_expr: &Expr, span: Span) -> Result<()> {
+        if self.types_equal(source_ty, target_ty) {
+            return Ok(());
+        }
+        match (source_ty, target_ty) {
+            (Type::Bool, Type::U8 | Type::U16 | Type::U32 | Type::U64) => Ok(()),
+            (Type::Bool, Type::U128) => Err(CompileError::new("non-constant casts to u128 are not supported", span)),
+            (source, Type::Bool) if self.is_numeric_type(source) => {
+                if let Some(value) = self.const_integer_value(source_expr) {
+                    if value > 1 {
+                        return Err(CompileError::new("constant cast value is out of range for bool", span));
+                    }
+                }
+                Ok(())
+            }
+            (source, target) if self.is_numeric_type(source) && self.is_numeric_type(target) => {
+                if matches!(target, Type::U128) && !self.expr_is_constant_scalar(source_expr) {
+                    return Err(CompileError::new("cast to u128 from a non-constant expression is not yet supported", span));
+                }
+                if let Some(value) = self.const_integer_value(source_expr) {
+                    if !Self::integer_value_fits_type(value, target) {
+                        return Err(CompileError::new(
+                            format!("constant cast value {} is out of range for {}", value, type_repr(target)),
+                            span,
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(CompileError::new(
+                format!("cast from {} to {} is not supported", type_repr(source_ty), type_repr(target_ty)),
+                span,
+            )),
+        }
+    }
+
+    fn expr_is_constant_scalar(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Integer(..) | Expr::Bool(..) => true,
+            Expr::Identifier(name, _) => self.constants.contains_key(name) || self.resolve_constant(name).is_some(),
+            Expr::Cast(cast) => self.expr_is_constant_scalar(&cast.expr),
+            _ => false,
+        }
+    }
+
+    fn const_integer_value(&self, expr: &Expr) -> Option<u128> {
+        match expr {
+            Expr::Integer(value, _) => Some(*value as u128),
+            Expr::Bool(value, _) => Some(u128::from(*value)),
+            Expr::Identifier(name, _) => {
+                if let Some(constant) = self.constants.get(name) {
+                    self.const_integer_value(&constant.value)
+                } else if let Some(constant) = self.resolve_constant(name) {
+                    self.const_integer_value(&constant.value)
+                } else {
+                    None
+                }
+            }
+            Expr::Cast(cast) => {
+                let value = self.const_integer_value(&cast.expr)?;
+                Self::integer_value_fits_type(value, &cast.ty).then_some(value)
+            }
+            _ => None,
+        }
+    }
+
+    fn integer_value_fits_type(value: u128, ty: &Type) -> bool {
+        match ty {
+            Type::Bool => value <= 1,
+            Type::U8 => value <= u8::MAX as u128,
+            Type::U16 => value <= u16::MAX as u128,
+            Type::U32 => value <= u32::MAX as u128,
+            Type::U64 => value <= u64::MAX as u128,
+            Type::U128 => true,
+            Type::Named(name) if name == "usize" || name == "isize" => value <= u64::MAX as u128,
+            _ => false,
+        }
+    }
+
     fn validate_named_type(&self, name: &str) -> Result<()> {
         let base_name = name.split('<').next().unwrap_or(name);
         match base_name {
@@ -4900,6 +5849,9 @@ impl<'a> TypeChecker<'a> {
                 Span::default(),
             ));
         }
+        if base_name == "Vec" && name.contains('<') {
+            self.validate_vec_type_argument(name)?;
+        }
 
         match base_name {
             "String" | "Range" | "Vec" | "usize" | "isize" => return Ok(()),
@@ -4921,10 +5873,29 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn types_equal(&self, a: &Type, b: &Type) -> bool {
-        if self.is_numeric_type(a) && self.is_numeric_type(b) {
-            return true;
+    fn validate_vec_type_argument(&self, name: &str) -> Result<()> {
+        let inner = self.vec_type_argument(name)?;
+        let inner_ty = self.parse_named_type_repr(inner);
+        self.validate_type(&inner_ty)
+    }
+
+    fn vec_type_argument<'b>(&self, name: &'b str) -> Result<&'b str> {
+        let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) else {
+            return Err(CompileError::new(format!("malformed Vec type '{}'", name), Span::default()));
+        };
+        let inner = inner.trim();
+        if inner.is_empty() {
+            return Err(CompileError::new("Vec<T> requires exactly one type argument", Span::default()));
         }
+        let args = split_top_level_type_list(inner);
+        if args.len() != 1 || args[0].trim() != inner {
+            return Err(CompileError::new(format!("Vec<T> requires exactly one type argument; found '{}'", inner), Span::default()));
+        }
+        Ok(inner)
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn types_equal(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::U8, Type::U8) => true,
             (Type::U16, Type::U16) => true,
@@ -4944,6 +5915,20 @@ impl<'a> TypeChecker<'a> {
             (Type::MutRef(a1), Type::MutRef(b1)) => self.types_equal(a1, b1),
             _ => false,
         }
+    }
+
+    fn numeric_types_equal(&self, a: &Type, b: &Type) -> bool {
+        self.types_equal(a, b)
+            || matches!(
+                (a, b),
+                (Type::U64, Type::Named(name)) | (Type::Named(name), Type::U64)
+                    if name == "usize" || name == "isize"
+            )
+            || matches!(
+                (a, b),
+                (Type::Named(name), Type::Named(name2))
+                    if (name == "usize" || name == "isize") && (name2 == "usize" || name2 == "isize")
+            )
     }
 
     fn base_type_name(ty: &Type) -> Option<&str> {
@@ -5009,7 +5994,7 @@ impl<'a> TypeChecker<'a> {
             return Err(CompileError::new(format!("{} requires a cell-backed linear value", operation), span));
         }
         match expr {
-            Expr::Identifier(name) => Ok((ty, name.clone())),
+            Expr::Identifier(name, _) => Ok((ty, name.clone())),
             _ => Err(CompileError::new(
                 format!("{} requires a named cell-backed value so the compiler can track linear ownership", operation),
                 span,
@@ -5028,6 +6013,32 @@ impl<'a> TypeChecker<'a> {
             TypeDef::Receipt(receipt) => Some(receipt.capabilities.into_iter().collect()),
             TypeDef::Struct(_) | TypeDef::Enum(_) => None,
         }
+    }
+
+    fn require_type_capability(&self, type_name: &str, capability: Capability, operation: &str, span: Span) -> Result<()> {
+        let base_type_name = type_name.split('<').next().unwrap_or(type_name);
+        let Some(capabilities) = self.resolve_capabilities(base_type_name) else {
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+        };
+        if capabilities.contains(&capability) {
+            return Ok(());
+        }
+        Err(CompileError::new(
+            format!(
+                "type '{}' does not declare '{}' capability required by {}",
+                base_type_name,
+                capability_name(capability),
+                operation
+            ),
+            span,
+        ))
+    }
+
+    fn require_capability(&self, ty: &Type, capability: Capability, operation: &str, span: Span) -> Result<()> {
+        let Some(type_name) = Self::base_type_name(ty) else {
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+        };
+        self.require_type_capability(type_name, capability, operation, span)
     }
 
     fn require_capability_or_kernel_effects(
@@ -5098,35 +6109,139 @@ fn stmt_span(stmt: &Stmt) -> Span {
 }
 
 fn expr_span(expr: &Expr) -> Span {
+    expr.span()
+}
+
+fn collect_field_type_dependencies(
+    owner: &str,
+    fields: &[Field],
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    for field in fields {
+        collect_type_dependencies(owner, &field.ty, field.span, local_types, graph);
+    }
+}
+
+fn collect_type_dependencies(
+    owner: &str,
+    ty: &Type,
+    span: Span,
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    match ty {
+        Type::Array(elem, _) | Type::Ref(elem) | Type::MutRef(elem) => {
+            collect_type_dependencies(owner, elem, span, local_types, graph);
+        }
+        Type::Tuple(types) => {
+            for elem in types {
+                collect_type_dependencies(owner, elem, span, local_types, graph);
+            }
+        }
+        Type::Named(name) => collect_named_type_dependencies(owner, name, span, local_types, graph),
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Bool | Type::Unit | Type::Address | Type::Hash => {}
+    }
+}
+
+fn collect_named_type_dependencies(
+    owner: &str,
+    name: &str,
+    span: Span,
+    local_types: &HashSet<String>,
+    graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+) {
+    let mut token = String::new();
+    for ch in name.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
+            token.push(ch);
+            continue;
+        }
+
+        if !token.is_empty() {
+            if local_types.contains(&token) {
+                graph.entry(owner.to_string()).or_default().push(TypeDependencyEdge { target: token.clone(), span });
+            }
+            token.clear();
+        }
+    }
+}
+
+fn visit_type_dependency_graph(
+    name: &str,
+    graph: &HashMap<String, Vec<TypeDependencyEdge>>,
+    states: &mut HashMap<String, TypeGraphVisitState>,
+    stack: &mut Vec<String>,
+) -> Result<()> {
+    states.insert(name.to_string(), TypeGraphVisitState::Visiting);
+    stack.push(name.to_string());
+
+    if let Some(edges) = graph.get(name) {
+        for edge in edges {
+            match states.get(&edge.target).copied() {
+                Some(TypeGraphVisitState::Done) => {}
+                Some(TypeGraphVisitState::Visiting) => {
+                    let start = stack.iter().position(|entry| entry == &edge.target).unwrap_or(0);
+                    let mut cycle = stack[start..].to_vec();
+                    cycle.push(edge.target.clone());
+                    return Err(CompileError::new(format!("cyclic type dependency detected: {}", cycle.join(" -> ")), edge.span));
+                }
+                None => visit_type_dependency_graph(&edge.target, graph, states, stack)?,
+            }
+        }
+    }
+
+    stack.pop();
+    states.insert(name.to_string(), TypeGraphVisitState::Done);
+    Ok(())
+}
+
+pub(crate) fn lifecycle_effect_keys(expr: &Expr) -> Vec<(String, Span, &'static str)> {
     match expr {
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => Span::default(),
-        Expr::StdlibCall(call) => call.span,
-        Expr::Assign(assign) => assign.span,
-        Expr::Binary(binary) => binary.span,
-        Expr::Unary(unary) => unary.span,
-        Expr::Call(call) => call.span,
-        Expr::FieldAccess(field) => field.span,
-        Expr::Index(index) => index.span,
-        Expr::Create(create) => create.span,
-        Expr::Consume(consume) => consume.span,
-        Expr::Transfer(transfer) => transfer.span,
-        Expr::Destroy(destroy) => destroy.span,
-        Expr::ReadRef(read_ref) => read_ref.span,
-        Expr::Claim(claim) => claim.span,
-        Expr::Settle(settle) => settle.span,
-        Expr::CreateUnique(cu) => cu.span,
-        Expr::ReplaceUnique(ru) => ru.span,
-        Expr::Assert(assert_expr) => assert_expr.span,
-        Expr::Require(require_expr) => require_expr.span,
-        Expr::Block(stmts) => stmts.last().map(stmt_span).unwrap_or_default(),
-        Expr::Tuple(_) | Expr::Array(_) => Span::default(),
-        Expr::If(if_expr) => if_expr.span,
-        Expr::Cast(cast) => cast.span,
-        Expr::Range(range) => range.span,
-        Expr::StructInit(init) => init.span,
-        Expr::Match(match_expr) => match_expr.span,
-        Expr::RequireBlock(require_block) => require_block.span,
-        Expr::Preserve(preserve) => preserve.span,
+        Expr::Create(create) => {
+            let binding = create.target.clone().unwrap_or_else(|| format!("create_{}", create.ty));
+            vec![(format!("output:{}", binding), create.span, "create")]
+        }
+        Expr::CreateUnique(create) => {
+            vec![(format!("output:create_unique_{}", create.ty), create.span, "create_unique")]
+        }
+        Expr::Consume(consume) => lifecycle_input_key(&consume.expr, consume.span, "consume"),
+        Expr::Transfer(transfer) => lifecycle_input_key(&transfer.expr, transfer.span, "transfer"),
+        Expr::Destroy(destroy) => lifecycle_input_key(&destroy.expr, destroy.span, "destroy"),
+        Expr::Claim(claim) => lifecycle_input_key(&claim.receipt, claim.span, "claim"),
+        Expr::Settle(settle) => lifecycle_input_key(&settle.expr, settle.span, "settle"),
+        Expr::ReplaceUnique(replace) => lifecycle_input_key(&replace.expr, replace.span, "replace_unique"),
+        Expr::StdlibCall(call) => {
+            let qualified = format!("std::{}::{}", call.namespace, call.name);
+            match qualified.as_str() {
+                "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
+                    let mut keys = Vec::new();
+                    if let Some(input) = call.args.first().and_then(lifecycle_operand_root) {
+                        keys.push((format!("input:{}", input), call.span, "stdlib lifecycle input"));
+                    }
+                    if let Some(output) = call.args.get(1).and_then(lifecycle_operand_root) {
+                        keys.push((format!("output:{}", output), call.span, "stdlib lifecycle output"));
+                    }
+                    keys
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn lifecycle_input_key(expr: &Expr, span: Span, label: &'static str) -> Vec<(String, Span, &'static str)> {
+    let binding = lifecycle_operand_root(expr).unwrap_or("<dynamic>");
+    vec![(format!("input:{}", binding), span, label)]
+}
+
+pub(crate) fn lifecycle_operand_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Identifier(name, _) => Some(name.as_str()),
+        Expr::FieldAccess(field) => lifecycle_operand_root(&field.expr),
+        Expr::Index(index) => lifecycle_operand_root(&index.expr),
+        _ => None,
     }
 }
 
@@ -5196,12 +6311,12 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 collect_required_output_fields(message, outputs, fields);
             }
         }
-        Expr::Block(stmts) => {
+        Expr::Block(stmts, _) => {
             for stmt in stmts {
                 collect_required_output_fields_from_stmt(stmt, outputs, fields);
             }
         }
-        Expr::Tuple(elems) | Expr::Array(elems) => {
+        Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
             for elem in elems {
                 collect_required_output_fields(elem, outputs, fields);
             }
@@ -5227,11 +6342,11 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
                 collect_required_output_fields(&arm.value, outputs, fields);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
+        Expr::Integer(..)
+        | Expr::Bool(..)
+        | Expr::String(..)
+        | Expr::ByteString(..)
+        | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => {}
         Expr::RequireBlock(require_block) => {
@@ -5284,7 +6399,7 @@ fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<Str
     let Expr::FieldAccess(field) = expr else {
         return None;
     };
-    let Expr::Identifier(base) = field.expr.as_ref() else {
+    let Expr::Identifier(base, _) = field.expr.as_ref() else {
         return None;
     };
     if outputs.contains(base) {
@@ -5296,7 +6411,7 @@ fn output_field_constraint(expr: &Expr, outputs: &HashSet<String>) -> Option<Str
 
 fn forbidden_consensus_call_name(expr: &Expr) -> Option<&'static str> {
     match expr {
-        Expr::Identifier(name) => forbidden_consensus_terminal(name),
+        Expr::Identifier(name, _) => forbidden_consensus_terminal(name),
         Expr::FieldAccess(field) => forbidden_consensus_terminal(&field.field),
         _ => None,
     }
@@ -5383,7 +6498,7 @@ fn aggregate_field_type_is_supported(ty: &Type) -> bool {
 
 fn assignment_root_name(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::Identifier(name, _) => Some(name.as_str()),
         Expr::FieldAccess(field) => assignment_root_name(&field.expr),
         Expr::Index(index) => assignment_root_name(&index.expr),
         _ => None,
@@ -5504,13 +6619,13 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
 fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<String>) {
     match expr {
         Expr::Consume(consume) => {
-            if let Expr::Identifier(name) = consume.expr.as_ref() {
+            if let Expr::Identifier(name, _) = consume.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&consume.expr, bindings);
         }
         Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name) = transfer.expr.as_ref() {
+            if let Expr::Identifier(name, _) = transfer.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&transfer.expr, bindings);
@@ -5545,19 +6660,19 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::Destroy(destroy) => {
-            if let Expr::Identifier(name) = destroy.expr.as_ref() {
+            if let Expr::Identifier(name, _) = destroy.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&destroy.expr, bindings);
         }
         Expr::Claim(claim) => {
-            if let Expr::Identifier(name) = claim.receipt.as_ref() {
+            if let Expr::Identifier(name, _) = claim.receipt.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&claim.receipt, bindings);
         }
         Expr::Settle(settle) => {
-            if let Expr::Identifier(name) = settle.expr.as_ref() {
+            if let Expr::Identifier(name, _) = settle.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&settle.expr, bindings);
@@ -5571,7 +6686,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
             }
         }
         Expr::ReplaceUnique(replace) => {
-            if let Expr::Identifier(name) = replace.expr.as_ref() {
+            if let Expr::Identifier(name, _) = replace.expr.as_ref() {
                 bindings.insert(name.clone());
             }
             collect_consumed_bindings_from_expr(&replace.expr, bindings);
@@ -5589,8 +6704,8 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(message, bindings);
             }
         }
-        Expr::Block(stmts) => collect_consumed_bindings_from_stmts(stmts, bindings),
-        Expr::Tuple(items) | Expr::Array(items) => {
+        Expr::Block(stmts, _) => collect_consumed_bindings_from_stmts(stmts, bindings),
+        Expr::Tuple(items, _) | Expr::Array(items, _) => {
             for item in items {
                 collect_consumed_bindings_from_expr(item, bindings);
             }
@@ -5616,13 +6731,13 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
                 collect_consumed_bindings_from_expr(&arm.value, bindings);
             }
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::Integer(..) | Expr::Bool(..) | Expr::String(..) | Expr::ByteString(..) | Expr::Identifier(..) | Expr::ReadRef(_) => {}
         Expr::StdlibCall(call) => {
             let qualified = format!("std::{}::{}", call.namespace, call.name);
             match qualified.as_str() {
                 "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle" => {
                     if !call.args.is_empty() {
-                        if let Expr::Identifier(name) = &call.args[0] {
+                        if let Expr::Identifier(name, _) = &call.args[0] {
                             bindings.insert(name.clone());
                         }
                     }
@@ -5641,7 +6756,7 @@ fn collect_consumed_bindings_from_expr(expr: &Expr, bindings: &mut HashSet<Strin
 
 fn direct_call_name(call: &CallExpr) -> Option<&str> {
     match call.func.as_ref() {
-        Expr::Identifier(name) => Some(name.as_str()),
+        Expr::Identifier(name, _) => Some(name.as_str()),
         _ => None,
     }
 }
@@ -5665,7 +6780,7 @@ fn mutable_reference_root_names(expr: &Expr) -> Vec<&str> {
 
 fn collect_mutable_reference_root_names<'a>(expr: &'a Expr, roots: &mut Vec<&'a str>) {
     match expr {
-        Expr::Identifier(name) => push_unique_root(roots, name.as_str()),
+        Expr::Identifier(name, _) => push_unique_root(roots, name.as_str()),
         Expr::FieldAccess(field) => collect_mutable_reference_root_names(&field.expr, roots),
         Expr::Index(index) => collect_mutable_reference_root_names(&index.expr, roots),
         Expr::Cast(cast) => collect_mutable_reference_root_names(&cast.expr, roots),
@@ -5678,7 +6793,7 @@ fn collect_mutable_reference_root_names<'a>(expr: &'a Expr, roots: &mut Vec<&'a 
                 collect_mutable_reference_root_names(&arm.value, roots);
             }
         }
-        Expr::Block(stmts) => collect_mutable_reference_root_names_from_tail_stmts(stmts, roots),
+        Expr::Block(stmts, _) => collect_mutable_reference_root_names_from_tail_stmts(stmts, roots),
         _ => {}
     }
 }
@@ -5705,6 +6820,56 @@ fn push_unique_root<'a>(roots: &mut Vec<&'a str>, root: &'a str) {
     }
 }
 
+fn split_top_level_type_list(input: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                items.push(input[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    items.push(input[start..].trim());
+    items
+}
+
+fn split_top_level_array_type(input: &str) -> Option<(&str, &str)> {
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ';' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                return Some((input[..index].trim(), input[index + ch.len_utf8()..].trim()));
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn capability_name(capability: Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
@@ -5729,8 +6894,23 @@ pub fn check(module: &Module) -> Result<()> {
     checker.check_module(module)
 }
 
+pub fn check_with_primitive_strict(module: &Module, primitive_strict: bool) -> Result<()> {
+    let mut checker = TypeChecker::new().with_primitive_strict(primitive_strict);
+    checker.check_module(module)
+}
+
 pub fn check_with_resolver(module: &Module, resolver: &ModuleResolver, current_module: &str) -> Result<()> {
     let mut checker = TypeChecker::with_resolver(resolver, current_module);
+    checker.check_module(module)
+}
+
+pub fn check_with_resolver_and_primitive_strict(
+    module: &Module,
+    resolver: &ModuleResolver,
+    current_module: &str,
+    primitive_strict: bool,
+) -> Result<()> {
+    let mut checker = TypeChecker::with_resolver_and_primitive_strict(resolver, current_module, primitive_strict);
     checker.check_module(module)
 }
 
@@ -5750,6 +6930,1254 @@ mod tests {
     fn source_module(source: &str) -> Module {
         let tokens = lexer::lex(source).unwrap();
         parser::parse(&tokens).unwrap()
+    }
+
+    #[test]
+    fn numeric_type_equality_respects_width() {
+        let checker = TypeChecker::new();
+
+        assert!(checker.types_equal(&Type::U64, &Type::U64));
+        assert!(!checker.types_equal(&Type::U8, &Type::U64));
+        assert!(!checker.types_equal(&Type::Array(Box::new(Type::U8), 1), &Type::Array(Box::new(Type::U64), 1)));
+        assert_eq!(TypeChecker::widen_to(&Type::U64, &Type::U8), Some(Type::U64));
+        assert_eq!(TypeChecker::widen_to(&Type::U8, &Type::U64), Some(Type::U64));
+    }
+
+    #[test]
+    fn numeric_named_type_equality_is_commutative() {
+        let checker = TypeChecker::new();
+        let usize_ty = Type::Named("usize".to_string());
+        let isize_ty = Type::Named("isize".to_string());
+        let other_ty = Type::Named("foo".to_string());
+
+        assert!(checker.numeric_types_equal(&Type::U64, &usize_ty));
+        assert!(checker.numeric_types_equal(&usize_ty, &Type::U64));
+        assert!(checker.numeric_types_equal(&usize_ty, &isize_ty));
+        assert!(checker.numeric_types_equal(&isize_ty, &usize_ty));
+        assert!(!checker.numeric_types_equal(&isize_ty, &other_ty));
+        assert!(!checker.numeric_types_equal(&other_ty, &isize_ty));
+    }
+
+    #[test]
+    fn unsigned_integer_negation_is_rejected() {
+        let module = source_module(
+            r#"
+module types::unsigned_neg
+
+action bad(x: u64) -> u64
+where
+    return -x
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("unary negation is not supported for unsigned integer types"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mixed_width_arithmetic_and_ordering_are_rejected() {
+        // u8 + u64 now widens to u64 (implicit lossless widening).
+        let ok_sources = [
+            r#"
+module types::mixed_u8_u64
+action ok(x: u8, y: u64) -> u64
+where
+    return x + y
+"#,
+            r#"
+module types::mixed_u64_u8
+action ok(x: u64, y: u8) -> u64
+where
+    return x + y
+"#,
+            r#"
+module types::mixed_u8_mul_u16
+action ok(x: u8, y: u16) -> u16
+where
+    return x * y
+"#,
+            r#"
+module types::mixed_u64_mul_u16
+action ok(x: u64, y: u16) -> u64
+where
+    return x * y
+"#,
+        ];
+        for source in &ok_sources {
+            check(&source_module(source)).expect("widening should succeed");
+        }
+
+        // u32 + u128 is still rejected: generic u128 arithmetic is not supported.
+        let err = check(&source_module(
+            r#"
+module types::mixed_u32_u128
+action bad(x: u32, y: u128) -> u32
+where
+    return x + y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128") || err.message.contains("matching numeric types"), "unexpected error: {}", err.message);
+
+        // u8 < u64 is now allowed with implicit widening (ordering comparison).
+        check(&source_module(
+            r#"
+module types::mixed_order
+action ok(x: u8, y: u64) -> bool
+where
+    return x < y
+"#,
+        ))
+        .expect("ordering with widening should succeed");
+
+        // Return type mismatch: u8 + u64 widens to u64, but declared return is u8.
+        // This must still be rejected: assignment/return boundary does not narrow.
+        let err = check(&source_module(
+            r#"
+module types::mismatch_return
+action bad(x: u8, y: u64) -> u8
+where
+    return x + y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("return type") || err.message.contains("type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn u128_ordering_and_arithmetic_still_rejected_on_widening() {
+        // u64 < u128 must NOT pass through widening: ordering is unsupported for u128.
+        let err = check(&source_module(
+            r#"
+module types::u64_lt_u128
+action bad(x: u64, y: u128) -> bool
+where
+    return x < y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64 < u128 should be rejected as u128 ordering, got: {}", err.message);
+
+        // u64 * u128 must NOT pass through widening: generic u128 arithmetic unsupported.
+        let err = check(&source_module(
+            r#"
+module types::u64_mul_u128
+action bad(x: u64, y: u128) -> u128
+where
+    return x * y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64 * u128 should be rejected as u128 arithmetic, got: {}", err.message);
+
+        // u32 + u128 must NOT pass through widening.
+        let err = check(&source_module(
+            r#"
+module types::u32_add_u128
+action bad(x: u32, y: u128) -> u128
+where
+    return x + y
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u32 + u128 should be rejected as u128 arithmetic, got: {}", err.message);
+    }
+
+    #[test]
+    fn compound_assign_rejects_implicit_narrowing() {
+        // u16 += u64 must be rejected: result would silently truncate.
+        let err = check(&source_module(
+            r#"
+module types::compound_narrow
+action bad(mut x: u16, y: u64) -> u16
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 += u64 should be rejected as implicit narrowing, got: {}", err.message);
+
+        // u64 += u16 is fine: u16 widens to u64, result fits.
+        check(&source_module(
+            r#"
+module types::compound_widen
+action ok(mut x: u64, y: u16) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += u16 should succeed");
+    }
+
+    #[test]
+    fn compound_assign_uses_numeric_binary_rules() {
+        let generic_u128 = check(&source_module(
+            r#"
+module types::compound_u128_generic
+action bad(mut x: u128, y: u128) -> bool
+where
+    x += y
+    return true
+"#,
+        ))
+        .unwrap_err();
+        assert!(generic_u128.message.contains("u128"), "u128 += u128 should be rejected, got: {}", generic_u128.message);
+
+        check(&source_module(
+            r#"
+module types::compound_u128_delta
+action ok(mut x: u128, y: u64) -> bool
+where
+    x += y
+    return true
+"#,
+        ))
+        .expect("u128 += u64 delta should succeed");
+
+        check(&source_module(
+            r#"
+module types::compound_usize_u64
+action ok(mut x: u64, y: usize) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += usize should match u64 + usize");
+
+        check(&source_module(
+            r#"
+module types::compound_isize_u64
+action ok(mut x: isize, y: u64) -> isize
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("isize += u64 should match isize + u64");
+
+        let narrow_u128 = check(&source_module(
+            r#"
+module types::compound_u64_u128
+action bad(mut x: u64, y: u128) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(narrow_u128.message.contains("narrow"), "u64 += u128 should reject narrowing, got: {}", narrow_u128.message);
+    }
+
+    /// Comprehensive boundary test: widening is expression-local only.
+    /// Every boundary (let, return, assign, field write, call arg) must reject
+    /// implicit narrowing, even when the expression itself involves widening.
+    #[test]
+    fn widening_boundary_matrix() {
+        // === EXPRESSION-LOCAL: widening allowed ===
+
+        // u64 * u16 -> u64 (arithmetic)
+        check(&source_module(
+            r#"
+module types::boundary_arith
+action ok(a: u64, b: u16) -> u64
+where
+    return a * b
+"#,
+        ))
+        .expect("u64 * u16 should widen to u64");
+
+        // u8 + u32 -> u32 (arithmetic)
+        check(&source_module(
+            r#"
+module types::boundary_arith_u8_u32
+action ok(a: u8, b: u32) -> u32
+where
+    return a + b
+"#,
+        ))
+        .expect("u8 + u32 should widen to u32");
+
+        // u16 < u64 (ordering)
+        check(&source_module(
+            r#"
+module types::boundary_order
+action ok(a: u16, b: u64) -> bool
+where
+    return a < b
+"#,
+        ))
+        .expect("u16 < u64 should be allowed with widening");
+
+        // u16 == u64 (equality)
+        check(&source_module(
+            r#"
+module types::boundary_eq
+action ok(a: u16, b: u64) -> bool
+where
+    return a == b
+"#,
+        ))
+        .expect("u16 == u64 should be allowed with widening");
+
+        // u32 != u16 (equality)
+        check(&source_module(
+            r#"
+module types::boundary_ne
+action ok(a: u32, b: u16) -> bool
+where
+    return a != b
+"#,
+        ))
+        .expect("u32 != u16 should be allowed with widening");
+
+        // === BOUNDARY: let binding rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_let_narrow
+action bad(a: u64, b: u16) -> u16
+where
+    let x: u16 = a * b
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let u16 = u64*u16 should fail: {}",
+            err.message
+        );
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_let_widen
+action bad(a: u16) -> u64
+where
+    let x: u64 = a
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let u64 = u16 should fail as an assignment boundary: {}",
+            err.message
+        );
+
+        // === BOUNDARY: return rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_narrow
+action bad(a: u64, b: u16) -> u16
+where
+    return a * b
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u64*u16 as u16 should fail: {}",
+            err.message
+        );
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_direct_narrow
+action bad(a: u64) -> u16
+where
+    return a
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u64 as u16 should fail: {}",
+            err.message
+        );
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_return_widen
+action bad(a: u16) -> u64
+where
+    return a
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return u16 as u64 should fail as a return boundary: {}",
+            err.message
+        );
+
+        // === BOUNDARY: plain assign rejects narrowing ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_assign_narrow
+action bad(mut x: u16, a: u64, b: u16) -> u16
+where
+    x = a * b
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("matching types"), "assign u64 result to u16 should fail: {}", err.message);
+
+        // === BOUNDARY: += rejects widening-past-target ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_compound_widen_past
+action bad(mut x: u16, y: u64) -> u16
+where
+    x += y
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 += u64 should fail as narrowing: {}", err.message);
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_compound
+
+struct Holder {
+    value: u16,
+}
+
+action bad(y: u64) -> u16
+where
+    let mut holder = Holder { value: 1 }
+    holder.value += y
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("narrow"), "u16 field += u64 should fail as narrowing: {}", err.message);
+
+        // === BOUNDARY: += allows value narrower than target ===
+        check(&source_module(
+            r#"
+module types::boundary_compound_safe
+action ok(mut x: u64, y: u16) -> u64
+where
+    x += y
+    return x
+"#,
+        ))
+        .expect("u64 += u16 should succeed");
+
+        // === BOUNDARY: field initializers require exact declared widths ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_narrow
+
+struct Holder {
+    value: u16,
+}
+
+action bad(y: u64) -> u16
+where
+    let holder = Holder { value: y }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "field u16 = u64 should fail: {}", err.message);
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_field_widen
+
+struct Holder {
+    value: u64,
+}
+
+action bad(y: u16) -> u64
+where
+    let holder = Holder { value: y }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "field u64 = u16 should fail as a layout boundary: {}", err.message);
+
+        let err = check(&source_module(
+            r#"
+module types::boundary_cell_layout
+
+resource Token has store, create, destroy {
+    amount: u16,
+}
+
+action bad(amount: u64) -> u64
+where
+    let token = create Token { amount: amount }
+    destroy token
+    return 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "cell layout field u16 = u64 should fail: {}", err.message);
+
+        // === BOUNDARY: ABI/function arguments require exact declared widths ===
+        let err = check(&source_module(
+            r#"
+module types::boundary_call_arg
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action bad(y: u16) -> u64
+where
+    return takes_u64(y)
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("argument 1 type mismatch"), "ABI argument u64 <- u16 should fail: {}", err.message);
+
+        // === BOUNDARY: u128 rejects in every widening path ===
+
+        // u32 + u128 -> rejected
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_add
+action bad(a: u32, b: u128) -> u128
+where
+    return a + b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u32+u128 rejected: {}", err.message);
+
+        // u64 < u128 -> rejected
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_lt
+action bad(a: u64, b: u128) -> bool
+where
+    return a < b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("u128"), "u64<u128 rejected: {}", err.message);
+
+        // u64 == u128 -> rejected (types_equal fails)
+        let err = check(&source_module(
+            r#"
+module types::boundary_u128_eq
+action bad(a: u64, b: u128) -> bool
+where
+    return a == b
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("matching types") || err.message.contains("u128"), "u64==u128 rejected: {}", err.message);
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_let_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_let_no_widen
+
+action bad(x: u16) -> u64
+where
+    let y: u64 = x
+    return y
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch") || err.message.contains("mismatch"),
+            "let expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_return_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_return_no_widen
+
+action bad(x: u16) -> u64
+where
+    return x
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("return type") || err.message.contains("mismatch"),
+            "return expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_abi_arg_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_abi_no_widen
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action bad(x: u16) -> u64
+where
+    return takes_u64(x)
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("argument 1 type mismatch"),
+            "ABI argument expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn expected_type_does_not_widen_non_literal_field_boundary() {
+        let err = check(&source_module(
+            r#"
+module types::expected_field_no_widen
+
+struct Holder {
+    value: u64,
+}
+
+action bad(x: u16) -> u64
+where
+    let holder = Holder { value: x }
+    return holder.value
+"#,
+        ))
+        .unwrap_err();
+        assert!(
+            err.message.contains("type mismatch"),
+            "field expected type should not widen a non-literal u16 into u64: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn explicit_cast_can_cross_integer_width_boundary() {
+        check(&source_module(
+            r#"
+module types::explicit_cast_boundary
+
+struct Holder {
+    value: u64,
+}
+
+fn takes_u64(x: u64) -> u64 {
+    return x
+}
+
+action good(x: u16) -> u64
+where
+    let y: u64 = x as u64
+    let holder = Holder { value: x as u64 }
+    return takes_u64(y) + holder.value
+"#,
+        ))
+        .expect("explicit casts should be accepted across integer width boundaries");
+    }
+
+    #[test]
+    fn contextual_integer_literals_fit_declared_widths() {
+        let module = source_module(
+            r#"
+module types::contextual_literals
+
+action good(x: u8) -> u8
+where
+    let y: u8 = x + 1
+    return y
+"#,
+        );
+        check(&module).unwrap();
+
+        let err = check(&source_module(
+            r#"
+module types::contextual_literal_oob
+
+action bad(x: u8) -> u8
+where
+    return x + 256
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("out of range for u8"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn unsupported_u128_arithmetic_is_rejected() {
+        for source in [
+            r#"
+module types::u128_add
+action bad(x: u128, y: u128) -> bool
+where
+    let z: u128 = x + y
+    return z == x
+"#,
+            r#"
+module types::u128_sub
+action bad(x: u128, y: u128) -> bool
+where
+    let z: u128 = x - y
+    return z == x
+"#,
+            r#"
+module types::u128_mul
+action bad(x: u128, y: u64) -> bool
+where
+    let z: u128 = x * y
+    return z == x
+"#,
+            r#"
+module types::u128_order
+action bad(x: u128, y: u128) -> bool
+where
+    return x < y
+"#,
+        ] {
+            let err = check(&source_module(source)).unwrap_err();
+            assert!(
+                err.message.contains("u128") || err.message.contains("matching numeric types"),
+                "unexpected error: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn constant_narrowing_casts_must_fit() {
+        for source in [
+            r#"
+module types::cast_u8
+action bad() -> u8
+where
+    return 256 as u8
+"#,
+            r#"
+module types::cast_u16
+action bad() -> u16
+where
+    return 65536 as u16
+"#,
+            r#"
+module types::cast_u32
+const BIG: u64 = 18446744073709551615
+action bad() -> u32
+where
+    return BIG as u32
+"#,
+            r#"
+module types::cast_bool
+action bad() -> bool
+where
+    return 2 as bool
+"#,
+        ] {
+            let err = check(&source_module(source)).unwrap_err();
+            assert!(err.message.contains("out of range"), "unexpected error: {}", err.message);
+        }
+    }
+
+    #[test]
+    fn statically_visible_division_by_zero_is_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::div_zero
+action bad(x: u64) -> u64
+where
+    return x / 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("division or modulo by zero"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn byte_string_literal_type_uses_actual_length() {
+        check(&source_module(
+            r#"
+module types::byte_string_len
+
+action ok() -> [u8; 4]
+where
+    return b"TEST"
+"#,
+        ))
+        .unwrap();
+
+        let err = check(&source_module(
+            r#"
+module types::byte_string_len_mismatch
+
+action bad() -> [u8; 3]
+where
+    return b"TEST"
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("type mismatch"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn cyclic_schema_type_dependencies_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::cyclic_schema
+
+struct A {
+    b: B
+}
+
+struct B {
+    a: A
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cyclic type dependency detected: A -> B -> A"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn lifecycle_capability_gates_reject_undeclared_kernel_effects() {
+        let create_err = check(&source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(amount: u64) -> Token
+where
+    return create Token { amount }
+"#,
+        ))
+        .unwrap_err();
+        assert!(create_err.message.contains("does not declare 'create' capability"), "unexpected error: {}", create_err.message);
+
+        let consume_err = check(&source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(token: Token)
+where
+    consume token
+"#,
+        ))
+        .unwrap_err();
+        assert!(consume_err.message.contains("does not declare 'consume' capability"), "unexpected error: {}", consume_err.message);
+
+        let read_err = check(&source_module(
+            r#"
+module test
+
+shared Config has store {
+    threshold: u64
+}
+
+lock main() -> bool {
+    return read_ref<Config>().threshold > 0
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(read_err.message.contains("does not declare 'read_ref' capability"), "unexpected error: {}", read_err.message);
+
+        let stdlib_err = check(&source_module(
+            r#"
+module test
+
+resource Coin has store, create, consume {
+    amount: u64
+}
+
+action move_coin(coin: Coin, to: Address) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, to) { amount }
+"#,
+        ))
+        .unwrap_err();
+        assert!(stdlib_err.message.contains("does not declare 'transfer' capability"), "unexpected error: {}", stdlib_err.message);
+    }
+
+    #[test]
+    fn strict_mode_rejects_imported_legacy_capabilities() {
+        let legacy = source_module(
+            r#"
+module dep
+
+resource Token has store, transfer {
+    amount: u64
+}
+"#,
+        );
+        let app = source_module(
+            r#"
+module app
+
+use dep::Token
+
+action main(token: Token, to: Address) -> Token
+where
+    return transfer token to to
+"#,
+        );
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(legacy).unwrap();
+        resolver.register_module(app.clone()).unwrap();
+
+        let err = check_with_resolver_and_primitive_strict(&app, &resolver, &app.name, true).unwrap_err();
+
+        assert!(err.message.contains("legacy capability 'transfer'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn vec_type_arguments_are_validated() {
+        let unknown = check(&source_module(
+            r#"
+module test
+
+struct Holder {
+    values: Vec<UnknownType>
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(unknown.message.contains("unknown type 'UnknownType'"), "unexpected error: {}", unknown.message);
+
+        let arity = check(&source_module(
+            r#"
+module test
+
+struct Holder {
+    values: Vec<u8, u16>
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(arity.message.contains("Vec<T> requires exactly one type argument"), "unexpected error: {}", arity.message);
+    }
+
+    #[test]
+    fn expression_branch_unreachable_code_is_rejected_by_typechecker() {
+        let err = check(&source_module(
+            r#"
+module types::expr_branch_unreachable
+
+enum Choice {
+    A,
+    B,
+}
+
+fn bad(choice: Choice) -> u64 {
+    match choice {
+        A => {
+            return 1
+            let x = 3
+        },
+        B => {
+            return 2
+        },
+    }
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("unreachable statement after guaranteed return"), "unexpected error: {}", err.message);
+        assert!(err.span.line > 0, "unreachable diagnostic should preserve a source span: {}", err.message);
+    }
+
+    #[test]
+    fn tail_match_expressions_are_valid_return_values() {
+        check(&source_module(
+            r#"
+module types::tail_match
+
+enum Choice {
+    A,
+    B,
+}
+
+fn pick(choice: Choice) -> u64 {
+    match choice {
+        A => {
+            1
+        },
+        B => {
+            2
+        },
+    }
+}
+
+lock pick_lock(witness choice: Choice) -> bool {
+    match choice {
+        A => {
+            true
+        },
+        B => {
+            false
+        },
+    }
+}
+"#,
+        ))
+        .expect("tail match expressions should satisfy function and lock return checks");
+    }
+
+    #[test]
+    fn match_requires_enum_scrutinee() {
+        let err = check(&source_module(
+            r#"
+module types::match_non_enum
+
+action bad(value: u64) -> u64
+where
+    return match value {
+        _ => {
+            0
+        },
+    }
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("enum scrutinee"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn qualified_identifier_must_resolve_to_value() {
+        let err = check(&source_module(
+            r#"
+module types::qualified_identifier
+
+struct Foo {
+    value: u64,
+}
+
+fn foo() -> Foo {
+    return Foo::CONST
+}
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("qualified identifier"), "unexpected error: {}", err.message);
+
+        check(&source_module(
+            r#"
+module types::qualified_zero_constructor
+
+action zero() -> Address
+where
+    return Address::zero
+"#,
+        ))
+        .expect("recognised qualified zero constructors should remain valid values");
+    }
+
+    #[test]
+    fn non_tail_linear_expression_statements_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::linear_expr_statement
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action bad() -> u64
+where
+    let token = create Token { amount: 1 }
+    token
+    destroy token
+    return 0
+"#,
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("linear expression result"), "unexpected error: {}", err.message);
+
+        check(&source_module(
+            r#"
+module types::linear_create_statement
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action ok(amount: u64) -> u64
+where
+    create Token { amount: amount }
+    return amount
+"#,
+        ))
+        .expect("explicit lifecycle create statements should remain valid");
+    }
+
+    #[test]
+    fn recursive_enum_payloads_are_rejected() {
+        let err = check(&source_module(
+            r#"
+module types::recursive_enum
+
+enum Node {
+    Leaf,
+    Branch(Node)
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cyclic type dependency detected: Node -> Node"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_cell_lifecycle_expressions() {
+        let err = check(&source_module(
+            r#"
+module types::const_lifecycle
+
+resource Token {
+    amount: u64
+}
+
+const BAD: u64 = create Token { amount: 1 }
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cell lifecycle expression is not allowed in const initializer"), "{}", err.message);
+    }
+
+    #[test]
+    fn branch_local_create_is_rejected_until_lifecycle_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::branch_create
+
+resource Token has store {
+    amount: u64
+}
+
+action mint(flag: bool) -> Token
+where
+    if flag {
+        return create Token { amount: 1 }
+    } else {
+        return create Token { amount: 2 }
+    }
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("branch-local lifecycle operation 'create'"), "{}", err.message);
+    }
+
+    #[test]
+    fn branch_local_consume_is_rejected_until_lifecycle_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::branch_consume
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(flag: bool, left: Token, right: Token) -> bool
+where
+    if flag {
+        consume left
+    } else {
+        consume right
+    }
+    return true
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("branch-local lifecycle operation 'consume'"), "{}", err.message);
+    }
+
+    #[test]
+    fn duplicate_lifecycle_binding_is_rejected_until_effects_are_cfg_aware() {
+        let err = check(&source_module(
+            r#"
+module types::duplicate_consume
+
+resource Token has store {
+    amount: u64
+}
+
+action burn(token: Token) -> bool
+where
+    consume token
+    consume token
+    return true
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("duplicate lifecycle binding 'input:token'"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_cell_backed_types() {
+        let err = check(&source_module(
+            r#"
+module types::const_cell_type
+
+resource Token {
+    amount: u64
+}
+
+const BAD: Token = 0
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("cannot have Cell-backed linear type"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_reject_computed_expressions() {
+        let err = check(&source_module(
+            r#"
+module types::const_computed
+
+const BAD: u64 = 1 + 2
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("computed expressions are not const-evaluable yet"), "{}", err.message);
+    }
+
+    #[test]
+    fn const_initializers_allow_supported_literals() {
+        check(&source_module(
+            r#"
+module types::const_literals
+
+const COUNT: u8 = 7
+const ENABLED: bool = true
+const TAG: [u8; 2] = b"OK"
+const SCRIPT: String = "worker"
+"#,
+        ))
+        .unwrap();
     }
 
     #[test]
@@ -5825,6 +8253,25 @@ where
     }
 
     #[test]
+    fn check_without_resolver_rejects_imports() {
+        let app = source_module(
+            r#"
+module app
+
+use cellscript::left::Token
+
+action main(token: Token) -> u64
+where
+    token.amount
+"#,
+        );
+
+        let err = check(&app).unwrap_err();
+
+        assert!(err.message.contains("resolver-aware type checking"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
     fn imported_linear_argument_is_marked_consumed_after_call() {
         let token = example_module("token.cell");
         let amm = example_module("amm_pool.cell");
@@ -5870,11 +8317,11 @@ where
             r#"
 module test
 
-resource A has store, transfer, destroy {
+resource A has store, transfer, destroy, consume {
     amount: u64
 }
 
-resource B has store, transfer, destroy {
+resource B has store, transfer, destroy, create {
     amount: bool
 }
 

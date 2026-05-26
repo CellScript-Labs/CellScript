@@ -54,7 +54,7 @@ fn cellc_top_level_accepts_primitive_strict_for_kernel_effect_capabilities() {
         r#"
 module test
 
-resource Token has store, consume, burn {
+resource Token has store, consume, burn, create, replace, relock, read_ref {
     amount: u64,
 }
 
@@ -87,7 +87,7 @@ fn cellc_top_level_primitive_strict_rejects_legacy_capabilities() {
         r#"
 module test
 
-resource Token has store, destroy {
+resource Token has store, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -111,7 +111,7 @@ where
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -129,6 +129,45 @@ where
     assert!(stderr.contains("CS0150"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("legacy capability 'transfer'"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("replace + relock"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
+fn cellc_verify_artifact_primitive_strict_rechecks_disk_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("legacy.cell");
+    let output = dir.path().join("legacy.s");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+resource Token has store, destroy, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action burn(token: Token)
+where
+    destroy token
+"#,
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("verify-artifact")
+        .arg(&output)
+        .arg("--primitive-strict")
+        .arg("0.15")
+        .output()
+        .unwrap();
+
+    assert!(!verify.status.success(), "strict verification unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("primitive mode source verification failed"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("CS0151"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("legacy capability 'destroy'"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
@@ -376,7 +415,7 @@ fn cellc_verify_artifact_enforces_policy_flags() {
     let source = r#"
 module test
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -508,8 +547,8 @@ fn cellc_compiles_bundled_examples_to_requested_outputs() {
 fn cellc_compiles_package_with_local_path_dependency() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -528,7 +567,7 @@ version = "0.1.0"
         r#"
 module dep::token
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 "#,
@@ -543,7 +582,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -618,8 +657,8 @@ where
 fn cellc_rejects_underdeclared_effects_from_path_dependency_calls() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -638,7 +677,7 @@ version = "0.1.0"
         r#"
 module dep::token
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -660,7 +699,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -712,8 +751,8 @@ where
 fn cellc_rejects_external_dependency_function_calls_until_linking_exists() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let dep_root = root.join("dep_pkg");
     let app_root = root.join("app_pkg");
+    let dep_root = app_root.join("deps").join("dep_pkg");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(app_root.join("src")).unwrap();
@@ -747,7 +786,7 @@ name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-dep_pkg = { path = "../dep_pkg" }
+dep_pkg = { path = "deps/dep_pkg" }
 "#,
     )
     .unwrap();
@@ -1180,7 +1219,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1266,7 +1305,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1314,7 +1353,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1384,12 +1423,12 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     owner: Address
 }
 
-receipt VestingGrant has store {
+receipt VestingGrant has store, create, consume, replace, burn, relock, read_ref {
     state: u8
     beneficiary: Address
     total_amount: u64
@@ -1540,7 +1579,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -1609,12 +1648,12 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
 
-action credit(ledger_before: Ledger, delta: u128) -> ledger_after: Ledger
+action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger
 where
     require ledger_after.owner == ledger_before.owner
     require ledger_after.balance == ledger_before.balance + delta
@@ -1664,7 +1703,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -1734,7 +1773,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource NFT {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
 }
@@ -1811,7 +1850,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u128,
     owner: Address,
 }
@@ -1862,11 +1901,11 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
-resource VestingReceipt has store {
+resource VestingReceipt has store, create, consume, replace, burn, relock, read_ref {
     amount: u64
     beneficiary: Address
     cliff_timepoint: u64
@@ -1940,18 +1979,18 @@ version = "0.1.0"
         r#"
 module demo::main
 
-resource Token has store {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     symbol: [u8; 8]
     amount: u64
 }
 
-receipt LPReceipt has store {
+receipt LPReceipt has store, create, consume, replace, burn, relock, read_ref {
     pool_id: Hash
     lp_amount: u64
     provider: Address
 }
 
-shared Pool has store {
+shared Pool has store, create, consume, replace, burn, relock, read_ref {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -2015,9 +2054,10 @@ fn cellc_check_reports_checked_pool_invariant_families_without_runtime_blockers(
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let amm_source = std::fs::read_to_string(manifest_dir.join("examples").join("amm_pool.cell"))
-        .unwrap()
-        .replace("use cellscript::fungible_token::Token", "resource Token has store {\n    symbol: [u8; 8]\n    amount: u64\n}");
+    let amm_source = std::fs::read_to_string(manifest_dir.join("examples").join("amm_pool.cell")).unwrap().replace(
+        "use cellscript::fungible_token::Token",
+        "resource Token has store, create, consume, replace, burn, relock, read_ref {\n    symbol: [u8; 8]\n    amount: u64\n}",
+    );
 
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -2092,7 +2132,7 @@ production = true
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2142,7 +2182,7 @@ deny_ckb_runtime = true
         r#"
 module demo::main
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2418,7 +2458,7 @@ where
 // cellscript-test: expect-error: create-output:Fingerprint
 module demo::tests::policy
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2482,7 +2522,7 @@ where
 // cellscript-test: expect-no-verifier-obligation: not-present
 module demo::tests::metadata
 
-resource Fingerprint {
+resource Fingerprint has store, create, consume, replace, burn, relock, read_ref {
     digest: Hash,
 }
 
@@ -2800,6 +2840,7 @@ where
     assert!(docs.contains("## Module `demo::main`"));
     assert!(docs.contains("### action `ping`"));
     assert!(docs.contains("## Lowering Audit Report"));
+    assert!(docs.contains("### Invariant Coverage"));
     assert!(docs.contains("### Verifier Obligations"));
 }
 
@@ -2942,7 +2983,7 @@ fn cellc_explain_proof_reports_covenant_proof_plan() {
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -2989,7 +3030,7 @@ fn cellc_explain_proof_human_reports_macro_provenance() {
         r#"
 module test
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3027,7 +3068,7 @@ invariant token_conservation {
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3049,6 +3090,9 @@ where
     assert_eq!(summary["status"], "ok");
     assert!(summary["proof_plan_summary"]["runtime_required_count"].as_u64().unwrap() > 0);
     assert!(summary["proof_plan_summary"]["metadata_only_gap_count"].as_u64().unwrap() > 0);
+    assert_eq!(summary["proof_plan_summary"]["invariant_action_match_count"].as_u64().unwrap(), 0);
+    assert_eq!(summary["proof_plan_summary"]["invariant_unmatched_action_coverage_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["has_unmatched_invariant_action_coverage"], true);
     assert_eq!(summary["proof_plan_summary"]["has_runtime_required_gaps"], true);
     assert_eq!(declared["category"], "declared-invariant");
     assert_eq!(declared["trigger"], "type_group");
@@ -3060,6 +3104,57 @@ where
         .unwrap()
         .iter()
         .any(|check| check == "assert_conserved:Token.amount=metadata-only"));
+}
+
+#[test]
+fn cellc_explain_proof_reports_invariant_action_coverage_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("token.cell");
+    std::fs::write(
+        &input,
+        r#"
+module test
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    amount: u64,
+}
+
+action pass(token: Token) -> Token
+where
+    let amount = token.amount
+    consume token
+    let out = create Token { amount: amount }
+    return out
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["proof_plan_summary"]["invariant_action_match_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["invariant_unmatched_action_coverage_count"].as_u64().unwrap(), 0);
+    assert_eq!(summary["proof_plan_summary"]["has_unmatched_invariant_action_coverage"], false);
+
+    let aggregate = summary["proof_plan"]
+        .as_array()
+        .expect("proof_plan array")
+        .iter()
+        .find(|plan| plan["origin"] == "invariant:token_conservation#aggregate:0")
+        .expect("aggregate invariant ProofPlan record");
+    assert!(aggregate["coverage"].as_array().unwrap().iter().any(|coverage| {
+        coverage.as_str().is_some_and(|coverage| {
+            coverage == "invariant_coverage:matched-action-obligation:action:pass:resource-conservation:Token=checked-runtime"
+        })
+    }));
 }
 
 #[test]
@@ -3078,7 +3173,7 @@ invariant lock_scans_transaction {
     assert_sum(outputs<Token>.amount) <= assert_sum(inputs<Token>.amount)
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3148,10 +3243,11 @@ invariant token_conservation {
     trigger: type_group
     scope: group
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
     assert_invariant(true, "token amount is conserved")
 }
 
-resource Token {
+resource Token has store, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3170,6 +3266,72 @@ where
     assert!(stderr.contains("runtime-required ProofPlan gaps"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("invariant:token_conservation"), "unexpected stderr: {}", stderr);
     assert!(stderr.contains("gap:metadata-only"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("unmatched invariant action coverage"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
+fn cellc_check_denies_checked_partial_proof_plan_gap() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
+    state: u8
+    note: String
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket, note: String) -> output: Ticket
+    transition ticket.state: Created -> output.state: Active
+where
+    consume ticket
+    create output = Ticket {
+        state: Ticket::Active,
+        note: note
+    }
+"#,
+    )
+    .unwrap();
+
+    let explain = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(root).arg("--json").output().unwrap();
+    assert!(explain.status.success(), "stderr: {}", String::from_utf8_lossy(&explain.stderr));
+    let summary: serde_json::Value = serde_json::from_slice(&explain.stdout).unwrap();
+    assert_eq!(summary["proof_plan_summary"]["checked_partial_count"].as_u64().unwrap(), 1);
+    assert_eq!(summary["proof_plan_summary"]["has_partial_gaps"], true);
+    assert_eq!(summary["proof_plan_summary"]["has_blocking_diagnostics"], true);
+    let partial = summary["proof_plan"]
+        .as_array()
+        .expect("proof_plan array")
+        .iter()
+        .find(|plan| plan["feature"] == "Ticket.state")
+        .expect("state transition ProofPlan record");
+    assert_eq!(partial["codegen_coverage_status"], "gap:checked-partial");
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("partial verifier obligations"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("partial ProofPlan gaps"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("Ticket.state"), "unexpected stderr: {}", stderr);
+    assert!(stderr.contains("gap:checked-partial"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
@@ -3301,11 +3463,64 @@ out_dir = "artifacts"
 }
 
 #[test]
+fn cellc_add_git_requires_full_rev_and_records_pin() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let missing_rev = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("add")
+        .arg("--git")
+        .arg("https://example.com/math.git")
+        .arg("math")
+        .output()
+        .unwrap();
+    assert!(!missing_rev.status.success(), "unexpected success: {}", String::from_utf8_lossy(&missing_rev.stdout));
+    assert!(
+        String::from_utf8_lossy(&missing_rev.stderr).contains("must specify --rev"),
+        "stderr: {}",
+        String::from_utf8_lossy(&missing_rev.stderr)
+    );
+
+    let pinned_rev = "0123456789abcdef0123456789abcdef01234567";
+    let add_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("add")
+        .arg("--git")
+        .arg("https://example.com/math.git")
+        .arg("--rev")
+        .arg(pinned_rev)
+        .arg("--json")
+        .arg("math")
+        .output()
+        .unwrap();
+    assert!(add_output.status.success(), "stderr: {}", String::from_utf8_lossy(&add_output.stderr));
+
+    let add_summary: serde_json::Value = serde_json::from_slice(&add_output.stdout).unwrap();
+    assert_eq!(add_summary["dependency"]["git"], "https://example.com/math.git");
+    assert_eq!(add_summary["dependency"]["rev"], pinned_rev);
+
+    let manifest: toml::Value = std::fs::read_to_string(root.join("Cell.toml")).unwrap().parse().unwrap();
+    assert_eq!(manifest["dependencies"]["math"]["git"].as_str().unwrap(), "https://example.com/math.git");
+    assert_eq!(manifest["dependencies"]["math"]["rev"].as_str().unwrap(), pinned_rev);
+}
+
+#[test]
 fn cellc_install_path_updates_lockfile_and_remove_prunes_it() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let dep_root = root.join("math");
-    let util_root = root.join("util");
+    let util_root = dep_root.join("deps").join("util");
 
     std::fs::create_dir_all(dep_root.join("src")).unwrap();
     std::fs::create_dir_all(util_root.join("src")).unwrap();
@@ -3327,7 +3542,7 @@ version = "0.2.0"
 
 [dependencies.util]
 version = "0.1.0"
-path = "../util"
+path = "deps/util"
 "#,
     )
     .unwrap();
@@ -3395,11 +3610,11 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64
 }
 
-resource Token has store, transfer, destroy {
+resource Token has store, transfer, destroy, create, consume, replace, burn, relock, read_ref {
     amount: u64
 }
 
@@ -3566,7 +3781,7 @@ target_profile = "ckb"
         r#"
 module demo::main
 
-resource Token has store, transfer {
+resource Token has store, transfer, create, consume, replace, burn, relock, read_ref {
     amount: u64,
 }
 
@@ -3727,7 +3942,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Ledger has store {
+shared Ledger has store, create, consume, replace, burn, relock, read_ref {
     balance: u64,
 }
 
@@ -4067,7 +4282,7 @@ version = "0.1.0"
         r#"
 module demo::main
 
-shared Config {
+shared Config has store, create, consume, replace, burn, relock, read_ref {
     threshold: u64,
 }
 

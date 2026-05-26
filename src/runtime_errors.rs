@@ -284,6 +284,14 @@ mod tests {
     }
 
     #[test]
+    fn runtime_error_docs_explain_ckb_code_overlap_channels() {
+        let docs = include_str!("../docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md");
+        for phrase in ["CKB syscall", "return codes", "RISC-V exception causes", "different", "channels", "VM trap"] {
+            assert!(docs.contains(phrase), "runtime error docs must explain overlap channel: {phrase}");
+        }
+    }
+
+    #[test]
     fn codegen_does_not_emit_unregistered_numeric_fail_literals() {
         let codegen = include_str!("codegen/mod.rs");
         for code in 1..=64 {

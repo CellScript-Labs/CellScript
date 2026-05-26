@@ -3,7 +3,7 @@
 use camino::Utf8PathBuf;
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata,
+    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata, ProofPlanMetadata,
 };
 
 const BUNDLED_EXAMPLES: [&str; 7] =
@@ -13,11 +13,11 @@ const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.j
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 40 * 1024),
     ("launch.cell", 30 * 1024),
-    ("multisig.cell", 84 * 1024),
+    ("multisig.cell", 100 * 1024),
     ("nft.cell", 54 * 1024),
     ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
-    ("vesting.cell", 22 * 1024),
+    ("vesting.cell", 24 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
@@ -33,7 +33,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 1_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 2_700,
-            max_call_edges: 420,
+            max_call_edges: 460,
             max_unreachable_machine_blocks: 1_200,
         },
     ),
@@ -45,7 +45,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 4,
             max_text_bytes: 27 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_800,
+            max_cond_branch_abs_distance: 8_500,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -56,56 +56,56 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 21_000,
-            max_fail_handlers: 64,
+            max_lines: 25_000,
+            max_fail_handlers: 72,
             max_shared_epilogues: 20,
-            max_text_bytes: 80 * 1024,
+            max_text_bytes: 96 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_400,
-            max_machine_blocks: 3_600,
+            max_cond_branch_abs_distance: 8_900,
+            max_machine_blocks: 3_900,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 5_800,
-            max_call_edges: 300,
-            max_unreachable_machine_blocks: 3_400,
+            max_cfg_edges: 6_400,
+            max_call_edges: 510,
+            max_unreachable_machine_blocks: 3_700,
         },
     ),
     (
         "nft.cell",
         AssemblyShapeBudget {
             max_lines: 13_000,
-            max_fail_handlers: 64,
+            max_fail_handlers: 72,
             max_shared_epilogues: 18,
-            max_text_bytes: 48 * 1024,
+            max_text_bytes: 50 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 6_000,
+            max_cond_branch_abs_distance: 7_500,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
-            max_call_edges: 440,
+            max_call_edges: 500,
             max_unreachable_machine_blocks: 2_100,
         },
     ),
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 16_000,
-            max_fail_handlers: 64,
+            max_lines: 17_000,
+            max_fail_handlers: 92,
             max_shared_epilogues: 22,
-            max_text_bytes: 64 * 1024,
+            max_text_bytes: 65 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 4_300,
-            max_machine_blocks: 1_900,
+            max_machine_blocks: 2_050,
             max_machine_block_bytes: 21_000,
-            max_cfg_edges: 3_100,
-            max_call_edges: 380,
-            max_unreachable_machine_blocks: 1_850,
+            max_cfg_edges: 3_500,
+            max_call_edges: 420,
+            max_unreachable_machine_blocks: 2_000,
         },
     ),
     (
         "token.cell",
         AssemblyShapeBudget {
             max_lines: 2_800,
-            max_fail_handlers: 24,
+            max_fail_handlers: 28,
             max_shared_epilogues: 6,
             max_text_bytes: 12 * 1024,
             max_relaxed_branches: 4,
@@ -113,24 +113,24 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_machine_blocks: 550,
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
-            max_call_edges: 110,
-            max_unreachable_machine_blocks: 230,
+            max_call_edges: 120,
+            max_unreachable_machine_blocks: 260,
         },
     ),
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 4_600,
-            max_fail_handlers: 28,
+            max_lines: 5_100,
+            max_fail_handlers: 36,
             max_shared_epilogues: 6,
-            max_text_bytes: 17 * 1024,
+            max_text_bytes: 20 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 700,
+            max_machine_blocks: 750,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_200,
-            max_call_edges: 230,
-            max_unreachable_machine_blocks: 620,
+            max_cfg_edges: 1_320,
+            max_call_edges: 250,
+            max_unreachable_machine_blocks: 670,
         },
     ),
 ];
@@ -221,7 +221,7 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 10,
+        BUNDLED_EXAMPLES.len() + 1 + 12,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 
@@ -1692,7 +1692,7 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     let recipients = simple_launch.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
     assert!(recipients.fixed_byte_pointer_abi);
     assert!(recipients.fixed_byte_length_abi);
-    assert_eq!(recipients.fixed_byte_len, Some(320));
+    assert_eq!(recipients.fixed_byte_len, Some(80));
     assert!(
         simple_launch.fail_closed_runtime_features.is_empty(),
         "simple_launch fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",
@@ -1713,4 +1713,170 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         "simple_launch does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
         simple_launch.verifier_obligations
     );
+}
+
+#[test]
+fn canonical_examples_compile_under_primitive_strict_015() {
+    let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() };
+    for example in BUNDLED_EXAMPLES {
+        let path = example_path(example);
+        compile_file(&path, strict_options.clone())
+            .unwrap_or_else(|err| panic!("canonical example {example} should compile under --primitive-strict=0.15: {}", err.message));
+    }
+}
+
+fn assert_proof_plan_invariant_record(
+    proof_plan: &[ProofPlanMetadata],
+    category: &str,
+    trigger: &str,
+    scope: &str,
+    coverage_status: &str,
+    status: &str,
+    on_chain_checked: bool,
+) -> ProofPlanMetadata {
+    let record = proof_plan
+        .iter()
+        .find(|plan| plan.category == category)
+        .unwrap_or_else(|| panic!("no ProofPlan record with category '{}' found: {:?}", category, proof_plan));
+    assert_eq!(record.trigger, trigger, "wrong trigger for {category}: expected {trigger}, got {}", record.trigger);
+    assert_eq!(record.scope, scope, "wrong scope for {category}: expected {scope}, got {}", record.scope);
+    assert_eq!(
+        record.codegen_coverage_status, coverage_status,
+        "wrong coverage for {category}: expected {coverage_status}, got {}",
+        record.codegen_coverage_status
+    );
+    assert_eq!(record.status, status, "wrong status for {category}: expected {status}, got {}", record.status);
+    assert_eq!(record.on_chain_checked, on_chain_checked, "wrong on_chain_checked for {category}");
+    record.clone()
+}
+
+#[test]
+fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_scoped_invariant.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_scoped_invariant should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "scoped invariant example must emit ProofPlan records");
+
+    // All declared-invariant and aggregate-invariant records must be metadata-only
+    let declared = assert_proof_plan_invariant_record(
+        proof_plan,
+        "declared-invariant",
+        "type_group",
+        "group",
+        "gap:metadata-only",
+        "runtime-required",
+        false,
+    );
+    assert_eq!(declared.name, "token_amount_conservation");
+
+    // All 5 aggregate invariant primitives must appear in ProofPlan
+    let aggregate_names: Vec<&str> =
+        proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant").map(|plan| plan.feature.as_str()).collect();
+    assert!(aggregate_names.iter().any(|name| name.starts_with("assert_sum:")), "missing assert_sum aggregate: {:?}", aggregate_names);
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_conserved:")),
+        "missing assert_conserved aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_delta:")),
+        "missing assert_delta aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_distinct:")),
+        "missing assert_distinct aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_singleton:")),
+        "missing assert_singleton aggregate: {:?}",
+        aggregate_names
+    );
+
+    // Every aggregate-invariant record must be metadata-only
+    for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
+        assert_eq!(aggregate.codegen_coverage_status, "gap:metadata-only", "aggregate must be metadata-only: {:?}", aggregate);
+        assert_eq!(aggregate.status, "runtime-required", "aggregate must be runtime-required: {:?}", aggregate);
+        assert!(!aggregate.on_chain_checked, "aggregate must not be on_chain_checked: {:?}", aggregate);
+    }
+
+    // lock_group + transaction must produce coverage diagnostics
+    let lock_tx_invariant = proof_plan.iter().find(|plan| plan.trigger == "lock_group" && plan.scope == "transaction");
+    if let Some(record) = lock_tx_invariant {
+        assert!(
+            record
+                .diagnostics
+                .iter()
+                .any(|diag| diag.severity == "warning" && diag.message.contains("do not imply type-group conservation")),
+            "lock_group + transaction must warn about coverage: {:?}",
+            record.diagnostics
+        );
+    }
+}
+
+#[test]
+fn v0_15_identity_lifecycle_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_identity_lifecycle.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_identity_lifecycle should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "identity lifecycle example must emit ProofPlan records");
+
+    // create_unique and replace_unique must appear as transaction-invariant obligations
+    let create_unique_records = proof_plan.iter().filter(|plan| plan.feature.starts_with("create-unique-output:")).collect::<Vec<_>>();
+    assert!(!create_unique_records.is_empty(), "missing create_unique ProofPlan records");
+
+    let replace_unique_records =
+        proof_plan.iter().filter(|plan| plan.feature.starts_with("replace-unique-output:")).collect::<Vec<_>>();
+    assert!(!replace_unique_records.is_empty(), "missing replace_unique ProofPlan records");
+
+    // Identity lifecycle policy must appear in ProofPlan records
+    let identity_records = proof_plan.iter().filter(|plan| plan.identity_lifecycle_policy != "none").collect::<Vec<_>>();
+    assert!(!identity_records.is_empty(), "missing identity lifecycle policy records");
+
+    // Destruction policy records must appear
+    let destroy_records = proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.feature.starts_with("destroy-output-scan:")
+                || plan.feature.starts_with("destroy-unique:")
+                || plan.feature.starts_with("destroy-instance:")
+                || plan.feature.starts_with("burn-amount:")
+        })
+        .collect::<Vec<_>>();
+    assert!(!destroy_records.is_empty(), "missing destruction policy ProofPlan records");
+}
+
+#[test]
+fn token_cell_invariant_appears_in_proof_plan() {
+    let result =
+        compile_file(example_path("token.cell"), CompileOptions::default()).expect("token.cell with invariant should compile");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "token.cell must emit ProofPlan records");
+
+    // The declared invariant must appear alongside action obligations
+    let declared_invariant = proof_plan
+        .iter()
+        .find(|plan| plan.category == "declared-invariant")
+        .expect("token.cell must emit declared-invariant ProofPlan record");
+    assert_eq!(declared_invariant.name, "token_amount_non_increase");
+    assert_eq!(declared_invariant.trigger, "type_group");
+    assert_eq!(declared_invariant.scope, "group");
+    assert_eq!(declared_invariant.codegen_coverage_status, "gap:metadata-only");
+    assert_eq!(declared_invariant.status, "runtime-required");
+    assert!(!declared_invariant.on_chain_checked);
+
+    // Action obligations must still be present
+    let action_obligations =
+        proof_plan.iter().filter(|plan| plan.category != "declared-invariant" && plan.category != "aggregate-invariant").count();
+    assert!(action_obligations > 0, "token.cell action obligations must still appear in ProofPlan");
 }

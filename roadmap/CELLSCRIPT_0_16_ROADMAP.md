@@ -1,6 +1,6 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Implemented for the scoped `cellscript-0.16` release
+**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release
 **Scope**: Metadata Semantics, Descriptive Standard Compatibility, and Production Tooling Skeleton
 **Dependencies**: v0.13, v0.14, and v0.15 complete
 
@@ -8,7 +8,7 @@
 
 ## Implementation Status
 
-The `cellscript-0.16` branch implements the scoped metadata-assurance release.
+The `nightly-0.16` branch implements the scoped metadata-assurance release.
 It does not claim full production transaction solving, CKB VM compatibility
 execution, stable protocol stdlib implementations, or formal verification.
 Those items are explicitly deferred to 0.17.

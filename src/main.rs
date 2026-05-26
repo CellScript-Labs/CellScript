@@ -13,6 +13,9 @@ use cellscript::{
 #[command(name = "cellc")]
 #[command(about = "CellScript compiler for CKB blockchain")]
 #[command(version = cellscript::VERSION)]
+#[command(
+    after_help = "Commands: build, test, doc, fmt, init, new, add, remove, clean, repl, check, metadata, constraints, abi, scheduler-plan, ckb-hash, explain, explain-profile, explain-proof, explain-generics, opt-report, action build, entry-witness, verify-artifact, run, publish, install, update, info, login"
+)]
 struct Cli {
     #[arg(value_name = "INPUT")]
     input: Option<String>,

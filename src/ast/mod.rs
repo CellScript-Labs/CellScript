@@ -366,11 +366,11 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Integer(u64),
-    Bool(bool),
-    String(String),
-    ByteString(Vec<u8>),
-    Identifier(String),
+    Integer(u64, Span),
+    Bool(bool, Span),
+    String(String, Span),
+    ByteString(Vec<u8>, Span),
+    Identifier(String, Span),
     Assign(AssignExpr),
     Binary(BinaryExpr),
     Unary(UnaryExpr),
@@ -390,9 +390,9 @@ pub enum Expr {
     Require(RequireExpr),
     RequireBlock(RequireBlockExpr),
     Preserve(PreserveExpr),
-    Block(Vec<Stmt>),
-    Tuple(Vec<Expr>),
-    Array(Vec<Expr>),
+    Block(Vec<Stmt>, Span),
+    Tuple(Vec<Expr>, Span),
+    Array(Vec<Expr>, Span),
     If(IfExpr),
     Cast(CastExpr),
     Range(RangeExpr),
@@ -405,11 +405,14 @@ impl Expr {
     /// Return the source span of this expression.
     pub fn span(&self) -> Span {
         match self {
-            Expr::Integer(_) => Span::default(), // primitives carry no span
-            Expr::Bool(_) => Span::default(),
-            Expr::String(_) => Span::default(),
-            Expr::ByteString(_) => Span::default(),
-            Expr::Identifier(_) => Span::default(),
+            Expr::Integer(_, span)
+            | Expr::Bool(_, span)
+            | Expr::String(_, span)
+            | Expr::ByteString(_, span)
+            | Expr::Identifier(_, span)
+            | Expr::Block(_, span)
+            | Expr::Tuple(_, span)
+            | Expr::Array(_, span) => *span,
             Expr::Assign(e) => e.span,
             Expr::Binary(e) => e.span,
             Expr::Unary(e) => e.span,
@@ -429,9 +432,6 @@ impl Expr {
             Expr::Require(e) => e.span,
             Expr::RequireBlock(e) => e.span,
             Expr::Preserve(e) => e.span,
-            Expr::Block(_) => Span::default(),
-            Expr::Tuple(_) => Span::default(),
-            Expr::Array(_) => Span::default(),
             Expr::If(e) => e.span,
             Expr::Cast(e) => e.span,
             Expr::Range(e) => e.span,

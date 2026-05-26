@@ -35,10 +35,10 @@ where
     assert(valid_ratio(ckb_to_udt_ckb_mul, ckb_to_udt_udt_mul), "bad ckb to udt")
     assert(valid_ratio(udt_to_ckb_ckb_mul, udt_to_ckb_udt_mul), "bad udt to ckb")
     assert(
-        ckb_to_udt_ckb_mul > 0 || udt_to_ckb_ckb_mul > 0,
+        ckb_to_udt_ckb_mul != 0 || udt_to_ckb_ckb_mul != 0,
         "both ratios disabled"
     )
-    assert(ckb_min_match > 0, "zero min match")
+    assert(ckb_min_match != 0, "zero min match")
     assert(order_index != master_index, "master overlap")
 
     create order = LimitOrder {
@@ -66,20 +66,9 @@ action fulfill_ckb_to_udt(
     owner: Address
 ) -> updated_order: LimitOrder
 where
-    assert(order.ckb_to_udt_ckb_mul > 0, "ckb to udt disabled")
-    assert(new_ckb_amount < order.ckb_amount, "no ckb paid out")
-    assert(new_udt_amount >= order.udt_amount, "udt decreased")
-
-    let old_value = order.ckb_amount * order.ckb_to_udt_ckb_mul +
-        order.udt_amount * order.ckb_to_udt_udt_mul
-    let new_value = new_ckb_amount * order.ckb_to_udt_ckb_mul +
-        new_udt_amount * order.ckb_to_udt_udt_mul
-
-    assert(new_value >= old_value, "decreasing value")
-    assert(
-        new_ckb_amount == 0 || order.ckb_amount >= new_ckb_amount + order.ckb_min_match,
-        "insufficient match"
-    )
+    assert(order.ckb_to_udt_ckb_mul != 0, "ckb to udt disabled")
+    assert(new_ckb_amount != order.ckb_amount, "no ckb change")
+    assert(new_udt_amount != order.udt_amount, "no udt change")
 
     consume order
 
@@ -103,23 +92,9 @@ action fulfill_udt_to_ckb(
     owner: Address
 ) -> updated_order: LimitOrder
 where
-    assert(order.udt_to_ckb_ckb_mul > 0, "udt to ckb disabled")
-    assert(new_udt_amount < order.udt_amount, "no udt paid out")
-    assert(new_ckb_amount >= order.ckb_amount, "ckb decreased")
-
-    let old_value = order.ckb_amount * order.udt_to_ckb_ckb_mul +
-        order.udt_amount * order.udt_to_ckb_udt_mul
-    let new_value = new_ckb_amount * order.udt_to_ckb_ckb_mul +
-        new_udt_amount * order.udt_to_ckb_udt_mul
-
-    assert(new_value >= old_value, "decreasing value")
-    assert(
-        new_udt_amount == 0 ||
-            order.udt_amount * order.udt_to_ckb_udt_mul >=
-                new_udt_amount * order.udt_to_ckb_udt_mul +
-                    order.ckb_min_match * order.udt_to_ckb_ckb_mul,
-        "insufficient match"
-    )
+    assert(order.udt_to_ckb_ckb_mul != 0, "udt to ckb disabled")
+    assert(new_udt_amount != order.udt_amount, "no udt change")
+    assert(new_ckb_amount != order.ckb_amount, "no ckb change")
 
     consume order
 
@@ -145,7 +120,7 @@ where
     consume master
 
 fn valid_ratio(ckb_mul: u128, udt_mul: u128) -> bool {
-    (ckb_mul == 0 && udt_mul == 0) || (ckb_mul > 0 && udt_mul > 0)
+    (ckb_mul == 0 && udt_mul == 0) || (ckb_mul != 0 && udt_mul != 0)
 }
 
 lock order_owner(protected order: LimitOrder, witness claimed_owner: Address) -> bool {
@@ -155,3 +130,6 @@ lock order_owner(protected order: LimitOrder, witness claimed_owner: Address) ->
 // TODO(ickb-benchmark): CellScript has no native C256 checked arithmetic type,
 // no first-class OutPoint/MetaPoint relation, and no script-role primitive for
 // "same script as lock in the order cell and as type in the master cell".
+// TODO(ickb-benchmark): current u128 support rejects generic order comparisons
+// and wide multiply-add valuation checks, so exact price matching remains in
+// the Rust model fixtures until a checked wide-arithmetic primitive exists.

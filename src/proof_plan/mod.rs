@@ -23,6 +23,13 @@ pub struct ProofPlanDiagnosticMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProofPlanEvidenceMetadata {
+    pub layer: String,
+    pub id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofPlanMetadata {
     pub name: String,
     pub origin: String,
@@ -47,6 +54,8 @@ pub struct ProofPlanMetadata {
     pub on_chain_checked: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub on_chain_checked_obligations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executable_evidence: Vec<ProofPlanEvidenceMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builder_assumptions: Vec<String>,
     pub codegen_coverage_status: String,
@@ -132,6 +141,87 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant) -> Vec<ProofPlanMetadata
     plans
 }
 
+pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
+    let action_plans = proof_plan.iter().filter(|plan| plan.origin.starts_with("action:")).cloned().collect::<Vec<_>>();
+    let checked_action_plans = action_plans.iter().filter(|plan| plan.on_chain_checked).cloned().collect::<Vec<_>>();
+
+    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "aggregate-invariant") {
+        let Some(query) = aggregate_coverage_query(&plan.feature) else {
+            continue;
+        };
+        let matches = matching_action_coverage(&query, &checked_action_plans);
+        let matched_origins = matching_action_origins(&query, &checked_action_plans);
+        let related_origins = related_action_origins(&query, &action_plans);
+        let unmatched_related_origins =
+            related_origins.iter().filter(|origin| !matched_origins.contains(*origin)).cloned().collect::<Vec<_>>();
+        if matches.is_empty() {
+            plan.builder_assumptions
+                .push(format!("declared(no_checked_action_obligation_matches:{}.{})", query.type_name, query.field));
+            plan.diagnostics.push(ProofPlanDiagnosticMetadata {
+                severity: "warning".to_string(),
+                message: "aggregate invariant has no matching checked action obligation; it remains runtime-required until executable invariant lowering or action coverage closes it".to_string(),
+            });
+        } else {
+            plan.coverage.extend(matches.iter().map(|label| format!("invariant_coverage:{}", label)));
+            plan.on_chain_checked_obligations.extend(matches);
+            plan.builder_assumptions
+                .push(format!("declared(matched_checked_action_obligation_count:{})", plan.on_chain_checked_obligations.len()));
+            plan.builder_assumptions.push("declared(action_coverage_evidence_is_existential_not_exhaustive)".to_string());
+            if !unmatched_related_origins.is_empty() {
+                plan.builder_assumptions.push(format!(
+                    "declared(unmatched_related_action_obligation_count:{}:{})",
+                    unmatched_related_origins.len(),
+                    unmatched_related_origins.join(",")
+                ));
+                plan.diagnostics.push(ProofPlanDiagnosticMetadata {
+                    severity: "warning".to_string(),
+                    message:
+                        "aggregate invariant has matching action evidence, but at least one related action origin lacks a matching checked obligation"
+                            .to_string(),
+                });
+            }
+        }
+        dedup(&mut plan.coverage);
+        dedup(&mut plan.on_chain_checked_obligations);
+        dedup(&mut plan.builder_assumptions);
+    }
+
+    let aggregate_summaries = proof_plan
+        .iter()
+        .filter(|plan| plan.category == "aggregate-invariant")
+        .filter_map(|plan| {
+            let (parent, _) = plan.origin.split_once("#aggregate:")?;
+            let matched =
+                plan.coverage.iter().filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:")).count();
+            Some((parent.to_string(), matched))
+        })
+        .collect::<Vec<_>>();
+
+    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "declared-invariant") {
+        let mut total = 0usize;
+        let mut matched = 0usize;
+        for (parent, count) in &aggregate_summaries {
+            if parent == &plan.origin {
+                total += 1;
+                matched += count.min(&1);
+            }
+        }
+        if total == 0 {
+            continue;
+        }
+        plan.coverage.push(format!("invariant_coverage:aggregate_action_evidence_matches={}/{}", matched, total));
+        if matched == 0 {
+            plan.builder_assumptions.push("declared(no_aggregate_action_evidence_matches)".to_string());
+        } else if matched < total {
+            plan.builder_assumptions.push(format!("declared(partial_aggregate_action_evidence:{}/{})", matched, total));
+        } else {
+            plan.builder_assumptions.push(format!("declared(all_aggregate_action_evidence_present:{})", total));
+        }
+        dedup(&mut plan.coverage);
+        dedup(&mut plan.builder_assumptions);
+    }
+}
+
 fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
@@ -200,6 +290,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
+        executable_evidence: Vec::new(),
         builder_assumptions,
         codegen_coverage_status: "gap:metadata-only".to_string(),
         status: "runtime-required".to_string(),
@@ -267,6 +358,7 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
+        executable_evidence: Vec::new(),
         builder_assumptions,
         codegen_coverage_status: "gap:metadata-only".to_string(),
         status: "runtime-required".to_string(),
@@ -297,6 +389,9 @@ fn plan_from_obligation(
     let input_output_relation_checks = input_output_relation_checks(obligation, pool_primitives);
     let on_chain_checked_obligations =
         if on_chain_checked { checked_obligation_labels(obligation, &input_output_relation_checks) } else { Vec::new() };
+    let executable_evidence = executable_evidence_for_obligation(obligation, on_chain_checked, &input_output_relation_checks);
+    let codegen_coverage_status =
+        codegen_coverage_status(&obligation.status, on_chain_checked, !executable_evidence.is_empty()).to_string();
     let builder_assumptions = builder_assumptions(obligation, &trigger, &scope, on_chain_checked);
     let diagnostics = diagnostics_for_plan(&trigger, &scope, obligation, &builder_assumptions);
 
@@ -318,11 +413,85 @@ fn plan_from_obligation(
         lock_args_fields: lock_args_fields.to_vec(),
         on_chain_checked,
         on_chain_checked_obligations,
+        executable_evidence,
         builder_assumptions,
-        codegen_coverage_status: codegen_coverage_status(&obligation.status, on_chain_checked).to_string(),
+        codegen_coverage_status,
         status: obligation.status.clone(),
         detail: obligation.detail.clone(),
         diagnostics,
+    }
+}
+
+fn executable_evidence_for_obligation(
+    obligation: &VerifierObligationMetadata,
+    on_chain_checked: bool,
+    input_output_relation_checks: &[String],
+) -> Vec<ProofPlanEvidenceMetadata> {
+    if !on_chain_checked {
+        return Vec::new();
+    }
+    let mut concrete_checks = checked_runtime_subconditions(&obligation.detail);
+    for relation in input_output_relation_checks {
+        if relation.contains("=runtime-required") || relation.contains("=metadata-only") {
+            continue;
+        }
+        concrete_checks.push(relation.clone());
+    }
+    dedup(&mut concrete_checks);
+    if concrete_checks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut evidence = vec![
+        ProofPlanEvidenceMetadata {
+            layer: "ir".to_string(),
+            id: format!("ir-obligation:{}:{}", obligation.category, obligation.feature),
+            status: obligation.status.clone(),
+        },
+        ProofPlanEvidenceMetadata {
+            layer: "codegen".to_string(),
+            id: codegen_evidence_id(obligation),
+            status: codegen_coverage_status(&obligation.status, true, true).to_string(),
+        },
+    ];
+    for relation in concrete_checks {
+        evidence.push(ProofPlanEvidenceMetadata {
+            layer: "runtime".to_string(),
+            id: format!("runtime-relation-check:{relation}"),
+            status: "checked-runtime".to_string(),
+        });
+    }
+    evidence
+}
+
+fn codegen_evidence_id(obligation: &VerifierObligationMetadata) -> String {
+    if obligation.feature.starts_with("resource-conservation:") {
+        "codegen:resource-conservation-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-output:") {
+        "codegen:create-output-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("replace-unique-output:") {
+        "codegen:unique-output-runtime-check".to_string()
+    } else if obligation.feature.starts_with("create-unique-identity:") || obligation.feature.starts_with("replace-unique-identity:") {
+        "codegen:unique-identity-runtime-check".to_string()
+    } else if obligation.feature.starts_with("consume-input:")
+        || obligation.feature.starts_with("transfer-input:")
+        || obligation.feature.starts_with("destroy-input:")
+        || obligation.feature.starts_with("claim-input:")
+        || obligation.feature.starts_with("settle-input:")
+        || obligation.feature.starts_with("replace-input:")
+        || obligation.feature.starts_with("replace-unique-input:")
+    {
+        "codegen:input-lifecycle-runtime-check".to_string()
+    } else if obligation.feature.starts_with("destroy-output-scan:") {
+        "codegen:destroy-output-scan-runtime-check".to_string()
+    } else if obligation.feature.starts_with("read-ref:") {
+        "codegen:read-ref-runtime-check".to_string()
+    } else if obligation.feature.starts_with("cell-metadata-equality:") {
+        "codegen:cell-metadata-equality-runtime-check".to_string()
+    } else if obligation.category == "state-transition" {
+        "codegen:state-transition-runtime-check".to_string()
+    } else {
+        format!("codegen:{}:{}", obligation.category, obligation.feature)
     }
 }
 
@@ -339,6 +508,10 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
         || obligation.feature.contains("claim-output")
         || obligation.feature.contains("settle-output")
         || obligation.feature.contains("destroy-output-scan")
+        || obligation.feature.contains("destroy-unique")
+        || obligation.feature.contains("destroy-instance")
+        || obligation.feature.contains("burn-amount")
+        || obligation.feature.contains("replace-unique")
         || obligation.feature.contains("resource-conservation")
     {
         "transaction"
@@ -534,7 +707,7 @@ fn lock_args_fields(params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccess
 }
 
 fn on_chain_checked(status: &str) -> bool {
-    matches!(status, "checked-runtime" | "checked-static" | "ckb-runtime")
+    status == "checked-runtime"
 }
 
 fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_primitives: &[PoolPrimitiveMetadata]) -> Vec<String> {
@@ -560,7 +733,6 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
     } else if obligation.feature.starts_with("replace-unique-output:")
         || obligation.feature.starts_with("replace-unique-input:")
         || obligation.feature.starts_with("replace-unique-identity:")
-        || obligation.feature.starts_with("replace_unique-input:")
     {
         vec!["macro_expansion:replace_unique=consume-input+create-output+preserve-identity".to_string()]
     } else if obligation.feature.starts_with("claim-output:") || obligation.feature.starts_with("claim-input:") {
@@ -571,6 +743,12 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
         vec!["macro_expansion:consume=consume-input".to_string()]
     } else if obligation.feature.starts_with("destroy-input:") {
         vec!["macro_expansion:destroy=consume-input+no-output".to_string()]
+    } else if obligation.feature.starts_with("destroy-output-scan:")
+        || obligation.feature.starts_with("destroy-unique:")
+        || obligation.feature.starts_with("destroy-instance:")
+        || obligation.feature.starts_with("burn-amount:")
+    {
+        vec!["macro_expansion:destroy=consume-input+destruction-policy".to_string()]
     } else if obligation.feature.starts_with("pool-create:") {
         vec!["macro_expansion:pool-create=shared-cell-create+pool-protocol-metadata".to_string()]
     } else if obligation.feature.starts_with("pool-mutation-invariants:") {
@@ -587,12 +765,6 @@ fn checked_runtime_subconditions(detail: &str) -> Vec<String> {
     for segment in detail.split([',', ';']) {
         let trimmed = segment.trim();
         if let Some((prefix, _)) = trimmed.split_once("=checked-runtime") {
-            let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
-            if !label.is_empty() {
-                out.push(label.to_string());
-            }
-        }
-        if let Some((prefix, _)) = trimmed.split_once("=checked-static") {
             let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
             if !label.is_empty() {
                 out.push(label.to_string());
@@ -645,6 +817,12 @@ fn diagnostics_for_plan(
             message: "obligation is not fully covered by generated on-chain code".to_string(),
         });
     }
+    if obligation.status == "checked-partial" {
+        diagnostics.push(ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "obligation is only partially covered by generated on-chain code".to_string(),
+        });
+    }
     if !builder_assumptions.is_empty() && obligation.status == "fail-closed" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "error".to_string(),
@@ -677,6 +855,12 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
         "identity singleton_type"
     } else if text.contains("type_id") || text.contains("type-id") {
         "identity ckb_type_id"
+    } else if text.contains("burn-amount") {
+        "burn_amount policy"
+    } else if text.contains("destroy-instance") {
+        "destroy_instance policy"
+    } else if text.contains("destroy-unique") {
+        "destroy_unique policy"
     } else if text.contains("destroy-output-scan") || text.contains("same type") || text.contains("typehash absence") {
         "destroy_singleton_type compatibility policy"
     } else if text.contains("destroy") {
@@ -690,11 +874,17 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
     }
 }
 
-fn codegen_coverage_status(status: &str, on_chain_checked: bool) -> &str {
+fn codegen_coverage_status(status: &str, on_chain_checked: bool, has_executable_evidence: bool) -> &str {
     if on_chain_checked {
-        "covered"
+        if has_executable_evidence {
+            "covered"
+        } else {
+            "gap:evidence-missing"
+        }
     } else if status == "runtime-required" {
         "gap:runtime-required"
+    } else if status == "checked-partial" {
+        "gap:checked-partial"
     } else if status == "fail-closed" {
         "fail-closed"
     } else {
@@ -755,19 +945,216 @@ fn aggregate_feature_label(aggregate: &ir::IrAggregateInvariant) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggregateCoverageMode {
+    Equality,
+    NonIncrease,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AggregateCoverageQuery {
+    type_name: String,
+    field: String,
+    mode: AggregateCoverageMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AggregateTarget {
+    source: Option<String>,
+    type_name: String,
+    field: String,
+}
+
+fn aggregate_coverage_query(feature: &str) -> Option<AggregateCoverageQuery> {
+    if let Some(target) = feature.strip_prefix("assert_conserved:") {
+        let target = aggregate_target_parts(target)?;
+        return Some(AggregateCoverageQuery {
+            type_name: target.type_name,
+            field: target.field,
+            mode: AggregateCoverageMode::Equality,
+        });
+    }
+
+    let expression = feature.strip_prefix("assert_sum:")?;
+    let (left, relation, right) = split_sum_relation(expression)?;
+    let left = aggregate_target_parts(left)?;
+    let right = aggregate_target_parts(right)?;
+    if left.type_name != right.type_name || left.field != right.field {
+        return None;
+    }
+
+    let left_is_output = left.source.as_deref().is_some_and(source_is_output);
+    let left_is_input = left.source.as_deref().is_some_and(source_is_input);
+    let right_is_output = right.source.as_deref().is_some_and(source_is_output);
+    let right_is_input = right.source.as_deref().is_some_and(source_is_input);
+
+    let mode = if relation == "==" && ((left_is_output && right_is_input) || (left_is_input && right_is_output)) {
+        AggregateCoverageMode::Equality
+    } else if (relation == "<=" && left_is_output && right_is_input) || (relation == ">=" && left_is_input && right_is_output) {
+        AggregateCoverageMode::NonIncrease
+    } else {
+        return None;
+    };
+
+    Some(AggregateCoverageQuery { type_name: left.type_name, field: left.field, mode })
+}
+
+fn split_sum_relation(expression: &str) -> Option<(&str, &str, &str)> {
+    for relation in ["<=", ">=", "==", "<", ">"] {
+        if let Some((left, right)) = expression.split_once(relation) {
+            return Some((left, relation, right));
+        }
+    }
+    None
+}
+
+fn aggregate_target_parts(target: &str) -> Option<AggregateTarget> {
+    if let Some(type_start) = target.find('<') {
+        let mut depth = 1;
+        let mut type_end = type_start + 1;
+        while type_end < target.len() && depth > 0 {
+            match target.as_bytes()[type_end] {
+                b'<' => depth += 1,
+                b'>' => depth -= 1,
+                _ => {}
+            }
+            type_end += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
+        let source = &target[..type_start];
+        let type_name = &target[type_start + 1..type_end - 1];
+        let field = target[type_end..].strip_prefix('.')?;
+        return Some(AggregateTarget { source: Some(source.to_string()), type_name: type_name.to_string(), field: field.to_string() });
+    }
+
+    let (type_name, field) = target.split_once('.')?;
+    Some(AggregateTarget { source: None, type_name: type_name.to_string(), field: field.to_string() })
+}
+
+fn source_is_input(source: &str) -> bool {
+    matches!(source, "input" | "inputs" | "group_input" | "group_inputs")
+}
+
+fn source_is_output(source: &str) -> bool {
+    matches!(source, "output" | "outputs" | "group_output" | "group_outputs")
+}
+
+fn matching_action_coverage(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut matches = action_plans
+        .iter()
+        .filter(|plan| action_plan_covers_query(query, plan))
+        .map(|plan| format!("matched-action-obligation:{}:{}={}", plan.origin, plan.feature, plan.status))
+        .collect::<Vec<_>>();
+    dedup(&mut matches);
+    matches
+}
+
+fn matching_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut origins =
+        action_plans.iter().filter(|plan| action_plan_covers_query(query, plan)).map(|plan| plan.origin.clone()).collect::<Vec<_>>();
+    dedup(&mut origins);
+    origins
+}
+
+fn action_plan_covers_query(query: &AggregateCoverageQuery, plan: &ProofPlanMetadata) -> bool {
+    if plan.category != "transaction-invariant" || !plan.on_chain_checked {
+        return false;
+    }
+
+    if action_resource_conservation_covers_field(plan, &query.type_name, &query.field) {
+        return true;
+    }
+
+    query.mode == AggregateCoverageMode::NonIncrease
+        && query.field == "amount"
+        && plan.feature == format!("destroy-output-scan:{}", query.type_name)
+}
+
+fn action_resource_conservation_covers_field(plan: &ProofPlanMetadata, type_name: &str, field: &str) -> bool {
+    plan.feature == format!("resource-conservation:{}", type_name) && detail_fields_include(&plan.detail, field)
+}
+
+fn related_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
+    let mut origins = action_plans
+        .iter()
+        .filter(|plan| action_plan_references_type(plan, &query.type_name))
+        .map(|plan| plan.origin.clone())
+        .collect::<Vec<_>>();
+    dedup(&mut origins);
+    origins
+}
+
+fn action_plan_references_type(plan: &ProofPlanMetadata, type_name: &str) -> bool {
+    matches!(plan.category.as_str(), "transaction-invariant" | "state-transition" | "cell-state" | "shared-state")
+        && proof_plan_feature_type_name(&plan.feature).is_some_and(|candidate| candidate == type_name)
+}
+
+fn proof_plan_feature_type_name(feature: &str) -> Option<&str> {
+    for prefix in [
+        "consume-input:",
+        "transfer-input:",
+        "claim-input:",
+        "settle-input:",
+        "destroy-input:",
+        "replace-unique-input:",
+        "create-output:",
+        "transfer-output:",
+        "claim-output:",
+        "settle-output:",
+        "create-unique-output:",
+        "replace-unique-output:",
+        "create-unique-identity:",
+        "replace-unique-identity:",
+        "destroy-output-scan:",
+        "destroy-unique:",
+        "destroy-instance:",
+        "burn-amount:",
+        "resource-conservation:",
+        "linear-collection:",
+        "mutable-cell:",
+        "shared-mutation:",
+    ] {
+        if let Some(rest) = feature.strip_prefix(prefix) {
+            return rest.split(':').next();
+        }
+    }
+    feature.split_once('.').map(|(type_name, _)| type_name)
+}
+
+fn detail_fields_include(detail: &str, field: &str) -> bool {
+    let Some((_, fields)) = detail.split_once("fields:") else {
+        return false;
+    };
+    fields
+        .split([',', ';'])
+        .map(str::trim)
+        .any(|candidate| candidate == field || candidate.strip_suffix('.').is_some_and(|candidate| candidate == field))
+}
+
 fn aggregate_reads(aggregate: &ir::IrAggregateInvariant) -> Vec<String> {
     let mut reads = Vec::new();
     reads.extend(reads_from_aggregate_target(&aggregate.target));
     if let Some(rhs) = &aggregate.rhs {
         reads.extend(reads_from_aggregate_target(rhs));
     }
-    if reads.is_empty() {
+    if matches!(aggregate.kind, AggregateInvariantKind::Delta) {
+        if let Some(argument) = &aggregate.argument {
+            reads.extend(reads_from_aggregate_argument(argument));
+        }
+    }
+    if !reads.iter().any(|read| matches!(read.as_str(), "input" | "output" | "group_input" | "group_output")) {
         match aggregate.scope.as_str() {
             "group" => {
                 reads.push("group_input".to_string());
                 reads.push("group_output".to_string());
             }
             "transaction" => {
+                reads.push("input".to_string());
+                reads.push("output".to_string());
+            }
+            "selected_cells" => {
                 reads.push("input".to_string());
                 reads.push("output".to_string());
             }
@@ -786,6 +1173,17 @@ fn reads_from_aggregate_target(target: &str) -> Vec<String> {
         "group_input" | "group_inputs" => vec!["group_input".to_string()],
         "group_output" | "group_outputs" => vec!["group_output".to_string()],
         _ => Vec::new(),
+    }
+}
+
+fn reads_from_aggregate_argument(argument: &str) -> Vec<String> {
+    if argument.chars().all(|ch| ch.is_ascii_digit()) || argument.starts_with('"') {
+        return Vec::new();
+    }
+    let base = argument.split('.').next().unwrap_or(argument);
+    match base {
+        "witness" | "lock_args" => vec![argument.to_string()],
+        _ => reads_from_aggregate_target(argument),
     }
 }
 
@@ -852,4 +1250,135 @@ fn declared_lock_args_fields(reads: &[String]) -> Vec<String> {
 fn dedup(values: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     values.retain(|value| seen.insert(value.clone()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Span;
+
+    fn empty_body() -> ir::IrBody {
+        ir::IrBody {
+            consume_set: Vec::new(),
+            read_refs: Vec::new(),
+            create_set: Vec::new(),
+            mutate_set: Vec::new(),
+            write_intents: Vec::new(),
+            blocks: vec![ir::IrBlock { id: ir::BlockId(0), instructions: Vec::new(), terminator: ir::IrTerminator::Return(None) }],
+        }
+    }
+
+    #[test]
+    fn checked_runtime_proof_plan_claims_include_executable_evidence() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "create-output-fields=checked-runtime; create-output-lock=checked-runtime".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.iter().any(|evidence| evidence.layer == "ir"), "{:?}", plan.executable_evidence);
+        assert!(
+            plan.executable_evidence
+                .iter()
+                .any(|evidence| evidence.layer == "codegen" && evidence.id == "codegen:create-output-runtime-check"),
+            "{:?}",
+            plan.executable_evidence
+        );
+    }
+
+    #[test]
+    fn unique_lifecycle_features_have_specific_codegen_evidence_ids() {
+        for (feature, expected) in [
+            ("replace-unique-input:Token:old", "codegen:input-lifecycle-runtime-check"),
+            ("create-unique-output:Token:out", "codegen:unique-output-runtime-check"),
+            ("replace-unique-output:Token:out", "codegen:unique-output-runtime-check"),
+            ("create-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
+            ("replace-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
+        ] {
+            let obligation = VerifierObligationMetadata {
+                scope: "action:rotate".to_string(),
+                category: "transaction-invariant".to_string(),
+                feature: feature.to_string(),
+                status: "checked-runtime".to_string(),
+                detail: "replace-unique-identity=checked-runtime".to_string(),
+            };
+
+            assert_eq!(codegen_evidence_id(&obligation), expected);
+        }
+    }
+
+    #[test]
+    fn replace_unique_features_are_transaction_scoped() {
+        let obligation = VerifierObligationMetadata {
+            scope: "action:rotate".to_string(),
+            category: "state-transition".to_string(),
+            feature: "replace-unique-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "replace-unique-output-fields=checked-runtime".to_string(),
+        };
+
+        assert_eq!(proof_scope("action", &obligation, &[]), "transaction");
+    }
+
+    #[test]
+    fn checked_runtime_without_concrete_evidence_is_not_marked_covered() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "create-output".to_string(),
+            feature: "create-output:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "category-level runtime status without executable lowering detail".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
+    }
+
+    #[test]
+    fn checked_static_detail_does_not_create_executable_runtime_evidence() {
+        let obligations = vec![VerifierObligationMetadata {
+            scope: "action:mint".to_string(),
+            category: "identity".to_string(),
+            feature: "identity-anchor:Token:out".to_string(),
+            status: "checked-runtime".to_string(),
+            detail: "identity-anchor=checked-static".to_string(),
+        }];
+
+        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
+        let plan = plans.first().expect("checked-runtime plan");
+
+        assert!(plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
+    }
+
+    #[test]
+    fn metadata_only_invariant_proof_plan_has_no_executable_evidence() {
+        let invariant = ir::IrInvariant {
+            name: "declared_only".to_string(),
+            trigger: Some("type_group".to_string()),
+            scope: Some("group".to_string()),
+            reads: vec!["group_inputs<Token>.amount".to_string()],
+            aggregates: Vec::new(),
+            assert_count: 1,
+            span: Span { start: 1, end: 2, line: 1, column: 1 },
+        };
+
+        let plans = build_for_invariant(&invariant);
+        let plan = plans.iter().find(|plan| plan.category == "declared-invariant").expect("declared invariant plan");
+
+        assert_eq!(plan.codegen_coverage_status, "gap:metadata-only");
+        assert!(!plan.on_chain_checked);
+        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
+    }
 }

@@ -17,7 +17,7 @@ need an external RISC-V toolchain for the built-in assembler path used here.
 Start by cloning the repository and running the test suite:
 
 ```bash
-git clone https://github.com/tsukifune-kosei/CellScript.git
+git clone https://github.com/a19q3/CellScript.git
 cd CellScript
 cargo test --locked
 ```
@@ -113,5 +113,5 @@ That fail-closed behavior is intentional.
 ## Next
 
 Once you can compile and verify one file, continue with
-[Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics). The next chapter explains
+[Language Basics](https://github.com/a19q3/CellScript/wiki/Tutorial-02-Language-Basics). The next chapter explains
 what you are looking at inside a `.cell` file.

@@ -94,6 +94,12 @@ tooling. `constraints.ckb.script_references` aggregates:
 This keeps `code_hash`, `hash_type`, and `args` visible instead of treating a
 source-level name as authority.
 
+Dedicated accepted/rejected CKB transaction fixture matrices for TYPE_ID
+continue paths, ScriptGroup shapes, and `outputs_data` negative cases remain
+part of the later standard compatibility-suite track. 0.14's release boundary
+is metadata, tamper-validation, strict compilation, and production evidence for
+the bundled examples.
+
 ### Declarative Since/Time And Capacity Surfaces
 
 0.14 adds profile-visible CKB policy helpers:
@@ -167,6 +173,12 @@ helpers, `ckb::*`, and `env::sighash_all`.
 
 0.14 does not include:
 
+- executable browser/WASM simulation; `src/wasm` remains audit-only and
+  fail-closed for executable actions/locks;
+- Action Builder, CellFabric, CCC integration, or automatic transaction
+  generation;
+- a portable target profile; `ckb` is the implemented release profile and
+  unsupported profile names fail closed;
 - first-class verified signer values;
 - implicit signer derivation from `Address`;
 - hidden sighash defaults;
@@ -181,14 +193,9 @@ helpers, `ckb::*`, and `env::sighash_all`.
 Targeted 0.14 gate:
 
 ```bash
-cargo fmt --all
-cargo check --locked -p cellscript
-cargo test --locked -p cellscript --test v0_14 -- --test-threads=1
-cargo test --locked -p cellscript --test examples -- --test-threads=1
-cargo test --locked -p cellscript --test cli cellc_explain_profile_reports_ckb_v0_14_contract -- --test-threads=1
-cargo test --locked -p cellscript --lib lsp -- --test-threads=1
+./scripts/cellscript_gate.sh ci
+./scripts/cellscript_0_14_scope_audit.sh
 cd editors/vscode-cellscript && npm run validate
-git diff --check
 ```
 
 Roadmap example gate:

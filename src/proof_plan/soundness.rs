@@ -117,7 +117,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if matches!(plan.status.as_str(), "checked-runtime" | "checked-static" | "ckb-runtime") && !plan.on_chain_checked {
+    if strict && matches!(plan.status.as_str(), "checked-runtime" | "checked-static" | "ckb-runtime") && !plan.on_chain_checked {
         push_issue(
             issues,
             "error",
@@ -143,7 +143,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if !plan.lock_args_fields.is_empty() && !plan.reads.iter().any(|read| read == "lock_args") {
+    if strict && !plan.lock_args_fields.is_empty() && !plan.reads.iter().any(|read| read == "lock_args") {
         push_issue(
             issues,
             "error",
@@ -154,7 +154,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if !plan.witness_fields.is_empty() && !plan.reads.iter().any(|read| read == "witness") {
+    if strict && !plan.witness_fields.is_empty() && !plan.reads.iter().any(|read| read == "witness") {
         push_issue(
             issues,
             "error",

@@ -15,7 +15,8 @@ impl Span {
     }
 
     pub fn combine(&self, other: &Span) -> Span {
-        Span { start: self.start.min(other.start), end: self.end.max(other.end), line: self.line, column: self.column }
+        let (line, column) = if other.start < self.start { (other.line, other.column) } else { (self.line, self.column) };
+        Span { start: self.start.min(other.start), end: self.end.max(other.end), line, column }
     }
 }
 
@@ -36,6 +37,28 @@ pub struct CompileError {
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
         Self { message: message.into(), span, file: None, code: None }
+    }
+
+    pub fn aggregate(errors: Vec<Self>) -> Self {
+        let mut errors = errors.into_iter();
+        let Some(first) = errors.next() else {
+            return Self::without_span("no compile errors to aggregate");
+        };
+        let rest = errors.collect::<Vec<_>>();
+        if rest.is_empty() {
+            return first;
+        }
+
+        let total = rest.len() + 1;
+        let mut message = format!("{} compile errors:\n1. {}", total, first.message);
+        for (index, error) in rest.iter().enumerate() {
+            message.push_str(&format!("\n{}. {}", index + 2, error.message));
+            if error.span != Span::default() {
+                message.push_str(&format!(" (line {}, column {})", error.span.line, error.span.column));
+            }
+        }
+
+        Self { message, span: first.span, file: first.file, code: first.code }
     }
 
     pub fn with_code(mut self, code: impl Into<String>) -> Self {

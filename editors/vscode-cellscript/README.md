@@ -1,14 +1,13 @@
 # CellScript VS Code Extension
 
 Production-grade VS Code tooling for `.cell` contracts, powered by a
-CellScript Language Server (`cellc lsp --stdio`).
+CellScript Language Server (`cellc --lsp`).
 
 The extension connects to a `cellc` binary running as a JSON-RPC language
 server over stdio. This provides real-time diagnostics, completion, hover,
-go-to-definition, find-references, rename, signature help, document
-highlighting, folding, formatting, code actions, and document symbols —
-all backed by the CellScript compiler's parser, type-checker, and
-lowering pipeline.
+go-to-definition, find-references, signature help, document highlighting,
+folding, formatting, code actions, and document symbols — all backed by the
+CellScript compiler's parser, type-checker, and lowering pipeline.
 
 CLI-backed commands (compile, metadata, constraints, production report)
 continue to spawn `cellc` directly for one-shot operations that are
@@ -16,14 +15,13 @@ outside the LSP scope.
 
 ## Features
 
-### LSP-powered (via `cellc lsp --stdio`)
+### LSP-powered (via `cellc --lsp`)
 
 - real-time diagnostics on open / edit / save with incremental sync
 - context-aware completion (keywords, types, user symbols, fields, locals)
 - hover information (types, lowering metadata, lifecycle states)
 - go-to-definition (top-level symbols, fields, local variables, cross-module)
 - find-references (lexer-accurate, skips comments and strings)
-- rename (cross-module, respects identifier boundaries)
 - signature help (action, function, lock parameters)
 - document highlight
 - folding ranges
@@ -43,7 +41,7 @@ outside the LSP scope.
 ### Editor basics
 
 - `.cell` file association
-- TextMate syntax highlighting for the current 0.13 action model (`where`
+- TextMate syntax highlighting for the current 0.15 authoring surface (`where`
   proof blocks, `transition input.state: A -> output.state: B`, `flow`, named
   output `create out = T { ... }`, and source qualifiers such as `read`,
   `protected`, `witness`, and `lock_args`)
@@ -54,9 +52,13 @@ outside the LSP scope.
   `preserve` blocks, and stdlib lifecycle/cell metadata helpers
 - 0.14 lock-boundary snippets and highlighting for `protected`, `lock_args`,
   `witness`, `require`, `source::*`, `witness::*`, and `env::sighash_all`
+- 0.15 identity, destruction-policy, and aggregate-invariant snippets for
+  `identity`, `create_unique`, `replace_unique`, `destroy_unique`,
+  `burn_amount`, `assert_sum`, `assert_delta`, `assert_distinct`, and
+  `assert_singleton`
 - status bar state indicator
 
-## 0.13 Authoring Surface
+## Authoring Surface
 
 The extension snippets and grammar follow the signature-direction action
 surface:
@@ -90,10 +92,25 @@ not runtime allocation. Expression-level `read_ref<T>()` still exists for
 lower-level reference reads, but action-boundary read-only Cell parameters
 should use `read name: T`.
 
+0.15 identity-aware lifecycle forms are also exposed through snippets and
+highlighting:
+
+```cellscript
+#[type_id("cellscript::token::Token:v1")]
+resource Token has store, create, consume, replace, burn, relock {
+    identity(ckb_type_id)
+    amount: u64
+}
+
+let minted = create_unique<Token>(identity = ckb_type_id) {
+    amount: 1
+}
+```
+
 ## Architecture
 
 ```
-VS Code ──(LanguageClient)──> cellc lsp --stdio ──(JSON-RPC)──> CellScriptBackend
+VS Code ──(LanguageClient)──> cellc --lsp ──(JSON-RPC)──> CellScriptBackend
 ```
 
 The `CellScriptBackend` in `server.rs` wraps the in-process `LspServer` and
@@ -107,7 +124,7 @@ Install `cellc` and make it available on `PATH`, or set
 `cellscript.compilerPath` to the full compiler path.
 
 When developing inside the CellScript Rust workspace, the extension can
-fall back to:
+fall back to this command after the workspace is trusted:
 
 ```bash
 cargo run -q -p cellscript --
@@ -124,16 +141,16 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Show Constraints` | Run `cellc constraints` for the active file and show JSON in the CellScript output channel. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
-Diagnostics, completion, hover, go-to-definition, references, rename,
-formatting, signature help, folding, and code actions are provided
-automatically by the language server — no explicit commands needed.
+Diagnostics, completion, hover, go-to-definition, references, formatting,
+signature help, folding, and code actions are provided automatically by the
+language server — no explicit commands needed.
 
 ## Settings
 
 | Setting | Default | Description |
 |---|---:|---|
 | `cellscript.compilerPath` | `cellc` | Compiler binary used for the language server and CLI commands. |
-| `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable. |
+| `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable and the workspace is trusted. |
 | `cellscript.commandTimeoutMs` | `15000` | Timeout for compiler-backed CLI commands. |
 | `cellscript.maxOutputBytes` | `4194304` | Captured stdout/stderr limit. |
 | `cellscript.target` | `riscv64-asm` | Compiler target for compile/metadata/constraints commands. |

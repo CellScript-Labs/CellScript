@@ -1,6 +1,7 @@
 //! CellScript formatter.
 //! Release-grade code formatter with idempotency guarantees,
-//! configurable line width, comment preservation, and whitespace normalization.
+//! configurable line width, doc-comment preservation, and whitespace normalization.
+//! Non-doc line/block comments are not represented in the AST and are not preserved.
 
 use crate::ast::*;
 use crate::error::Result;
@@ -419,6 +420,30 @@ impl Formatter {
         self.push_line("}");
     }
 
+    fn format_block_expr_body(&self, stmts: &[Stmt]) -> String {
+        stmts
+            .iter()
+            .map(|stmt| match stmt {
+                Stmt::Let(_) | Stmt::If(_) | Stmt::For(_) | Stmt::While(_) => {
+                    let mut formatter = Formatter::new(self.config.clone());
+                    formatter.format_stmt(stmt);
+                    formatter.output.trim_end().to_string()
+                }
+                Stmt::Expr(expr) => self.format_expr(expr),
+                Stmt::Return(None) => "return".to_string(),
+                Stmt::Return(Some(expr)) => format!("return {}", self.format_expr(expr)),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn format_expr_as_block_body(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Block(stmts, _) => self.format_block_expr_body(stmts),
+            _ => self.format_expr(expr),
+        }
+    }
+
     fn format_for_stmt(&mut self, for_stmt: &ForStmt) {
         self.push_line(&format!("for {} in {} {{", format_binding_pattern(&for_stmt.pattern), self.format_expr(&for_stmt.iterable)));
         self.indent_level += 1;
@@ -441,17 +466,17 @@ impl Formatter {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(value) => value.to_string(),
-            Expr::Bool(value) => value.to_string(),
-            Expr::String(value) => format!("{:?}", value),
-            Expr::ByteString(bytes) => {
+            Expr::Integer(value, _) => value.to_string(),
+            Expr::Bool(value, _) => value.to_string(),
+            Expr::String(value, _) => format!("{:?}", value),
+            Expr::ByteString(bytes, _) => {
                 let mut body = String::with_capacity(bytes.len() * 4);
                 for byte in bytes {
                     write!(&mut body, "\\x{:02x}", byte).expect("writing to a String cannot fail");
                 }
                 format!("b\"{}\"", body)
             }
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name, _) => name.clone(),
             Expr::Assign(assign) => format!(
                 "{} {} {}",
                 self.format_expr(&assign.target),
@@ -549,26 +574,30 @@ impl Formatter {
                 let fields = preserve.fields.join("\n");
                 format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let inner = stmts
                     .iter()
                     .map(|stmt| {
                         let mut formatter = Formatter::new(self.config.clone());
-                        formatter.indent_level = 0;
+                        formatter.indent_level = 1;
                         formatter.format_stmt(stmt);
-                        formatter.output.trim().to_string()
+                        formatter.output.trim_end().to_string()
                     })
                     .collect::<Vec<_>>()
-                    .join(" ");
-                format!("{{ {} }}", inner)
+                    .join("\n");
+                if inner.is_empty() {
+                    "{}".to_string()
+                } else {
+                    format!("{{\n{}\n}}", inner)
+                }
             }
-            Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
-            Expr::Array(items) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Tuple(items, _) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Array(items, _) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::If(if_expr) => format!(
                 "if {} {{ {} }} else {{ {} }}",
                 self.format_expr(&if_expr.condition),
-                self.format_expr(&if_expr.then_branch),
-                self.format_expr(&if_expr.else_branch)
+                self.format_expr_as_block_body(&if_expr.then_branch),
+                self.format_expr_as_block_body(&if_expr.else_branch)
             ),
             Expr::Cast(cast) => format!("{} as {}", self.format_expr(&cast.expr), format_type(&cast.ty)),
             Expr::Range(range) => format!("{}..{}", self.format_expr(&range.start), self.format_expr(&range.end)),
@@ -600,7 +629,7 @@ impl Formatter {
     }
 
     fn format_field_initializer(&self, name: &str, value: &Expr) -> String {
-        if matches!(value, Expr::Identifier(identifier) if identifier == name) {
+        if matches!(value, Expr::Identifier(identifier, _) if identifier == name) {
             name.to_string()
         } else {
             format!("{}: {}", name, self.format_expr(value))
@@ -981,6 +1010,44 @@ where
         let module2 = parser::parse(&tokens2).unwrap();
         let formatted2 = format_default(&module2).unwrap();
         assert_eq!(formatted, formatted2, "formatter round-trip failed for require block");
+    }
+
+    #[test]
+    fn format_round_trips_multiline_expression_block() {
+        let source = r#"
+module demo
+
+action calc(x: u64) -> u64
+where
+    let y = {
+        let z = x + 1
+        z
+    }
+    return y
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("let y = {\n    let z = x + 1\n    z\n}"), "unexpected formatted source:\n{}", formatted);
+
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for expression block");
+    }
+
+    #[test]
+    fn format_round_trips_inline_if_tuple_expression() {
+        let source = r#"
+module demo
+
+action choose(flag: bool) -> u64
+where
+    let pair = if flag { (1, 2) } else { (3, 4) }
+    return pair.0
+"#;
+        verify_idempotent(source, FormatConfig::default()).unwrap();
     }
 
     #[test]

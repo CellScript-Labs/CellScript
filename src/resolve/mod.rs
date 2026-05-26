@@ -8,6 +8,18 @@ pub struct ModuleResolver {
     imports: HashMap<String, Vec<ImportItem>>,
 }
 
+#[derive(Debug, Clone)]
+struct TypeDependencyEdge {
+    target: String,
+    span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeGraphVisitState {
+    Visiting,
+    Done,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     types: HashMap<String, TypeDef>,
@@ -181,18 +193,47 @@ impl ModuleResolver {
             }
 
             if let Some(full_path) = table.imported.get(name) {
-                let parts: Vec<&str> = full_path.split("::").collect();
-                if let Some(type_name) = parts.last() {
-                    for (mod_name, table) in &self.symbol_tables {
-                        if full_path.starts_with(mod_name) {
-                            return table.types.get(*type_name).cloned();
-                        }
+                if let Some((target_module, type_name)) = full_path.rsplit_once("::") {
+                    if let Some(target_table) = self.symbol_tables.get(target_module) {
+                        return target_table.types.get(type_name).cloned();
                     }
                 }
             }
         }
 
         self.resolve_type_global(name)
+    }
+
+    pub fn resolve_type_with_module(&self, module: &str, name: &str) -> Option<(String, TypeDef)> {
+        if let Some((target_module, symbol)) = name.rsplit_once("::") {
+            if let Some(table) = self.symbol_tables.get(target_module) {
+                return table.types.get(symbol).cloned().map(|ty| (target_module.to_string(), ty));
+            }
+        }
+
+        if let Some(table) = self.symbol_tables.get(module) {
+            if let Some(ty) = table.types.get(name) {
+                return Some((module.to_string(), ty.clone()));
+            }
+
+            if let Some(full_path) = table.imported.get(name) {
+                if let Some((target_module, type_name)) = full_path.rsplit_once("::") {
+                    if let Some(target_table) = self.symbol_tables.get(target_module) {
+                        return target_table.types.get(type_name).cloned().map(|ty| (target_module.to_string(), ty));
+                    }
+                }
+            }
+        }
+
+        self.resolve_type_global_with_module(name)
+    }
+
+    fn resolve_type_global_with_module(&self, name: &str) -> Option<(String, TypeDef)> {
+        let symbol = name.rsplit("::").next().unwrap_or(name);
+        let mut matches =
+            self.symbol_tables.iter().filter_map(|(module, table)| table.types.get(symbol).cloned().map(|ty| (module.clone(), ty)));
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_function(&self, module: &str, name: &str) -> Option<FunctionDef> {
@@ -249,7 +290,9 @@ impl ModuleResolver {
 
     pub fn resolve_type_global(&self, name: &str) -> Option<TypeDef> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.types.get(symbol).cloned())
+        let mut matches = self.symbol_tables.values().filter_map(|table| table.types.get(symbol).cloned());
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_function_global(&self, name: &str) -> Option<FunctionDef> {
@@ -258,14 +301,19 @@ impl ModuleResolver {
 
     pub fn resolve_function_global_with_module(&self, name: &str) -> Option<(String, FunctionDef)> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables
+        let mut matches = self
+            .symbol_tables
             .iter()
-            .find_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)))
+            .filter_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)));
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_constant_global(&self, name: &str) -> Option<ConstantDef> {
         let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.constants.get(symbol).cloned())
+        let mut matches = self.symbol_tables.values().filter_map(|table| table.constants.get(symbol).cloned());
+        let resolved = matches.next()?;
+        matches.next().is_none().then_some(resolved)
     }
 
     pub fn imports_for_module(&self, module: &str) -> Vec<ImportItem> {
@@ -274,6 +322,10 @@ impl ModuleResolver {
 
     pub fn module(&self, module: &str) -> Option<&Module> {
         self.modules.get(module)
+    }
+
+    pub fn modules(&self) -> impl Iterator<Item = &Module> {
+        self.modules.values()
     }
 
     pub fn type_is_linear(&self, module: &str, name: &str) -> bool {
@@ -315,7 +367,109 @@ impl ModuleResolver {
             }
         }
 
+        self.check_type_dependency_cycles()?;
         Ok(())
+    }
+
+    fn check_type_dependency_cycles(&self) -> Result<()> {
+        let mut graph = HashMap::<String, Vec<TypeDependencyEdge>>::new();
+
+        for (module_name, module) in &self.modules {
+            for item in &module.items {
+                let Some((type_name, _, _, _)) = type_item_parts(item) else {
+                    continue;
+                };
+                graph.entry(format!("{}::{}", module_name, type_name)).or_default();
+            }
+        }
+
+        for (module_name, module) in &self.modules {
+            for item in &module.items {
+                let Some((type_name, fields, claim_output, enum_fields)) = type_item_parts(item) else {
+                    continue;
+                };
+                let owner = format!("{}::{}", module_name, type_name);
+                for field in fields {
+                    self.collect_type_dependencies(module_name, &owner, &field.ty, field.span, &mut graph);
+                }
+                if let Some((ty, span)) = claim_output {
+                    self.collect_type_dependencies(module_name, &owner, ty, span, &mut graph);
+                }
+                for (ty, span) in enum_fields {
+                    self.collect_type_dependencies(module_name, &owner, ty, span, &mut graph);
+                }
+            }
+        }
+
+        let mut states = HashMap::new();
+        let mut stack = Vec::new();
+        for name in graph.keys().cloned().collect::<Vec<_>>() {
+            if !states.contains_key(&name) {
+                visit_type_dependency_graph(&name, &graph, &mut states, &mut stack)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_type_dependencies(
+        &self,
+        module_name: &str,
+        owner: &str,
+        ty: &Type,
+        span: Span,
+        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+    ) {
+        match ty {
+            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => {
+                self.collect_type_dependencies(module_name, owner, inner, span, graph);
+            }
+            Type::Tuple(items) => {
+                for item in items {
+                    self.collect_type_dependencies(module_name, owner, item, span, graph);
+                }
+            }
+            Type::Named(name) => self.collect_named_type_dependencies(module_name, owner, name, span, graph),
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Bool | Type::Unit | Type::Address | Type::Hash => {}
+        }
+    }
+
+    fn collect_named_type_dependencies(
+        &self,
+        module_name: &str,
+        owner: &str,
+        name: &str,
+        span: Span,
+        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+    ) {
+        let mut token = String::new();
+        for ch in name.chars().chain(std::iter::once(' ')) {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
+                token.push(ch);
+                continue;
+            }
+            self.push_named_type_dependency(module_name, owner, &token, span, graph);
+            token.clear();
+        }
+    }
+
+    fn push_named_type_dependency(
+        &self,
+        module_name: &str,
+        owner: &str,
+        token: &str,
+        span: Span,
+        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
+    ) {
+        if token.is_empty() || matches!(token, "String" | "Range" | "Vec" | "usize" | "isize") {
+            return;
+        }
+        let Some((target_module, target_def)) = self.resolve_type_with_module(module_name, token) else {
+            return;
+        };
+        let target = format!("{}::{}", target_module, type_def_name(&target_def));
+        if graph.contains_key(&target) {
+            graph.entry(owner.to_string()).or_default().push(TypeDependencyEdge { target, span });
+        }
     }
 
     pub fn resolve_qualified_name(&self, path: &[String]) -> Option<ResolvedName> {
@@ -345,6 +499,67 @@ impl ModuleResolver {
     }
 }
 
+fn type_def_name(type_def: &TypeDef) -> &str {
+    match type_def {
+        TypeDef::Resource(resource) => &resource.name,
+        TypeDef::Shared(shared) => &shared.name,
+        TypeDef::Receipt(receipt) => &receipt.name,
+        TypeDef::Struct(struct_def) => &struct_def.name,
+        TypeDef::Enum(enum_def) => &enum_def.name,
+    }
+}
+
+type TypeItemParts<'a> = (&'a str, &'a [Field], Option<(&'a Type, Span)>, Vec<(&'a Type, Span)>);
+
+fn type_item_parts(item: &Item) -> Option<TypeItemParts<'_>> {
+    match item {
+        Item::Resource(resource) => Some((&resource.name, &resource.fields, None, Vec::new())),
+        Item::Shared(shared) => Some((&shared.name, &shared.fields, None, Vec::new())),
+        Item::Receipt(receipt) => {
+            Some((&receipt.name, &receipt.fields, receipt.claim_output.as_ref().map(|ty| (ty, receipt.span)), Vec::new()))
+        }
+        Item::Struct(struct_def) => Some((&struct_def.name, &struct_def.fields, None, Vec::new())),
+        Item::Enum(enum_def) => {
+            let fields = enum_def
+                .variants
+                .iter()
+                .flat_map(|variant| variant.fields.iter().map(move |ty| (ty, variant.span)))
+                .collect::<Vec<_>>();
+            Some((&enum_def.name, &[], None, fields))
+        }
+        _ => None,
+    }
+}
+
+fn visit_type_dependency_graph(
+    name: &str,
+    graph: &HashMap<String, Vec<TypeDependencyEdge>>,
+    states: &mut HashMap<String, TypeGraphVisitState>,
+    stack: &mut Vec<String>,
+) -> Result<()> {
+    states.insert(name.to_string(), TypeGraphVisitState::Visiting);
+    stack.push(name.to_string());
+
+    if let Some(edges) = graph.get(name) {
+        for edge in edges {
+            match states.get(&edge.target).copied() {
+                Some(TypeGraphVisitState::Done) => {}
+                Some(TypeGraphVisitState::Visiting) => {
+                    let start = stack.iter().position(|entry| entry == &edge.target).unwrap_or(0);
+                    let mut cycle = stack[start..].to_vec();
+                    cycle.push(edge.target.clone());
+                    return Err(CompileError::new(format!("cyclic type dependency detected: {}", cycle.join(" -> ")), edge.span));
+                }
+                None => visit_type_dependency_graph(&edge.target, graph, states, stack)?,
+            }
+        }
+    }
+
+    stack.pop();
+    states.insert(name.to_string(), TypeGraphVisitState::Done);
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum ResolvedName {
     Module(String),
@@ -367,6 +582,12 @@ impl PathResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{lexer, parser};
+
+    fn source_module(source: &str) -> Module {
+        let tokens = lexer::lex(source).unwrap();
+        parser::parse(&tokens).unwrap()
+    }
 
     #[test]
     fn test_module_resolver() {
@@ -446,6 +667,115 @@ mod tests {
     }
 
     #[test]
+    fn rejects_cross_module_type_dependency_cycles() {
+        let left = source_module(
+            r#"
+module left
+
+use right::B
+
+struct A {
+    b: B
+}
+"#,
+        );
+        let right = source_module(
+            r#"
+module right
+
+use left::A
+
+struct B {
+    a: A
+}
+"#,
+        );
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(left).unwrap();
+        resolver.register_module(right).unwrap();
+
+        let err = resolver.check_circular_deps().unwrap_err();
+
+        assert!(err.message.contains("cyclic type dependency detected"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("left::A") && err.message.contains("right::B"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_imported_type_resolution_uses_exact_module_path() {
+        let mut resolver = ModuleResolver::new();
+
+        resolver
+            .register_module(Module {
+                name: "foo".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Type".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "small".to_string(), ty: Type::U8, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+        resolver
+            .register_module(Module {
+                name: "foobar".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Type".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "wide".to_string(), ty: Type::U64, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+        resolver
+            .register_module(Module {
+                name: "app".to_string(),
+                items: vec![Item::Use(UseStmt {
+                    module_path: vec!["foobar".to_string()],
+                    imports: vec![UseImport { name: "Type".to_string(), alias: None }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+
+        let Some(TypeDef::Struct(resolved)) = resolver.resolve_type("app", "Type") else {
+            panic!("expected imported struct to resolve");
+        };
+        assert_eq!(resolved.fields[0].name, "wide");
+    }
+
+    #[test]
+    fn test_global_type_resolution_rejects_ambiguous_symbol() {
+        let mut resolver = ModuleResolver::new();
+
+        for module_name in ["left", "right"] {
+            resolver
+                .register_module(Module {
+                    name: module_name.to_string(),
+                    items: vec![Item::Struct(StructDef {
+                        name: "Token".to_string(),
+                        type_id: None,
+                        default_hash_type: None,
+                        capacity_floor: None,
+                        fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                        span: Span::default(),
+                    })],
+                    span: Span::default(),
+                })
+                .unwrap();
+        }
+
+        assert!(resolver.resolve_type_global("Token").is_none());
+        assert!(resolver.resolve_type("left", "Token").is_some());
+    }
+
+    #[test]
     fn test_rejects_duplicate_local_symbols() {
         let mut resolver = ModuleResolver::new();
         let err = resolver
@@ -468,7 +798,7 @@ mod tests {
                         return_type: Some(Type::U64),
                         outputs: Vec::new(),
                         state_edges: Vec::new(),
-                        body: vec![Stmt::Return(Some(Expr::Integer(0)))],
+                        body: vec![Stmt::Return(Some(Expr::Integer(0, Span::default())))],
                         effect: EffectClass::Pure,
                         effect_declared: false,
                         scheduler_hint: None,

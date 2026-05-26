@@ -63,6 +63,20 @@
     ],
     "description": "Insert effect and scheduler hint attributes"
   },
+  "Type ID Attribute": {
+    "prefix": "type-id",
+    "body": [
+      "#[type_id(\"${1:cellscript::module::Type:v1}\")]"
+    ],
+    "description": "Attach a stable type identity string to a CellScript type"
+  },
+  "Identity Policy": {
+    "prefix": "identity",
+    "body": [
+      "identity(${1:ckb_type_id})"
+    ],
+    "description": "Declare a Cell identity policy"
+  },
   "Create With Lock": {
     "prefix": "create",
     "body": [
@@ -71,6 +85,38 @@
       "} with_lock(${5:owner})"
     ],
     "description": "Constrain a named output with a lock"
+  },
+  "Create Unique": {
+    "prefix": "create-unique",
+    "body": [
+      "create_unique<${1:Token}>(identity = ${2:ckb_type_id}) {",
+      "    ${3:amount}: ${4:1}",
+      "} with_lock(${5:owner})"
+    ],
+    "description": "Create an identity-aware output cell"
+  },
+  "Replace Unique": {
+    "prefix": "replace-unique",
+    "body": [
+      "replace_unique<${1:Token}>(identity = ${2:ckb_type_id}) ${3:input} {",
+      "    ${4:amount}: ${5:input.amount}",
+      "}"
+    ],
+    "description": "Replace an identity-aware cell while preserving identity"
+  },
+  "Destroy Unique": {
+    "prefix": "destroy-unique",
+    "body": [
+      "destroy_unique(${1:cell}, identity = ${2:type_id})"
+    ],
+    "description": "Destroy a cell with an explicit unique identity policy"
+  },
+  "Burn Amount": {
+    "prefix": "burn-amount",
+    "body": [
+      "burn_amount(${1:cell}, field = ${2:amount})"
+    ],
+    "description": "Declare quantity-delta burn intent for a field"
   },
   "Transition": {
     "prefix": "transition",
@@ -117,6 +163,41 @@
       "}"
     ],
     "description": "Group multiple require conditions in an anonymous block"
+  },
+  "Aggregate Sum": {
+    "prefix": "assert-sum",
+    "body": [
+      "assert_sum(${1:group_outputs<Token>.amount}) <= assert_sum(${2:group_inputs<Token>.amount})"
+    ],
+    "description": "Declare an aggregate sum relation inside an invariant"
+  },
+  "Aggregate Conserved": {
+    "prefix": "assert-conserved",
+    "body": [
+      "assert_conserved(${1:Token.amount}, scope = ${2:group})"
+    ],
+    "description": "Declare aggregate conservation inside an invariant"
+  },
+  "Aggregate Delta": {
+    "prefix": "assert-delta",
+    "body": [
+      "assert_delta(${1:Token.amount}, ${2:witness.delta}, scope = ${3:group})"
+    ],
+    "description": "Declare an aggregate delta relation inside an invariant"
+  },
+  "Aggregate Distinct": {
+    "prefix": "assert-distinct",
+    "body": [
+      "assert_distinct(${1:outputs<NFT>.token_id}, scope = ${2:transaction})"
+    ],
+    "description": "Declare aggregate distinctness inside an invariant"
+  },
+  "Aggregate Singleton": {
+    "prefix": "assert-singleton",
+    "body": [
+      "assert_singleton(${1:Config.config_id}, scope = ${2:group})"
+    ],
+    "description": "Declare singleton aggregate scope inside an invariant"
   },
   "Preserve": {
     "prefix": "preserve",

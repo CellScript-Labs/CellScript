@@ -164,6 +164,11 @@ impl SimulateInterpreter {
     pub fn simulate_action(&mut self, name: &str, args: &[SimValue]) -> Result<SimulateResult, SimulateError> {
         let key = format!("action::{}", name);
         let (params, body) = self.functions.get(&key).cloned().ok_or(SimulateError::UndefinedFunction { name: key })?;
+        if args.len() != params.len() {
+            return Err(SimulateError::Unsupported {
+                description: format!("action '{}' expects {} argument(s), got {}", name, params.len(), args.len()),
+            });
+        }
 
         for (param, arg) in params.iter().zip(args.iter()) {
             self.env.insert(param.name.clone(), arg.clone());
@@ -276,11 +281,11 @@ impl SimulateInterpreter {
         self.bump_steps()?;
 
         match expr {
-            Expr::Integer(n) => Ok(SimValue::Integer(*n)),
-            Expr::Bool(b) => Ok(SimValue::Bool(*b)),
-            Expr::String(s) => Ok(SimValue::String(s.clone())),
-            Expr::ByteString(bytes) => Ok(SimValue::String(format!("0x{}", crate::hex_encode(bytes)))),
-            Expr::Identifier(name) => {
+            Expr::Integer(n, _) => Ok(SimValue::Integer(*n)),
+            Expr::Bool(b, _) => Ok(SimValue::Bool(*b)),
+            Expr::String(s, _) => Ok(SimValue::String(s.clone())),
+            Expr::ByteString(bytes, _) => Ok(SimValue::String(format!("0x{}", crate::hex_encode(bytes)))),
+            Expr::Identifier(name, _) => {
                 self.env.get(name).cloned().ok_or_else(|| SimulateError::UndefinedVariable { name: name.clone() })
             }
             Expr::Binary(bin) => {
@@ -309,7 +314,10 @@ impl SimulateInterpreter {
                 let idx = self.eval_expr(&index.index)?;
                 match (&obj, &idx) {
                     (SimValue::Array(items), SimValue::Integer(i)) => {
-                        items.get(*i as usize).cloned().ok_or_else(|| SimulateError::UndefinedVariable { name: format!("[{}]", i) })
+                        let index = usize::try_from(*i).map_err(|_| SimulateError::Unsupported {
+                            description: format!("array index {} does not fit this target", i),
+                        })?;
+                        items.get(index).cloned().ok_or_else(|| SimulateError::UndefinedVariable { name: format!("[{}]", i) })
                     }
                     _ => Ok(SimValue::Simulated { ty: "index".to_string(), description: format!("{}[{}]", obj, idx) }),
                 }
@@ -389,15 +397,15 @@ impl SimulateInterpreter {
                     Ok(SimValue::Bool(true))
                 }
             }
-            Expr::Block(stmts) => {
+            Expr::Block(stmts, _) => {
                 let result = self.exec_stmts(stmts)?;
                 Ok(result.unwrap_or(SimValue::Unit))
             }
-            Expr::Tuple(exprs) => {
+            Expr::Tuple(exprs, _) => {
                 let values: Vec<SimValue> = exprs.iter().map(|e| self.eval_expr(e)).collect::<Result<_, _>>()?;
                 Ok(SimValue::Tuple(values))
             }
-            Expr::Array(exprs) => {
+            Expr::Array(exprs, _) => {
                 let values: Vec<SimValue> = exprs.iter().map(|e| self.eval_expr(e)).collect::<Result<_, _>>()?;
                 Ok(SimValue::Array(values))
             }
@@ -434,7 +442,7 @@ impl SimulateInterpreter {
             Expr::Match(_match) => Ok(SimValue::Simulated { ty: "match".to_string(), description: "match expression".to_string() }),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.value)?;
-                if let Expr::Identifier(name) = assign.target.as_ref() {
+                if let Expr::Identifier(name, _) = assign.target.as_ref() {
                     self.env.insert(name.clone(), value.clone());
                 }
                 Ok(value)
@@ -506,7 +514,9 @@ impl SimulateInterpreter {
 
     fn eval_unary(&self, op: &UnaryOp, value: &SimValue) -> Result<SimValue, SimulateError> {
         match (op, value) {
-            (UnaryOp::Neg, SimValue::Integer(n)) => Ok(SimValue::Integer(n.wrapping_neg())),
+            (UnaryOp::Neg, SimValue::Integer(_)) => Err(SimulateError::Unsupported {
+                description: "unary negation is not supported for unsigned integer types".to_string(),
+            }),
             (UnaryOp::Not, SimValue::Bool(b)) => Ok(SimValue::Bool(!b)),
             (UnaryOp::Not, SimValue::Integer(n)) => Ok(SimValue::Bool(*n == 0)),
             _ => Ok(SimValue::Simulated { ty: "unary".to_string(), description: format!("{:?} {:?}", op, value) }),
@@ -515,7 +525,7 @@ impl SimulateInterpreter {
 
     fn eval_call(&mut self, call: &CallExpr) -> Result<SimValue, SimulateError> {
         let func_name = match call.func.as_ref() {
-            Expr::Identifier(name) => name.clone(),
+            Expr::Identifier(name, _) => name.clone(),
             _ => return Ok(SimValue::Simulated { ty: "call".to_string(), description: "indirect call".to_string() }),
         };
 
@@ -574,7 +584,7 @@ impl SimulateInterpreter {
 
     fn bump_steps(&mut self) -> Result<(), SimulateError> {
         self.steps += 1;
-        if self.steps > self.max_steps {
+        if self.steps >= self.max_steps {
             return Err(SimulateError::StepLimitExceeded { max: self.max_steps });
         }
         Ok(())
@@ -607,6 +617,72 @@ where
         let result = interp.simulate_action("add", &[SimValue::Integer(3), SimValue::Integer(5)]).unwrap();
         assert_eq!(result.return_value, SimValue::Integer(8));
         assert!(!result.has_cell_ops);
+    }
+
+    #[test]
+    fn simulate_unsigned_high_bit_integer_operations() {
+        let source = r#"
+module sim_test
+
+action greater(a: u64, b: u64) -> bool
+where
+    return a > b
+
+action div(a: u64, b: u64) -> u64
+where
+    return a / b
+
+action rem(a: u64, b: u64) -> u64
+where
+    return a % b
+"#;
+        let module = parse_module(source);
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("greater", &[SimValue::Integer(u64::MAX), SimValue::Integer(1)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Bool(true));
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("div", &[SimValue::Integer(u64::MAX), SimValue::Integer(2)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Integer(u64::MAX / 2));
+
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let result = interp.simulate_action("rem", &[SimValue::Integer(u64::MAX), SimValue::Integer(2)]).unwrap();
+        assert_eq!(result.return_value, SimValue::Integer(u64::MAX % 2));
+    }
+
+    #[test]
+    fn array_size_simulator_uses_checked_target_width_for_indices() {
+        let module = Module { name: "sim_test".to_string(), items: Vec::new(), span: crate::error::Span::default() };
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        interp.env.insert("items".to_string(), SimValue::Array(vec![SimValue::Integer(1)]));
+        let expr = Expr::Index(IndexExpr {
+            expr: Box::new(Expr::Identifier("items".to_string(), crate::error::Span::default())),
+            index: Box::new(Expr::Integer(u64::MAX, crate::error::Span::default())),
+            span: crate::error::Span::default(),
+        });
+        let result = interp.eval_expr(&expr);
+
+        #[cfg(target_pointer_width = "64")]
+        assert!(matches!(result, Err(SimulateError::UndefinedVariable { .. })));
+
+        #[cfg(target_pointer_width = "32")]
+        assert!(matches!(result, Err(SimulateError::Unsupported { .. })));
+    }
+
+    #[test]
+    fn simulate_rejects_wrong_action_arity() {
+        let source = r#"
+module sim_test
+
+action add(a: u64, b: u64) -> u64
+where
+    a + b
+"#;
+        let module = parse_module(source);
+        let mut interp = SimulateInterpreter::new(&module, 1000);
+        let error = interp.simulate_action("add", &[SimValue::Integer(3)]).unwrap_err();
+        assert!(error.to_string().contains("expects 2 argument(s), got 1"), "{}", error);
     }
 
     #[test]
@@ -685,10 +761,6 @@ where
         let module = parse_module(source);
         let mut interp = SimulateInterpreter::new(&module, 2);
         let result = interp.simulate_action("infinite", &[]);
-        match result {
-            Ok(r) => assert!(r.steps <= 3),
-            Err(SimulateError::StepLimitExceeded { .. }) => {} // ok
-            Err(e) => panic!("unexpected error: {}", e),
-        }
+        assert!(matches!(result, Err(SimulateError::StepLimitExceeded { max: 2 })));
     }
 }

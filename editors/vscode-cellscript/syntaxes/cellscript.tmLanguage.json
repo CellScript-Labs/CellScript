@@ -67,7 +67,7 @@
       "patterns": [
         {
           "name": "meta.annotation.cellscript",
-          "begin": "(#\\[)(effect|scheduler_hint)\\b",
+          "begin": "(#\\[)(type_id|capabilities|effect|scheduler_hint)\\b",
           "beginCaptures": {
             "1": {
               "name": "punctuation.definition.annotation.begin.cellscript"
@@ -84,7 +84,7 @@
           },
           "patterns": [
             {
-              "match": "\\b(Pure|ReadOnly|Mutating|Creating|Destroying|parallel|sequential|estimated_cycles)\\b",
+              "match": "\\b(Pure|ReadOnly|Mutating|Creating|Destroying|parallel|sequential|estimated_cycles|store|create|consume|replace|burn|relock|retarget_type|read_ref|transfer|destroy)\\b",
               "name": "constant.language.annotation.cellscript"
             },
             {
@@ -167,7 +167,7 @@
         },
         {
           "name": "keyword.other.cellscript",
-          "match": "\\b(has|store|consume|create|read|read_ref|launch|transition|self|env|with_lock|assert|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|transfer|destroy|std)\\b"
+          "match": "\\b(has|store|consume|create|create_unique|replace_unique|read|read_ref|launch|transition|self|env|with_lock|assert|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|transfer|claim|settle|destroy|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|std|replace|burn|relock|retarget_type|identity|with_default_hash_type|with_capacity_floor)\\b"
         },
         {
           "name": "constant.language.boolean.cellscript",
@@ -211,7 +211,7 @@
         },
         {
           "name": "support.function.builtin.cellscript",
-          "match": "\\b(assert|assert_invariant|invariant|require|preserve|min|max|isqrt)\\b"
+          "match": "\\b(assert|assert_invariant|invariant|require|preserve|create_unique|replace_unique|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|assert_sum|assert_conserved|assert_delta|assert_distinct|assert_singleton|min|max|isqrt)\\b"
         },
         {
           "name": "support.function.namespace.cellscript",
@@ -224,6 +224,10 @@
         {
           "name": "constant.other.enum-variant.cellscript",
           "match": "\\b[A-Z][A-Za-z0-9_]*::[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "constant.language.identity.cellscript",
+          "match": "\\b(none|ckb_type_id|script_args|singleton_type|type_id|identity_field|field|scope|trigger|reads|group|transaction|selected_cells)\\b"
         },
         {
           "name": "constant.language.wildcard.cellscript",

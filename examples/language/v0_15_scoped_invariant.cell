@@ -1,0 +1,69 @@
+module cellscript::language::v0_15_scoped_invariant
+
+// v0.15 scoped invariant primitives: demonstrates all five aggregate
+// invariant kinds, explicit_entry/type_group triggers, and three scope types.
+
+resource Token has store, create, consume, replace, burn, relock {
+    amount: u64,
+    symbol: [u8; 8],
+}
+
+resource NFT has store, create, consume, replace, burn, relock {
+    token_id: u64,
+    owner: Address,
+}
+
+shared OracleConfig has store {
+    oracle_id: Hash,
+    value: u64,
+}
+
+// 1. assert_sum: type-group scoped amount conservation
+invariant token_amount_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+// 2. assert_conserved: group-scoped field conservation
+invariant token_supply_conserved {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+
+    assert_conserved(Token.amount, scope = group)
+}
+
+// 3. assert_delta: selected_cells scoped delta check
+invariant token_mint_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount, witness.mint_amount
+
+    assert_delta(Token.amount, witness.mint_amount, scope = selected_cells)
+}
+
+// 4. assert_distinct: transaction-scoped NFT uniqueness
+invariant nft_no_duplicates {
+    trigger: type_group
+    scope: transaction
+    reads: outputs<NFT>.token_id
+
+    assert_distinct(outputs<NFT>.token_id, scope = transaction)
+}
+
+// 5. assert_singleton: group-scoped singleton policy
+invariant oracle_singleton {
+    trigger: explicit_entry
+    scope: group
+    reads: group_inputs<OracleConfig>.oracle_id
+
+    assert_singleton(OracleConfig.oracle_id, scope = group)
+}
+
+action transfer_token(token: Token, to: Address) -> next_token: Token
+where
+    consume token
+    create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)

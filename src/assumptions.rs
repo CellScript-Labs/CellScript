@@ -112,6 +112,7 @@ pub fn builder_assumptions_from_metadata(metadata: &CompileMetadata) -> Vec<Buil
             codegen_coverage_status: "builder-required".to_string(),
             status: "builder-required".to_string(),
             detail: detail.to_string(),
+            executable_evidence: Vec::new(),
             diagnostics: Vec::new(),
         };
         push_assumption(&mut assumptions, &mut seen, &synthetic, "capacity_policy", detail.to_string());

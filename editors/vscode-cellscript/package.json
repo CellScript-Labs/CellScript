@@ -8,11 +8,11 @@
   "main": "./dist/extension.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tsukifune-kosei/CellScript.git"
+    "url": "https://github.com/a19q3/CellScript.git"
   },
-  "homepage": "https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript",
+  "homepage": "https://github.com/a19q3/CellScript/tree/main/editors/vscode-cellscript",
   "bugs": {
-    "url": "https://github.com/tsukifune-kosei/CellScript/issues"
+    "url": "https://github.com/a19q3/CellScript/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -143,7 +143,7 @@
         "cellscript.useCargoRunFallback": {
           "type": "boolean",
           "default": true,
-          "description": "If compilerPath is unavailable, try `cargo run -q -p cellscript --` from the workspace root."
+          "description": "If compilerPath is unavailable and the workspace is trusted, try `cargo run -q -p cellscript --` from the workspace root."
         },
         "cellscript.commandTimeoutMs": {
           "type": "number",

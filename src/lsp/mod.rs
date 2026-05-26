@@ -1,16 +1,24 @@
 use crate::ast::*;
-use crate::error::{CompileError, Span};
-use crate::lexer::token::{keyword_or_identifier, TokenKind};
-use camino::Utf8PathBuf;
+use crate::error::{CompileError, Result, Span};
+use crate::lexer::token::TokenKind;
+use crate::resolve::ModuleResolver;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod server;
+
+const LSP_MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
+const LSP_MAX_OPEN_DOCUMENTS: usize = 1_000;
+const LSP_MAX_WORKSPACE_MODULES: usize = 256;
+const LSP_MAX_WORKSPACE_BYTES: usize = 20 * 1024 * 1024;
+const LSP_MAX_REFERENCE_LOCATIONS: usize = 2_048;
 
 pub struct LspServer {
     documents: HashMap<String, String>,
     ast_cache: HashMap<String, Module>,
     diagnostics: HashMap<String, Vec<Diagnostic>>,
+    primitive_compat: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,15 +148,26 @@ impl Default for LspServer {
 
 impl LspServer {
     pub fn new() -> Self {
-        Self { documents: HashMap::new(), ast_cache: HashMap::new(), diagnostics: HashMap::new() }
+        Self { documents: HashMap::new(), ast_cache: HashMap::new(), diagnostics: HashMap::new(), primitive_compat: None }
+    }
+
+    pub fn set_primitive_compat(&mut self, primitive_compat: Option<String>) {
+        self.primitive_compat = primitive_compat;
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
+        if !self.accept_document_update(&uri, content.len(), !self.documents.contains_key(&uri)) {
+            return;
+        }
         self.documents.insert(uri.clone(), content.clone());
         self.parse_document(&uri, &content);
     }
 
     pub fn update_document(&mut self, uri: String, content: String) {
+        let new_document = !self.documents.contains_key(&uri);
+        if !self.accept_document_update(&uri, content.len(), new_document) {
+            return;
+        }
         self.documents.insert(uri.clone(), content.clone());
         self.parse_document(&uri, &content);
     }
@@ -163,6 +182,17 @@ impl LspServer {
         };
 
         for change in changes {
+            if change.text.len() > LSP_MAX_DOCUMENT_BYTES {
+                self.reject_document_update(
+                    uri,
+                    format!(
+                        "document change is too large: {} bytes exceeds the {} byte limit",
+                        change.text.len(),
+                        LSP_MAX_DOCUMENT_BYTES
+                    ),
+                );
+                return;
+            }
             match change.range {
                 None => {
                     // Full document replacement.
@@ -171,6 +201,13 @@ impl LspServer {
                 Some(range) => {
                     content = apply_incremental_change(&content, range, &change.text);
                 }
+            }
+            if content.len() > LSP_MAX_DOCUMENT_BYTES {
+                self.reject_document_update(
+                    uri,
+                    format!("document is too large: {} bytes exceeds the {} byte limit", content.len(), LSP_MAX_DOCUMENT_BYTES),
+                );
+                return;
             }
         }
 
@@ -182,6 +219,35 @@ impl LspServer {
         self.documents.remove(uri);
         self.ast_cache.remove(uri);
         self.diagnostics.remove(uri);
+    }
+
+    fn accept_document_update(&mut self, uri: &str, byte_len: usize, new_document: bool) -> bool {
+        if new_document && self.documents.len() >= LSP_MAX_OPEN_DOCUMENTS {
+            self.reject_document_update(uri, format!("too many open documents: limit is {}", LSP_MAX_OPEN_DOCUMENTS));
+            return false;
+        }
+        if byte_len > LSP_MAX_DOCUMENT_BYTES {
+            self.reject_document_update(
+                uri,
+                format!("document is too large: {} bytes exceeds the {} byte limit", byte_len, LSP_MAX_DOCUMENT_BYTES),
+            );
+            return false;
+        }
+        true
+    }
+
+    fn reject_document_update(&mut self, uri: &str, message: String) {
+        self.documents.remove(uri);
+        self.ast_cache.remove(uri);
+        self.diagnostics.insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+                severity: DiagnosticSeverity::Error,
+                message,
+                source: "cellscript".to_string(),
+            }],
+        );
     }
 
     fn parse_document(&mut self, uri: &str, content: &str) {
@@ -203,11 +269,35 @@ impl LspServer {
             }
         };
 
+        let primitive_strict = self.primitive_strict_for_uri(uri);
+        if primitive_strict {
+            if let Err(error) = crate::check_primitive_strict_015(&ast) {
+                self.diagnostics.insert(uri.to_string(), vec![diagnostic_from_error(content, &error)]);
+                return;
+            }
+        }
+
         self.ast_cache.insert(uri.to_string(), ast.clone());
-        let diagnostics = match crate::types::check(&ast).and_then(|_| crate::flow::check(&ast)) {
+        let resolver = match self.document_resolver(uri) {
+            Ok(resolver) => resolver,
+            Err(error) => {
+                self.diagnostics.insert(uri.to_string(), vec![diagnostic_from_error(content, &error)]);
+                return;
+            }
+        };
+
+        let type_check = match resolver.as_ref() {
+            Some(resolver) => crate::types::check_with_resolver_and_primitive_strict(&ast, resolver, &ast.name, primitive_strict),
+            None => crate::types::check_with_primitive_strict(&ast, primitive_strict),
+        };
+        let diagnostics = match type_check.and_then(|_| crate::flow::check(&ast)) {
             Ok(()) => {
                 let mut diagnostics = Vec::new();
-                if let Ok(metadata) = crate::compile_metadata(content, None) {
+                let metadata = match resolver.as_ref() {
+                    Some(resolver) => crate::compile_metadata_with_resolver(content, None, resolver, &ast.name),
+                    None => crate::compile_metadata(content, None),
+                };
+                if let Ok(metadata) = metadata {
                     diagnostics.extend(lowering_diagnostics(content, &ast, &metadata));
                 }
                 diagnostics
@@ -215,6 +305,20 @@ impl LspServer {
             Err(error) => vec![diagnostic_from_error(content, &error)],
         };
         self.diagnostics.insert(uri.to_string(), diagnostics);
+    }
+
+    fn document_resolver(&self, uri: &str) -> Result<Option<ModuleResolver>> {
+        let modules = self.workspace_modules_result(uri)?;
+        if modules.is_empty() {
+            return Ok(None);
+        }
+
+        let mut resolver = ModuleResolver::new();
+        for module in modules {
+            resolver.register_module(module.ast)?;
+        }
+        resolver.check_circular_deps()?;
+        Ok(Some(resolver))
     }
 
     pub fn get_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
@@ -667,11 +771,23 @@ impl LspServer {
             ("while", "while ${1:condition} {\n    $0\n}"),
             ("return", "return $0"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
+            ("create_unique", "create_unique<${1:Type}>(identity = ${2:ckb_type_id}) { $0 }"),
+            ("replace_unique", "replace_unique<${1:Type}>(identity = ${2:ckb_type_id}) ${3:input} { $0 }"),
             ("destroy", "destroy ${1:expr}"),
+            ("destroy_singleton_type", "destroy_singleton_type(${1:expr})"),
+            ("destroy_unique", "destroy_unique(${1:expr}, identity = ${2:type_id})"),
+            ("destroy_instance", "destroy_instance(${1:expr}, identity_field = ${2:field})"),
+            ("burn_amount", "burn_amount(${1:expr}, field = ${2:field})"),
             ("assert", "assert ${1:condition}"),
+            ("assert_invariant", "assert_invariant(${1:condition}, \"${2:message}\")"),
             ("require", "require ${1:condition}"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
+            ("assert_sum", "assert_sum(${1:expr}, scope = ${2:group})"),
+            ("assert_conserved", "assert_conserved(${1:expr}, scope = ${2:group})"),
+            ("assert_delta", "assert_delta(${1:expr}, ${2:witness}, scope = ${3:group})"),
+            ("assert_distinct", "assert_distinct(${1:expr}, scope = ${2:group})"),
+            ("assert_singleton", "assert_singleton(${1:expr}, scope = ${2:group})"),
             ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
             ("std::cell::preserve_lock", "std::cell::preserve_lock(${1:output}, ${2:input})"),
             ("std::cell::preserve_type", "std::cell::preserve_type(${1:output}, ${2:input})"),
@@ -791,37 +907,19 @@ impl LspServer {
     pub fn goto_definition(&self, uri: &str, position: Position) -> Option<Location> {
         let symbol = self.symbol_at_position(uri, position)?;
 
-        // 1. Try top-level symbol in the current file.
-        if let Some(loc) = self.find_top_level_symbol(uri, &symbol) {
-            return Some(loc);
-        }
-
-        // 2. Try field definition if inside a type reference (e.g. `token.amount`).
+        // 1. Prefer the most local semantic scopes. A local variable named
+        // `Token` or a field named `amount` must not jump to a top-level item
+        // with the same text.
         if let Some(loc) = self.find_field_definition(uri, position, &symbol) {
             return Some(loc);
         }
 
-        // 3. Try local variable / parameter definition.
         if let Some(loc) = self.find_local_definition(uri, position, &symbol) {
             return Some(loc);
         }
 
-        // 4. Try workspace modules (cross-file).
-        for module in self.workspace_modules(uri) {
-            let module_uri = utf8_path_to_file_uri(&module.path);
-            if let Some(loc) = module.ast.items.iter().find_map(|item| {
-                let name = item_name(item)?;
-                if name == symbol {
-                    Some(Location { uri: module_uri.clone(), range: span_to_range(&module.source, item_span(item)) })
-                } else {
-                    None
-                }
-            }) {
-                return Some(loc);
-            }
-        }
-
-        None
+        // 2. Then try top-level symbols in the current file and workspace.
+        self.find_top_level_symbol(uri, &symbol)
     }
 
     /// Find a field definition for `symbol` when accessed via `expr.field`.
@@ -894,11 +992,44 @@ impl LspServer {
         None
     }
 
+    fn find_enclosing_callable_range(&self, uri: &str, position: Position) -> Option<Range> {
+        let content = self.documents.get(uri)?;
+        let ast = self.ast_cache.get(uri)?;
+        for item in &ast.items {
+            let span = match item {
+                Item::Action(action) => action.span,
+                Item::Function(function) => function.span,
+                Item::Lock(lock) => lock.span,
+                _ => continue,
+            };
+            let range = span_to_range(content, span);
+            if position_in_range(position, range) {
+                return Some(range);
+            }
+        }
+        None
+    }
+
     pub fn find_references(&self, uri: &str, position: Position) -> Vec<Location> {
         let Some(symbol) = self.symbol_at_position(uri, position) else {
             return Vec::new();
         };
         let mut refs = Vec::new();
+
+        if self.find_local_definition(uri, position, &symbol).is_some() {
+            if let (Some(content), Some(scope)) = (self.documents.get(uri), self.find_enclosing_callable_range(uri, position)) {
+                for (start, end) in word_occurrences_in_range(content, &symbol, scope) {
+                    refs.push(Location {
+                        uri: uri.to_string(),
+                        range: Range { start: offset_to_position(content, start), end: offset_to_position(content, end) },
+                    });
+                    if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                        break;
+                    }
+                }
+            }
+            return refs;
+        }
 
         let workspace_modules = self.workspace_modules(uri);
         if !workspace_modules.is_empty() {
@@ -912,6 +1043,9 @@ impl LspServer {
                             end: offset_to_position(&module.source, end),
                         },
                     });
+                    if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                        return refs;
+                    }
                 }
             }
             return refs;
@@ -923,6 +1057,9 @@ impl LspServer {
                     uri: uri.to_string(),
                     range: Range { start: offset_to_position(content, start), end: offset_to_position(content, end) },
                 });
+                if refs.len() >= LSP_MAX_REFERENCE_LOCATIONS {
+                    break;
+                }
             }
         }
         refs
@@ -1196,18 +1333,8 @@ impl LspServer {
     }
 
     pub fn rename(&self, uri: &str, position: Position, new_name: String) -> HashMap<String, Vec<TextEdit>> {
-        let mut changes = HashMap::new();
-        if !is_valid_rename_identifier(&new_name) {
-            return changes;
-        }
-        let refs = self.find_references(uri, position);
-        if refs.is_empty() {
-            return changes;
-        }
-        for location in refs {
-            changes.entry(location.uri).or_insert_with(Vec::new).push(TextEdit { range: location.range, new_text: new_name.clone() });
-        }
-        changes
+        let _ = (uri, position, new_name);
+        HashMap::new()
     }
 
     pub fn code_action(&self, uri: &str, range: Range) -> Vec<CodeAction> {
@@ -1388,15 +1515,16 @@ impl LspServer {
             ranges.push(line_range);
         }
 
-        ranges.sort_by(|a, b| {
-            let a_size = (b.start.line - a.start.line) * 10000 + b.start.character.saturating_sub(a.start.character);
-            let b_size = (b.start.line - a.start.line) * 10000 + b.start.character.saturating_sub(a.start.character);
-            a_size.cmp(&b_size)
+        ranges.sort_by_key(|range| {
+            let line_span = range.end.line.saturating_sub(range.start.line) as u64;
+            let character_span = range.end.character.saturating_sub(range.start.character) as u64;
+            line_span.saturating_mul(10_000).saturating_add(character_span)
         });
 
-        let mut result = SelectionRange { range: ranges[0], parent: None };
-        for range in ranges.iter().skip(1) {
-            result = SelectionRange { range: *range, parent: Some(Box::new(result)) };
+        let mut sorted = ranges.into_iter().rev();
+        let mut result = SelectionRange { range: sorted.next()?, parent: None };
+        for range in sorted {
+            result = SelectionRange { range, parent: Some(Box::new(result)) };
         }
 
         Some(result)
@@ -1563,11 +1691,15 @@ impl LspServer {
     }
 
     fn workspace_modules(&self, uri: &str) -> Vec<crate::LoadedModule> {
+        self.workspace_modules_result(uri).unwrap_or_default()
+    }
+
+    fn workspace_modules_result(&self, uri: &str) -> Result<Vec<crate::LoadedModule>> {
         let Some(path) = file_uri_to_utf8_path(uri) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
 
-        let mut modules = crate::load_modules_for_input(&path).unwrap_or_default();
+        let mut modules = lsp_load_workspace_modules_for_path(&path)?;
 
         if let (Some(content), Some(ast)) = (self.documents.get(uri), self.ast_cache.get(uri)) {
             if let Some(module) = modules.iter_mut().find(|module| same_workspace_path(&module.path, &path)) {
@@ -1578,7 +1710,17 @@ impl LspServer {
             }
         }
 
-        modules
+        Ok(modules)
+    }
+
+    fn primitive_strict_for_uri(&self, uri: &str) -> bool {
+        if matches!(self.primitive_compat.as_deref(), Some("0.15")) {
+            return true;
+        }
+        let Some(path) = file_uri_to_utf8_path(uri) else {
+            return false;
+        };
+        lsp_manifest_primitive_compat(&path).as_deref() == Some("0.15")
     }
 }
 
@@ -1990,12 +2132,18 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {
     let mut line = 0u32;
     let mut col = 0u32;
+    let mut iter = source.char_indices().peekable();
 
-    for (idx, ch) in source.char_indices() {
+    while let Some((idx, ch)) = iter.next() {
         if line == position.line && col == position.character {
             return Some(idx);
         }
-        if ch == '\n' {
+        if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
+            let (_, next) = iter.next().expect("peeked CRLF newline");
+            debug_assert_eq!(next, '\n');
+            line += 1;
+            col = 0;
+        } else if ch == '\n' {
             line += 1;
             col = 0;
         } else {
@@ -2019,11 +2167,20 @@ fn position_to_offset(source: &str, position: Position) -> Option<usize> {
 fn offset_to_position(source: &str, offset: usize) -> Position {
     let mut line = 0u32;
     let mut col = 0u32;
-    for (idx, ch) in source.char_indices() {
+    let mut iter = source.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
         if idx >= offset {
             break;
         }
-        if ch == '\n' {
+        if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
+            let (next_idx, next) = iter.next().expect("peeked CRLF newline");
+            debug_assert_eq!(next, '\n');
+            line += 1;
+            col = 0;
+            if next_idx >= offset {
+                break;
+            }
+        } else if ch == '\n' {
             line += 1;
             col = 0;
         } else {
@@ -2136,25 +2293,217 @@ fn word_occurrences(source: &str, symbol: &str) -> Vec<(usize, usize)> {
     matches
 }
 
+fn word_occurrences_in_range(source: &str, symbol: &str, range: Range) -> Vec<(usize, usize)> {
+    let Some((scope_start, scope_end)) = range_to_offsets(source, range) else {
+        return Vec::new();
+    };
+    word_occurrences(source, symbol).into_iter().filter(|(start, end)| *start >= scope_start && *end <= scope_end).collect()
+}
+
+fn range_to_offsets(source: &str, range: Range) -> Option<(usize, usize)> {
+    let start = position_to_offset(source, range.start)?;
+    let end = position_to_offset(source, range.end)?;
+    (start <= end).then_some((start, end))
+}
+
+fn lsp_load_workspace_modules_for_path(path: &Utf8Path) -> Result<Vec<crate::LoadedModule>> {
+    let files = lsp_workspace_cell_files(path)?;
+    let mut modules = Vec::new();
+    let mut total_bytes = 0usize;
+    for path in files {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| CompileError::new(format!("failed to read module '{}': {}", path, error), Span::default()))?;
+        total_bytes = total_bytes
+            .checked_add(source.len())
+            .ok_or_else(|| CompileError::new("LSP workspace source size overflow while loading modules", Span::default()))?;
+        if total_bytes > LSP_MAX_WORKSPACE_BYTES {
+            return Err(CompileError::new(
+                format!(
+                    "LSP workspace source size exceeds {} bytes; narrow Cell.toml package.source_roots or close large workspace files",
+                    LSP_MAX_WORKSPACE_BYTES
+                ),
+                Span::default(),
+            ));
+        }
+        let tokens = crate::lexer::lex(&source).map_err(|error| error.with_file(path.clone()))?;
+        let ast = crate::parser::parse(&tokens).map_err(|error| error.with_file(path.clone()))?;
+        modules.push(crate::LoadedModule { path, source, ast });
+    }
+    Ok(modules)
+}
+
+fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let path = lsp_canonical_utf8_path(path)?;
+    let Some(package_root) = lsp_find_package_root(&path)? else {
+        let mut files = Vec::new();
+        let mut seen_files = HashSet::new();
+        if let Some(parent) = path.parent() {
+            lsp_collect_cell_files_recursive(parent, &mut files, &mut seen_files)?;
+        }
+        if seen_files.insert(path.clone()) {
+            files.push(path);
+        }
+        files.sort();
+        return Ok(files);
+    };
+
+    let manifest = lsp_read_manifest_value(&package_root)?;
+    let mut roots = Vec::new();
+    let mut seen_roots = HashSet::new();
+    for source_root in lsp_manifest_source_roots(&manifest) {
+        let root = lsp_package_child_path(&package_root, &source_root)?;
+        if root.is_dir() && seen_roots.insert(root.clone()) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        let src_root = package_root.join("src");
+        if src_root.is_dir() {
+            let src_root = lsp_canonical_utf8_path(&src_root)?;
+            if seen_roots.insert(src_root.clone()) {
+                roots.push(src_root);
+            }
+        }
+    }
+    if let Some(entry) = lsp_manifest_entry(&manifest) {
+        let entry_path = lsp_package_child_path(&package_root, &entry)?;
+        if let Some(parent) = entry_path.parent() {
+            let parent = lsp_canonical_utf8_path(parent)?;
+            if parent.is_dir() && seen_roots.insert(parent.clone()) {
+                roots.push(parent);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    let mut seen_files = HashSet::new();
+    for root in roots {
+        lsp_collect_cell_files_recursive(&root, &mut files, &mut seen_files)?;
+    }
+    if seen_files.insert(path.clone()) {
+        files.push(path);
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn lsp_collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>, seen: &mut HashSet<Utf8PathBuf>) -> Result<()> {
+    if files.len() >= LSP_MAX_WORKSPACE_MODULES {
+        return Err(CompileError::new(
+            format!("LSP workspace module count exceeds {}; narrow Cell.toml package.source_roots", LSP_MAX_WORKSPACE_MODULES),
+            Span::default(),
+        ));
+    }
+    let entries = std::fs::read_dir(root)
+        .map_err(|error| CompileError::new(format!("failed to read module directory '{}': {}", root, error), Span::default()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| CompileError::new(format!("failed to read directory entry: {}", error), Span::default()))?;
+        let Ok(candidate) = Utf8PathBuf::from_path_buf(entry.path()) else {
+            continue;
+        };
+        if candidate.is_dir() {
+            if matches!(candidate.file_name(), Some(".git" | ".cell" | "target")) {
+                continue;
+            }
+            lsp_collect_cell_files_recursive(&candidate, files, seen)?;
+            continue;
+        }
+        if candidate.extension() == Some("cell") {
+            let candidate = lsp_canonical_utf8_path(&candidate)?;
+            if seen.insert(candidate.clone()) {
+                files.push(candidate);
+                if files.len() > LSP_MAX_WORKSPACE_MODULES {
+                    return Err(CompileError::new(
+                        format!(
+                            "LSP workspace module count exceeds {}; narrow Cell.toml package.source_roots",
+                            LSP_MAX_WORKSPACE_MODULES
+                        ),
+                        Span::default(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn lsp_find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
+    let mut cursor = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+    loop {
+        if cursor.join("Cell.toml").is_file() {
+            return Ok(Some(lsp_canonical_utf8_path(cursor)?));
+        }
+        let Some(parent) = cursor.parent() else {
+            return Ok(None);
+        };
+        cursor = parent;
+    }
+}
+
+fn lsp_manifest_primitive_compat(path: &Utf8Path) -> Option<String> {
+    let package_root = lsp_find_package_root(path).ok().flatten()?;
+    let manifest = lsp_read_manifest_value(&package_root).ok()?;
+    let build = manifest.get("build")?;
+    if let Some(mode) = build.get("primitive_compat").and_then(toml::Value::as_str) {
+        return Some(mode.to_string());
+    }
+    match build.get("primitive_strict") {
+        Some(value) if value.as_bool() == Some(true) => Some("0.15".to_string()),
+        Some(value) => value.as_str().map(str::to_string),
+        None => None,
+    }
+}
+
+fn lsp_read_manifest_value(package_root: &Utf8Path) -> Result<toml::Value> {
+    let manifest_path = package_root.join("Cell.toml");
+    let source = std::fs::read_to_string(&manifest_path)
+        .map_err(|error| CompileError::new(format!("failed to read Cell.toml '{}': {}", manifest_path, error), Span::default()))?;
+    toml::from_str(&source)
+        .map_err(|error| CompileError::new(format!("failed to parse Cell.toml '{}': {}", manifest_path, error), Span::default()))
+}
+
+fn lsp_manifest_source_roots(manifest: &toml::Value) -> Vec<String> {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("source_roots"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+fn lsp_manifest_entry(manifest: &toml::Value) -> Option<String> {
+    manifest.get("package").and_then(|package| package.get("entry")).and_then(toml::Value::as_str).map(str::to_string)
+}
+
+fn lsp_package_child_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf8PathBuf> {
+    let candidate = package_root.join(raw_path);
+    let canonical = lsp_canonical_utf8_path(&candidate)?;
+    if !canonical.starts_with(package_root) {
+        return Err(CompileError::new(
+            format!("Cell.toml path '{}' resolves outside package root '{}'", raw_path, package_root),
+            Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn lsp_canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    let canonical = std::fs::canonicalize(path)
+        .map_err(|error| CompileError::new(format!("failed to canonicalize '{}': {}", path, error), Span::default()))?;
+    Utf8PathBuf::from_path_buf(canonical)
+        .map_err(|path| CompileError::new(format!("path is not valid UTF-8: {}", path.display()), Span::default()))
+}
+
 fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     let path = uri.strip_prefix("file://")?;
     let decoded = percent_decode(path)?;
     let candidate = Utf8PathBuf::from(decoded);
     std::fs::canonicalize(&candidate).ok().and_then(|path| Utf8PathBuf::from_path_buf(path).ok()).or(Some(candidate))
-}
-
-fn is_valid_rename_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_alphabetic() || first == '_') {
-        return false;
-    }
-    if !chars.all(|ch| ch.is_alphanumeric() || ch == '_') {
-        return false;
-    }
-    matches!(keyword_or_identifier(name), TokenKind::Identifier(_))
 }
 
 fn utf8_path_to_file_uri(path: &camino::Utf8Path) -> String {
@@ -2215,6 +2564,57 @@ mod tests {
     }
 
     #[test]
+    fn lsp_position_conversion_treats_crlf_as_single_line_ending() {
+        let source = "alpha\r\nbeta";
+        let beta_offset = source.find("beta").expect("beta offset");
+
+        assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
+        assert_eq!(offset_to_position(source, source.find('\n').expect("lf offset")), Position { line: 1, character: 0 });
+        assert_eq!(position_to_offset(source, Position { line: 0, character: 5 }), Some(5));
+        assert_eq!(position_to_offset(source, Position { line: 1, character: 0 }), Some(beta_offset));
+        assert_eq!(position_to_offset(source, Position { line: 1, character: 4 }), Some(source.len()));
+    }
+
+    #[test]
+    fn lsp_position_incremental_change_applies_crlf_ranges() {
+        let source = "module demo\r\n// marker\r\n";
+        let marker_start = source.find("marker").expect("marker start");
+        let marker_end = marker_start + "marker".len();
+        let updated = apply_incremental_change(
+            source,
+            Range { start: offset_to_position(source, marker_start), end: offset_to_position(source, marker_end) },
+            "done",
+        );
+
+        assert_eq!(updated, "module demo\r\n// done\r\n");
+    }
+
+    #[test]
+    fn lsp_rejects_oversized_documents() {
+        let mut server = LspServer::new();
+        let uri = "file:///oversized.cell".to_string();
+
+        server.open_document(uri.clone(), "x".repeat(LSP_MAX_DOCUMENT_BYTES + 1));
+
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("too large")));
+    }
+
+    #[test]
+    fn lsp_rejects_document_count_over_limit() {
+        let mut server = LspServer::new();
+        for index in 0..LSP_MAX_OPEN_DOCUMENTS {
+            server.documents.insert(format!("file:///{index}.cell"), String::new());
+        }
+        let uri = "file:///extra.cell".to_string();
+
+        server.open_document(uri.clone(), "module extra".to_string());
+
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri).iter().any(|diagnostic| diagnostic.message.contains("too many open documents")));
+    }
+
+    #[test]
     fn test_incremental_change_applies_utf16_ranges_after_non_bmp_text() {
         let source = "module demo\n// 😀 marker\n";
         let start = source.find("marker").expect("marker start");
@@ -2262,6 +2662,20 @@ mod tests {
 
         let keywords: Vec<_> = completions.iter().filter(|c| c.kind == CompletionItemKind::Keyword).collect();
         assert!(!keywords.is_empty());
+    }
+
+    #[test]
+    fn test_selection_range_orders_child_before_parent() {
+        let mut server = LspServer::new();
+        let uri = "file:///selection.cell".to_string();
+        let content = "module test\n\naction answer(x: u64) -> u64\nwhere\n    let y = x + 1\n    return y\n".to_string();
+
+        server.open_document(uri.clone(), content);
+        let selection = server.selection_range(&uri, Position { line: 4, character: 8 }).expect("selection range");
+        let parent = selection.parent.as_ref().expect("parent range");
+
+        assert!(position_le(parent.range.start, selection.range.start));
+        assert!(position_le(selection.range.end, parent.range.end));
     }
 
     #[test]
@@ -2449,6 +2863,55 @@ where
     }
 
     #[test]
+    fn lsp_primitive_strict_rejects_legacy_capabilities() {
+        let mut server = LspServer::new();
+        server.set_primitive_compat(Some("0.15".to_string()));
+        let uri = "file:///strict.cell".to_string();
+        let source = r#"
+module strict
+
+resource Coin has store, transfer {
+    amount: u64,
+}
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("CS0150")),
+            "strict LSP diagnostics should reject legacy transfer capability: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn lsp_reads_primitive_strict_from_manifest() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n\n[build]\nprimitive_compat = \"0.15\"\n")
+            .unwrap();
+        let source = r#"
+module strict_manifest
+
+resource Coin has store, transfer {
+    amount: u64,
+}
+"#;
+        let main_path = root.join("src/main.cell");
+        std::fs::write(&main_path, source).unwrap();
+
+        let mut server = LspServer::new();
+        let uri = utf8_path_to_file_uri(&main_path);
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("CS0150")),
+            "manifest strict LSP diagnostics should reject legacy transfer capability: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
     fn test_goto_definition_and_references() {
         let mut server = LspServer::new();
         let uri = "file:///defs.cell".to_string();
@@ -2461,6 +2924,57 @@ where
 
         let refs = server.find_references(&uri, Position { line: 8, character: 16 });
         assert!(refs.len() >= 2);
+    }
+
+    #[test]
+    fn goto_definition_prefers_local_scope_over_top_level_symbol() {
+        let mut server = LspServer::new();
+        let uri = "file:///shadow.cell".to_string();
+        let source = r#"
+module shadow
+
+resource Token {
+    amount: u64,
+}
+
+action inspect() -> u64
+where
+    let Token = 1
+    return Token
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let token_use = source.find("return Token").expect("return Token") + "return ".len();
+        let definition =
+            server.goto_definition(&uri, offset_to_position(source, token_use)).expect("local shadow definition should resolve");
+        assert_eq!(definition.range.start.line, 9, "local binding should win over top-level resource: {:?}", definition);
+    }
+
+    #[test]
+    fn find_references_for_locals_stays_in_enclosing_callable_scope() {
+        let mut server = LspServer::new();
+        let uri = "file:///local_refs.cell".to_string();
+        let source = r#"
+module local_refs
+
+action first() -> u64
+where
+    let value = 1
+    return value
+
+action second() -> u64
+where
+    let value = 2
+    return value
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let first_value_use = source.find("return value").expect("first return value") + "return ".len();
+        let refs = server.find_references(&uri, offset_to_position(source, first_value_use));
+        assert_eq!(refs.len(), 2, "local reference search should include only first action let/use: {:?}", refs);
+        assert!(
+            refs.iter().all(|location| location.range.start.line < 8),
+            "second action references leaked into first action: {:?}",
+            refs
+        );
     }
 
     #[test]
@@ -2481,7 +2995,7 @@ where
         let source = r#"
 module metadata_hover
 
-shared Config {
+shared Config has store, read_ref {
     threshold: u64,
 }
 
@@ -2553,7 +3067,7 @@ where
         let source = r#"
 module metadata_diagnostic
 
-shared Config {
+shared Config has store, read_ref {
     threshold: u64,
 }
 
@@ -2584,7 +3098,7 @@ where
         let source = r#"
 module metadata_action
 
-resource NFT {
+resource NFT has store, create {
     token_id: u64,
 }
 
@@ -2640,6 +3154,72 @@ where
     }
 
     #[test]
+    fn test_workspace_diagnostics_check_imported_type_id_collisions() {
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        std::fs::write(
+            root.join("src/left.cell"),
+            r#"module demo::left
+
+#[type_id("demo::asset::Token:v1")]
+resource TokenA has store {
+    amount: u64
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/right.cell"),
+            r#"module demo::right
+
+#[type_id("demo::asset::Token:v1")]
+resource TokenB has store {
+    amount: u64
+}
+"#,
+        )
+        .unwrap();
+        let main_source = r#"module demo::main
+
+use demo::left::TokenA
+use demo::right::TokenB
+
+action inspect(token: TokenA) -> u64
+where
+    token.amount
+"#;
+        let main_path = root.join("src/main.cell");
+        std::fs::write(&main_path, main_source).unwrap();
+
+        let mut server = LspServer::new();
+        let main_uri = utf8_path_to_file_uri(&main_path);
+        server.open_document(main_uri.clone(), main_source.to_string());
+
+        let diagnostics = server.get_diagnostics(&main_uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.message.contains("duplicate type_id 'demo::asset::Token:v1'")),
+            "expected imported type_id collision diagnostic, got {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn lsp_loads_sibling_modules_for_standalone_example_imports() {
+        let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let launch_path = root.join("examples/launch.cell");
+        let launch_source = std::fs::read_to_string(&launch_path).expect("launch example source");
+        let launch_uri = utf8_path_to_file_uri(&launch_path);
+
+        let mut server = LspServer::new();
+        server.open_document(launch_uri.clone(), launch_source);
+
+        let diagnostics = server.get_diagnostics(&launch_uri);
+        assert!(diagnostics.is_empty(), "unexpected launch example diagnostics: {:?}", diagnostics);
+    }
+
+    #[test]
     fn test_workspace_references_across_modules() {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
@@ -2663,105 +3243,14 @@ where
     }
 
     #[test]
-    fn test_workspace_rename_groups_edits_by_file() {
-        let temp = tempdir().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
-        let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
-        let types_path = root.join("src/types.cell");
-        std::fs::write(&types_path, types_source).unwrap();
-        let main_source =
-            "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64\nwhere\n    token.amount\n";
-        let main_path = root.join("src/main.cell");
-        std::fs::write(&main_path, main_source).unwrap();
-
-        let mut server = LspServer::new();
-        let types_uri = utf8_path_to_file_uri(&types_path);
-        server.open_document(types_uri.clone(), types_source.to_string());
-
-        let changes = server.rename(&types_uri, Position { line: 2, character: 10 }, "Asset".to_string());
-
-        let type_uri =
-            changes.keys().find(|uri| uri.ends_with("/src/types.cell")).expect("rename should edit the defining file").clone();
-        let main_uri = changes
-            .keys()
-            .find(|uri| uri.ends_with("/src/main.cell"))
-            .expect("rename should edit referencing files separately")
-            .clone();
-        let type_edits = changes.get(&type_uri).expect("defining file edits should be present");
-        let main_edits = changes.get(&main_uri).expect("referencing file edits should be present");
-        assert_eq!(changes.len(), 2);
-        assert_eq!(type_edits.len(), 1);
-        assert!(main_edits.len() >= 2, "main file should include the import and parameter references: {:?}", main_edits);
-        assert!(changes.values().flatten().all(|edit| edit.new_text == "Asset"));
-    }
-
-    #[test]
-    fn test_workspace_rename_rejects_invalid_new_names() {
+    fn test_workspace_rename_is_disabled_until_symbol_scoped() {
         let mut server = LspServer::new();
         let uri = "file:///rename.cell".to_string();
         let source = "module demo\n\nresource Token {\n    amount: u64,\n}\n";
         server.open_document(uri.clone(), source.to_string());
 
-        for new_name in ["", "123Token", "Token-V2", "resource", "Address"] {
-            let changes = server.rename(&uri, Position { line: 2, character: 10 }, new_name.to_string());
-            assert!(changes.is_empty(), "rename should fail closed for invalid new name `{new_name}`");
-        }
-    }
+        let changes = server.rename(&uri, Position { line: 2, character: 10 }, "Asset".to_string());
 
-    #[test]
-    fn test_workspace_rename_respects_unicode_identifier_boundaries() {
-        let mut server = LspServer::new();
-        let uri = "file:///unicode_rename.cell".to_string();
-        let source = r#"module unicode_rename
-
-resource βToken {
-    amount: u64,
-}
-
-resource Token {
-    amount: u64,
-}
-
-action inspect(token: Token) -> u64
-where
-    token.amount
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let changes = server.rename(&uri, Position { line: 6, character: 10 }, "Asset".to_string());
-        let edits = changes.get(&uri).expect("rename should edit the current document");
-
-        assert!(edits.iter().all(|edit| edit.range.start.line != 2), "rename must not edit the suffix of βToken: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 6), "definition should be renamed: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 10), "type reference should be renamed: {edits:?}");
-    }
-
-    #[test]
-    fn test_workspace_rename_skips_comments_and_strings() {
-        let mut server = LspServer::new();
-        let uri = "file:///rename_text.cell".to_string();
-        let source = r#"module rename_text
-
-// Token in a comment must not be edited.
-resource Token {
-    amount: u64,
-}
-
-action inspect(token: Token) -> u64
-where
-    let label = "Token"
-    token.amount
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let changes = server.rename(&uri, Position { line: 3, character: 10 }, "Asset".to_string());
-        let edits = changes.get(&uri).expect("rename should edit identifiers in the current document");
-
-        assert!(edits.iter().all(|edit| edit.range.start.line != 2), "rename must not edit comments: {edits:?}");
-        assert!(edits.iter().all(|edit| edit.range.start.line != 8), "rename must not edit string literals: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 3), "definition should be renamed: {edits:?}");
-        assert!(edits.iter().any(|edit| edit.range.start.line == 7), "type reference should be renamed: {edits:?}");
+        assert!(changes.is_empty(), "rename must fail closed until symbol-scoped edits are implemented");
     }
 }

@@ -1,7 +1,9 @@
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
@@ -361,7 +363,7 @@ dist/
     }
 
     fn resolve_from_path_at(&self, name: &str, path: &str, base_root: &Path) -> Result<(ResolvedPackage, PackageManifest)> {
-        let package_path = base_root.join(path);
+        let package_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
         let manifest_path = package_path.join("Cell.toml");
 
         if !manifest_path.exists() {
@@ -400,20 +402,28 @@ dist/
         url: &str,
         detailed: &DetailedDependency,
     ) -> Result<(ResolvedPackage, PackageManifest)> {
+        validate_git_url(url)?;
+        validate_git_dependency_pin(name, detailed)?;
+
         let cache_dir = self.git_cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| {
             CompileError::without_span(format!("failed to create git cache directory '{}': {}", cache_dir.display(), e))
         })?;
+        let cache_dir = std::fs::canonicalize(&cache_dir).map_err(|e| {
+            CompileError::without_span(format!("failed to canonicalize git cache directory '{}': {}", cache_dir.display(), e))
+        })?;
 
-        let requested_ref = detailed.rev.as_ref().or(detailed.tag.as_ref()).or(detailed.branch.as_ref());
-        let cache_key = format!("{}#{}", url, requested_ref.map(String::as_str).unwrap_or("HEAD"));
-        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
+        let requested_ref = detailed.rev.as_ref();
+        let cache_name = git_cache_entry_name(name, url, requested_ref.map(String::as_str));
         let clone_dir = cache_dir.join(&cache_name);
+        ensure_git_cache_child(&cache_dir, &clone_dir)?;
 
         let git_result = if clone_dir.exists() && clone_dir.join(".git").exists() {
             Self::git_update(&clone_dir)
         } else {
-            let _ = std::fs::remove_dir_all(&clone_dir);
+            remove_git_cache_child(&cache_dir, &clone_dir).map_err(|e| {
+                CompileError::without_span(format!("failed to remove stale git cache entry '{}': {}", clone_dir.display(), e))
+            })?;
             Self::git_clone(url, &clone_dir)
         };
 
@@ -455,10 +465,9 @@ dist/
     }
 
     fn git_clone(url: &str, target: &Path) -> std::result::Result<(), String> {
-        let output = std::process::Command::new("git")
-            .args(["clone", url, &target.to_string_lossy()])
-            .output()
-            .map_err(|e| format!("failed to execute git: {}", e))?;
+        validate_git_url(url).map_err(|error| error.message)?;
+        let mut command = Self::git_command();
+        let output = command.args(Self::git_clone_args(url, target)).output().map_err(|e| format!("failed to execute git: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -469,7 +478,8 @@ dist/
     }
 
     fn git_update(clone_dir: &Path) -> std::result::Result<(), String> {
-        let output = std::process::Command::new("git")
+        let mut command = Self::git_command();
+        let output = command
             .args(["fetch", "--tags", "--prune", "origin"])
             .current_dir(clone_dir)
             .output()
@@ -477,21 +487,27 @@ dist/
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("Warning: git pull failed for {}: {}", clone_dir.display(), stderr.trim());
+            return Err(format!("git fetch failed for {}: {}", clone_dir.display(), stderr.trim()));
         }
 
         Ok(())
     }
 
     fn git_checkout(clone_dir: &Path, ref_str: &str) -> std::result::Result<(), String> {
-        let _output = std::process::Command::new("git")
-            .args(["fetch", "origin", ref_str])
+        let mut fetch_command = Self::git_command();
+        let fetch = fetch_command
+            .args(Self::git_fetch_ref_args(ref_str))
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git fetch: {}", e))?;
+        if !fetch.status.success() {
+            let stderr = String::from_utf8_lossy(&fetch.stderr);
+            return Err(format!("git fetch {} failed: {}", ref_str, stderr.trim()));
+        }
 
-        let output = std::process::Command::new("git")
-            .args(["checkout", ref_str])
+        let mut checkout_command = Self::git_command();
+        let output = checkout_command
+            .args(Self::git_checkout_args(ref_str))
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git checkout: {}", e))?;
@@ -502,6 +518,24 @@ dist/
         }
 
         Ok(())
+    }
+
+    fn git_command() -> Command {
+        let mut command = Command::new("git");
+        command.args(["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never"]);
+        command
+    }
+
+    fn git_clone_args(url: &str, target: &Path) -> Vec<OsString> {
+        vec![OsString::from("clone"), OsString::from("--"), OsString::from(url), target.as_os_str().to_os_string()]
+    }
+
+    fn git_fetch_ref_args(ref_str: &str) -> Vec<OsString> {
+        vec![OsString::from("fetch"), OsString::from("origin"), OsString::from("--"), OsString::from(ref_str)]
+    }
+
+    fn git_checkout_args(ref_str: &str) -> Vec<OsString> {
+        vec![OsString::from("checkout"), OsString::from("--"), OsString::from(ref_str)]
     }
 
     fn git_revision(clone_dir: &Path) -> std::result::Result<String, String> {
@@ -615,13 +649,169 @@ impl DependencyGraph {
     }
 }
 
-fn simple_hash(s: &str) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in s.bytes() {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+fn canonical_package_child_path(base_root: &Path, raw_path: &str, label: &str) -> Result<PathBuf> {
+    reject_package_path_escape(raw_path, label)?;
+    let canonical_root = std::fs::canonicalize(base_root)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {}", base_root.display(), e)))?;
+    let candidate = base_root.join(raw_path);
+    if !candidate.exists() {
+        return Err(CompileError::without_span(format!("{} '{}' does not exist", label, candidate.display())));
     }
-    hash
+    let canonical_candidate = std::fs::canonicalize(&candidate)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, candidate.display(), e)))?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err(CompileError::without_span(format!(
+            "{} '{}' resolves outside package root '{}'",
+            label,
+            raw_path,
+            canonical_root.display()
+        )));
+    }
+    Ok(canonical_candidate)
+}
+
+fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
+    let path = Path::new(raw_path);
+    if raw_path.is_empty() {
+        return Err(CompileError::without_span(format!("{} path must not be empty", label)));
+    }
+    if path.is_absolute() {
+        return Err(CompileError::without_span(format!("{} '{}' must be relative to the package root", label, raw_path)));
+    }
+    if path.components().any(|component| matches!(component, Component::ParentDir | Component::Prefix(_) | Component::RootDir)) {
+        return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
+    }
+    Ok(())
+}
+
+fn validate_git_url(url: &str) -> Result<()> {
+    if url.is_empty() || url.trim() != url {
+        return Err(CompileError::without_span("git dependency URL must not be empty or padded with whitespace"));
+    }
+    if url.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()) {
+        return Err(CompileError::without_span(format!("git dependency URL '{}' contains whitespace or control characters", url)));
+    }
+    if url.contains("::") {
+        return Err(CompileError::without_span(format!(
+            "git dependency URL '{}' uses a Git remote-helper/ext-style transport; use https://, http://, git://, ssh://, or scp-like SSH",
+            url
+        )));
+    }
+    if url.bytes().any(is_git_url_shell_metachar) {
+        return Err(CompileError::without_span(format!("git dependency URL '{}' contains unsupported shell metacharacters", url)));
+    }
+
+    if let Some((scheme, _rest)) = url.split_once("://") {
+        let scheme = scheme.to_ascii_lowercase();
+        if matches!(scheme.as_str(), "https" | "http" | "git" | "ssh") {
+            return Ok(());
+        }
+        return Err(CompileError::without_span(format!(
+            "git dependency URL '{}' uses unsupported scheme '{}'; allowed schemes are https, http, git, and ssh",
+            url, scheme
+        )));
+    }
+
+    if is_scp_like_ssh_url(url) {
+        return Ok(());
+    }
+
+    Err(CompileError::without_span(format!(
+        "git dependency URL '{}' must use https://, http://, git://, ssh://, or scp-like SSH",
+        url
+    )))
+}
+
+fn validate_git_dependency_pin(name: &str, detailed: &DetailedDependency) -> Result<()> {
+    if detailed.branch.is_some() || detailed.tag.is_some() {
+        return Err(CompileError::without_span(format!(
+            "git dependency '{}' must pin an immutable rev; branch and tag refs are not accepted",
+            name
+        )));
+    }
+
+    let Some(rev) = detailed.rev.as_deref() else {
+        return Err(CompileError::without_span(format!(
+            "git dependency '{}' must specify a full commit rev for provenance; branch/tag/default-branch dependencies are not accepted",
+            name
+        )));
+    };
+
+    validate_git_revision(rev)
+}
+
+pub(crate) fn validate_git_revision(rev: &str) -> Result<()> {
+    let is_full_sha1 = rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let is_full_sha256 = rev.len() == 64 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if is_full_sha1 || is_full_sha256 {
+        return Ok(());
+    }
+
+    Err(CompileError::without_span("git dependency rev must be a full 40-character SHA-1 or 64-character SHA-256 commit hash"))
+}
+
+fn is_git_url_shell_metachar(byte: u8) -> bool {
+    matches!(byte, b';' | b'|' | b'&' | b'`' | b'$' | b'<' | b'>' | b'\'' | b'"' | b'\\')
+}
+
+fn is_scp_like_ssh_url(url: &str) -> bool {
+    let Some((authority, path)) = url.split_once(':') else {
+        return false;
+    };
+    !authority.is_empty()
+        && authority.contains('@')
+        && !authority.starts_with('-')
+        && !path.is_empty()
+        && !path.starts_with('-')
+        && !path.starts_with('/')
+}
+
+fn git_cache_entry_name(name: &str, url: &str, requested_ref: Option<&str>) -> String {
+    let cache_key = format!("{}\0{}\0{}", name, url, requested_ref.unwrap_or("HEAD"));
+    let digest = blake2b_simd::Params::new().hash_length(16).personal(b"CellPkgGitCache").hash(cache_key.as_bytes());
+    format!("git-{}", digest.to_hex())
+}
+
+fn ensure_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
+    if target.file_name().is_none() {
+        return Err(CompileError::without_span(format!("invalid git cache target '{}'", target.display())));
+    }
+
+    let parent =
+        target.parent().ok_or_else(|| CompileError::without_span(format!("invalid git cache target '{}'", target.display())))?;
+    let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
+        CompileError::without_span(format!("failed to canonicalize git cache target parent '{}': {}", parent.display(), e))
+    })?;
+    if canonical_parent != cache_root {
+        return Err(CompileError::without_span(format!(
+            "git cache target '{}' resolves outside cache root '{}'",
+            target.display(),
+            cache_root.display()
+        )));
+    }
+
+    if target.exists() {
+        let canonical_target = std::fs::canonicalize(target).map_err(|e| {
+            CompileError::without_span(format!("failed to canonicalize git cache target '{}': {}", target.display(), e))
+        })?;
+        if !canonical_target.starts_with(cache_root) {
+            return Err(CompileError::without_span(format!(
+                "git cache target '{}' resolves outside cache root '{}'",
+                target.display(),
+                cache_root.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn remove_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
+    ensure_git_cache_child(cache_root, target)?;
+    if target.exists() {
+        std::fs::remove_dir_all(target)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -795,8 +985,7 @@ fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &Loc
                 match &locked.source {
                     LockedSource::Git { url, revision } if url == git => {
                         if let Some(rev) = &detail.rev {
-                            let rev_matches = revision == rev || revision.starts_with(rev) || rev.starts_with(revision);
-                            if !rev_matches {
+                            if revision != rev {
                                 issues.push(format!(
                                     "dependency '{}' expects git revision '{}' but Cell.lock records '{}'",
                                     name, rev, revision
@@ -1090,7 +1279,7 @@ version = "0.1.0"
         assert_eq!(math.name, "math");
         assert_eq!(math.version, "0.1.0");
         assert!(matches!(math.source, PackageSource::Local(_)));
-        assert_eq!(manager.get_source_paths(), vec![root.join("deps/math/src")]);
+        assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(root.join("deps/math/src")).unwrap()]);
     }
 
     #[test]
@@ -1132,7 +1321,7 @@ version = "0.2.0"
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/util/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/math/deps/util/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1155,12 +1344,12 @@ version = "0.1.0"
 
 [dependencies.util]
 version = "0.1.0"
-path = "../util"
+path = "deps/util"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/util/Cell.toml"),
+            root.join("deps/math/deps/util/Cell.toml"),
             r#"
 [package]
 name = "util"
@@ -1178,11 +1367,57 @@ version = "0.1.0"
     }
 
     #[test]
+    fn package_manager_rejects_local_path_dependency_traversal() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
+        std::fs::create_dir_all(root.join("outside/src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+path = "deps/math"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/math/Cell.toml"),
+            r#"
+[package]
+name = "math"
+version = "0.1.0"
+
+[dependencies.outside]
+path = "../outside"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("outside/Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(root);
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("must stay inside the package root"), "{}", error.message);
+    }
+
+    #[test]
     fn package_manager_rejects_transitive_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/a/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/b/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/a/deps/b/deps/a/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1203,19 +1438,28 @@ name = "a"
 version = "0.1.0"
 
 [dependencies.b]
-path = "../b"
+path = "deps/b"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/b/Cell.toml"),
+            root.join("deps/a/deps/b/Cell.toml"),
             r#"
 [package]
 name = "b"
 version = "0.1.0"
 
 [dependencies.a]
-path = "../a"
+path = "deps/a"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/a/deps/b/deps/a/Cell.toml"),
+            r#"
+[package]
+name = "a"
+version = "0.1.0"
 "#,
         )
         .unwrap();
@@ -1313,6 +1557,39 @@ path = "deps/math"
     }
 
     #[test]
+    fn lockfile_consistency_requires_exact_git_revision_match() {
+        let manifest: PackageManifest = toml::from_str(
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+version = "0.1.0"
+git = "https://example.com/math.git"
+rev = "0123456789abcdef0123456789abcdef01234567"
+"#,
+        )
+        .unwrap();
+        let mut lockfile = Lockfile::new();
+        lockfile.dependencies.insert(
+            "math".to_string(),
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Git {
+                    url: "https://example.com/math.git".to_string(),
+                    revision: "0123456789abcdef0123456789abcdef0123456".to_string(),
+                },
+            },
+        );
+
+        let issues = lockfile.consistency_issues(&manifest);
+
+        assert!(issues.iter().any(|issue| issue.contains("expects git revision")), "{issues:?}");
+        assert!(!lockfile.is_consistent(&manifest));
+    }
+
+    #[test]
     fn lockfile_replace_with_resolved_prunes_removed_dependencies() {
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
@@ -1377,6 +1654,34 @@ remote = "1.2.3"
     }
 
     #[test]
+    fn git_cache_entry_name_is_hash_only() {
+        let cache_name = git_cache_entry_name("../../outside", "https://example.com/repo.git", Some("../rev"));
+
+        assert!(cache_name.starts_with("git-"));
+        assert!(!cache_name.contains(".."));
+        assert!(!cache_name.contains('/'));
+        assert!(!cache_name.contains('\\'));
+        let digest = cache_name.strip_prefix("git-").unwrap();
+        assert_eq!(digest.len(), 32);
+        assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn git_cache_child_check_rejects_path_escape() {
+        let temp = tempdir().unwrap();
+        let cache_root = temp.path().join(".cell").join("git-cache");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&cache_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let cache_root = std::fs::canonicalize(cache_root).unwrap();
+        let escaped = cache_root.join("..").join("..").join("outside");
+        let error = ensure_git_cache_child(&cache_root, &escaped).unwrap_err();
+
+        assert!(error.message.contains("outside cache root"), "{}", error.message);
+    }
+
+    #[test]
     fn package_manager_git_dependency_fails_for_invalid_url() {
         let temp = tempdir().unwrap();
         std::fs::write(
@@ -1389,7 +1694,7 @@ version = "0.1.0"
 [dependencies.remote]
 version = "0.1.0"
 git = "https://example.invalid/remote.git"
-rev = "abc123"
+rev = "0123456789abcdef0123456789abcdef01234567"
 "#,
         )
         .unwrap();
@@ -1400,5 +1705,115 @@ rev = "abc123"
         assert!(error.message.contains("remote"));
         assert!(error.message.contains("https://example.invalid/remote.git"));
         assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_rejects_unpinned_git_dependency_before_fetch() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.remote]
+version = "0.1.0"
+git = "https://example.com/remote.git"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(temp.path());
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("must specify a full commit rev"), "{}", error.message);
+        assert!(manager.get_resolved().is_empty());
+    }
+
+    #[test]
+    fn package_manager_rejects_branch_or_tag_git_dependency_before_fetch() {
+        for ref_key in ["branch", "tag"] {
+            let temp = tempdir().unwrap();
+            std::fs::write(
+                temp.path().join("Cell.toml"),
+                format!(
+                    r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.remote]
+version = "0.1.0"
+git = "https://example.com/remote.git"
+{ref_key} = "main"
+"#
+                ),
+            )
+            .unwrap();
+
+            let mut manager = PackageManager::new(temp.path());
+            let error = manager.resolve_dependencies().unwrap_err();
+
+            assert!(error.message.contains("branch and tag refs are not accepted"), "{}", error.message);
+            assert!(manager.get_resolved().is_empty());
+        }
+    }
+
+    #[test]
+    fn package_manager_rejects_unsafe_git_url_transports() {
+        for url in [
+            "ext::sh -c touch /tmp/cellscript-owned",
+            "file:///tmp/local.git",
+            "hg::https://example.com/repo",
+            "https://example.com/repo.git;touch-owned",
+            "https://example.com/repo.git\nssh://example.com/other.git",
+        ] {
+            let error = validate_git_url(url).expect_err("unsafe git URL should be rejected");
+            assert!(error.message.contains("git dependency URL"), "unexpected error for {url}: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn package_manager_accepts_allowed_git_url_transports() {
+        for url in [
+            "https://example.com/org/repo.git",
+            "http://example.com/org/repo.git",
+            "git://example.com/org/repo.git",
+            "ssh://git@example.com/org/repo.git",
+            "git@example.com:org/repo.git",
+        ] {
+            validate_git_url(url).unwrap_or_else(|error| panic!("expected {url} to be accepted: {}", error.message));
+        }
+    }
+
+    #[test]
+    fn package_manager_git_commands_separate_user_controlled_ref_arguments() {
+        let target = Path::new("/tmp/cellscript-git-target");
+        let clone_args = PackageManager::git_clone_args("--upload-pack=calc.exe", target);
+        let fetch_args = PackageManager::git_fetch_ref_args("--upload-pack=calc.exe");
+        let checkout_args = PackageManager::git_checkout_args("--upload-pack=calc.exe");
+
+        let clone = clone_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let fetch = fetch_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let checkout = checkout_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+
+        assert_eq!(clone, vec!["clone", "--", "--upload-pack=calc.exe", "/tmp/cellscript-git-target"]);
+        assert_eq!(fetch, vec!["fetch", "origin", "--", "--upload-pack=calc.exe"]);
+        assert_eq!(checkout, vec!["checkout", "--", "--upload-pack=calc.exe"]);
+    }
+
+    #[test]
+    fn package_manager_git_update_fails_closed_on_fetch_error() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = tempdir().unwrap();
+        let output = std::process::Command::new("git").arg("init").current_dir(temp.path()).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+        let error = PackageManager::git_update(temp.path()).unwrap_err();
+        assert!(error.contains("git fetch failed"), "{}", error);
     }
 }
