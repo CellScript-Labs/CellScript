@@ -295,7 +295,7 @@ For package-level strict gates, run the check from a directory that contains
 
 ```bash
 cd path/to/your-cellscript-package
-cellc check --all-targets --target-profile ckb --production --primitive-strict 0.15
+cellc check --all-targets --target-profile ckb --production --primitive-strict 0.16
 ```
 
 If this fails with runtime-required ProofPlan gaps, the compiler is telling you

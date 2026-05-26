@@ -10,7 +10,7 @@ you already know what you want to do.
 Use this when you have a single `.cell` file and want a CKB-profile artifact.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 cellc verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -116,12 +116,13 @@ destroy_instance(badge, identity_field = badge_id)
 burn_amount(token, field = amount)
 ```
 
-In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
-burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
-when reviewers must distinguish output absence, identity consumption, instance
-consumption, and quantity burn. Singleton/type-id destruction has an executable
-absence scan, while field-instance and amount-burn policies are reported as
-runtime-required until their dedicated scans are lowered.
+In `--primitive-strict=0.16` mode, bare `destroy value` still follows the 0.15
+kernel-effect rule: it requires `consume + burn` instead of legacy
+`has destroy`. Keep the policy explicit when reviewers must distinguish output
+absence, identity consumption, instance consumption, and quantity burn.
+Singleton/type-id destruction has an executable absence scan, while
+field-instance and amount-burn policies are reported as runtime-required until
+their dedicated scans are lowered.
 
 ## Recipe: Write An Honest Lock Predicate
 

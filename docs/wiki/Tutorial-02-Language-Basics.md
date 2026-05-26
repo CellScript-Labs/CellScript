@@ -233,8 +233,8 @@ CellScript 0.15 resets `has ...` clauses from protocol verbs to kernel effects.
 New strict-mode declarations should use capabilities such as `create`,
 `consume`, `replace`, `burn`, `relock`, `retarget_type`, and `read_ref`.
 The older `transfer` and `destroy` capability words are accepted only through
-the `--primitive-compat=0.14` migration path; `--primitive-strict=0.15`
-rejects them in type declarations.
+the `--primitive-compat=0.14` migration path; `--primitive-strict=0.16`
+includes the 0.15 kernel-effect checks and rejects them in type declarations.
 
 ## Identity Policies
 

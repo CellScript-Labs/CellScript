@@ -138,9 +138,8 @@ cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-
 cellc check --target-profile ckb
 ```
 
-Use `--primitive-strict 0.15` when checking only the kernel-effect migration
-boundary. Use `--primitive-strict 0.16` for the current assurance gate, which
-adds mandatory ProofPlan soundness checks.
+The current assurance gate is `--primitive-strict 0.16`. It includes the earlier
+kernel-effect migration checks and adds mandatory ProofPlan soundness checks.
 
 ## Core Model
 
