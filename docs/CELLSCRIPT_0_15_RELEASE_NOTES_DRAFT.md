@@ -1,11 +1,18 @@
-# CellScript 0.15 Release Notes Draft
+# CellScript 0.15 Release Notes
 
-**Status**: Release gate passed on the `nightly-0.15` implementation branch.
+**Status**: Released as `v0.15.0`.
 
-**Updated**: 2026-05-20.
+**Release date**: 2026-05-26.
+
+**Release tag**: `v0.15.0`.
+
+**GitHub release**:
+<https://github.com/a19q3/CellScript/releases/tag/v0.15.0>.
+
+**Updated**: 2026-05-26.
 
 CellScript 0.15 is the scoped-invariant, Covenant ProofPlan, and verifier
-soundness hardening preview. It closes the known fail-open and
+soundness hardening release. It closes the known fail-open and
 semantic-boundary bugs found during the hardening audit, makes verifier
 triggers, scope, coverage, builder assumptions, and enforcement gaps explicit
 in source and metadata, and promotes cell identity into a first-class primitive
@@ -467,23 +474,28 @@ Full release gate:
 ./scripts/cellscript_gate.sh release
 ```
 
-Latest recorded release evidence, generated on 2026-05-20:
+Latest recorded release evidence, generated on 2026-05-26 for the `v0.15.0`
+release line:
 
 - Release gate status: passed.
 - Production evidence status: `status: "passed"`, `production_ready: true`.
-- CKB production scope: 7 bundled examples, 43/43 scoped action runs, 17/17
-  scoped lock entries, 17 valid-spend and 17 invalid-spend lock cases.
-- Stateful evidence: 27 local CKB stateful scenario runs.
+- CKB production scope: 7 bundled example deployments, 43 scoped action runs,
+  17 scoped lock entries, 17 valid-spend and 17 invalid-spend lock cases.
+- Action coverage: 4 token actions, 9 NFT actions, 10 timelock actions,
+  8 multisig actions, 4 vesting actions, 6 AMM actions, and 2 launch actions.
+- Stateful evidence: 27 local CKB stateful scenario runs covering 46 steps.
 - Final production hardening gate: `status: "passed"`, `ready: true`.
 - Strict backend CI audit: passed; the CI audit covers compiler-layer IR,
   codegen, RISC-V, syntax-combination, and regression contracts, while the
   full release acceptance covers the stateful CKB evidence boundary.
+- VS Code extension validation and dry-run packaging passed; the release VSIX
+  is attached to the GitHub release as `cellscript-vscode-0.15.0.vsix`.
 
 Report paths:
 
 ```text
-target/ckb-cellscript-acceptance/20260520-215759-25169/ckb-cellscript-acceptance-report.json
-target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260520-215735.json
+target/ckb-cellscript-acceptance/20260526-191436-8309/ckb-cellscript-acceptance-report.json
+target/cellscript-strict-backend-audit/strict-backend-audit-ci-20260526-191416.json
 target/cellscript-backend-shape/backend-shape-report-release.json
 target/cellscript-schema-manifest/schema-manifest-report-release.json
 ```

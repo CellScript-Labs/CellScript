@@ -2338,7 +2338,16 @@ fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     }
     let path = lsp_canonical_utf8_path(path)?;
     let Some(package_root) = lsp_find_package_root(&path)? else {
-        return Ok(vec![path]);
+        let mut files = Vec::new();
+        let mut seen_files = HashSet::new();
+        if let Some(parent) = path.parent() {
+            lsp_collect_cell_files_recursive(parent, &mut files, &mut seen_files)?;
+        }
+        if seen_files.insert(path.clone()) {
+            files.push(path);
+        }
+        files.sort();
+        return Ok(files);
     };
 
     let manifest = lsp_read_manifest_value(&package_root)?;
@@ -3194,6 +3203,20 @@ where
             "expected imported type_id collision diagnostic, got {:?}",
             diagnostics
         );
+    }
+
+    #[test]
+    fn lsp_loads_sibling_modules_for_standalone_example_imports() {
+        let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let launch_path = root.join("examples/launch.cell");
+        let launch_source = std::fs::read_to_string(&launch_path).expect("launch example source");
+        let launch_uri = utf8_path_to_file_uri(&launch_path);
+
+        let mut server = LspServer::new();
+        server.open_document(launch_uri.clone(), launch_source);
+
+        let diagnostics = server.get_diagnostics(&launch_uri);
+        assert!(diagnostics.is_empty(), "unexpected launch example diagnostics: {:?}", diagnostics);
     }
 
     #[test]
