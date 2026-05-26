@@ -230,7 +230,7 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                         "PP0403",
                         &plan.origin,
                         &plan.feature,
-                        "local ProofPlan record differs from runtime.proof_plan in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
+                        "local ProofPlan record differs from runtime.proof_plan in trigger, scope, reads, coverage, assumptions, group cardinality, detail, or codegen coverage",
                     );
                 }
             }
@@ -260,7 +260,7 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                         "PP0404",
                         &plan.origin,
                         &plan.feature,
-                        "runtime ProofPlan record differs from local action/function/lock metadata in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
+                        "runtime ProofPlan record differs from local action/function/lock metadata in trigger, scope, reads, coverage, assumptions, group cardinality, detail, or codegen coverage",
                     );
                 }
             }

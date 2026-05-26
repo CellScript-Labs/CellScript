@@ -2991,6 +2991,17 @@ fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json
     let added = new_keys.difference(&old_keys).cloned().collect::<Vec<_>>();
     let removed = old_keys.difference(&new_keys).cloned().collect::<Vec<_>>();
     let changed = old_keys.intersection(&new_keys).filter(|key| old_map.get(*key) != new_map.get(*key)).cloned().collect::<Vec<_>>();
+    let changed_records = changed
+        .iter()
+        .map(|key| {
+            let old_record = old_map.get(key).expect("changed proof record must exist in old metadata");
+            let new_record = new_map.get(key).expect("changed proof record must exist in new metadata");
+            serde_json::json!({
+                "key": key,
+                "fields": changed_proof_plan_fields(old_record, new_record),
+            })
+        })
+        .collect::<Vec<_>>();
     serde_json::json!({
         "status": "ok",
         "schema": "cellscript-proof-diff-v0.16",
@@ -2999,7 +3010,34 @@ fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json
         "added": added,
         "removed": removed,
         "changed": changed,
+        "changed_records": changed_records,
     })
+}
+
+fn changed_proof_plan_fields(old: &serde_json::Value, new: &serde_json::Value) -> Vec<serde_json::Value> {
+    [
+        "trigger",
+        "scope",
+        "reads",
+        "coverage",
+        "group_cardinality",
+        "builder_assumptions",
+        "codegen_coverage_status",
+        "on_chain_checked",
+    ]
+    .iter()
+    .filter_map(|field| {
+        let old_value = old.get(*field).cloned().unwrap_or(serde_json::Value::Null);
+        let new_value = new.get(*field).cloned().unwrap_or(serde_json::Value::Null);
+        (old_value != new_value).then(|| {
+            serde_json::json!({
+                "field": field,
+                "old": old_value,
+                "new": new_value,
+            })
+        })
+    })
+    .collect()
 }
 
 fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::Value> {
@@ -3013,6 +3051,8 @@ fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::V
                     "scope": plan.scope,
                     "reads": plan.reads,
                     "coverage": plan.coverage,
+                    "group_cardinality": plan.group_cardinality,
+                    "builder_assumptions": plan.builder_assumptions,
                     "codegen_coverage_status": plan.codegen_coverage_status,
                     "on_chain_checked": plan.on_chain_checked,
                 }),

@@ -121,6 +121,29 @@ fn proof_plan_soundness_rejects_local_runtime_mismatches() {
 }
 
 #[test]
+fn proof_plan_soundness_rejects_group_cardinality_drift_after_optimization() {
+    let result = compile(
+        IDENTITY_CREATE_UNIQUE,
+        CompileOptions { target_profile: Some("ckb".to_string()), opt_level: 1, ..CompileOptions::default() },
+    )
+    .unwrap();
+    assert_eq!(result.metadata.runtime.proof_plan_soundness.status, "passed");
+
+    let mut metadata = result.metadata.clone();
+    let plan = metadata
+        .actions
+        .iter_mut()
+        .flat_map(|action| action.proof_plan.iter_mut())
+        .next()
+        .expect("identity action should expose local ProofPlan records");
+    plan.group_cardinality = "stale optimizer cardinality".to_string();
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0403" && issue.message.contains("group cardinality")), "{report:#?}");
+}
+
+#[test]
 fn validate_tx_checks_builder_assumption_evidence() {
     let result =
         compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -302,6 +325,13 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let proof_diff_json = run_success_json(proof_diff);
     assert_eq!(proof_diff_json["schema"], "cellscript-proof-diff-v0.16");
     assert!(proof_diff_json["changed"].as_array().is_some_and(|changed| !changed.is_empty()), "{proof_diff_json:#?}");
+    let changed_records = proof_diff_json["changed_records"].as_array().expect("changed_records");
+    assert!(
+        changed_records.iter().any(|record| {
+            record["fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field["field"] == "coverage"))
+        }),
+        "{proof_diff_json:#?}"
+    );
 
     let mut trace = cellc_command();
     trace.arg("trace-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
