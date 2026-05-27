@@ -34,7 +34,7 @@ syntax forms you will see in the examples:
 | `use cellscript::path::{A, B}` | Grouped imports from another module. |
 | `resource T has store, create, consume, replace, burn, relock` | Linear Cell-backed assets with explicit kernel-effect capabilities. |
 | `shared T has store` | Shared Cell-backed state such as pools or registries. |
-| `receipt T has store` | Settlement-style proof Cells. |
+| `receipt T` | Settlement-style proof Cells. |
 | `receipt T -> Output` | Claimable receipt Cells with a declared claim output type. |
 | `with_default_hash_type(Data1)` | Default CKB hash type metadata for a persistent declaration. |
 | `flow Name for T.state { A -> B by action; }` | Named state graph for one explicit state field. |
@@ -43,9 +43,9 @@ syntax forms you will see in the examples:
 | `-> (left: T, right: Receipt)` | Multiple named proposed output Cell bindings. |
 | `input x: T` | Explicit consumed input Cell qualifier when the default action side is not enough. |
 | `read cfg: T` | Read-only CellDep-backed action input. |
-| `protected cell: T` | Lock-guarded input Cell view. |
+| `protected cell: T` | Lock-guarded input Cell view (lock parameters only). |
 | `witness arg: T` | Decoded witness data. |
-| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args`. |
+| `lock_args args: T` | Typed bytes from the executing lock script's `Script.args` (lock parameters only). |
 | `transition old.state: A -> new.state: B` | Explicit field-to-field state edge. |
 | `transition { ... }` | Non-empty block form for multiple explicit state edges. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
@@ -93,6 +93,39 @@ Hash
 
 Use fixed-size byte arrays when a value must live in a predictable persistent
 schema or CKB data layout.
+
+### Expression-local Unsigned Widening
+
+CellScript supports expression-local primitive unsigned integer widening for
+arithmetic and numeric comparison:
+
+```cellscript
+let total: u64 = amount_u64 + fee_u16
+let under_limit: bool = fee_u16 < amount_u64
+```
+
+The chain is `u8 -> u16 -> u32 -> u64 -> u128`, but the widening is local to
+the expression being evaluated. It does not cross assignment, return, ABI,
+witness, `create` layout, struct field initialization, or serialization
+boundaries.
+
+Integer literals may be context-typed by an expected primitive integer type:
+
+```cellscript
+let byte: u8 = 1
+```
+
+Non-literal numeric values must keep their actual width at boundaries:
+
+```cellscript
+let amount64: u64 = amount16        // rejected
+let explicit: u64 = amount16 as u64 // accepted
+```
+
+Compound assignment is a write boundary. `target += rhs` is valid only when
+`rhs` is the same width as, or narrower than, `target`. Generic `u128`
+arithmetic and ordering remain unsupported except for explicitly implemented
+`u128` delta or equality paths.
 
 `Signature` is not a built-in scalar. If a contract needs to carry a signature,
 model it explicitly:
@@ -200,8 +233,8 @@ CellScript 0.15 resets `has ...` clauses from protocol verbs to kernel effects.
 New strict-mode declarations should use capabilities such as `create`,
 `consume`, `replace`, `burn`, `relock`, `retarget_type`, and `read_ref`.
 The older `transfer` and `destroy` capability words are accepted only through
-the `--primitive-compat=0.14` migration path; `--primitive-strict=0.15`
-rejects them in type declarations.
+the `--primitive-compat=0.14` migration path; `--primitive-strict=0.16`
+includes the 0.15 kernel-effect checks and rejects them in type declarations.
 
 ## Identity Policies
 
@@ -261,7 +294,9 @@ receipt VestingGrant has store {
 }
 ```
 
-Use a claim output arrow when a receipt has a direct claim output type:
+`has store` is optional for receipts; ephemeral records such as execution logs
+or settlement proofs may omit it. Use a claim output arrow when a receipt has a
+direct claim output type:
 
 ```cellscript
 receipt ClaimTicket -> Token {
@@ -458,8 +493,11 @@ Use comments where they help the reader understand Cell movement, witness
 scope, builder obligations, or a security boundary. Avoid comments that merely
 repeat arithmetic.
 
+The formatter is AST-based. It preserves action/function doc comments, but
+ordinary line comments and block comments are not retained by `cellc fmt`.
+
 ## Next
 
 With the source shape in mind, continue with
-[Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects). If a
-CKB term is unclear, use the [CKB Glossary](https://github.com/tsukifune-kosei/CellScript/wiki/CKB-Glossary).
+[Resources and Cell Effects](https://github.com/a19q3/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects). If a
+CKB term is unclear, use the [CKB Glossary](https://github.com/a19q3/CellScript/wiki/CKB-Glossary).

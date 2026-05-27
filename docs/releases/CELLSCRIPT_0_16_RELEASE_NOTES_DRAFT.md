@@ -1,8 +1,8 @@
 # CellScript 0.16 Release Notes Draft
 
-Status: implementation branch draft for `cellscript-0.16`.
+Status: implementation branch draft for `nightly-0.16`.
 
-Updated: 2026-04-28.
+Updated: 2026-05-26.
 
 CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
 assurance toolchain. The release adds operational semantics, ProofPlan
@@ -148,8 +148,19 @@ spans, IR effect classes, and codegen coverage status, along with action/lock
 traces that include per-entry source-to-IR-to-codegen mappings and runtime
 access details.
 
+`proof-diff` reports added, removed, and changed ProofPlan record keys and
+includes `changed_records` field entries for changed trigger, scope, reads,
+coverage, group cardinality, builder assumption, codegen coverage, and
+on-chain-check status fields.
+
 **Note**: Source-to-codegen mapping is at the metadata/IR level. Full
 CellScript-to-RISC-V assembly source maps are not yet available.
+
+### VS Code Extension
+
+The VS Code extension package is aligned with CellScript 0.16.0. Its README,
+changelog, package metadata, validation script, and packaged VSIX now describe
+the current `cellc --lsp` tooling surface and 0.16 authoring surface.
 
 ### Standard Compatibility Suite
 

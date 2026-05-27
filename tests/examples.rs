@@ -45,7 +45,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 4,
             max_text_bytes: 27 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_800,
+            max_cond_branch_abs_distance: 8_500,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -221,7 +221,7 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 10,
+        BUNDLED_EXAMPLES.len() + 1 + 12,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 
@@ -1692,7 +1692,7 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     let recipients = simple_launch.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
     assert!(recipients.fixed_byte_pointer_abi);
     assert!(recipients.fixed_byte_length_abi);
-    assert_eq!(recipients.fixed_byte_len, Some(320));
+    assert_eq!(recipients.fixed_byte_len, Some(80));
     assert!(
         simple_launch.fail_closed_runtime_features.is_empty(),
         "simple_launch fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",

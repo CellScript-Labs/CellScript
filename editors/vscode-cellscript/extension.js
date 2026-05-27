@@ -67,7 +67,7 @@ function deactivate() {
 
 async function startLanguageServer(context, output, status) {
   const config = vscode.workspace.getConfiguration("cellscript");
-  const serverPath = resolveServerPath(config);
+  const serverPath = resolveServerPath(config, output);
 
   if (!serverPath) {
     status.text = "$(warning) CellScript";
@@ -112,7 +112,7 @@ async function startLanguageServer(context, output, status) {
   }
 }
 
-function resolveServerPath(config) {
+function resolveServerPath(config, output) {
   const compilerPath = config.get("compilerPath", "cellc");
 
   // Direct cellc path.
@@ -126,7 +126,7 @@ function resolveServerPath(config) {
   }
 
   // Cargo fallback.
-  if (config.get("useCargoRunFallback", true)) {
+  if (canUseCargoRunFallback(config)) {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (workspaceFolder) {
       const cwd = workspaceFolder.uri.fsPath;
@@ -140,9 +140,15 @@ function resolveServerPath(config) {
         }
       }
     }
+  } else if (config.get("useCargoRunFallback", true)) {
+    output.appendLine("[cellscript] Cargo fallback is disabled until this workspace is trusted.");
   }
 
   return null;
+}
+
+function canUseCargoRunFallback(config) {
+  return config.get("useCargoRunFallback", true) && vscode.workspace.isTrusted === true;
 }
 
 // ============================================================================
@@ -161,7 +167,6 @@ function activeCellScriptDocument() {
 async function resolveCompilerCommand(document) {
   const config = vscode.workspace.getConfiguration("cellscript", document.uri);
   const compilerPath = config.get("compilerPath", "cellc");
-  const useCargoRunFallback = config.get("useCargoRunFallback", true);
   const options = {
     timeout: Math.max(config.get("commandTimeoutMs", 15000), 1000),
     maxBuffer: Math.max(config.get("maxOutputBytes", 4 * 1024 * 1024), 64 * 1024)
@@ -171,7 +176,7 @@ async function resolveCompilerCommand(document) {
     return { command: compilerPath, args: [], cwd: undefined, options };
   }
 
-  if (!useCargoRunFallback) {
+  if (!canUseCargoRunFallback(config)) {
     return null;
   }
 

@@ -23,8 +23,11 @@ transactions, lock rejection matrices, and stateful business-flow scenarios.
 The full release gate is:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
+
+The old `./scripts/cellscript_ckb_release_gate.sh full` command remains
+supported as a compatibility wrapper.
 
 The current release evidence includes:
 

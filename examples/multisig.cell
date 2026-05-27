@@ -21,7 +21,7 @@ enum OperationType {
     Custom,
 }
 
-resource MultisigWallet has store {
+resource MultisigWallet has store, create, replace, read_ref {
     wallet_id: Hash,
     signers: Vec<Address>,
     threshold: u8,
@@ -49,13 +49,13 @@ struct Signature {
     signature: [u8; 64],
 }
 
-receipt SignatureConfirmation {
+receipt SignatureConfirmation has create {
     proposal_id: u64,
     signer: Address,
     timestamp: u64,
 }
 
-receipt ExecutionRecord {
+receipt ExecutionRecord has create {
     proposal_id: u64,
     executor: Address,
     executed_at: u64,

@@ -3,6 +3,8 @@ editors/vscode-cellscript/dist/
 
 .DS_Store
 .vscode/
+__pycache__/
+*.py[cod]
 *.swp
 *.swo
 
@@ -13,6 +15,8 @@ editors/vscode-cellscript/dist/
 
 .cell/
 Cell.lock
+
+proposals/
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

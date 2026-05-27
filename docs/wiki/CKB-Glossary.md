@@ -69,9 +69,10 @@ across lifecycle operations. Supported v0.15 policies are `ckb_type_id`,
 `field(name)`, `script_args`, and `singleton_type`.
 
 `replace_unique` emits runtime preservation checks for the selected policy.
-`create_unique` emits a local runtime anchor for the created output. Chain-wide
-uniqueness for non-TYPE_ID policies remains a builder or indexer claim, not a
-standalone compiler proof.
+`create_unique` emits a local runtime anchor for the created output and records
+the full create-time uniqueness proof as runtime-required. Chain-wide
+uniqueness remains a TYPE_ID builder-plan claim or a builder/indexer claim, not
+a standalone compiler proof.
 
 ## Witness
 

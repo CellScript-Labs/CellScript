@@ -4,35 +4,25 @@ use cellscript::fungible_token::{Token, MintAuthority}
 
 use cellscript::amm_pool::{Pool, LPReceipt}
 
-action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, pool: Pool, lp_receipt: LPReceipt)
+action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token)
 where
     assert(initial_mint <= max_supply, "initial exceeds max")
     assert(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
     let dist_total = distribution[0].1 + distribution[1].1 + distribution[2].1 + distribution[3].1
     assert(dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint")
     create auth = MintAuthority { token_symbol: symbol, max_supply, minted: initial_mint } with_lock(creator)
-    if distribution[0].1 > 0 {
-        create Token { amount: distribution[0].1, symbol } with_lock(distribution[0].0)
-    }
-    if distribution[1].1 > 0 {
-        create Token { amount: distribution[1].1, symbol } with_lock(distribution[1].0)
-    }
-    if distribution[2].1 > 0 {
-        create Token { amount: distribution[2].1, symbol } with_lock(distribution[2].0)
-    }
-    if distribution[3].1 > 0 {
-        create Token { amount: distribution[3].1, symbol } with_lock(distribution[3].0)
-    }
+    create dist0 = Token { amount: distribution[0].1, symbol } with_lock(distribution[0].0)
+    create dist1 = Token { amount: distribution[1].1, symbol } with_lock(distribution[1].0)
+    create dist2 = Token { amount: distribution[2].1, symbol } with_lock(distribution[2].0)
+    create dist3 = Token { amount: distribution[3].1, symbol } with_lock(distribution[3].0)
     let initial_lp = pool_seed_amount
     consume pool_paired_token
     create pool = Pool { token_a_symbol: symbol, token_b_symbol: pool_paired_token.symbol, reserve_a: pool_seed_amount, reserve_b: pool_paired_token.amount, total_lp: initial_lp, fee_rate_bps }
     create lp_receipt = LPReceipt { pool_id: pool.type_hash(), lp_amount: initial_lp, provider: creator } with_lock(creator)
     let remaining = initial_mint - dist_total - pool_seed_amount
-    if remaining > 0 {
-        create Token { amount: remaining, symbol } with_lock(creator)
-    }
+    create change = Token { amount: remaining, symbol } with_lock(creator)
 
-action simple_launch(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 8]) -> auth: MintAuthority
+action simple_launch(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
 where
     assert(initial_mint <= max_supply, "initial exceeds max")
     let mut total_distributed: u64 = 0
@@ -41,31 +31,7 @@ where
     }
     assert(total_distributed <= initial_mint, "distribution exceeds mint")
     create auth = MintAuthority { token_symbol: symbol, max_supply, minted: initial_mint } with_lock(creator)
-    if recipients[0].1 > 0 {
-        create Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
-    }
-    if recipients[1].1 > 0 {
-        create Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
-    }
-    if recipients[2].1 > 0 {
-        create Token { amount: recipients[2].1, symbol } with_lock(recipients[2].0)
-    }
-    if recipients[3].1 > 0 {
-        create Token { amount: recipients[3].1, symbol } with_lock(recipients[3].0)
-    }
-    if recipients[4].1 > 0 {
-        create Token { amount: recipients[4].1, symbol } with_lock(recipients[4].0)
-    }
-    if recipients[5].1 > 0 {
-        create Token { amount: recipients[5].1, symbol } with_lock(recipients[5].0)
-    }
-    if recipients[6].1 > 0 {
-        create Token { amount: recipients[6].1, symbol } with_lock(recipients[6].0)
-    }
-    if recipients[7].1 > 0 {
-        create Token { amount: recipients[7].1, symbol } with_lock(recipients[7].0)
-    }
+    create rec0 = Token { amount: recipients[0].1, symbol } with_lock(recipients[0].0)
+    create rec1 = Token { amount: recipients[1].1, symbol } with_lock(recipients[1].0)
     let remaining = initial_mint - total_distributed
-    if remaining > 0 {
-        create Token { amount: remaining, symbol } with_lock(creator)
-    }
+    create change = Token { amount: remaining, symbol } with_lock(creator)

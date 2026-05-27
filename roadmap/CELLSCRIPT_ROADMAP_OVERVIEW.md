@@ -73,7 +73,7 @@ Each release answers a specific question:
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
-| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
+| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/a19q3/CellScript/wiki) |
 
 ---
 
@@ -873,7 +873,7 @@ Local deployment artifacts:
 Audit tooling:
 
 - metadata/IR-level source-to-codegen mapping;
-- proof diff;
+- field-level proof diff;
 - cycle profiler per invariant/check;
 - transaction assumption trace viewer;
 - HTML audit bundle linking source, ProofPlan, metadata, IR effect classes, and
@@ -1029,7 +1029,7 @@ Future work:
 
 Source documents:
 
-- [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
+- [GitHub Wiki](https://github.com/a19q3/CellScript/wiki)
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
 
 ---
@@ -1116,7 +1116,7 @@ metadata, IR effect classes, and codegen coverage.
 | Standard compatibility | descriptive CKB standard script fixture suites | v0.16 |
 | Transaction validation | schema-bound `cellc validate-tx` | v0.16 |
 | Transaction templates | `cellc solve-tx` template emitter | v0.16 |
-| Deployment governance | local deploy plan, dep locks, proof diff, audit bundle | v0.16 |
+| Deployment governance | local deploy plan, dep locks, field-level proof diff, audit bundle | v0.16 |
 
 ---
 
