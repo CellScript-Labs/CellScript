@@ -32,9 +32,9 @@ dynamic BLAKE2b. They are covered by compiler/tooling tests rather than CKB
 production action acceptance.
 
 For a visual business-flow map of every bundled example, see
-[`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
+[`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](../CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
 For small reusable patterns drawn from the same ideas, see
-[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes).
+[Cookbook Recipes](https://github.com/a19q3/CellScript/wiki/Cookbook-Recipes).
 
 ## A Good Reading Order
 
@@ -59,7 +59,7 @@ From the repository root:
 ```bash
 for f in examples/*.cell; do
   echo "==> $f"
-  cellc "$f" --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o "/tmp/$(basename "$f" .cell).elf"
+  cellc "$f" --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o "/tmp/$(basename "$f" .cell).elf"
 done
 ```
 
@@ -165,7 +165,7 @@ script-args data comes from, but it does not turn an `Address` into a signer.
 The CKB profile is strict, and the bundled suite has a defined production
 boundary:
 
-- bundled examples compile under the CKB profile with `--primitive-strict=0.15`;
+- bundled examples compile under the CKB profile with `--primitive-strict=0.16`;
 - bundled business actions have scoped CKB production harnesses;
 - bundled locks have builder-backed valid-spend and invalid-spend matrices;
 - valid CKB transactions are builder-generated and dry-run;
@@ -186,20 +186,21 @@ checks:
 ```bash
 cellc fmt --check
 cellc check --target-profile ckb --production
-cellc build --target riscv64-elf --target-profile ckb --production --primitive-strict 0.15
+cellc build --target riscv64-elf --target-profile ckb --production --primitive-strict 0.16
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb --production
-cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.15 --production
+cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --production
 # --entry-action selects a single action entry point for targeted inspection
 ```
 
 For release-facing CKB evidence, run the CellScript acceptance gate:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
-This wrapper runs the syntax-combination CI preflight before the builder-backed
-CKB acceptance script, so bundled examples cannot become release evidence if a
+This wrapper runs compiler/backend evidence and the syntax-combination CI
+preflight before the builder-backed CKB acceptance script, so bundled examples
+cannot become release evidence if a
 new syntax/lowering combination is failing.
 
 Do not use compile-only or bounded diagnostic runs as production release

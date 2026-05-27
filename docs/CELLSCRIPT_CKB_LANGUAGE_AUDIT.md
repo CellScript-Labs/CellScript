@@ -40,6 +40,15 @@ literals, explicit `protected` / `witness` / `require` lock syntax, and
 fixed-width `lock_args` binding. It does not add implicit signer authority,
 hidden sighash defaults, or automatic signature verification.
 
+The 2026-05-18 coercion hardening keeps numeric convenience inside verifier
+expressions while preserving explicit boundaries. The rule is named
+expression-local unsigned widening: primitive unsigned integers may widen only
+inside arithmetic and numeric comparison. Assignment, return, ABI, witness,
+Molecule/layout, struct field initialization, and serialization boundaries
+remain exact-type boundaries unless the source contains an explicit cast.
+Integer literals may still be context-typed by an expected primitive integer
+type, but non-literal values do not pretend to have another width at a boundary.
+
 The 0.13 compiler also exposes CKB-specific evidence instead of hiding it behind
 a generic artifact:
 

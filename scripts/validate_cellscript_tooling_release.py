@@ -33,6 +33,8 @@ def main() -> int:
     cargo_lock = tomllib.loads(read("Cargo.lock"))
     package_json = json.loads(read("editors/vscode-cellscript/package.json"))
     changelog = read("CHANGELOG.md")
+    extension_changelog = read("editors/vscode-cellscript/CHANGELOG.md")
+    extension_readme = read("editors/vscode-cellscript/README.md")
 
     crate_version = cargo["package"]["version"]
     lock_versions = [
@@ -46,6 +48,9 @@ def main() -> int:
     require(package_json["version"] == crate_version, "VS Code extension version must match Cargo.toml package.version")
     require(changelog_match is not None, "CHANGELOG.md must start with a semver release heading")
     require(changelog_match.group(1) == crate_version, "CHANGELOG.md current release heading must match Cargo.toml package.version")
+    require(f"## {crate_version}" in extension_changelog, "VS Code extension changelog must include the current package version")
+    require(f"current {crate_version.rsplit('.', 1)[0]} authoring surface" in extension_readme, "VS Code extension README must name the current authoring surface")
+    require("current 0.15 authoring surface" not in extension_readme, "VS Code extension README must not describe the current surface as 0.15")
     require_contains(
         "src/lib.rs",
         ['pub const VERSION: &str = env!("CARGO_PKG_VERSION");'],
@@ -56,6 +61,15 @@ def main() -> int:
     )
     require_contains("README.md", [f'version = "{crate_version}"'])
     require_contains("README_CH.md", [f'version = "{crate_version}"'])
+    for wiki_path in [
+        "docs/wiki/Tutorial-01-Getting-Started.md",
+        "docs/wiki/Cookbook-Recipes.md",
+        "docs/wiki/Tutorial-03-Resources-and-Cell-Effects.md",
+        "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md",
+        "docs/wiki/Tutorial-11-Scoped-Invariants-and-ProofPlan.md",
+    ]:
+        require("--primitive-strict 0.15" not in read(wiki_path), f"{wiki_path} must use the current 0.16 assurance gate in command examples")
+        require("--primitive-strict=0.15" not in read(wiki_path), f"{wiki_path} must use the current 0.16 assurance gate in command examples")
 
     require(package_json["name"] == "cellscript-vscode", "VS Code extension package name changed")
     require(package_json["main"] == "./dist/extension.js", "VS Code extension entrypoint changed")
@@ -137,8 +151,13 @@ def main() -> int:
         '"docs/"',
         '"docs/wiki/"',
         '"editors/"',
+        '"proposals/"',
+        '"scripts/__pycache__/"',
     ]:
         require(excluded in cargo_toml, f"Cargo.toml package exclude is missing {excluded}")
+
+    require("__pycache__/" in read(".gitignore"), ".gitignore must ignore generated Python bytecode directories")
+    require("*.py[cod]" in read(".gitignore"), ".gitignore must ignore generated Python bytecode files")
 
     print("valid CellScript tooling release boundary")
     return 0

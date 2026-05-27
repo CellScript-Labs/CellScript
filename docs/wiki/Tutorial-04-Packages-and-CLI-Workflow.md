@@ -190,6 +190,16 @@ You can also add and lock a local dependency in one command:
 cellc install my_lib --path ../my_lib
 ```
 
+Git dependencies must be pinned to a full commit hash:
+
+```bash
+cellc add math --git https://example.com/math.git --rev 0123456789abcdef0123456789abcdef01234567
+cellc install math --git https://example.com/math.git --rev 0123456789abcdef0123456789abcdef01234567
+```
+
+Branch, tag, and default-branch git dependencies are rejected because they can
+move without changing `Cell.toml`.
+
 Remove it:
 
 ```bash
@@ -218,4 +228,4 @@ supported as lockfile helpers for local path dependency workflows.
 ## Next
 
 With a repeatable package workflow in place, continue with
-[CKB Target Profiles](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).
+[CKB Target Profiles](https://github.com/a19q3/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).

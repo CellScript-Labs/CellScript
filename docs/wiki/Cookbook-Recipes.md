@@ -10,7 +10,7 @@ you already know what you want to do.
 Use this when you have a single `.cell` file and want a CKB-profile artifact.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
+cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 cellc verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -85,8 +85,9 @@ where
 
 `replace_unique` consumes the named input before the field initializer block.
 For `field(...)`, the generated verifier compares the fixed-width identity field
-between input and output. Global uniqueness of field identities still needs
-builder or indexer evidence.
+between input and output. `create_unique` emits a local output anchor and
+records full create-time uniqueness as runtime-required; field identity
+uniqueness still needs builder or indexer evidence.
 
 ## Recipe: Update State Without Updating In Place
 
@@ -115,10 +116,13 @@ destroy_instance(badge, identity_field = badge_id)
 burn_amount(token, field = amount)
 ```
 
-In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
-burn` kernel effects instead of legacy `has destroy`. Keep the policy explicit
-when reviewers must distinguish output absence, identity consumption, instance
-consumption, and quantity burn.
+In `--primitive-strict=0.16` mode, bare `destroy value` still follows the 0.15
+kernel-effect rule: it requires `consume + burn` instead of legacy
+`has destroy`. Keep the policy explicit when reviewers must distinguish output
+absence, identity consumption, instance consumption, and quantity burn.
+Singleton/type-id destruction has an executable absence scan, while
+field-instance and amount-burn policies are reported as runtime-required until
+their dedicated scans are lowered.
 
 ## Recipe: Write An Honest Lock Predicate
 
@@ -224,7 +228,7 @@ This is a compiler/package gate. Use it before asking for deeper CKB evidence.
 Use this only from the CellScript repository root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 This is the boundary where compiler evidence becomes builder-backed local CKB

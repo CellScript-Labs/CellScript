@@ -71,6 +71,9 @@ The audit must run without an LLM in the loop.
 Recommended command surface:
 
 ```bash
+scripts/cellscript_gate.sh dev
+scripts/cellscript_gate.sh ci
+scripts/cellscript_gate.sh backend
 scripts/cellscript_syntax_combo_audit.sh quick
 scripts/cellscript_syntax_combo_audit.sh ci
 scripts/cellscript_syntax_combo_audit.sh deep --seed 20260503 --budget 5000
@@ -97,8 +100,12 @@ To reuse it for a new syntax feature:
    riskiest accepted or rejected shape;
 3. update the mode contract if the new origin should be required in `quick`,
    `ci`, or `deep`;
-4. run `scripts/cellscript_syntax_combo_audit.sh quick` while developing;
-5. run `scripts/cellscript_syntax_combo_audit.sh ci` before merge or release;
+4. run `scripts/cellscript_gate.sh dev` while developing, or
+   `scripts/cellscript_syntax_combo_audit.sh quick` for a focused syntax-only
+   check;
+5. run `scripts/cellscript_gate.sh ci` before merge, or
+   `scripts/cellscript_syntax_combo_audit.sh ci` when you only need the syntax
+   component;
 6. keep reports under `target/syntax-combo-audit/` instead of pasting artifacts
    into review threads.
 
@@ -117,20 +124,25 @@ closed if a budget/configuration change drops coverage below that contract.
 ## Acceptance Integration
 
 The syntax-combination audit is a release acceptance preflight. It runs before
-builder-backed CKB acceptance in `scripts/cellscript_ckb_release_gate.sh full`.
+builder-backed CKB acceptance through `scripts/cellscript_gate.sh release`.
 
 Keep this layering strict:
 
-- `scripts/cellscript_syntax_combo_audit.sh quick` is the local smoke gate;
-- `scripts/cellscript_syntax_combo_audit.sh ci` is the merge/release syntax
-  gate;
+- `scripts/cellscript_gate.sh dev` is the local smoke gate;
+- `scripts/cellscript_gate.sh ci` is the merge gate and includes syntax
+  combination CI through the strict backend runner;
+- `scripts/cellscript_syntax_combo_audit.sh quick|ci` are focused component
+  checks for debugging syntax-combination failures;
 - `scripts/cellscript_syntax_combo_audit.sh deep` is for release-local or
   feature-risk replay;
 - `scripts/ckb_cellscript_acceptance.sh --production` remains the chain-evidence
   component;
-- `scripts/cellscript_ckb_release_gate.sh full` is the acceptance-standard
-  wrapper that requires both syntax-combination CI and builder-backed CKB
-  evidence.
+- `scripts/cellscript_gate.sh release` is the acceptance-standard wrapper that
+  requires compiler/backend evidence, syntax-combination CI, builder-backed CKB
+  evidence, and stateful scenario/action coverage.
+
+`scripts/cellscript_ckb_release_gate.sh full` remains a compatibility wrapper
+for `scripts/cellscript_gate.sh release`.
 
 Do not treat a passing CKB acceptance run as a substitute for a failed
 syntax-combination audit. CKB evidence proves selected concrete transactions;
@@ -390,8 +402,7 @@ The runner should fail if a seed changes behavior without an explicit update to
 Before a stable release:
 
 ```bash
-scripts/cellscript_syntax_combo_audit.sh ci
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 The release is blocked if any of these are true:
