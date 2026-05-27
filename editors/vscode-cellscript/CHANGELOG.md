@@ -7,6 +7,9 @@
   package verification, registry verification, and live registry verification.
 - Added extension settings for generated builder output, CKB RPC URL,
   deployment network filtering, and registry trust metadata gates.
+
+## 0.17.0
+
 - Updated grammar, snippets, and README examples for the canonical
   `verification` action/lock surface and removed the legacy authoring model
   from current guidance.
@@ -45,14 +48,14 @@
 ## 0.12.0
 
 - Replaced direct CLI diagnostics with a full LSP language server integration
-  (`cellc lsp --stdio`) using `vscode-languageclient`.
+  (`cellc --lsp`) using `vscode-languageclient`.
 - LSP-powered features: real-time diagnostics (open/edit/save with incremental
   sync), context-aware completion, hover, go-to-definition, find-references,
-  rename, signature help, document highlight, folding ranges, selection ranges,
-  document symbols, code actions, and document formatting.
+  signature help, document highlight, folding ranges, selection ranges, document
+  symbols, code actions, and document formatting.
 - CLI-backed commands continue to work for compile, metadata, constraints,
   production report, and CKB target-profile arguments.
-- Updated extension architecture: VS Code → LanguageClient → `cellc lsp --stdio`
+- Updated extension architecture: VS Code → LanguageClient → `cellc --lsp`
   → `CellScriptBackend` (tower-lsp) → in-process `LspServer`.
 - Removed stale validation-mode and validation-debounce settings (diagnostics
   are now driven by the language server, not by CLI polling).

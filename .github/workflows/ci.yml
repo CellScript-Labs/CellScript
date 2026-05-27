@@ -35,6 +35,12 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Install CI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          rg --version
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -45,31 +51,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run tests
+      - name: Run unified CI gate
         run: |
           mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
           printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' > "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
-          cargo test --locked --manifest-path Cargo.toml -- --test-threads=1
-
-      - name: Run syntax combination audit
-        run: ./scripts/cellscript_syntax_combo_audit.sh ci
-
-      - name: Run clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Check crates.io package contents
-        run: |
-          cargo package --list --locked --allow-dirty --offline > /tmp/cellscript-package-files.txt
-          if grep -E '^(\.github/|docs/|editors/|tools/|src/bin/)' /tmp/cellscript-package-files.txt; then
-            echo "crates.io package includes repository-only files or unpublished helper binaries" >&2
-            exit 1
-          fi
-
-      - name: Verify crates.io package
-        run: cargo package --locked --offline
+          ./scripts/cellscript_gate.sh ci
 
       - name: Upload backend shape report
         if: always()
@@ -86,3 +72,11 @@ jobs:
           name: cellscript-syntax-combo-audit
           if-no-files-found: ignore
           path: target/syntax-combo-audit/
+
+      - name: Upload strict backend audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cellscript-strict-backend-audit
+          if-no-files-found: ignore
+          path: target/cellscript-strict-backend-audit/

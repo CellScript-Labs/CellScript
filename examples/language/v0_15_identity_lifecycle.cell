@@ -1,0 +1,80 @@
+module cellscript::language::v0_15_identity_lifecycle
+
+// v0.15 identity policies and destruction policies: demonstrates
+// identity declarations, create_unique/replace_unique lifecycle forms,
+// and policy-specific destruction.
+
+#[type_id("cellscript::language::v0_15_identity_lifecycle::TypedToken:v1")]
+resource TypedToken has store, create, consume, replace, burn, relock
+    identity(ckb_type_id)
+{
+    amount: u64,
+}
+
+resource UniqueNFT has store, create, consume, replace, burn, relock
+    identity(field(token_id))
+{
+    token_id: u64,
+    owner: Address,
+}
+
+resource InstanceItem has store, create, consume, replace, burn, relock
+    identity(script_args)
+{
+    item_id: u64,
+    data: Hash,
+}
+
+action mint_typed_token(recipient: Address, amount: u64) -> TypedToken
+{
+    verification
+        create_unique<TypedToken>(identity = ckb_type_id) { amount } with_lock(recipient)
+}
+
+action transfer_typed_token(token: TypedToken, to: Address) -> TypedToken
+{
+    verification
+        replace_unique<TypedToken>(identity = ckb_type_id) token { amount: token.amount }
+}
+
+action burn_typed_token(token: TypedToken)
+{
+    verification
+        destroy_singleton_type(token)
+}
+
+action mint_unique_nft(recipient: Address, tid: u64) -> UniqueNFT
+{
+    verification
+        create_unique<UniqueNFT>(identity = field(token_id)) { token_id: tid, owner: recipient } with_lock(recipient)
+}
+
+action transfer_unique_nft(nft: UniqueNFT, to: Address) -> UniqueNFT
+{
+    verification
+        replace_unique<UniqueNFT>(identity = field(token_id)) nft { token_id: nft.token_id, owner: to }
+}
+
+action destroy_unique_nft(nft: UniqueNFT)
+{
+    verification
+        destroy_unique(nft, identity = type_id)
+}
+
+action update_instance(item: InstanceItem, new_data: Hash) -> InstanceItem
+{
+    verification
+        replace_unique<InstanceItem>(identity = script_args) item { item_id: item.item_id, data: new_data }
+}
+
+action destroy_instance_item(item: InstanceItem)
+{
+    verification
+        destroy_instance(item, identity_field = item_id)
+}
+
+action burn_item_quantity(item: InstanceItem)
+{
+    verification
+        burn_amount(item, field = item_id)
+}

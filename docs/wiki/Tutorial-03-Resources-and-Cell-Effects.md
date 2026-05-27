@@ -28,12 +28,12 @@ place. A transaction spends Cells and creates new Cells.
 | `read param: T` | Read dependency-backed state without consuming it. |
 | `read_ref<T>()` | Read dependency-backed state from an expression. |
 | `destroy value` | Consume a value without a successor output, if the type allows `destroy`. |
-| `create_unique<T>(identity = policy) { ... }` | Create a typed output and anchor its declared identity. |
+| `create_unique<T>(identity = policy) { ... }` | Create a typed output, anchor its declared identity, and report full uniqueness as runtime-required. |
 | `replace_unique<T>(identity = policy) input { ... }` | Consume one input-backed value and create a replacement that preserves identity. |
 | `destroy_singleton_type(value)` | Consume a singleton and prove no same-TypeHash output continues it. |
 | `destroy_unique(value, identity = type_id)` | Consume a TYPE_ID-backed unique value without replacement. |
-| `destroy_instance(value, identity_field = id)` | Consume one field-identified instance while allowing unrelated same-type outputs. |
-| `burn_amount(value, field = amount)` | Prove a quantity burn rather than output absence. |
+| `destroy_instance(value, identity_field = id)` | Consume one field-identified instance; executable same-field output exclusion is runtime-required. |
+| `burn_amount(value, field = amount)` | Declare a quantity burn rather than output absence; executable delta proof is runtime-required. |
 | `std::lifecycle::transfer(input, output, to) { ... }` | Expand to consume plus a locked output and explicit preservation checks. |
 | `std::receipt::claim(receipt, output, to) { ... }` | Consume a receipt and materialize the claim output. |
 | `std::lifecycle::settle(receipt, output, to) { ... }` | Finalize a receipt-backed process with an explicit output. |
@@ -230,8 +230,9 @@ identity evidence across input and output: fixed-width field bytes for
 `singleton_type`.
 
 For `create_unique`, 0.15 emits local runtime anchors for the created output.
-Global uniqueness for non-TYPE_ID policies still needs builder/indexer evidence;
-do not treat compiler metadata alone as a chain-wide uniqueness proof.
+The full global uniqueness proof is recorded as runtime-required and still
+needs TYPE_ID builder-plan evidence or builder/indexer evidence; do not treat
+compiler metadata alone as a chain-wide uniqueness proof.
 
 ## Explicit Destruction Policies
 
@@ -245,9 +246,10 @@ burn_amount(token, field = amount)
 ```
 
 These forms are intentionally different. Destroying a singleton is an output
-absence proof. Destroying a TYPE_ID value is identity consumption. Destroying an
-instance by field still allows unrelated same-type outputs. Burning an amount is
-a quantity relation, not an output absence claim.
+absence proof. Destroying a TYPE_ID value uses the same executable absence scan
+for the identity continuation. Destroying an instance by field and burning an
+amount are explicit runtime-required proof gaps; they are not lowered as
+over-broad same-TypeHash absence claims.
 
 ## Updating Existing State
 
@@ -309,7 +311,7 @@ For CKB code, prefer:
 - fixed persistent schemas;
 - explicit action parameters;
 - explicit locks for authorization boundaries;
-- `--primitive-strict=0.15` syntax for new code;
+- `--primitive-strict=0.16` syntax for new code;
 - explicit capacity, witness, and dependency review;
 - metadata-backed explanations for every runtime obligation.
 
@@ -320,7 +322,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Action Model and 0.13 Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+[Action Model and 0.13 Syntax](https://github.com/a19q3/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
 for a deeper walkthrough of signature-direction actions, then use
-[Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes)
+[Cookbook Recipes](https://github.com/a19q3/CellScript/wiki/Cookbook-Recipes)
 for small copyable patterns.

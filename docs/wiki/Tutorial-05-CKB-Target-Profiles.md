@@ -122,4 +122,4 @@ You can think of the layers like this:
 ## Next
 
 After choosing a profile, continue with
-[Metadata, Verification, and Production Gates](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates).
+[Metadata, Verification, and Production Gates](https://github.com/a19q3/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates).

@@ -62,10 +62,9 @@ by existing fixed-width machinery):
 - [x] Cell-backed / linear collection paths remain metadata-visible and
   fail-closed.
 - [x] Latest release-gate verification has passed:
-  - `cargo fmt --all`
+  - `./scripts/cellscript_gate.sh ci`
+  - `./scripts/cellscript_gate.sh backend`
   - targeted helper tests for each new helper
-  - `cargo clippy --locked -p cellscript --all-targets -- -D warnings`
-  - `cargo test --locked -p cellscript -- --test-threads=1`
   - `git diff --check`
 
 ---
@@ -120,9 +119,9 @@ by existing fixed-width machinery):
   wiki home/sidebar.
 - [x] Added an executable syntax-combination audit:
   `./scripts/cellscript_syntax_combo_audit.sh quick|ci|deep`.
-- [x] Wired quick syntax audit into the local release gate, CI syntax audit into
-  the full release gate and GitHub Actions, and mode contracts so coverage
-  shrinkage fails closed.
+- [x] Wired quick and CI syntax audits through the unified
+  `./scripts/cellscript_gate.sh dev|ci|release` entry points, and mode contracts
+  so coverage shrinkage fails closed.
 
 ---
 

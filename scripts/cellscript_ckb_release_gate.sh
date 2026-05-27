@@ -273,15 +273,13 @@ run_production_gate() {
 
 case "$MODE" in
     quick)
-        run_quick_gate
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release-quick "$@"
         ;;
     production|full)
-        run_production_gate
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release "$@"
         ;;
     *)
         printf 'usage: %s [quick|production|full]\n' "$0" >&2
         exit 2
         ;;
 esac
-
-printf '\nCellScript CKB %s release gate passed.\n' "$MODE"

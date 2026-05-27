@@ -947,6 +947,55 @@ def generated_cases() -> list[AuditCase]:
             expected=Expected("accept"),
         ),
         AuditCase(
+            name="if-tuple-projection",
+            source=module_source(
+                "if_tuple_projection",
+                """
+                action choose(flag: bool) -> u64
+                where
+                    let pair = if flag { (1, 2) } else { (3, 4) }
+                    return pair.0
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/tuple-projection",
+        ),
+        AuditCase(
+            name="match-tuple-projection",
+            source=module_source(
+                "match_tuple_projection",
+                """
+                enum Flag {
+                    Off,
+                    On,
+                }
+
+                action choose(flag: Flag) -> u64
+                where
+                    let pair = match flag {
+                        Flag::Off => { (1, 2) },
+                        _ => { (3, 4) },
+                    }
+                    return pair.1
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/tuple-projection",
+        ),
+        AuditCase(
+            name="byte-string-fixed-length",
+            source=module_source(
+                "byte_string_fixed_length",
+                """
+                action symbol() -> [u8; 4]
+                where
+                    return b"TEST"
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/bytestring-length",
+        ),
+        AuditCase(
             name="reject-require-block-lifecycle",
             source=module_source(
                 "reject_require_block_lifecycle",
@@ -963,6 +1012,40 @@ def generated_cases() -> list[AuditCase]:
                 """,
             ),
             expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
+        ),
+        AuditCase(
+            name="reject-wildcard-match-non-last",
+            source=module_source(
+                "reject_wildcard_match_non_last",
+                """
+                enum Flag {
+                    Off,
+                    On,
+                }
+
+                action bad(flag: Flag) -> u64
+                where
+                    return match flag {
+                        _ => { 1 },
+                        Flag::Off => { 2 },
+                    }
+                """,
+            ),
+            expected=Expected("reject_compile", ("wildcard pattern '_'", "last match arm")),
+            origin="matrix:edge/wildcard-match-order",
+        ),
+        AuditCase(
+            name="reject-byte-string-length-mismatch",
+            source=module_source(
+                "reject_byte_string_length_mismatch",
+                """
+                action bad() -> [u8; 3]
+                where
+                    return b"TEST"
+                """,
+            ),
+            expected=Expected("reject_compile", ("type mismatch",)),
+            origin="matrix:edge/bytestring-length",
         ),
         AuditCase(
             name="reject-preserve-type-mismatch",

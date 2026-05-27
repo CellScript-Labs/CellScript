@@ -19,6 +19,23 @@ sidecar metadata all expose the same machine-readable registry.
 When a CLI failure can be tied to this registry, stderr uses the same
 `error[E####]` code and points to `cellc explain E####`.
 
+## Error-Code Channels
+
+Some CellScript runtime error numbers intentionally overlap with CKB syscall
+return codes and RISC-V exception causes. For example, CellScript code `1`
+means `syscall-failed`, while a raw CKB syscall return value of `1` means
+`CKB_INDEX_OUT_OF_BOUND` in the syscall ABI.
+
+This overlap is functionally safe because the values travel through different
+channels. A generated verifier returns a CellScript error only by loading the
+stable CellScript code into `a0` and exiting normally. Raw CKB syscall return
+codes are checked immediately after `ecall` and are converted into CellScript
+errors before verifier exit. A RISC-V exception or VM trap is reported by the
+CKB-VM as a VM-level failure, not as the verifier's normal `a0` return value.
+
+Use the table below only for normal CellScript verifier exit codes. Do not
+interpret raw syscall status registers or VM trap diagnostics with this table.
+
 | Code | Name | Meaning | Debugging hint |
 |---:|---|---|---|
 | 1 | `syscall-failed` | A target VM syscall returned a non-zero status while loading transaction context. | Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility. |

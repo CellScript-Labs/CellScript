@@ -15,7 +15,7 @@ autobins = false
 authors = ["CellScript Core Team"]
 description = "CellScript compiler for the Cell model"
 license = "MIT"
-repository = "https://github.com/tsukifune-kosei/CellScript"
+repository = "https://github.com/a19q3/CellScript"
 exclude = [
     ".gitignore",
     ".rustfmt.toml",
@@ -23,6 +23,8 @@ exclude = [
     "docs/",
     "docs/wiki/",
     "editors/",
+    "proposals/",
+    "scripts/__pycache__/",
     "src/bin/",
     "tools/",
 ]
@@ -46,7 +48,6 @@ blake2b_simd = "1.0"
 toml = "0.8"
 hex = "0.4"
 
-dashmap = "6.0"
 indexmap = "=2.2.6"
 
 log = "0.4"
@@ -67,6 +68,7 @@ tokio = { version = "1", features = ["full"] }
 [features]
 default = []
 vm-runner = ["dep:ckb-vm"]
+ckb-acceptance = []
 
 [dev-dependencies]
 pretty_assertions = "1.4"

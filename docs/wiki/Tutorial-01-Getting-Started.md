@@ -17,7 +17,7 @@ need an external RISC-V toolchain for the built-in assembler path used here.
 Start by cloning the repository and running the test suite:
 
 ```bash
-git clone https://github.com/tsukifune-kosei/CellScript.git
+git clone https://github.com/a19q3/CellScript.git
 cd CellScript
 cargo test --locked
 ```
@@ -58,13 +58,13 @@ output.
 Compile it to RISC-V assembly:
 
 ```bash
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-asm --target-profile ckb --primitive-strict 0.15 -o /tmp/token.s
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-asm --target-profile ckb --primitive-strict 0.16 -o /tmp/token.s
 ```
 
 Then compile the same source to ELF:
 
 ```bash
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 ```
 
 After the ELF build, look for the metadata sidecar:
@@ -102,7 +102,7 @@ chapters explain the difference, but this check is the right first habit.
 For CKB artifacts, keep the profile explicit:
 
 ```bash
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.ckb.elf
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.ckb.elf
 cargo run --locked --bin cellc -- verify-artifact /tmp/token.ckb.elf --expect-target-profile ckb
 ```
 
@@ -113,5 +113,5 @@ That fail-closed behavior is intentional.
 ## Next
 
 Once you can compile and verify one file, continue with
-[Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics). The next chapter explains
+[Language Basics](https://github.com/a19q3/CellScript/wiki/Tutorial-02-Language-Basics). The next chapter explains
 what you are looking at inside a `.cell` file.

@@ -4,13 +4,13 @@
   <img src="assets/cellscript-logo.png" alt="CellScript" width="560">
 </p>
 
-[![CellScript CI](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml)
+[![CellScript CI](https://github.com/a19q3/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/a19q3/CellScript/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
 [![Package Workflow: Local First](https://img.shields.io/badge/package%20workflow-local%20first-2f6f4e.svg)](#包工作流)
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#编辑器支持)
-[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/tsukifune-kosei/CellScript/wiki)
+[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
 
 [English](README.md) | [中文](README_CH.md)
 
@@ -400,7 +400,7 @@ stack-spill 布局、witness byte bounds、CKB cycle/capacity 估算。
 | 模块 | 作用 |
 |---|---|
 | **Stdlib**（`stdlib/`） | 降低到显式 verifier effect 的内置函数和 compiler-recognized patterns：`std::lifecycle::transfer`、`std::receipt::claim`、`std::lifecycle::settle` 等 lifecycle helpers，`std::cell::preserve_type`、`std::cell::preserve_lock`、`std::cell::preserve_capacity` 等 cell metadata helpers，以及 ckb-vm syscall/runtime helpers。模块注入，不单独链接。 |
-| **Collections**（`stdlib/collections.rs`） | bounded stack-backed `Vec<T: FixedWidth>` helpers，用于 verifier-local value：`new`、`with_capacity`、`capacity`、`push`、`extend_from_slice`、`len`、`is_empty`、indexing、`first`、`last`、`contains`、`set`、`remove`、`pop`、`insert`、`reverse`、`truncate`、`swap`、`clear`。Cell-backed collection ownership 仍不支持。 |
+| **Collections**（`stdlib/collections.rs`） | compiler-recognized stack-backed `Vec<T: FixedWidth>` lowering 仍支持 verifier-local value：`new`、`with_capacity`、`capacity`、`push`、`extend_from_slice`、`len`、`is_empty`、indexing、`first`、`last`、`contains`、`set`、`remove`、`pop`、`insert`、`reverse`、`truncate`、`swap`、`clear`。Generated allocation-backed collection symbols 当前 fail-closed，不是 production allocator ABI。Cell-backed collection ownership 仍不支持。 |
 
 ### 工具面
 

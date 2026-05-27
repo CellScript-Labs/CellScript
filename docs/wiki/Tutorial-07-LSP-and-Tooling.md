@@ -70,7 +70,7 @@ Useful settings:
 | Setting | Purpose |
 |---|---|
 | `cellscript.compilerPath` | Path to the `cellc` binary used for LSP and CLI-backed commands. |
-| `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a workspace when `cellc` is unavailable. |
+| `cellscript.useCargoRunFallback` | Use `cargo run -q -p cellscript --` from a trusted workspace when `cellc` is unavailable. |
 | `cellscript.target` | Compiler target for command-backed reports: `riscv64-asm` or `riscv64-elf`. |
 | `cellscript.commandTimeoutMs` | Timeout for compiler-backed commands. |
 | `cellscript.builderOutputDir` | Output directory for generated TypeScript action-builder packages. Relative paths resolve from the nearest package `Cell.toml`. |
@@ -135,6 +135,9 @@ For trust metadata review, add the explicit presence gate:
 ```bash
 cellc registry verify --require-publisher-signature --require-audit-report --json
 ```
+
+Run these from a package directory that contains `Cell.toml`. The `.` argument
+refers to the current package; for a single file, pass the file path instead.
 
 For CKB admission, keep the profile visible:
 
@@ -214,4 +217,4 @@ current build explicitly reports them as completed and supported.
 ## Next
 
 With the tooling loop in place, continue with
-[Bundled Example Contracts](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts).
+[Bundled Example Contracts](https://github.com/a19q3/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts).
