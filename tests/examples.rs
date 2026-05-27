@@ -223,7 +223,7 @@ fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 10,
+        BUNDLED_EXAMPLES.len() + 1 + 12,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 

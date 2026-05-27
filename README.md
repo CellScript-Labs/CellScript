@@ -4,13 +4,13 @@
   <img src="assets/cellscript-logo.png" alt="CellScript" width="560">
 </p>
 
-[![CellScript CI](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/tsukifune-kosei/CellScript/actions/workflows/ci.yml)
+[![CellScript CI](https://github.com/a19q3/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/a19q3/CellScript/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
 [![Package Workflow: Local First](https://img.shields.io/badge/package%20workflow-local%20first-2f6f4e.svg)](#package-workflow)
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
-[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/tsukifune-kosei/CellScript/wiki)
+[![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
 
 [English](README.md) | [Chinese](README_CH.md)
 
@@ -126,7 +126,7 @@ CellScript now supports CKB as its only target profile:
 
 | Profile | When to use | What you get |
 |---|---|---|
-| `ckb` | CKB mainnet artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
+| `ckb` | CKB ckb-vm RISC-V artifacts | BLAKE2b/Molecule conventions, CKB syscall profile |
 
 > The `ckb` profile is production-gated for the bundled CellScript suite. It
 > emits raw CKB ckb-vm artifacts, uses CKB syscall
@@ -138,9 +138,8 @@ cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-
 cellc check --target-profile ckb
 ```
 
-Use `--primitive-strict 0.15` when checking only the kernel-effect migration
-boundary. Use `--primitive-strict 0.16` for the current assurance gate, which
-adds mandatory ProofPlan soundness checks.
+The current assurance gate is `--primitive-strict 0.16`. It includes the earlier
+kernel-effect migration checks and adds mandatory ProofPlan soundness checks.
 
 ## Core Model
 
@@ -358,7 +357,7 @@ Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
 CKB production acceptance matrix. `registry.cell` covers bounded local
 `Vec<Address>` / `Vec<Hash>` helpers; `examples/registry.cell` keeps that
-surface available from the top-level examples directory. `order_book.cell` is a
+surface available from the top-level examples directory. `examples/language/order_book.cell` is a
 local stack-backed order-vector sketch and does not claim persistent order-book
 semantics. The v0.14 language examples cover CKB source/witness, capacity/time,
 TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
@@ -527,7 +526,7 @@ CKB cycle/capacity estimates.
 | Module | What it does |
 |---|---|
 | **Stdlib** (`stdlib/`) | Built-in functions and compiler-recognized patterns that lower to explicit verifier effects: lifecycle helpers such as `std::lifecycle::transfer`, `std::receipt::claim`, and `std::lifecycle::settle`; cell metadata helpers such as `std::cell::preserve_type`, `std::cell::preserve_lock`, and `std::cell::preserve_capacity`; plus ckb-vm syscall/runtime helpers. Module-injected, not linked separately. |
-| **Collections** (`stdlib/collections.rs`) | Bounded stack-backed `Vec<T: FixedWidth>` helpers for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Cell-backed collection ownership remains unsupported. |
+| **Collections** (`stdlib/collections.rs`) | Compiler-recognized stack-backed `Vec<T: FixedWidth>` lowering remains supported for verifier-local values, including `new`, `with_capacity`, `capacity`, `push`, `extend_from_slice`, `len`, `is_empty`, indexing, `first`, `last`, `contains`, `set`, `remove`, `pop`, `insert`, `reverse`, `truncate`, `swap`, and `clear`. Generated allocation-backed collection symbols are fail-closed and are not a production allocator ABI. Cell-backed collection ownership remains unsupported. |
 
 ### Tooling Surface
 

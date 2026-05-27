@@ -297,6 +297,8 @@ LANGUAGE_EXAMPLES = [
     "v0_14_hash_blake2b.cell",
     "v0_14_multi_step_pipeline.cell",
     "v0_14_witness_source.cell",
+    "v0_15_identity_lifecycle.cell",
+    "v0_15_scoped_invariant.cell",
 ]
 EXAMPLE_SCOPE = {
     "production_bundled_examples": EXAMPLES,
@@ -498,7 +500,7 @@ for action, source in TOKEN_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock {
+NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64
     owner: Address
     metadata_hash: Hash
@@ -506,7 +508,7 @@ NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, re
     royalty_bps: u16
 }
 
-resource Collection has store {
+resource Collection has store, replace {
     creator: Address
     total_supply: u64
     max_supply: u64
@@ -526,7 +528,7 @@ receipt Offer has create, consume, burn {
     expires_at: u64
 }
 
-receipt RoyaltyPayment {
+receipt RoyaltyPayment has create {
     token_id: u64
     recipient: Address
     amount: u64
@@ -711,7 +713,7 @@ for action, source in NFT_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn {
+TIMELOCK_TYPES_SOURCE = """resource TimeLock has store, create, consume, replace, burn, read_ref {
     owner: Address
     lock_type: u8
     unlock_height: u64
@@ -736,7 +738,7 @@ receipt EmergencyRelease has create, consume, replace, burn {
     approvals: u8
 }
 
-receipt ReleaseRecord {
+receipt ReleaseRecord has create {
     lock_hash: Hash
     released_at: u64
     released_by: Address
@@ -927,12 +929,12 @@ for action, source in TIMELOCK_ACTION_SOURCES.items():
 
 AMM_ACTION_SOURCES = {
     "seed_pool": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -941,7 +943,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -992,12 +994,12 @@ action isqrt(n: u64) -> u64 {
 }
 """,
     "add_liquidity": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -1006,7 +1008,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -1044,12 +1046,12 @@ action min(a: u64, b: u64) -> u64 {
 }
 """,
     "swap_a_for_b": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -1086,12 +1088,12 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
 }
 """,
     "remove_liquidity": """
-resource Token has store {
+resource Token has store, create, consume {
     amount: u64
     symbol: [u8; 8]
 }
 
-shared Pool {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8]
     token_b_symbol: [u8; 8]
     reserve_a: u64
@@ -1100,7 +1102,7 @@ shared Pool {
     fee_rate_bps: u16
 }
 
-receipt LPReceipt {
+receipt LPReceipt has store, create, consume {
     pool_id: Hash
     lp_amount: u64
     provider: Address
@@ -1165,7 +1167,7 @@ for action, source in AMM_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
-MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store {
+MULTISIG_TYPES_SOURCE = """resource MultisigWallet has store, create, replace, read_ref {
     wallet_id: Hash
     signer_a: Address
     signer_b: Address
@@ -1187,13 +1189,13 @@ receipt Proposal has create, consume, replace, burn {
     expires_at: u64
 }
 
-receipt SignatureConfirmation {
+receipt SignatureConfirmation has create {
     proposal_id: u64
     signer: Address
     timestamp: u64
 }
 
-receipt ExecutionRecord {
+receipt ExecutionRecord has create {
     proposal_id: u64
     executor: Address
     executed_at: u64
@@ -1354,7 +1356,7 @@ action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address
         proposer: proposer,
         operation: 3,
         target: Address::zero(),
-        amount: new_threshold,
+        amount: new_threshold as u64,
         required_signatures: wallet_before.threshold,
         signature_count: 0,
         created_at: current_time,
@@ -2349,14 +2351,26 @@ def update_ckb_business_coverage(onchain_actions):
         and (report.get("production_gate") or {}).get("status") == "passed"
     )
 
+RPC_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 def rpc(method, params=None):
     body = json.dumps({"id": 42, "jsonrpc": "2.0", "method": method, "params": params or []}).encode("utf-8")
-    request = urllib.request.Request(rpc_url, data=body, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as error:
-        raise RuntimeError(f"RPC {method} failed to connect: {error}") from error
+    last_error = None
+    for attempt in range(6):
+        request = urllib.request.Request(rpc_url, data=body, headers={"Content-Type": "application/json"})
+        try:
+            with RPC_OPENER.open(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                break
+        except urllib.error.HTTPError as error:
+            if error.code not in {502, 503, 504}:
+                raise RuntimeError(f"RPC {method} failed to connect: {error}") from error
+            last_error = error
+        except urllib.error.URLError as error:
+            last_error = error
+        if attempt == 5:
+            raise RuntimeError(f"RPC {method} failed to connect after retries: {last_error}") from last_error
+        time.sleep(0.25 * (attempt + 1))
     if payload.get("error"):
         raise RuntimeError(f"RPC {method} returned error: {payload['error']}")
     return payload.get("result")
@@ -2455,8 +2469,8 @@ def mint_authority_data(token_symbol=b"TOKEN001", max_supply=1000, minted=0):
     return token_symbol + max_supply.to_bytes(8, "little") + minted.to_bytes(8, "little")
 
 def fixed_recipient_tuple_array(recipients):
-    if len(recipients) != 8:
-        raise RuntimeError(f"launch recipients must contain exactly 8 entries, got {len(recipients)}")
+    if len(recipients) != 2:
+        raise RuntimeError(f"launch recipients must contain exactly 2 entries, got {len(recipients)}")
     out = bytearray()
     for address, amount in recipients:
         if len(address) != 32:
@@ -2770,22 +2784,35 @@ def entry_witness(*args):
             raise RuntimeError(f"unsupported entry witness arg: {arg!r}")
     return "0x" + bytes(out).hex()
 
-def get_block(block_hash):
-    block = rpc("get_block", [block_hash])
-    if block is None:
-        raise RuntimeError(f"block not found: {block_hash}")
-    return block
+def get_block(block_hash, attempts=20, delay_seconds=0.05):
+    block = None
+    for _ in range(attempts):
+        block = rpc("get_block", [block_hash])
+        if block is not None:
+            return block
+        time.sleep(delay_seconds)
+    raise RuntimeError(f"block not found: {block_hash}")
 
-def get_block_by_number(number):
-    block = rpc("get_block_by_number", [hex_u64(number)])
-    if block is None:
-        raise RuntimeError(f"block number not found: {number}")
-    return block
+def get_block_by_number(number, attempts=20, delay_seconds=0.05):
+    block = None
+    for _ in range(attempts):
+        block = rpc("get_block_by_number", [hex_u64(number)])
+        if block is not None:
+            return block
+        time.sleep(delay_seconds)
+    raise RuntimeError(f"block number not found: {number}")
 
 RESERVED_SPENDABLE_OUTPOINTS = set()
 
 def spendable_outpoint_key(tx_hash, index):
     return (tx_hash, int(index))
+
+def reserve_spendable_outpoint(tx_hash, index):
+    key = spendable_outpoint_key(tx_hash, index)
+    if key in RESERVED_SPENDABLE_OUTPOINTS:
+        return False
+    RESERVED_SPENDABLE_OUTPOINTS.add(key)
+    return True
 
 def find_spendable_cellbase(max_blocks=64):
     generated = []
@@ -2802,7 +2829,11 @@ def find_spendable_cellbase(max_blocks=64):
                     if spendable_outpoint_key(cellbase["hash"], index) in RESERVED_SPENDABLE_OUTPOINTS:
                         continue
                     live_status = wait_live_cell(cellbase["hash"], index)
-                    if live_status and live_status.get("status") == "live":
+                    if (
+                        live_status
+                        and live_status.get("status") == "live"
+                        and reserve_spendable_outpoint(cellbase["hash"], index)
+                    ):
                         return {
                             "block_hash": block_hash,
                             "tx_hash": cellbase["hash"],
@@ -2826,8 +2857,6 @@ def collect_spendable_cellbases(min_capacity, max_cells=256):
             f"collected {total_capacity:#x} capacity from {len(cells)} cellbase cells, "
             f"need at least {min_capacity:#x}"
         )
-    for cell in cells:
-        RESERVED_SPENDABLE_OUTPOINTS.add(spendable_outpoint_key(cell["tx_hash"], cell["index"]))
     return {
         "cells": cells,
         "total_capacity": total_capacity,
@@ -4460,12 +4489,12 @@ def run_launch_action(action_record, always_success_dep):
     paired_symbol = b"PAIR0001"
     fee_rate_bps = 30
     creator_lock = always_success_lock("0x60")
-    recipient_count = 4 if action == "launch_token" else 8
+    recipient_count = 4 if action == "launch_token" else 2
     recipient_locks = [always_success_lock("0x7" + format(index, "x")) for index in range(recipient_count)]
     creator = decode_hex(script_hash(creator_lock), 32)
     recipients = [
         (decode_hex(script_hash(lock), 32), amount)
-        for lock, amount in zip(recipient_locks, [10, 20, 30, 40] if action == "launch_token" else [10, 20, 30, 40, 50, 60, 70, 80])
+        for lock, amount in zip(recipient_locks, [10, 20, 30, 40] if action == "launch_token" else [10, 20])
     ]
     recipient_payload = fixed_recipient_tuple_array4(recipients) if action == "launch_token" else fixed_recipient_tuple_array(recipients)
     total_distributed = sum(amount for _, amount in recipients)
@@ -4545,19 +4574,15 @@ def build_launch_action_case(action_record, cellscript_lock, auth_type, token_ty
             cell_deps,
         )
         input_cell = initial["cells"][0]
-        outputs = [
-            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type},
-            {"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": pool_type},
-            {"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": lp_type},
-        ]
-        outputs_data = [
-            "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
-            "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, initial_lp, fee_rate_bps).hex(),
-            "0x" + lp_receipt_data(pool_id, initial_lp, creator).hex(),
-        ]
+        outputs = [{"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": auth_type}]
+        outputs_data = ["0x" + mint_authority_data(symbol, max_supply, initial_mint).hex()]
         for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
             outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
             outputs_data.append("0x" + token_data(amount, symbol).hex())
+        outputs.append({"capacity": hex_u64(400 * 100_000_000), "lock": creator_lock, "type": pool_type})
+        outputs_data.append("0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, initial_lp, fee_rate_bps).hex())
+        outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": lp_type})
+        outputs_data.append("0x" + lp_receipt_data(pool_id, initial_lp, creator).hex())
         outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": creator_lock, "type": token_type})
         outputs_data.append("0x" + token_data(remaining, symbol).hex())
         witness = entry_witness(symbol, max_supply, initial_mint, pool_seed_amount, bytes([fee_rate_bps & 0xff, fee_rate_bps >> 8]), creator, recipient_payload)
@@ -5357,7 +5382,7 @@ def build_stateful_action_branch_case(record, always_success_dep):
         paired_symbol = b"PAIR0001"
         fee_rate_bps = 30
         creator_lock = always_success_lock("0x60")
-        recipient_amounts = [10, 20, 30, 40] if action == "launch_token" else [10, 20, 30, 40, 50, 60, 70, 80]
+        recipient_amounts = [10, 20, 30, 40] if action == "launch_token" else [10, 20]
         recipient_locks = [always_success_lock("0x7" + format(index, "x")) for index in range(len(recipient_amounts))]
         recipients = [
             (decode_hex(script_hash(lock), 32), amount)
@@ -5776,19 +5801,15 @@ def run_stateful_launch_to_token_mint(always_success_dep):
         launch["cell_deps"],
     )
     paired_input = initial["cells"][0]
-    outputs = [
-        {"capacity": hex_u64(400 * 100_000_000), "lock": mint["lock"], "type": auth_type},
-        {"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": pool_type},
-        {"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": lp_type},
-    ]
-    outputs_data = [
-        "0x" + mint_authority_data(symbol, max_supply, initial_mint).hex(),
-        "0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, pool_seed_amount, fee_rate_bps).hex(),
-        "0x" + lp_receipt_data(pool_id, pool_seed_amount, creator).hex(),
-    ]
+    outputs = [{"capacity": hex_u64(400 * 100_000_000), "lock": mint["lock"], "type": auth_type}]
+    outputs_data = ["0x" + mint_authority_data(symbol, max_supply, initial_mint).hex()]
     for recipient_lock, (_, amount) in zip(recipient_locks, recipients):
         outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": recipient_lock, "type": token_type})
         outputs_data.append("0x" + token_data(amount, symbol).hex())
+    outputs.append({"capacity": hex_u64(400 * 100_000_000), "lock": always_success_lock(), "type": pool_type})
+    outputs_data.append("0x" + pool_data(symbol, paired_symbol, pool_seed_amount, paired_amount, pool_seed_amount, fee_rate_bps).hex())
+    outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": lp_type})
+    outputs_data.append("0x" + lp_receipt_data(pool_id, pool_seed_amount, creator).hex())
     outputs.append({"capacity": hex_u64(200 * 100_000_000), "lock": mint["lock"], "type": token_type})
     outputs_data.append("0x" + token_data(remaining, symbol).hex())
 

@@ -4,7 +4,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-05-03.
+Last updated: 2026-05-26.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -48,11 +48,11 @@ If you already know what you need, jump directly:
 
 ## Tutorial Path
 
-1. [Getting Started](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-01-Getting-Started): compile one example and
+1. [Getting Started](https://github.com/a19q3/CellScript/wiki/Tutorial-01-Getting-Started): compile one example and
    verify its artifact.
-2. [Language Basics](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-02-Language-Basics): learn the shape of a
+2. [Language Basics](https://github.com/a19q3/CellScript/wiki/Tutorial-02-Language-Basics): learn the shape of a
    `.cell` file.
-3. [Resources and Cell Effects](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects):
+3. [Resources and Cell Effects](https://github.com/a19q3/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects):
    understand how values move through a Cell transaction.
 4. [Action Model and Canonical Syntax](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax):
    learn the signature-direction action model, `verification`, `transition`,
@@ -60,18 +60,21 @@ If you already know what you need, jump directly:
 5. [Standard Library](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-10-Standard-Library):
    use stdlib lifecycle, Cell metadata, accounting, runtime, and collection
    helpers without hiding verifier obligations.
-6. [Cookbook Recipes](https://github.com/tsukifune-kosei/CellScript/wiki/Cookbook-Recipes): copy small patterns once the basic
+6. [Scoped Invariants and ProofPlan](https://github.com/a19q3/CellScript/wiki/Tutorial-11-Scoped-Invariants-and-ProofPlan):
+   inspect 0.15 invariant trigger/scope/read metadata and understand
+   metadata-only ProofPlan gaps.
+7. [Cookbook Recipes](https://github.com/a19q3/CellScript/wiki/Cookbook-Recipes): copy small patterns once the basic
    vocabulary is familiar.
-7. [Packages and CLI Workflow](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow):
+8. [Packages and CLI Workflow](https://github.com/a19q3/CellScript/wiki/Tutorial-04-Packages-and-CLI-Workflow):
    create a package, build it, check it, and inspect reports.
-8. [CKB Target Profiles](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-05-CKB-Target-Profiles): choose the CKB
+9. [CKB Target Profiles](https://github.com/a19q3/CellScript/wiki/Tutorial-05-CKB-Target-Profiles): choose the CKB
    runtime assumptions before compiling.
-9. [Metadata, Verification, and Production Gates](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates):
+10. [Metadata, Verification, and Production Gates](https://github.com/a19q3/CellScript/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates):
    learn what artifact verification proves, and what still needs chain
    evidence.
-10. [LSP and Tooling](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-07-LSP-and-Tooling): use editor feedback and
+11. [LSP and Tooling](https://github.com/a19q3/CellScript/wiki/Tutorial-07-LSP-and-Tooling): use editor feedback and
    command-backed reports.
-11. [Bundled Example Contracts](https://github.com/tsukifune-kosei/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts): study
+12. [Bundled Example Contracts](https://github.com/a19q3/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts): study
    the examples in a useful order.
 
 ## The Core Idea
@@ -109,10 +112,10 @@ transaction, the wiki says so.
 The fastest way to get oriented is to compile the token example:
 
 ```bash
-git clone https://github.com/tsukifune-kosei/CellScript.git
+git clone https://github.com/a19q3/CellScript.git
 cd CellScript
-cargo test --locked
-cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.15 -o /tmp/token.elf
+./scripts/cellscript_gate.sh dev
+cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 cargo run --locked --bin cellc -- verify-artifact /tmp/token.elf --expect-target-profile ckb
 ```
 
@@ -145,7 +148,7 @@ Keep two levels separate:
 Release-facing CKB evidence comes from the repository root:
 
 ```bash
-./scripts/cellscript_ckb_release_gate.sh full
+./scripts/cellscript_gate.sh release
 ```
 
 The bundled examples are covered by the current local production evidence suite.
@@ -155,7 +158,7 @@ production-ready.
 
 ## Reference Examples
 
-- [CKB hashing workflow](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
+- [CKB hashing workflow](../examples/ckb_hashing.md)
+- [Collections matrix](../examples/collections_matrix.md)
+- [Deployment manifest](../examples/deployment_manifest.md)
+- [Output append](../examples/output_append.md)

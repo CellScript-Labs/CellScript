@@ -2,7 +2,7 @@ module cellscript::vesting
 
 use cellscript::fungible_token::Token
 
-shared VestingConfig has store {
+shared VestingConfig has store, create, read_ref {
     admin: Address,
     token_symbol: [u8; 8],
     cliff_period: u64,
@@ -10,7 +10,7 @@ shared VestingConfig has store {
     revocable: bool,
 }
 
-receipt VestingGrant has store {
+receipt VestingGrant has store, create, consume {
     state: u8,
     beneficiary: Address,
     total_amount: u64,

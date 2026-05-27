@@ -30,6 +30,8 @@ EXPECTED_LANGUAGE_EXAMPLES = [
     "v0_14_hash_blake2b.cell",
     "v0_14_multi_step_pipeline.cell",
     "v0_14_witness_source.cell",
+    "v0_15_identity_lifecycle.cell",
+    "v0_15_scoped_invariant.cell",
 ]
 EXPECTED_ACTION_COUNT = 43
 EXPECTED_STATUS = "passed"

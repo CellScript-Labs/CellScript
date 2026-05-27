@@ -40,7 +40,7 @@
   branch, including canonical `transition`/`where` action syntax, kernel-effect
   capabilities, stdlib lifecycle metadata, and VS Code packaging dry-runs.
 
-## 0.15.0 - 2026-05-04
+## 0.15.0 - 2026-05-26
 
 - Add scoped invariant declarations with explicit trigger, scope, reads,
   coverage, and runtime-obligation metadata for CKB covenant auditing.
@@ -70,6 +70,43 @@
   compile directly under `--primitive-strict 0.15`, and update release
   documentation to keep 0.15 P0 scope separate from deferred 0.16 proof
   soundness and compatibility-suite work.
+
+## 0.14.0 - 2026-05-09
+
+- Add the CKB semantic-completeness surface for typed Source and WitnessArgs
+  views, fixed-width `lock_args`, explicit `env::sighash_all(...)`, and
+  profile-visible since, time, and epoch policy helpers.
+- Add bounded Spawn/IPC verifier composition through `spawn`, `wait`, `pipe`,
+  inherited file descriptors, and close/read/write helpers, with
+  metadata-visible script references and type-checker rejection of static
+  descriptor leaks, double closes, and use-after-close paths.
+- Report a structured CKB target-profile ABI contract for witness data, lock
+  args, Source encoding, Spawn/IPC, since/time, CellDep and script references,
+  `outputs` / `outputs_data`, capacity floors, TYPE_ID, and CKB transaction
+  version.
+- Validate profile ABI metadata, runtime-access metadata, ScriptGroup evidence,
+  TYPE_ID output plans, script references, and `outputs_data` bindings so
+  release evidence fails closed when compiler policy and metadata drift apart.
+- Expose declarative output capacity floors through
+  `with_capacity_floor(...)` and `occupied_capacity(...)` while keeping builder
+  funding, transaction-size, occupied-capacity, and acceptance evidence as
+  explicit production responsibilities.
+- Add executable fixed-Hash Blake2b support through CKB's
+  `ckb-default-hash` personalization and metadata-visible `CKB_BLAKE2B`
+  runtime access.
+- Complete the state-edge spelling cleanup from legacy `move` to
+  `transition`, and refresh examples, docs, formatter behavior, LSP
+  completions, VS Code snippets, and syntax highlighting for the 0.14 surface.
+- Add language examples for delegate verification, Spawn/IPC pipelines,
+  witness/source views, TYPE_ID creation, capacity/time policy, and canonical
+  style.
+- Harden malformed input handling across metadata tampering, scheduler and CLI
+  decoding, LSP incremental edits, static width calculations, entry-witness
+  widths, and package-version parsing.
+- Add the reusable 0.14 scope audit gate and document the release boundary:
+  metadata/tamper validation and strict compilation now, with full
+  accepted/rejected CKB transaction fixture matrices left to the later
+  compatibility-suite track.
 
 ## 0.13.2 - 2026-05-03
 

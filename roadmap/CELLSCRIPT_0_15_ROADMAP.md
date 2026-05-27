@@ -1,6 +1,6 @@
 # CellScript v0.15 Roadmap
 
-**Status**: Implemented for P0 release scope; P1/P2 items are deferred unless explicitly promoted
+**Status**: Implemented for P0 release scope, including invariant/action coverage cross-references; P1/P2 items are deferred unless explicitly promoted
 **Scope**: Scoped Invariants and Covenant ProofPlan
 **Dependencies**: v0.13 and v0.14 complete
 
@@ -16,6 +16,7 @@ CellScript should let developers express transaction and cell invariants in a CK
 - `scope`: which cell universe the invariant reasons over
 - `reads`: which transaction views are inspected
 - `coverage`: which cells are actually protected
+- `action_coverage`: which checked action obligations satisfy a declared invariant
 - `on_chain_checked`: which obligations are enforced by generated code
 - `builder_assumption`: which obligations are only construction/deployment assumptions
 
@@ -110,7 +111,7 @@ invariant udt_amount_non_increase {
 
 ---
 
-### 2. Scoped Aggregate Invariant Primitives *(Implemented as metadata-only)*
+### 2. Scoped Aggregate Invariant Primitives *(Implemented with metadata-only aggregate lowering and action-coverage links)*
 
 **Problem**
 
@@ -123,7 +124,7 @@ Add scoped aggregate assertions:
 ```text
 assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
 assert_conserved(Token.amount, scope = group)
-assert_delta(Token.amount, delta, scope = selected_cells)
+assert_delta(Token.amount, witness.delta, scope = selected_cells)
 assert_distinct(outputs<NFT>.id, scope = transaction)
 assert_singleton(type_id, scope = group)
 ```
@@ -133,8 +134,10 @@ Rules:
 - every aggregate assertion must bind `scope`
 - source view must be explicit
 - field type must be fixed-width integer or fixed bytes
-- overflow traps fail closed
-- loops are bounded by declared group/transaction limits
+- non-literal `assert_delta` values must be bound through `reads` to
+  `witness.*` or `lock_args.*`; bare variables and cell reads are rejected
+- future executable lowering must trap overflow and malformed cell data
+- future executable loops must be bounded by declared group/transaction limits
 
 **Code Areas**
 
@@ -146,10 +149,15 @@ Rules:
 
 **Acceptance**
 
-- UDT-style amount conservation lowers without token-specific recognizers
-- pool invariant helpers lower through aggregate primitives
-- generated code traps on overflow and malformed cell data
-- tests cover `group`, `transaction`, and `selected_cells` scopes
+- UDT-style amount conservation is represented as an aggregate ProofPlan
+  obligation without token-specific metadata recognizers
+- declared aggregate invariants are cross-referenced against checked action
+  obligations when a matching runtime check exists
+- unmatched aggregate invariants are marked with
+  `declared(no_checked_action_obligation_matches:...)` and are visible to the
+  runtime-obligation policy gate
+- tests cover `group`, `transaction`, `selected_cells`, and rejected unbound
+  `assert_delta` arguments
 
 ---
 
@@ -215,10 +223,14 @@ builder_assumption: none
 
 **Acceptance**
 
-- strict CKB mode fails if any invariant obligation is metadata-only
+- runtime-obligation policy gates fail if a required invariant remains
+  metadata-only or has no matching checked action coverage
 - `cellc explain-proof` prints trigger/scope/reads/coverage/on-chain status
+- `cellc explain-proof` and docgen audit output expose matched/unmatched
+  invariant action coverage
 - dangerous trigger/scope combinations produce warnings or strict-mode errors
-- tests compare ProofPlan obligations with emitted code coverage
+- tests compare declared invariant records with checked action obligations and
+  emitted code coverage
 
 ---
 
@@ -830,7 +842,10 @@ CS0160 builder assumption is not on-chain checked
 v0.15 cannot ship until:
 
 - every invariant records trigger, scope, reads, coverage, and enforcement status
+- declared aggregate invariants expose matched or unmatched action coverage
 - `lock_group + transaction` covenant patterns produce coverage diagnostics
+- `assert_delta` arguments are bound to witness or lock-args reads before they
+  can enter ProofPlan
 - strict primitive mode rejects protocol-verb capability declarations
 - 0.15 kernel-effect capabilities compile in the canonical examples
 - selected protocol lifecycle forms emit ProofPlan macro provenance
@@ -839,11 +854,13 @@ v0.15 cannot ship until:
 - direct `destroy` accepts explicit 0.15 `consume + burn` kernel effects and
   policy-specific destruction forms remain available
 - resource capabilities use kernel effect names in strict mode
-- ProofPlan coverage is checked in tests
+- ProofPlan codegen coverage and invariant/action coverage are checked in tests
 - examples pass in the canonical strict track
 
 Deferred release-gate candidates for later milestones:
 
+- complete formal invariant satisfaction checking across all action effects
+- executable aggregate verifier-loop lowering
 - full macro-only lowering with no protocol-name codegen recognizers
 - explicit CKB entry roles
 - `Address` / `LockScript` / `LockHash` type-system split

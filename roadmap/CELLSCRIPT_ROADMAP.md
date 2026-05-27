@@ -33,7 +33,7 @@ The current project direction is simple:
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
-| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki) |
+| Documentation and wiki | Wiki is version-neutral, cookbook-oriented, includes a standard-library chapter, and is published separately to GitHub Wiki. | [GitHub Wiki](https://github.com/a19q3/CellScript/wiki) |
 
 ## Release Tracks
 
@@ -79,7 +79,7 @@ boundaries:
 Detailed status:
 
 - [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
+- [0.14 release notes](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md)
 
 ### 0.15: Scoped Invariants And Covenant ProofPlan
 
@@ -90,6 +90,8 @@ metadata-only declarations are already executable CKB verifier code:
   and `reads`;
 - aggregate primitives for sum, conservation, delta, distinct field, and
   singleton identity relations;
+- bounded invariant/action coverage links that show whether a declared
+  aggregate invariant matches a checked action obligation;
 - Covenant ProofPlan records for declared invariants, aggregate primitives,
   selected protocol flows, and pool protocol metadata;
 - diagnostics for risky coverage assumptions such as `lock_group` verifiers that
@@ -102,7 +104,7 @@ Detailed status:
 
 ### 0.16: Formal Semantics And Production Tooling
 
-The `feat/assurance-tooling` branch turns v0.15 audit metadata into an
+The `nightly-0.16` branch turns v0.15 audit metadata into an
 assurance surface:
 
 - operational semantics in `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md`;
@@ -124,7 +126,7 @@ stubs are not stable, and `solve-tx` is explicitly `can_submit=false`.
 Detailed status:
 
 - [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
+- [0.16 release notes draft](../docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
 
 ### 0.17: iCKB-Grade Protocol Semantics
 
@@ -334,7 +336,7 @@ Future work:
 
 Source documents:
 
-- [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
+- [GitHub Wiki](https://github.com/a19q3/CellScript/wiki)
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
 
 ## Roadmap Discipline

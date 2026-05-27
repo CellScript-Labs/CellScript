@@ -9,7 +9,7 @@ enum LockType {
     Relative,
 }
 
-resource TimeLock has store, create, consume, replace, burn {
+resource TimeLock has store, create, consume, replace, burn, read_ref {
     lock_id: Hash,
     owner: Address,
     lock_type: LockType,
@@ -36,7 +36,7 @@ receipt ReleaseRequest has create, consume, burn {
     state: u8,
 }
 
-receipt ReleaseRecord {
+receipt ReleaseRecord has create {
     lock_id: Hash,
     released_at: u64,
     released_by: Address,

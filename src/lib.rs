@@ -4430,7 +4430,10 @@ fn find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
     while let Some(dir) = current {
         let manifest = dir.join("Cell.toml");
         if manifest.exists() {
-            return Ok(Some(dir.to_path_buf()));
+            let manifest = load_manifest(dir)?;
+            if manifest.package.is_some() {
+                return Ok(Some(dir.to_path_buf()));
+            }
         }
         current = dir.parent();
     }
@@ -14034,7 +14037,7 @@ fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -
 }
 
 fn should_skip_cell_dir(path: &Utf8Path) -> bool {
-    matches!(path.file_name(), Some(".git" | ".cell" | "target"))
+    matches!(path.file_name(), Some(".git" | ".cell" | "target")) || path.join("Cell.toml").exists()
 }
 
 fn register_module_file(resolver: &mut ModuleResolver, path: &Utf8Path) -> Result<()> {
