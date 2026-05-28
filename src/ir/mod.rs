@@ -6026,17 +6026,24 @@ fn verify_body(
 
     for block in &body.blocks {
         let mut defs = in_defs.get(&block.id).cloned().unwrap_or_default();
-        for instruction in &block.instructions {
-            verify_instruction_operands(label, block.id, instruction, &defs, &all_var_types)?;
-            verify_instruction_result_types(label, block.id, instruction)?;
-            verify_instruction_abi(label, block.id, instruction, callable_returns, callable_params)?;
-            verify_instruction_value_kinds(label, block.id, instruction, &all_value_kinds)?;
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+            let instruction_span = block.instruction_spans.get(instruction_index).copied().flatten();
+            verify_instruction_operands(label, block.id, instruction, &defs, &all_var_types)
+                .map_err(|error| ir_verify_instruction_error(error, instruction_span))?;
+            verify_instruction_result_types(label, block.id, instruction)
+                .map_err(|error| ir_verify_instruction_error(error, instruction_span))?;
+            verify_instruction_abi(label, block.id, instruction, callable_returns, callable_params)
+                .map_err(|error| ir_verify_instruction_error(error, instruction_span))?;
+            verify_instruction_value_kinds(label, block.id, instruction, &all_value_kinds)
+                .map_err(|error| ir_verify_instruction_error(error, instruction_span))?;
             if let Some(dest) = instruction_dest(instruction) {
                 defs.insert(dest.id);
             }
         }
-        verify_terminator(label, block.id, &block.terminator, return_type, &defs, &all_var_types)?;
-        verify_terminator_value_kinds(label, block.id, &block.terminator, &all_value_kinds)?;
+        verify_terminator(label, block.id, &block.terminator, return_type, &defs, &all_var_types)
+            .map_err(|error| ir_verify_instruction_error(error, block.terminator_span))?;
+        verify_terminator_value_kinds(label, block.id, &block.terminator, &all_value_kinds)
+            .map_err(|error| ir_verify_instruction_error(error, block.terminator_span))?;
     }
     verify_no_unconsumed_status_values(label, body, &all_value_kinds)?;
 
@@ -6987,6 +6994,16 @@ fn const_ir_type(value: &IrConst) -> IrType {
 
 fn ir_verify_error(message: impl Into<String>) -> CompileError {
     CompileError::without_span(format!("IR verifier failed: {}", message.into()))
+}
+
+fn ir_verify_instruction_error(error: CompileError, span: Option<Span>) -> CompileError {
+    if error.span != Span::default() {
+        return error;
+    }
+    match span.filter(|span| *span != Span::default()) {
+        Some(span) => CompileError { span, ..error },
+        None => error,
+    }
 }
 
 fn ir_verify_block_error(_label: &str, body: &IrBody, block_id: BlockId, message: impl Into<String>) -> CompileError {
@@ -8278,6 +8295,34 @@ where\n\
             .expect("expected binary instruction provenance");
 
         assert_eq!(binary_span.line, 5);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_reports_instruction_provenance() {
+        let mut ir = parse_and_lower(
+            "module ir::diag\n\
+\n\
+action add(a: u64, b: u64) -> u64\n\
+where\n\
+    return a + b\n",
+        );
+        let body = first_action_body_mut(&mut ir);
+        let mut expected_line = None;
+        'blocks: for block in &mut body.blocks {
+            for (index, instruction) in block.instructions.iter_mut().enumerate() {
+                if let IrInstruction::Binary { left, .. } = instruction {
+                    expected_line = block.instruction_spans.get(index).copied().flatten().map(|span| span.line);
+                    *left = IrOperand::Var(IrVar { id: 9999, name: "ghost".to_string(), ty: IrType::U64 });
+                    break 'blocks;
+                }
+            }
+        }
+        let expected_line = expected_line.expect("expected binary instruction provenance");
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert_eq!(err.span.line, expected_line, "unexpected diagnostic span for {}", err.message);
+        assert!(err.message.contains("var9999"), "unexpected error: {}", err.message);
     }
 
     #[test]

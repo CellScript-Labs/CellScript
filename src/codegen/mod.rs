@@ -471,28 +471,31 @@ impl CodeGenerator {
     }
 
     fn verify_reserved_register_contract(&self) -> Result<()> {
-        let allowed_stack_base_write = format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG);
-        let allowed_direct_return_label_write = format!("la {}, .Lentry_direct_done_", ENTRY_DIRECT_RETURN_REG);
-        let allowed_witness_return_label_write = format!("la {}, .Lentry_witness_done_", ENTRY_DIRECT_RETURN_REG);
+        let mut current_label = None;
         for (line_index, line) in self.assembly.iter().enumerate() {
+            if let Some(label) = assembly_label(line) {
+                current_label = Some(label);
+                continue;
+            }
             let Some(dest) = assembly_destination_register(line) else {
                 continue;
             };
-            let trimmed = line.trim();
-            if dest == ENTRY_DIRECT_STACK_BASE_REG && trimmed != allowed_stack_base_write {
+            let trimmed = strip_comment(line).unwrap_or_default();
+            if register_name_matches(dest, ENTRY_DIRECT_STACK_BASE_REG)
+                && !reserved_entry_register_write_is_allowed(trimmed, current_label, ENTRY_DIRECT_STACK_BASE_REG)
+            {
                 return Err(CompileError::without_span(format!(
-                    "generated assembly writes reserved entry stack register {} outside the entry wrapper at line {}: {}",
+                    "generated assembly writes reserved entry stack register {} outside its authorised entry wrapper form at line {}: {}",
                     ENTRY_DIRECT_STACK_BASE_REG,
                     line_index + 1,
                     trimmed
                 )));
             }
-            if dest == ENTRY_DIRECT_RETURN_REG
-                && !trimmed.starts_with(&allowed_direct_return_label_write)
-                && !trimmed.starts_with(&allowed_witness_return_label_write)
+            if register_name_matches(dest, ENTRY_DIRECT_RETURN_REG)
+                && !reserved_entry_register_write_is_allowed(trimmed, current_label, ENTRY_DIRECT_RETURN_REG)
             {
                 return Err(CompileError::without_span(format!(
-                    "generated assembly writes reserved entry return register {} outside the entry wrapper at line {}: {}",
+                    "generated assembly writes reserved entry return register {} outside its authorised entry wrapper form at line {}: {}",
                     ENTRY_DIRECT_RETURN_REG,
                     line_index + 1,
                     trimmed
@@ -2394,7 +2397,7 @@ impl CodeGenerator {
 }
 
 fn assembly_destination_register(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
+    let trimmed = strip_comment(line)?;
     if trimmed.is_empty() || trimmed.starts_with('.') || trimmed.starts_with('#') {
         return None;
     }
@@ -2404,6 +2407,39 @@ fn assembly_destination_register(line: &str) -> Option<&str> {
     }
     let register = operands.trim_start().split([',', ' ', '\t']).next()?;
     (!register.is_empty()).then_some(register)
+}
+
+fn assembly_label(line: &str) -> Option<&str> {
+    let trimmed = strip_comment(line)?;
+    let label = trimmed.strip_suffix(':')?;
+    if label.is_empty() || label.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(label)
+}
+
+fn reserved_entry_register_write_is_allowed(line: &str, current_label: Option<&str>, reserved_register: &str) -> bool {
+    if current_label != Some(ENTRY_WITNESS_LABEL) {
+        return false;
+    }
+    let Some((mnemonic, operands)) = line.split_once(char::is_whitespace) else {
+        return false;
+    };
+    let operands = operands.split(',').map(str::trim).filter(|operand| !operand.is_empty()).collect::<Vec<_>>();
+    if operands.len() != 2 || !register_name_matches(operands[0], reserved_register) {
+        return false;
+    }
+    if register_name_matches(reserved_register, ENTRY_DIRECT_STACK_BASE_REG) {
+        mnemonic == "mv" && register_name_matches(operands[1], "sp")
+    } else if register_name_matches(reserved_register, ENTRY_DIRECT_RETURN_REG) {
+        mnemonic == "la" && (operands[1].starts_with(".Lentry_direct_done_") || operands[1].starts_with(".Lentry_witness_done_"))
+    } else {
+        false
+    }
+}
+
+fn register_name_matches(left: &str, right: &str) -> bool {
+    matches!((parse_register(left), parse_register(right)), (Ok(left), Ok(right)) if left == right)
 }
 
 fn instruction_writes_first_operand(mnemonic: &str) -> bool {
@@ -2762,19 +2798,28 @@ mod tests {
     fn register_contract_allows_only_entry_wrapper_writes_to_direct_registers() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.assembly = vec![
+            ".section .text".to_string(),
+            format!(".global {}", ENTRY_WITNESS_LABEL),
+            format!("{}:", ENTRY_WITNESS_LABEL),
             format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG),
             format!("la {}, .Lentry_direct_done_0", ENTRY_DIRECT_RETURN_REG),
             format!("la {}, .Lentry_witness_done_0", ENTRY_DIRECT_RETURN_REG),
             format!("mv sp, {}", ENTRY_DIRECT_STACK_BASE_REG),
             format!("mv ra, {}", ENTRY_DIRECT_RETURN_REG),
+            "helper:".to_string(),
+            "ret".to_string(),
         ];
 
         generator.verify_reserved_register_contract().expect("entry wrapper writes should satisfy the register contract");
 
-        generator.assembly.push(format!("li {}, 0", ENTRY_DIRECT_STACK_BASE_REG));
-        let err = generator
-            .verify_reserved_register_contract()
-            .expect_err("non-entry writes to reserved direct-wrapper registers must be rejected");
+        generator.assembly.push(format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG));
+        let err =
+            generator.verify_reserved_register_contract().expect_err("entry-shaped writes outside the entry label must be rejected");
+
+        assert!(err.message.contains("reserved entry stack register"), "unexpected error: {}", err.message);
+
+        generator.assembly = vec![".section .text".to_string(), "helper:".to_string(), "li x26, 0".to_string()];
+        let err = generator.verify_reserved_register_contract().expect_err("register aliases for reserved registers must be rejected");
 
         assert!(err.message.contains("reserved entry stack register"), "unexpected error: {}", err.message);
     }

@@ -2488,6 +2488,57 @@ fn helper() -> u64 {
 }
 
 #[test]
+fn cellc_test_subcommand_rejects_empty_expected_error_line_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("tests")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+action ping() -> u64
+where
+    1
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tests").join("negative.cell"),
+        r#"
+// cellscript-test: expect-error-line:10:
+module demo::tests::negative
+
+action impure() -> u64
+where
+    1
+
+fn helper() -> u64 {
+    impure()
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("expect-error-line requires non-empty error text"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
 fn cellc_test_subcommand_supports_target_directive() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
