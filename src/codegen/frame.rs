@@ -11,7 +11,7 @@ use crate::ast::ParamSource;
 use crate::error::{CompileError, Result};
 use crate::ir::*;
 
-use super::abi::abi_arg_label;
+use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes};
 use super::assembler::{align_frame, align_up, scratch_register_avoiding, small_signed_immediate};
 use super::cell_ops::consumed_operand_var;
 use super::runtime::is_ckb_fixed_hash_helper;
@@ -104,19 +104,31 @@ impl CodeGenerator {
         self.emit_stack_access("sd", rs2, offset);
     }
 
+    /// Emit `sd rs2, offset(sp)` while preserving additional live scratch registers.
+    pub(crate) fn emit_stack_store_avoiding(&mut self, rs2: &str, offset: usize, avoid: &[&str]) {
+        self.emit_stack_access_avoiding("sd", rs2, offset, avoid);
+    }
+
     /// Emit `sb rs2, offset(sp)` through the centralized stack-offset gate.
     pub(crate) fn emit_stack_store_byte(&mut self, rs2: &str, offset: usize) {
         self.emit_stack_access("sb", rs2, offset);
     }
 
     fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
+        self.emit_stack_access_avoiding(opcode, register, offset, &[]);
+    }
+
+    fn emit_stack_access_avoiding(&mut self, opcode: &str, register: &str, offset: usize, avoid: &[&str]) {
         let Some(offset) = self.usize_to_i64_codegen_offset(offset, "stack") else {
             return;
         };
         if small_signed_immediate(offset) {
             self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
         } else {
-            let scratch = scratch_register_avoiding(&[register]);
+            let mut avoided = Vec::with_capacity(avoid.len() + 1);
+            avoided.push(register);
+            avoided.extend_from_slice(avoid);
+            let scratch = scratch_register_avoiding(&avoided);
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("{} {}, 0({})", opcode, register, scratch));
@@ -185,6 +197,8 @@ impl CodeGenerator {
         self.param_type_hash_sources.clear();
         self.collection_region_start = 0;
         self.next_collection_slot = 0;
+        self.outgoing_stack_arg_staging_offset = 0;
+        self.outgoing_stack_arg_staging_bytes = 0;
 
         let schema_param_ids =
             params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
@@ -428,6 +442,27 @@ impl CodeGenerator {
             .count();
         self.collection_region_start = next_cell_slot;
         next_cell_slot += collection_count * collection_slot_size;
+
+        let max_outgoing_stack_arg_bytes = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| {
+                if let IrInstruction::Call { func, args, .. } = instruction {
+                    let abi = self.callable_abis.get(func);
+                    Some(outgoing_stack_arg_bytes(call_abi_arg_count(abi, args)))
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        if max_outgoing_stack_arg_bytes > 0 {
+            next_cell_slot = align_up(next_cell_slot, 8);
+            self.outgoing_stack_arg_staging_offset = next_cell_slot;
+            self.outgoing_stack_arg_staging_bytes = max_outgoing_stack_arg_bytes;
+            next_cell_slot += max_outgoing_stack_arg_bytes;
+        }
 
         let raw_frame_size = next_cell_slot
             .checked_add(RUNTIME_EXPR_TEMP_SIZE)

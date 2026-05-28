@@ -66,7 +66,8 @@ struct Cli {
 
 fn main() {
     // Start the LSP server before any CLI parsing side effects.
-    if std::env::args().any(|arg| arg == "--lsp") {
+    if should_start_lsp_server() {
+        let _ = env_logger::try_init();
         cellscript::lsp::server::run_lsp_server_blocking();
         return;
     }
@@ -273,6 +274,21 @@ fn main() {
             process::exit(1);
         }
     }
+}
+
+fn should_start_lsp_server() -> bool {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let has_lsp = args.iter().skip(1).any(|arg| arg == "--lsp");
+    if !has_lsp {
+        return false;
+    }
+
+    if args.len() == 2 && args[1] == "--lsp" {
+        return true;
+    }
+
+    eprintln!("{}: --lsp must be used by itself as `cellc --lsp`", "error".red());
+    process::exit(2);
 }
 
 fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {

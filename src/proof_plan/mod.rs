@@ -367,6 +367,7 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_from_obligation(
     scope_kind: &str,
     origin: &str,
@@ -1264,7 +1265,12 @@ mod tests {
             create_set: Vec::new(),
             mutate_set: Vec::new(),
             write_intents: Vec::new(),
-            blocks: vec![ir::IrBlock { id: ir::BlockId(0), instructions: Vec::new(), terminator: ir::IrTerminator::Return(None) }],
+            blocks: vec![ir::IrBlock {
+                id: ir::BlockId(0),
+                source_span: None,
+                instructions: Vec::new(),
+                terminator: ir::IrTerminator::Return(None),
+            }],
         }
     }
 

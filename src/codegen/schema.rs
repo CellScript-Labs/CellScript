@@ -587,6 +587,7 @@ impl CodeGenerator {
         self.emit_stack_store("t5", pointer_stack_offset);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_dynamic_fixed_field_pointer_to_stack(
         &mut self,
         size_offset: usize,
@@ -639,6 +640,7 @@ impl CodeGenerator {
         self.emit_label(&ok_label);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_dynamic_table_field_equality_check(
         &mut self,
         type_name: &str,
@@ -725,6 +727,7 @@ impl CodeGenerator {
         self.emit_fixed_byte_mismatch_fail(&mismatch_label, fail_code);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_dynamic_table_field_span_to_stack(
         &mut self,
         size_offset: usize,
@@ -745,6 +748,7 @@ impl CodeGenerator {
         self.emit_stack_store("t0", len_stack_offset);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_dynamic_table_fixed_field_pointer_to_stack(
         &mut self,
         size_offset: usize,

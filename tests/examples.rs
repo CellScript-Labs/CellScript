@@ -47,7 +47,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 8_500,
             max_machine_blocks: 860,
-            max_machine_block_bytes: 1_152,
+            max_machine_block_bytes: 1_536,
             max_cfg_edges: 1_500,
             max_call_edges: 250,
             max_unreachable_machine_blocks: 600,

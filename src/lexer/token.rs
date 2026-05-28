@@ -20,7 +20,6 @@ pub enum TokenKind {
     Has,        // has
     Store,      // store
     Transfer,   // transfer (capability context)
-    Destroy,    // destroy (capability context)
     If,         // if
     Else,       // else
     For,        // for
@@ -124,7 +123,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Has => write!(f, "'has'"),
             TokenKind::Store => write!(f, "'store'"),
             TokenKind::Transfer => write!(f, "'transfer'"),
-            TokenKind::Destroy => write!(f, "'destroy'"),
             TokenKind::If => write!(f, "'if'"),
             TokenKind::Else => write!(f, "'else'"),
             TokenKind::For => write!(f, "'for'"),

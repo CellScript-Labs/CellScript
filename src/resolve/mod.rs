@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
+use crate::type_graph::{visit_type_dependency_graph, TypeDependencyEdge};
 use std::collections::HashMap;
 
 pub struct ModuleResolver {
@@ -8,24 +9,21 @@ pub struct ModuleResolver {
     imports: HashMap<String, Vec<ImportItem>>,
 }
 
-#[derive(Debug, Clone)]
-struct TypeDependencyEdge {
-    target: String,
-    span: Span,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TypeGraphVisitState {
-    Visiting,
-    Done,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     types: HashMap<String, TypeDef>,
     functions: HashMap<String, FunctionDef>,
     constants: HashMap<String, ConstantDef>,
     imported: HashMap<String, String>,
+}
+
+impl SymbolTable {
+    fn contains_symbol(&self, name: &str) -> bool {
+        self.types.contains_key(name)
+            || self.functions.contains_key(name)
+            || self.constants.contains_key(name)
+            || self.imported.contains_key(name)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +75,7 @@ impl ModuleResolver {
         }
 
         let mut symbol_table = SymbolTable::default();
+        let mut pending_imports = Vec::new();
 
         for item in &module.items {
             match item {
@@ -124,13 +123,19 @@ impl ModuleResolver {
                         };
 
                         self.process_import(&mut symbol_table, &import_item)?;
-                        self.imports.entry(name.clone()).or_default().push(import_item);
+                        pending_imports.push(import_item);
                     }
                 }
             }
         }
 
+        self.validate_pending_imports_against_module(&name, &symbol_table, &pending_imports)?;
+        self.validate_existing_imports_targeting(&name, &symbol_table)?;
+
         self.symbol_tables.insert(name.clone(), symbol_table);
+        if !pending_imports.is_empty() {
+            self.imports.entry(name.clone()).or_default().extend(pending_imports);
+        }
         self.modules.insert(name, module);
 
         Ok(())
@@ -155,18 +160,20 @@ impl ModuleResolver {
     }
 
     fn ensure_symbol_available(symbol_table: &SymbolTable, name: &str, span: Span) -> Result<()> {
-        if symbol_table.types.contains_key(name)
-            || symbol_table.functions.contains_key(name)
-            || symbol_table.constants.contains_key(name)
-            || symbol_table.imported.contains_key(name)
-        {
+        if symbol_table.contains_symbol(name) {
             Err(CompileError::new(format!("duplicate symbol '{}'", name), span))
         } else {
             Ok(())
         }
     }
 
-    fn process_import(&mut self, symbol_table: &mut SymbolTable, import: &ImportItem) -> Result<()> {
+    fn sorted_symbol_tables(&self) -> Vec<(&str, &SymbolTable)> {
+        let mut tables = self.symbol_tables.iter().map(|(module, table)| (module.as_str(), table)).collect::<Vec<_>>();
+        tables.sort_by(|(left, _), (right, _)| left.cmp(right));
+        tables
+    }
+
+    fn process_import(&self, symbol_table: &mut SymbolTable, import: &ImportItem) -> Result<()> {
         if import.module_path.is_empty() || import.name.is_empty() {
             return Err(CompileError::new("empty import path", import.span));
         }
@@ -175,9 +182,51 @@ impl ModuleResolver {
         let local_name = import.alias.clone().unwrap_or_else(|| import.name.clone());
 
         Self::ensure_symbol_available(symbol_table, &local_name, import.span)?;
+        self.validate_loaded_import_target(import)?;
         symbol_table.imported.insert(local_name, full_path);
 
         Ok(())
+    }
+
+    fn validate_loaded_import_target(&self, import: &ImportItem) -> Result<()> {
+        let target_module = import.module_path.join("::");
+        let Some(target_table) = self.symbol_tables.get(&target_module) else {
+            return Ok(());
+        };
+        Self::validate_import_symbol(target_table, &target_module, import)
+    }
+
+    fn validate_pending_imports_against_module(
+        &self,
+        module_name: &str,
+        symbol_table: &SymbolTable,
+        pending_imports: &[ImportItem],
+    ) -> Result<()> {
+        for import in pending_imports {
+            if import.module_path.join("::") == module_name {
+                Self::validate_import_symbol(symbol_table, module_name, import)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_existing_imports_targeting(&self, module_name: &str, symbol_table: &SymbolTable) -> Result<()> {
+        for imports in self.imports.values() {
+            for import in imports {
+                if import.module_path.join("::") == module_name {
+                    Self::validate_import_symbol(symbol_table, module_name, import)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_import_symbol(symbol_table: &SymbolTable, target_module: &str, import: &ImportItem) -> Result<()> {
+        if symbol_table.contains_symbol(&import.name) {
+            Ok(())
+        } else {
+            Err(CompileError::new(format!("symbol '{}' not found in module '{}'", import.name, target_module), import.span))
+        }
     }
 
     pub fn resolve_type(&self, module: &str, name: &str) -> Option<TypeDef> {
@@ -229,9 +278,11 @@ impl ModuleResolver {
     }
 
     fn resolve_type_global_with_module(&self, name: &str) -> Option<(String, TypeDef)> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        let mut matches =
-            self.symbol_tables.iter().filter_map(|(module, table)| table.types.get(symbol).cloned().map(|ty| (module.clone(), ty)));
+        let symbol = terminal_path_symbol(name);
+        let mut matches = self
+            .sorted_symbol_tables()
+            .into_iter()
+            .filter_map(|(module, table)| table.types.get(symbol).cloned().map(|ty| (module.to_string(), ty)));
         let resolved = matches.next()?;
         matches.next().is_none().then_some(resolved)
     }
@@ -289,10 +340,7 @@ impl ModuleResolver {
     }
 
     pub fn resolve_type_global(&self, name: &str) -> Option<TypeDef> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        let mut matches = self.symbol_tables.values().filter_map(|table| table.types.get(symbol).cloned());
-        let resolved = matches.next()?;
-        matches.next().is_none().then_some(resolved)
+        self.resolve_type_global_with_module(name).map(|(_, ty)| ty)
     }
 
     pub fn resolve_function_global(&self, name: &str) -> Option<FunctionDef> {
@@ -300,18 +348,18 @@ impl ModuleResolver {
     }
 
     pub fn resolve_function_global_with_module(&self, name: &str) -> Option<(String, FunctionDef)> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
+        let symbol = terminal_path_symbol(name);
         let mut matches = self
-            .symbol_tables
-            .iter()
-            .filter_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)));
+            .sorted_symbol_tables()
+            .into_iter()
+            .filter_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.to_string(), function)));
         let resolved = matches.next()?;
         matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_constant_global(&self, name: &str) -> Option<ConstantDef> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        let mut matches = self.symbol_tables.values().filter_map(|table| table.constants.get(symbol).cloned());
+        let symbol = terminal_path_symbol(name);
+        let mut matches = self.sorted_symbol_tables().into_iter().filter_map(|(_, table)| table.constants.get(symbol).cloned());
         let resolved = matches.next()?;
         matches.next().is_none().then_some(resolved)
     }
@@ -358,16 +406,26 @@ impl ModuleResolver {
     }
 
     pub fn check_circular_deps(&self) -> Result<()> {
+        self.validate_imports()?;
+        self.check_type_dependency_cycles()?;
+        Ok(())
+    }
+
+    fn validate_imports(&self) -> Result<()> {
         for imports in self.imports.values() {
             for import in imports {
                 let target_module = import.module_path.join("::");
-                if !self.modules.contains_key(&target_module) {
+                let Some(target_table) = self.symbol_tables.get(&target_module) else {
                     return Err(CompileError::new(format!("module '{}' not found", target_module), import.span));
+                };
+                if !target_table.contains_symbol(&import.name) {
+                    return Err(CompileError::new(
+                        format!("symbol '{}' not found in module '{}'", import.name, target_module),
+                        import.span,
+                    ));
                 }
             }
         }
-
-        self.check_type_dependency_cycles()?;
         Ok(())
     }
 
@@ -499,6 +557,10 @@ impl ModuleResolver {
     }
 }
 
+fn terminal_path_symbol(name: &str) -> &str {
+    name.rsplit("::").next().expect("str::rsplit always yields at least one element")
+}
+
 fn type_def_name(type_def: &TypeDef) -> &str {
     match type_def {
         TypeDef::Resource(resource) => &resource.name,
@@ -529,35 +591,6 @@ fn type_item_parts(item: &Item) -> Option<TypeItemParts<'_>> {
         }
         _ => None,
     }
-}
-
-fn visit_type_dependency_graph(
-    name: &str,
-    graph: &HashMap<String, Vec<TypeDependencyEdge>>,
-    states: &mut HashMap<String, TypeGraphVisitState>,
-    stack: &mut Vec<String>,
-) -> Result<()> {
-    states.insert(name.to_string(), TypeGraphVisitState::Visiting);
-    stack.push(name.to_string());
-
-    if let Some(edges) = graph.get(name) {
-        for edge in edges {
-            match states.get(&edge.target).copied() {
-                Some(TypeGraphVisitState::Done) => {}
-                Some(TypeGraphVisitState::Visiting) => {
-                    let start = stack.iter().position(|entry| entry == &edge.target).unwrap_or(0);
-                    let mut cycle = stack[start..].to_vec();
-                    cycle.push(edge.target.clone());
-                    return Err(CompileError::new(format!("cyclic type dependency detected: {}", cycle.join(" -> ")), edge.span));
-                }
-                None => visit_type_dependency_graph(&edge.target, graph, states, stack)?,
-            }
-        }
-    }
-
-    stack.pop();
-    states.insert(name.to_string(), TypeGraphVisitState::Done);
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -856,6 +889,71 @@ struct B {
             .unwrap_err();
 
         assert!(err.message.contains("duplicate symbol 'Token'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_register_module_rejects_missing_imported_symbol_when_target_is_loaded() {
+        let mut resolver = ModuleResolver::new();
+        resolver
+            .register_module(Module {
+                name: "cellscript::token".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Token".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+        let err = resolver
+            .register_module(Module {
+                name: "app".to_string(),
+                items: vec![Item::Use(UseStmt {
+                    module_path: vec!["cellscript".to_string(), "token".to_string()],
+                    imports: vec![UseImport { name: "Missing".to_string(), alias: None }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap_err();
+
+        assert!(err.message.contains("symbol 'Missing' not found in module 'cellscript::token'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_register_module_rejects_deferred_missing_import_when_target_arrives() {
+        let mut resolver = ModuleResolver::new();
+        resolver
+            .register_module(Module {
+                name: "app".to_string(),
+                items: vec![Item::Use(UseStmt {
+                    module_path: vec!["cellscript".to_string(), "token".to_string()],
+                    imports: vec![UseImport { name: "Missing".to_string(), alias: None }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap();
+
+        let err = resolver
+            .register_module(Module {
+                name: "cellscript::token".to_string(),
+                items: vec![Item::Struct(StructDef {
+                    name: "Token".to_string(),
+                    type_id: None,
+                    default_hash_type: None,
+                    capacity_floor: None,
+                    fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                    span: Span::default(),
+                })],
+                span: Span::default(),
+            })
+            .unwrap_err();
+
+        assert!(err.message.contains("symbol 'Missing' not found in module 'cellscript::token'"), "unexpected error: {}", err.message);
     }
 
     #[test]

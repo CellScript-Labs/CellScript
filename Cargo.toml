@@ -40,13 +40,13 @@ blake2b_simd = "1.0"
 toml = "0.8"
 hex = "0.4"
 
-indexmap = "=2.2.6"
+indexmap = "2.2"
 
 log = "0.4"
 env_logger = "0.11"
 
 # CLI
-clap = { version = "=4.5.49", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 
 colored = "2.1"
 
@@ -55,7 +55,7 @@ ckb-vm = { version = "0.24", features = ["asm", "detect-asm"], optional = true }
 
 # LSP
 tower-lsp = "0.20"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["io-std", "rt"] }
 
 [features]
 default = []

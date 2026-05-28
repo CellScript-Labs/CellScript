@@ -114,7 +114,7 @@ impl<'a> Parser<'a> {
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
             TokenKind::Transfer => Some("transfer".to_string()),
-            TokenKind::Destroy | TokenKind::DestroyKw => Some("destroy".to_string()),
+            TokenKind::DestroyKw => Some("destroy".to_string()),
             TokenKind::Launch => Some("launch".to_string()),
             TokenKind::Assert => Some("assert".to_string()),
             TokenKind::Preserve => Some("preserve".to_string()),
@@ -137,6 +137,11 @@ impl<'a> Parser<'a> {
         let name = self.ident_like_name().ok_or_else(|| CompileError::new("expected identifier", self.current().span))?;
         self.advance();
         Ok(name)
+    }
+
+    fn parse_name_with_span(&mut self) -> Result<(String, Span)> {
+        let span = self.current().span;
+        self.parse_name().map(|name| (name, span))
     }
 
     fn parse_name_path(&mut self) -> Result<String> {
@@ -233,7 +238,7 @@ impl<'a> Parser<'a> {
                                 caps.push(Capability::Transfer);
                                 self.advance();
                             }
-                            TokenKind::Destroy | TokenKind::DestroyKw => {
+                            TokenKind::DestroyKw => {
                                 caps.push(Capability::Destroy);
                                 self.advance();
                             }
@@ -800,7 +805,7 @@ impl<'a> Parser<'a> {
         self.advance(); // consume "identity"
         if self.check(&TokenKind::LParen) {
             self.advance();
-            let kind = self.parse_name()?;
+            let (kind, kind_span) = self.parse_name_with_span()?;
             let policy = match kind.as_str() {
                 "ckb_type_id" => IdentityPolicy::CkbTypeId,
                 "field" => {
@@ -818,7 +823,7 @@ impl<'a> Parser<'a> {
                             "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
                             other
                         ),
-                        self.current().span,
+                        kind_span,
                     ));
                 }
             };
@@ -826,7 +831,7 @@ impl<'a> Parser<'a> {
             Ok(policy)
         } else {
             // `identity ckb_type_id` without parens
-            let kind = self.parse_name()?;
+            let (kind, kind_span) = self.parse_name_with_span()?;
             match kind.as_str() {
                 "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
                 "script_args" => Ok(IdentityPolicy::ScriptArgs),
@@ -834,7 +839,7 @@ impl<'a> Parser<'a> {
                 "none" => Ok(IdentityPolicy::None),
                 other => Err(crate::error::CompileError::new(
                     format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
-                    self.current().span,
+                    kind_span,
                 )),
             }
         }
@@ -909,7 +914,7 @@ impl<'a> Parser<'a> {
                         caps.push(Capability::Transfer);
                         self.advance();
                     }
-                    TokenKind::Destroy | TokenKind::DestroyKw => {
+                    TokenKind::DestroyKw => {
                         caps.push(Capability::Destroy);
                         self.advance();
                     }
@@ -1514,10 +1519,45 @@ impl<'a> Parser<'a> {
                 | TokenKind::Action
                 | TokenKind::Fn
                 | TokenKind::Lock
-        ) || matches!(
-            &self.current().kind,
-            TokenKind::Identifier(name)
-                if matches!(name.as_str(), "flow" | "with_default_hash_type" | "with_capacity_floor")
+        ) || self.looks_like_top_level_flow_decl()
+            || self.looks_like_top_level_type_policy_decl()
+    }
+
+    fn looks_like_top_level_flow_decl(&self) -> bool {
+        let TokenKind::Identifier(name) = &self.current().kind else {
+            return false;
+        };
+        if name != "flow" {
+            return false;
+        }
+
+        let mut offset = 1;
+        let mut saw_target_separator = false;
+        loop {
+            match &self.peek(offset).kind {
+                TokenKind::Identifier(_) | TokenKind::Resource | TokenKind::Shared | TokenKind::Receipt | TokenKind::Struct => {
+                    offset += 1;
+                }
+                TokenKind::ColonColon => offset += 1,
+                TokenKind::For => {
+                    saw_target_separator = true;
+                    offset += 1;
+                }
+                TokenKind::Dot => {
+                    saw_target_separator = true;
+                    offset += 1;
+                }
+                TokenKind::LBrace => return saw_target_separator,
+                _ => return false,
+            }
+        }
+    }
+
+    fn looks_like_top_level_type_policy_decl(&self) -> bool {
+        matches!(
+            (&self.current().kind, &self.peek(1).kind),
+            (TokenKind::Identifier(name), TokenKind::LParen)
+                if matches!(name.as_str(), "with_default_hash_type" | "with_capacity_floor")
         )
     }
 
@@ -2271,6 +2311,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expr::Integer(val, span))
             }
+            TokenKind::HexLiteral(text) => {
+                let span = self.current().span;
+                let val = u64::from_str_radix(text, 16)
+                    .map_err(|_| CompileError::new(format!("invalid hex integer literal: 0x{}", text), span))?;
+                self.advance();
+                Ok(Expr::Integer(val, span))
+            }
             TokenKind::True => {
                 let span = self.current().span;
                 self.advance();
@@ -2324,7 +2371,7 @@ impl<'a> Parser<'a> {
                     _ => {}
                 }
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
-                    self.parse_struct_init(name)
+                    self.parse_struct_init(name, start_span)
                 } else {
                     let end = self.current().span.start.max(start_span.end);
                     Ok(Expr::Identifier(name, Span::new(start_span.start, end, start_span.line, start_span.column)))
@@ -2628,12 +2675,9 @@ impl<'a> Parser<'a> {
 
     /// Parse a named argument like `identity = type_id` or `field = amount`.
     fn parse_named_arg(&mut self, expected_name: &str) -> Result<String> {
-        let name = self.parse_name()?;
+        let (name, name_span) = self.parse_name_with_span()?;
         if name != expected_name {
-            return Err(CompileError::new(
-                format!("expected named argument '{}', got '{}'", expected_name, name),
-                self.current().span,
-            ));
+            return Err(CompileError::new(format!("expected named argument '{}', got '{}'", expected_name, name), name_span));
         }
         self.expect(TokenKind::Eq)?;
         let value = self.parse_name()?;
@@ -2697,12 +2741,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_identity_policy_from_args(&mut self) -> Result<IdentityPolicy> {
-        let name = self.parse_name()?;
+        let (name, name_span) = self.parse_name_with_span()?;
         if name != "identity" {
-            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), self.current().span));
+            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), name_span));
         }
         self.expect(TokenKind::Eq)?;
-        let kind = self.parse_name()?;
+        let (kind, kind_span) = self.parse_name_with_span()?;
         match kind.as_str() {
             "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
             "field" => {
@@ -2719,7 +2763,7 @@ impl<'a> Parser<'a> {
                     "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
                     other
                 ),
-                self.current().span,
+                kind_span,
             )),
         }
     }
@@ -2774,7 +2818,10 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::Assert)?;
         if self.check(&TokenKind::Not) {
-            self.advance();
+            return Err(CompileError::new(
+                "expected '(' after assert; CellScript assertions use assert(condition, message), not assert!(...)",
+                self.current().span,
+            ));
         }
         self.expect(TokenKind::LParen)?;
         self.skip_newlines();
@@ -2992,8 +3039,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_struct_init(&mut self, ty: String) -> Result<Expr> {
-        let start_span = self.current().span;
+    fn parse_struct_init(&mut self, ty: String, start_span: Span) -> Result<Expr> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
@@ -3015,8 +3061,12 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
 
-        self.expect(TokenKind::RBrace)?;
-        Ok(Expr::StructInit(StructInitExpr { ty, fields, span: start_span }))
+        let end_span = self.expect(TokenKind::RBrace)?.span;
+        Ok(Expr::StructInit(StructInitExpr {
+            ty,
+            fields,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
     }
 
     fn parse_match_expr(&mut self) -> Result<Expr> {
@@ -3289,6 +3339,98 @@ where
     }
 
     #[test]
+    fn hex_literal_exprs_parse_as_integers() {
+        let input = r#"
+module test
+
+const MASK: u64 = 0xFF
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Const(const_def) = &module.items[0] else {
+            panic!("expected const");
+        };
+        let Expr::Integer(value, span) = &const_def.value else {
+            panic!("expected integer literal");
+        };
+        let expected_start = input.find("0xFF").unwrap();
+
+        assert_eq!(*value, 255);
+        assert_eq!(span.start, expected_start);
+        assert_eq!(span.end, expected_start + "0xFF".len());
+    }
+
+    #[test]
+    fn struct_init_span_covers_type_name_and_body() {
+        let input = r#"
+module test
+
+const SNAPSHOT: Token = Token { amount: 1 }
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Const(const_def) = &module.items[0] else {
+            panic!("expected const");
+        };
+        let Expr::StructInit(init) = &const_def.value else {
+            panic!("expected struct init");
+        };
+        let expected_start = input.find("Token {").unwrap();
+        let expected_end = expected_start + "Token { amount: 1 }".len();
+
+        assert_eq!(init.span.start, expected_start);
+        assert_eq!(init.span.end, expected_end);
+    }
+
+    #[test]
+    fn parser_rejects_bang_assert_syntax() {
+        let input = r#"
+module test
+
+action test()
+where
+    assert!(true, "bang")
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("not assert!(...)"), "{}", err.message);
+        assert_eq!(err.span.start, input.find('!').unwrap());
+    }
+
+    #[test]
+    fn named_arg_diagnostic_uses_bad_name_span() {
+        let input = r#"
+module test
+
+const BAD: u64 = destroy_unique(token, wrong = token_id)
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("expected named argument 'identity', got 'wrong'"), "{}", err.message);
+        assert_eq!(err.span.start, input.find("wrong").unwrap());
+    }
+
+    #[test]
+    fn identity_policy_diagnostic_uses_bad_policy_span() {
+        let input = r#"
+module test
+
+resource Token
+identity(mystery)
+{
+    amount: u64
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("unsupported identity policy 'mystery'"), "{}", err.message);
+        assert_eq!(err.span.start, input.find("mystery").unwrap());
+    }
+
+    #[test]
     fn postfix_exprs_cover_the_consumed_source_range() {
         let input = r#"
 module test
@@ -3532,6 +3674,27 @@ where
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn test_action_where_column_one_flow_identifier_stays_in_body() {
+        let input = r#"
+module test
+
+action echo(flow: u64) -> u64
+where
+flow
+    return flow
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let action = match &module.items[0] {
+            Item::Action(action) => action,
+            other => panic!("expected action, found {:?}", other),
+        };
+
+        assert_eq!(action.body.len(), 2);
+        assert!(matches!(&action.body[0], Stmt::Expr(Expr::Identifier(name, _)) if name == "flow"));
     }
 
     #[test]

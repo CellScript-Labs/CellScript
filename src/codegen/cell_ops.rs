@@ -1328,6 +1328,7 @@ impl CodeGenerator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_dynamic_create_output_fixed_field_equals_expected(
         &mut self,
         output_size_offset: usize,
@@ -1404,6 +1405,7 @@ impl CodeGenerator {
         true
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_dynamic_create_output_field_equals_expected(
         &mut self,
         output_size_offset: usize,
@@ -1602,6 +1604,7 @@ impl CodeGenerator {
         self.emit_loaded_field_bytes_equals_expected(size_offset, buffer_offset, &layout, expected, "output lock hash")
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_cell_field_hash_equality(
         &mut self,
         left_reason: &str,

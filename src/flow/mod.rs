@@ -119,19 +119,11 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
 fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, expr: &Expr) {
     match expr {
         Expr::Consume(consume) => {
-            if let Expr::Identifier(name, _) = consume.expr.as_ref() {
-                if let Some(ty) = context.variable_flow_types.get(name) {
-                    context.consumed_flow_types.insert(ty.clone());
-                }
-            }
+            mark_consumed_flow_expr(specs, context, &consume.expr);
             collect_state_context_from_expr(specs, context, &consume.expr);
         }
         Expr::Transfer(transfer) => {
-            if let Expr::Identifier(name, _) = transfer.expr.as_ref() {
-                if let Some(ty) = context.variable_flow_types.get(name) {
-                    context.consumed_flow_types.insert(ty.clone());
-                }
-            }
+            mark_consumed_flow_expr(specs, context, &transfer.expr);
             collect_state_context_from_expr(specs, context, &transfer.expr);
             collect_state_context_from_expr(specs, context, &transfer.to);
         }
@@ -230,6 +222,12 @@ fn collect_state_context_from_expr(specs: &HashMap<String, FlowSpec>, context: &
         | Expr::Identifier(..)
         | Expr::ReadRef(_)
         | Expr::StdlibCall(_) => {}
+    }
+}
+
+fn mark_consumed_flow_expr(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, expr: &Expr) {
+    if let Some(ty) = flow_expr_type(specs, context, expr) {
+        context.consumed_flow_types.insert(ty);
     }
 }
 
@@ -459,4 +457,33 @@ fn static_flow_state_value(expr: &Expr, context: &ActionStateContext, _type_name
         }
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumed_flow_tracking_follows_expression_aliases() {
+        let mut specs = HashMap::new();
+        specs.insert(
+            "Offer".to_string(),
+            FlowSpec {
+                states: vec!["Open".to_string(), "Filled".to_string()],
+                state_field_name: FLOW_STATE_FIELD_NAME.to_string(),
+                state_field_span: Some(Span::default()),
+            },
+        );
+        let mut context = ActionStateContext::default();
+        context.variable_flow_types.insert("offer".to_string(), "Offer".to_string());
+        let expr = Expr::Cast(CastExpr {
+            expr: Box::new(Expr::Identifier("offer".to_string(), Span::default())),
+            ty: Type::Named("Offer".to_string()),
+            span: Span::default(),
+        });
+
+        mark_consumed_flow_expr(&specs, &mut context, &expr);
+
+        assert!(context.consumed_flow_types.contains("Offer"));
+    }
 }

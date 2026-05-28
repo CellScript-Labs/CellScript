@@ -1,8 +1,6 @@
 //! CellScript - Domain-specific language compiler for CKB blockchain
 //! Currently the backend can output RISC-V assembly or ELF artifacts.
 
-#![allow(clippy::ptr_arg, clippy::too_many_arguments)]
-
 pub mod assumptions;
 pub mod ast;
 pub mod cli;
@@ -26,6 +24,7 @@ pub mod runtime_errors;
 pub mod simulate;
 pub mod stdlib;
 pub(crate) mod syscalls;
+pub(crate) mod type_graph;
 pub mod types;
 pub mod wasm;
 
@@ -87,6 +86,15 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
     if options.opt_level > 3 {
         return Err(CompileError::without_span(format!("optimization level must be between 0 and 3, got {}", options.opt_level)));
     }
+    if options.debug && options.opt_level == 0 {
+        return Err(CompileError::without_span("debug output requires opt_level > 0; set opt_level to 1..=3 or disable debug output"));
+    }
+    if let Some(target) = options.target.as_deref() {
+        ArtifactFormat::from_target(target)?;
+    }
+    if let Some(target_profile) = options.target_profile.as_deref() {
+        TargetProfile::from_name(target_profile)?;
+    }
     if let Some(mode) = options.primitive_compat.as_deref() {
         if !matches!(mode, "0.14" | "0.15" | "0.16") {
             return Err(CompileError::without_span(format!(
@@ -145,7 +153,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-pub const METADATA_SCHEMA_VERSION: u32 = 41;
+pub const METADATA_SCHEMA_VERSION: u32 = 42;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -334,9 +342,19 @@ pub struct CompileMetadata {
     pub actions: Vec<ActionMetadata>,
     pub functions: Vec<FunctionMetadata>,
     pub locks: Vec<LockMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_entrypoint: Option<EntrypointMetadata>,
     /// Embedded DWARF debug section names (non-empty when debug mode is enabled for ELF artifacts)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub debug_info_sections: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EntrypointMetadata {
+    pub kind: String,
+    pub name: String,
+    pub selection: String,
+    pub param_count: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -813,6 +831,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
+    validate_selected_entrypoint_metadata(metadata)?;
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
@@ -862,6 +881,44 @@ fn validate_target_profile_metadata(metadata: &CompileMetadata, artifact_format:
             expected.tx_version,
             profile.name(),
             artifact_format.display_name()
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_selected_entrypoint_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let Some(entrypoint) = &metadata.selected_entrypoint else {
+        if metadata.actions.is_empty() && metadata.locks.is_empty() {
+            return Ok(());
+        }
+        return Err(CompileError::without_span("metadata is missing selected_entrypoint for a module with actions or locks"));
+    };
+
+    if entrypoint.selection.is_empty() {
+        return Err(CompileError::without_span("metadata selected_entrypoint.selection must not be empty"));
+    }
+
+    let expected_param_count = match entrypoint.kind.as_str() {
+        "action" => metadata.actions.iter().find(|action| action.name == entrypoint.name).map(|action| action.params.len()),
+        "lock" => metadata.locks.iter().find(|lock| lock.name == entrypoint.name).map(|lock| lock.params.len()),
+        other => {
+            return Err(CompileError::without_span(format!(
+                "metadata selected_entrypoint.kind '{}' is unsupported; expected action or lock",
+                other
+            )));
+        }
+    };
+    let Some(expected_param_count) = expected_param_count else {
+        return Err(CompileError::without_span(format!(
+            "metadata selected_entrypoint references missing {} '{}'",
+            entrypoint.kind, entrypoint.name
+        )));
+    };
+    if entrypoint.param_count != expected_param_count {
+        return Err(CompileError::without_span(format!(
+            "metadata selected_entrypoint.param_count {} does not match {} '{}' parameter count {}",
+            entrypoint.param_count, entrypoint.kind, entrypoint.name, expected_param_count
         )));
     }
 
@@ -3821,48 +3878,109 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<CompileResult> {
     Ok(result)
 }
 
-/// Only generate compile metadata, without asm/elf artifact.
+/// Generate compile metadata without returning an artifact.
+///
+/// Executable modules are still passed through backend emission so metadata
+/// cannot describe an action or lock that codegen cannot emit.
 pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
-    let tokens = lexer::lex(source)?;
-    let ast = parser::parse(&tokens)?;
-    compile_metadata_for_ast(source, &ast, target, None)
+    let options = CompileOptions { target, ..CompileOptions::default() };
+    compile_metadata_with_options(source, options)
 }
 
-/// Only generate compile metadata using an already-built module resolver.
+/// Only generate compile metadata with explicit compile options.
+pub fn compile_metadata_with_options(source: &str, options: CompileOptions) -> Result<CompileMetadata> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    compile_metadata_for_ast(source, &ast, &options, None)
+}
+
+/// Generate compile metadata using an already-built module resolver, without returning an artifact.
+///
+/// Executable modules are still passed through backend emission so metadata
+/// cannot describe an action or lock that codegen cannot emit.
 pub fn compile_metadata_with_resolver(
     source: &str,
     target: Option<String>,
     resolver: &ModuleResolver,
     current_module: &str,
 ) -> Result<CompileMetadata> {
+    let options = CompileOptions { target, ..CompileOptions::default() };
+    compile_metadata_with_resolver_and_options(source, options, resolver, current_module)
+}
+
+/// Only generate compile metadata using explicit compile options and an already-built module resolver.
+pub fn compile_metadata_with_resolver_and_options(
+    source: &str,
+    options: CompileOptions,
+    resolver: &ModuleResolver,
+    current_module: &str,
+) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
     let ast = parser::parse(&tokens)?;
-    compile_metadata_for_ast(source, &ast, target, Some((resolver, current_module)))
+    compile_metadata_for_ast(source, &ast, &options, Some((resolver, current_module)))
 }
 
 fn compile_metadata_for_ast(
     source: &str,
     ast: &ast::Module,
-    target: Option<String>,
+    options: &CompileOptions,
     resolver: Option<(&ModuleResolver, &str)>,
 ) -> Result<CompileMetadata> {
-    let artifact_format = ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET))?;
-    let target_profile = TargetProfile::Ckb;
+    validate_compile_options(options)?;
+    let target_profile = TargetProfile::from_options(options, None)?;
+    target_profile.ensure_compile_supported()?;
+    let artifact_format = ArtifactFormat::from_target(resolve_target(options, None))?;
+
+    if options.is_primitive_strict() {
+        check_primitive_strict_015(ast)?;
+    };
+
     if let Some((resolver, module_name)) = resolver {
-        types::check_with_resolver(ast, resolver, module_name)?;
+        types::check_with_resolver_and_primitive_strict(ast, resolver, module_name, options.is_primitive_strict())?;
     } else {
-        types::check(ast)?;
+        types::check_with_primitive_strict(ast, options.is_primitive_strict())?;
     }
     flow::check(ast)?;
-    let ir = if let Some((resolver, module_name)) = resolver {
-        ir::generate_with_resolver(ast, resolver, module_name)?
+
+    let optimized_ast = if options.opt_level > 0 {
+        let mut optimized = ast.clone();
+        optimize::optimize_module(&mut optimized, options.opt_level)?;
+        if options.is_primitive_strict() {
+            check_primitive_strict_015(&optimized)?;
+        };
+        if let Some((resolver, module_name)) = resolver {
+            types::check_with_resolver_and_primitive_strict(&optimized, resolver, module_name, options.is_primitive_strict())?;
+        } else {
+            types::check_with_primitive_strict(&optimized, options.is_primitive_strict())?;
+        }
+        flow::check(&optimized)?;
+        Some(optimized)
     } else {
-        ir::generate(ast)?
+        None
     };
+    let lowering_ast = optimized_ast.as_ref().unwrap_or(ast);
+
+    let ir = if let Some((resolver, module_name)) = resolver {
+        ir::generate_with_resolver(lowering_ast, resolver, module_name)?
+    } else {
+        ir::generate(lowering_ast)?
+    };
+    ir::verify_module(&ir)?;
+    if ir_has_backend_entry(&ir) {
+        let codegen_options = codegen::CodegenOptions { opt_level: options.opt_level, debug: options.debug, target_profile };
+        let artifact_bytes = codegen::generate(&ir, &codegen_options, artifact_format)?;
+        if artifact_bytes.is_empty() {
+            return Err(CompileError::new("backend produced an empty artifact", error::Span::default()));
+        }
+    }
     let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
     Ok(metadata)
+}
+
+fn ir_has_backend_entry(ir: &ir::IrModule) -> bool {
+    ir.items.iter().any(|item| matches!(item, ir::IrItem::Action(_) | ir::IrItem::Lock(_)))
 }
 
 fn compile_ast(ast: &ast::Module, options: &CompileOptions, resolver: Option<(&ModuleResolver, &str)>) -> Result<CompileResult> {
@@ -3903,6 +4021,9 @@ fn compile_ast_with_build(
     let optimized_ast = if options.opt_level > 0 {
         let mut optimized = ast.clone();
         optimize::optimize_module(&mut optimized, options.opt_level)?;
+        if options.is_primitive_strict() {
+            check_primitive_strict_015(&optimized)?;
+        };
         if let Some((resolver, module_name)) = resolver {
             types::check_with_resolver_and_primitive_strict(&optimized, resolver, module_name, options.is_primitive_strict())?;
         } else {
@@ -4836,6 +4957,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                 _ => None,
             })
             .collect(),
+        selected_entrypoint: selected_entrypoint_metadata(ir),
         debug_info_sections: Vec::new(),
     };
     metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
@@ -4979,6 +5101,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
             .filter(|(name, _)| used_types.contains(*name))
             .map(|(name, size)| (name.clone(), *size))
             .collect(),
+        has_lowering_errors: ir.has_lowering_errors,
     })
 }
 
@@ -6008,6 +6131,7 @@ fn stack_collection_constructor_helper(
         .unwrap_or("new")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_stack_collection_helper(
     builders: &mut BTreeMap<String, CollectionInstantiationBuilder>,
     scope_kind: &str,
@@ -6045,6 +6169,7 @@ fn record_stack_collection_helper(
     builder.helpers.insert(helper.to_string());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_stack_collection_push_helper(
     builders: &mut BTreeMap<String, CollectionInstantiationBuilder>,
     scope_kind: &str,
@@ -6306,6 +6431,7 @@ fn body_static_resource_operation_checks(body: &ir::IrBody) -> Vec<StaticResourc
     checks
 }
 
+#[allow(clippy::too_many_arguments)]
 fn body_transaction_resource_obligations(
     name: &str,
     body: &ir::IrBody,
@@ -6775,6 +6901,7 @@ fn body_resource_conservation_obligations(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resource_conservation_checked_detail(
     name: &str,
     body: &ir::IrBody,
@@ -7575,6 +7702,7 @@ fn transaction_obligation_has_checked_subcondition(obligation: &VerifierObligati
     obligation.detail.contains(&format!("{}=checked-runtime", name))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transaction_runtime_input_requirement(
     obligation: &VerifierObligationMetadata,
     component: &str,
@@ -8004,6 +8132,7 @@ fn pool_checked_invariant_guard_names(name: &str, operation: &str, source_invari
     guards
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pool_checked_protocol_components(
     name: &str,
     operation: &str,
@@ -10192,6 +10321,38 @@ fn module_has_entry_params(ir: &ir::IrModule) -> bool {
         ir::IrItem::PureFn(_) => false,
         ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => false,
     })
+}
+
+fn selected_entrypoint_metadata(ir: &ir::IrModule) -> Option<EntrypointMetadata> {
+    for item in &ir.items {
+        if let ir::IrItem::Action(action) = item {
+            if action.name == "main" {
+                return Some(entrypoint_metadata("action", &action.name, "main action", action.params.len()));
+            }
+        }
+    }
+    for item in &ir.items {
+        if let ir::IrItem::Action(action) = item {
+            if action.params.is_empty() {
+                return Some(entrypoint_metadata("action", &action.name, "first parameterless action", action.params.len()));
+            }
+        }
+    }
+    for item in &ir.items {
+        if let ir::IrItem::Action(action) = item {
+            return Some(entrypoint_metadata("action", &action.name, "first action", action.params.len()));
+        }
+    }
+    for item in &ir.items {
+        if let ir::IrItem::Lock(lock) = item {
+            return Some(entrypoint_metadata("lock", &lock.name, "first lock", lock.params.len()));
+        }
+    }
+    None
+}
+
+fn entrypoint_metadata(kind: &str, name: &str, selection: &str, param_count: usize) -> EntrypointMetadata {
+    EntrypointMetadata { kind: kind.to_string(), name: name.to_string(), selection: selection.to_string(), param_count }
 }
 
 const COLLECTION_FAIL_CLOSED_FEATURE_NEW: &str = "collection-new";
@@ -12642,6 +12803,7 @@ fn molecule_table_for_type(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn molecule_type_for_ir_type(
     ty: &ir::IrType,
     owner: &str,
@@ -12690,6 +12852,7 @@ fn molecule_type_for_ir_type(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn molecule_type_for_named_type(
     name: &str,
     owner: &str,
@@ -13770,10 +13933,10 @@ pub const NAME: &str = "cellc";
 mod tests {
     use super::{
         bind_source_metadata, ckb_code_cell_capacity_shannons, compile, compile_file, compile_file_with_entry_action,
-        compile_file_with_entry_lock, compile_path, decode_scheduler_witness_hex, default_output_path_for_input,
-        encode_entry_witness_args_for_params, entry_abi_constraints, load_modules_for_input, resolve_input_path,
-        source_unit_from_file, validate_source_units_on_disk_under, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
-        ParamMetadata, ENTRY_ABI_MAX_SLOTS, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
+        compile_file_with_entry_lock, compile_metadata_with_options, compile_path, decode_scheduler_witness_hex,
+        default_output_path_for_input, encode_entry_witness_args_for_params, entry_abi_constraints, load_modules_for_input,
+        resolve_input_path, source_unit_from_file, validate_source_units_on_disk_under, ActionMetadata, ArtifactFormat,
+        CompileOptions, EntryWitnessArg, ParamMetadata, ENTRY_ABI_MAX_SLOTS, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -21703,6 +21866,36 @@ where
             "entry wrapper must precede actions:\n{}",
             asm
         );
+        let entrypoint = result.metadata.selected_entrypoint.as_ref().expect("selected entrypoint metadata");
+        assert_eq!(entrypoint.kind, "action");
+        assert_eq!(entrypoint.name, "main");
+        assert_eq!(entrypoint.selection, "main action");
+        assert_eq!(entrypoint.param_count, 0);
+    }
+
+    #[test]
+    fn compile_metadata_reports_parameterless_action_entrypoint_selection() {
+        let result = compile(
+            r#"
+module test
+
+action initialize() -> u64
+where
+    1
+
+action needs_arg(value: u64) -> u64
+where
+    value
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+
+        let entrypoint = result.metadata.selected_entrypoint.as_ref().expect("selected entrypoint metadata");
+        assert_eq!(entrypoint.kind, "action");
+        assert_eq!(entrypoint.name, "initialize");
+        assert_eq!(entrypoint.selection, "first parameterless action");
+        assert_eq!(entrypoint.param_count, 0);
     }
 
     #[test]
@@ -21711,6 +21904,15 @@ where
             .unwrap_err();
 
         assert!(err.message.contains("unsupported target profile 'unknown'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_rejects_unknown_target_during_option_validation() {
+        let err =
+            compile(SIMPLE_PROGRAM, CompileOptions { target: Some("definitely-not-riscv".to_string()), ..CompileOptions::default() })
+                .unwrap_err();
+
+        assert!(err.message.contains("unsupported target 'definitely-not-riscv'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24399,6 +24601,45 @@ where
     }
 
     #[test]
+    fn compile_metadata_with_options_rejects_strict_legacy_capabilities() {
+        let source = r#"
+module test
+
+resource Token has store, transfer, create, consume, replace, relock, read_ref {
+    amount: u64,
+}
+
+action transfer_token(token: Token, to: Address) -> Token
+where
+    return transfer token to to
+"#;
+
+        let err = compile_metadata_with_options(
+            source,
+            CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("legacy capability 'transfer'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_metadata_with_options_uses_ast_optimizer_for_nonzero_levels() {
+        let baseline = compile_metadata_with_options(OPTIMIZER_PROGRAM, CompileOptions::default()).unwrap();
+        let metadata_optimized =
+            compile_metadata_with_options(OPTIMIZER_PROGRAM, CompileOptions { opt_level: 1, ..CompileOptions::default() }).unwrap();
+        let full_compile_optimized = compile(OPTIMIZER_PROGRAM, CompileOptions { opt_level: 1, ..CompileOptions::default() }).unwrap();
+
+        assert!(
+            metadata_optimized.actions[0].estimated_cycles < baseline.actions[0].estimated_cycles,
+            "optimized metadata should reflect folded IR cycle estimate: baseline={}, optimized={}",
+            baseline.actions[0].estimated_cycles,
+            metadata_optimized.actions[0].estimated_cycles
+        );
+        assert_eq!(metadata_optimized.actions[0].estimated_cycles, full_compile_optimized.metadata.actions[0].estimated_cycles);
+    }
+
+    #[test]
     fn compile_accepts_kernel_effect_capabilities_for_destroy() {
         let source = r#"
 module test
@@ -26163,12 +26404,17 @@ where
         let result = compile(program, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
         assert!(
-            asm.contains("# cellscript abi: stage outgoing stack arg8 at pre-call sp-16")
+            asm.contains("# cellscript abi: stage outgoing stack arg8 in frame staging +0")
+                && asm.contains("# cellscript abi: copy staged stack arg at +0")
                 && asm.contains("# cellscript abi: reserve 16 bytes for outgoing stack call arguments"),
             "internal calls must keep sp 16-byte aligned at RISC-V call boundaries:\n{}",
             asm
         );
-        assert!(asm.contains("sd t0, -16(sp)"), "internal call did not stage arg8 in the aligned outgoing area:\n{}", asm);
+        assert!(
+            !asm.contains("sd t0, -16(sp)") && !asm.contains("pre-call sp-16"),
+            "internal call must not write below sp before reserving outgoing stack space:\n{}",
+            asm
+        );
     }
 
     #[test]
@@ -26287,12 +26533,17 @@ where
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16")
+            asm.contains("# cellscript entry abi: stage stack arg8 in frame staging +0")
+                && asm.contains("# cellscript entry abi: copy staged stack arg at +0")
                 && asm.contains("# cellscript entry abi: reserve 16 bytes for outgoing stack call arguments"),
-            "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
+            "entry wrapper did not stage and copy the stack scalar argument before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, -16(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
+        assert!(
+            !asm.contains("sd t3, -16(sp)") && !asm.contains("pre-call sp-16"),
+            "entry wrapper must not write below sp before reserving outgoing stack space:\n{}",
+            asm
+        );
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];

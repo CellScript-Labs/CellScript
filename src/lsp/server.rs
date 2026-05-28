@@ -4,7 +4,6 @@
 //! trait so that `cellc --lsp` can act as a full JSON-RPC language server.
 
 use crate::lsp;
-use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::{
@@ -15,9 +14,9 @@ use tower_lsp::lsp_types::{
     FoldingRangeKind, FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
     Location, MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams,
-    RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -32,12 +31,18 @@ impl CellScriptBackend {
     }
 
     fn state(&self) -> MutexGuard<'_, lsp::LspServer> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state.lock().unwrap_or_else(|poisoned| {
+            log::warn!("LSP state mutex was poisoned; resetting in-memory document cache");
+            let mut state = poisoned.into_inner();
+            *state = lsp::LspServer::new();
+            state
+        })
     }
 
     /// Publish diagnostics for a given URI.
     async fn publish_diagnostics_for(&self, uri: &Url) {
         let uri_str = uri.to_string();
+        // Keep the mutex guard inside this statement; do not hold LSP state across client awaits.
         let diagnostics = self.state().get_diagnostics(&uri_str);
         let lsp_diagnostics: Vec<Diagnostic> = diagnostics.into_iter().map(convert_diagnostic).collect();
         self.client.publish_diagnostics(uri.clone(), lsp_diagnostics, None).await;
@@ -69,7 +74,7 @@ impl LanguageServer for CellScriptBackend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(false)),
+                rename_provider: None,
                 document_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -204,27 +209,6 @@ impl LanguageServer for CellScriptBackend {
             Ok(None)
         } else {
             Ok(Some(DocumentSymbolResponse::Flat(symbols.into_iter().map(convert_symbol_information).collect())))
-        }
-    }
-
-    async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
-        let uri_str = params.text_document_position.text_document.uri.to_string();
-        let position = convert_position_back(params.text_document_position.position);
-        let changes = self.state().rename(&uri_str, position, params.new_name);
-        if changes.is_empty() {
-            Ok(None)
-        } else {
-            let mut lsp_changes = HashMap::new();
-            for (uri, edits) in changes {
-                if let Some(url) = url_from_lsp_uri(&uri) {
-                    lsp_changes.insert(url, edits.into_iter().map(convert_text_edit).collect());
-                }
-            }
-            if lsp_changes.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(WorkspaceEdit { changes: Some(lsp_changes), document_changes: None, change_annotations: None }))
-            }
         }
     }
 
@@ -543,7 +527,10 @@ pub async fn run_lsp_server() {
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::new(CellScriptBackend::new);
-    Server::new(stdin, stdout, socket).serve(service).await;
+    // tower-lsp implements `$/cancelRequest` in its transport service when
+    // concurrency is greater than one. Keep that explicit so future refactors
+    // do not accidentally serialize every request and disable cancellation.
+    Server::new(stdin, stdout, socket).concurrency_level(4).serve(service).await;
 }
 
 /// Blocking entry point for use from synchronous `main`.

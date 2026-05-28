@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
+use crate::type_graph::{visit_type_dependency_graph, TypeDependencyEdge};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,22 +77,11 @@ enum CellTypeKind {
     Receipt,
 }
 
-#[derive(Debug, Clone)]
-struct TypeDependencyEdge {
-    target: String,
-    span: Span,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TypeGraphVisitState {
-    Visiting,
-    Done,
-}
-
 pub struct TypeEnv {
     vars: HashMap<String, Type>,
     mutability: HashMap<String, bool>,
     linear_states: HashMap<String, LinearState>,
+    linear_spans: HashMap<String, Span>,
     parent: Option<Box<TypeEnv>>,
 }
 
@@ -111,11 +101,23 @@ impl Default for TypeEnv {
 
 impl TypeEnv {
     pub fn new() -> Self {
-        Self { vars: HashMap::new(), mutability: HashMap::new(), linear_states: HashMap::new(), parent: None }
+        Self {
+            vars: HashMap::new(),
+            mutability: HashMap::new(),
+            linear_states: HashMap::new(),
+            linear_spans: HashMap::new(),
+            parent: None,
+        }
     }
 
     pub fn child(&self) -> Self {
-        Self { vars: HashMap::new(), mutability: HashMap::new(), linear_states: HashMap::new(), parent: Some(Box::new(self.clone())) }
+        Self {
+            vars: HashMap::new(),
+            mutability: HashMap::new(),
+            linear_states: HashMap::new(),
+            linear_spans: HashMap::new(),
+            parent: Some(Box::new(self.clone())),
+        }
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Type> {
@@ -127,12 +129,18 @@ impl TypeEnv {
     }
 
     pub fn insert(&mut self, name: String, ty: Type, is_linear: bool, is_mut: bool) {
+        self.insert_with_span(name, ty, is_linear, is_mut, Span::default());
+    }
+
+    pub fn insert_with_span(&mut self, name: String, ty: Type, is_linear: bool, is_mut: bool, span: Span) {
         self.vars.insert(name.clone(), ty);
         self.mutability.insert(name.clone(), is_mut);
         if is_linear {
-            self.linear_states.insert(name, LinearState::Available);
+            self.linear_states.insert(name.clone(), LinearState::Available);
+            self.linear_spans.insert(name, span);
         } else {
             self.linear_states.remove(&name);
+            self.linear_spans.remove(&name);
         }
     }
 
@@ -140,7 +148,7 @@ impl TypeEnv {
         if self.lookup(&name).is_some() {
             return Err(CompileError::new(format!("binding '{}' already exists in this scope or an outer scope", name), span));
         }
-        self.insert(name, ty, is_linear, is_mut);
+        self.insert_with_span(name, ty, is_linear, is_mut, span);
         Ok(())
     }
 
@@ -173,32 +181,32 @@ impl TypeEnv {
         }
     }
 
-    pub fn consume(&mut self, name: &str) -> Result<()> {
-        self.set_linear_state(name, LinearState::Consumed)
+    pub fn consume(&mut self, name: &str, span: Span) -> Result<()> {
+        self.set_linear_state(name, LinearState::Consumed, span)
     }
 
-    pub fn transfer(&mut self, name: &str) -> Result<()> {
-        self.set_linear_state(name, LinearState::Transferred)
+    pub fn transfer(&mut self, name: &str, span: Span) -> Result<()> {
+        self.set_linear_state(name, LinearState::Transferred, span)
     }
 
-    pub fn destroy(&mut self, name: &str) -> Result<()> {
-        self.set_linear_state(name, LinearState::Destroyed)
+    pub fn destroy(&mut self, name: &str, span: Span) -> Result<()> {
+        self.set_linear_state(name, LinearState::Destroyed, span)
     }
 
-    fn set_linear_state(&mut self, name: &str, next: LinearState) -> Result<()> {
+    fn set_linear_state(&mut self, name: &str, next: LinearState, span: Span) -> Result<()> {
         match self.linear_states.get_mut(name) {
             Some(state) => {
                 if *state != LinearState::Available {
-                    return Err(CompileError::new(format!("resource '{}' already {:?}", name, state), Span::default()));
+                    return Err(CompileError::new(format!("resource '{}' already {:?}", name, state), span));
                 }
                 *state = next;
                 Ok(())
             }
             None => {
                 if let Some(ref mut parent) = self.parent {
-                    parent.set_linear_state(name, next)
+                    parent.set_linear_state(name, next, span)
                 } else {
-                    Err(CompileError::new(format!("unknown resource '{}'", name), Span::default()))
+                    Err(CompileError::new(format!("unknown resource '{}'", name), span))
                 }
             }
         }
@@ -304,7 +312,7 @@ impl TypeEnv {
             if *state == LinearState::Available {
                 return Err(CompileError::new(
                     format!("linear resource '{}' was not consumed, transferred, or destroyed", name),
-                    Span::default(),
+                    self.linear_spans.get(name).copied().unwrap_or_default(),
                 ));
             }
         }
@@ -318,6 +326,7 @@ impl Clone for TypeEnv {
             vars: self.vars.clone(),
             mutability: self.mutability.clone(),
             linear_states: self.linear_states.clone(),
+            linear_spans: self.linear_spans.clone(),
             parent: self.parent.as_ref().map(|p| Box::new((**p).clone())),
         }
     }
@@ -513,7 +522,6 @@ impl<'a> TypeChecker<'a> {
             }
             match item {
                 Item::Const(const_def) => {
-                    self.validate_type(&const_def.ty)?;
                     self.env.insert(const_def.name.clone(), const_def.ty.clone(), false, false);
                     self.constants.insert(const_def.name.clone(), const_def.clone());
                 }
@@ -522,20 +530,14 @@ impl<'a> TypeChecker<'a> {
                     self.linear_types.insert(resource.name.clone());
                     self.cell_type_kinds.insert(resource.name.clone(), CellTypeKind::Resource);
                     self.type_capabilities.insert(resource.name.clone(), resource.capabilities.iter().copied().collect());
-                    self.type_fields.insert(
-                        resource.name.clone(),
-                        resource.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
-                    );
+                    self.type_fields.entry(resource.name.clone()).or_default();
                 }
                 Item::Shared(shared) => {
                     register_type_id(&mut seen_type_ids, &shared.name, shared.type_id.as_ref())?;
                     self.linear_types.insert(shared.name.clone());
                     self.cell_type_kinds.insert(shared.name.clone(), CellTypeKind::Shared);
                     self.type_capabilities.insert(shared.name.clone(), shared.capabilities.iter().copied().collect());
-                    self.type_fields.insert(
-                        shared.name.clone(),
-                        shared.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
-                    );
+                    self.type_fields.entry(shared.name.clone()).or_default();
                 }
                 Item::Receipt(receipt) => {
                     register_type_id(&mut seen_type_ids, &receipt.name, receipt.type_id.as_ref())?;
@@ -543,17 +545,11 @@ impl<'a> TypeChecker<'a> {
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
-                    self.type_fields.insert(
-                        receipt.name.clone(),
-                        receipt.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
-                    );
+                    self.type_fields.entry(receipt.name.clone()).or_default();
                 }
                 Item::Struct(struct_def) => {
                     register_type_id(&mut seen_type_ids, &struct_def.name, struct_def.type_id.as_ref())?;
-                    self.type_fields.insert(
-                        struct_def.name.clone(),
-                        struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
-                    );
+                    self.type_fields.entry(struct_def.name.clone()).or_default();
                 }
                 Item::Invariant(_) => {}
                 Item::Enum(enum_def) => {
@@ -605,6 +601,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         self.register_imported_type_ids(&mut seen_type_ids)?;
+        self.validate_and_register_schema_fields(module)?;
         self.register_flows(module)?;
         self.validate_flow_action_edges(module)?;
         self.validate_local_schema_type_graph_acyclic(module)?;
@@ -935,7 +932,7 @@ impl<'a> TypeChecker<'a> {
     fn check_receipt(&mut self, receipt: &ReceiptDef) -> Result<()> {
         self.validate_schema_fields(&receipt.fields, "receipt", &receipt.name)?;
         if let Some(output) = &receipt.claim_output {
-            self.validate_type(output)?;
+            self.validate_type_at(output, receipt.span)?;
             self.validate_receipt_claim_output(output, receipt.span)?;
         }
         Ok(())
@@ -1166,6 +1163,54 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    fn validate_and_register_schema_fields(&mut self, module: &Module) -> Result<()> {
+        let mut pending_fields = Vec::new();
+
+        for item in &module.items {
+            match item {
+                Item::Const(const_def) => {
+                    self.validate_type_at(&const_def.ty, const_def.span)?;
+                }
+                Item::Resource(resource) => {
+                    self.validate_schema_fields(&resource.fields, "resource", &resource.name)?;
+                    pending_fields.push((resource.name.clone(), Self::schema_field_map(&resource.fields)));
+                }
+                Item::Shared(shared) => {
+                    self.validate_schema_fields(&shared.fields, "shared", &shared.name)?;
+                    pending_fields.push((shared.name.clone(), Self::schema_field_map(&shared.fields)));
+                }
+                Item::Receipt(receipt) => {
+                    self.validate_schema_fields(&receipt.fields, "receipt", &receipt.name)?;
+                    if let Some(output) = &receipt.claim_output {
+                        self.validate_type_at(output, receipt.span)?;
+                    }
+                    pending_fields.push((receipt.name.clone(), Self::schema_field_map(&receipt.fields)));
+                }
+                Item::Struct(struct_def) => {
+                    self.validate_schema_fields(&struct_def.fields, "struct", &struct_def.name)?;
+                    pending_fields.push((struct_def.name.clone(), Self::schema_field_map(&struct_def.fields)));
+                }
+                Item::Enum(enum_def) => {
+                    for variant in &enum_def.variants {
+                        for field_ty in &variant.fields {
+                            self.validate_type_at(field_ty, variant.span)?;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (name, fields) in pending_fields {
+            self.type_fields.insert(name, fields);
+        }
+        Ok(())
+    }
+
+    fn schema_field_map(fields: &[Field]) -> HashMap<String, Type> {
+        fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect()
+    }
+
     fn validate_schema_fields(&self, fields: &[Field], item_kind: &str, item_name: &str) -> Result<()> {
         let mut seen = HashSet::new();
         for field in fields {
@@ -1184,7 +1229,7 @@ impl<'a> TypeChecker<'a> {
                     field.span,
                 ));
             }
-            self.validate_type(&field.ty)?;
+            self.validate_type_at(&field.ty, field.span)?;
             self.validate_stored_type_has_no_references(
                 &field.ty,
                 &format!("{} '{}' field '{}'", item_kind, item_name, field.name),
@@ -1255,7 +1300,7 @@ impl<'a> TypeChecker<'a> {
                 return Err(CompileError::new(format!("duplicate enum variant '{}::{}'", enum_def.name, variant.name), variant.span));
             }
             for field_ty in &variant.fields {
-                self.validate_type(field_ty)?;
+                self.validate_type_at(field_ty, variant.span)?;
                 self.validate_stored_type_has_no_references(
                     field_ty,
                     &format!("enum variant '{}::{}' payload", enum_def.name, variant.name),
@@ -1280,7 +1325,7 @@ impl<'a> TypeChecker<'a> {
         self.validate_const_initializer(&const_def.name, &const_def.value)?;
 
         let mut env = self.env.clone();
-        let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
+        let value_ty = self.infer_expr_with_contextual_literals(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
             return Err(CompileError::new(
                 format!("const '{}' has type mismatch: expected {:?}, found {:?}", const_def.name, const_def.ty, value_ty),
@@ -1398,7 +1443,7 @@ impl<'a> TypeChecker<'a> {
                     output.span,
                 ));
             }
-            self.validate_type(&output.ty)?;
+            self.validate_type_at(&output.ty, output.span)?;
             let Some(type_name) = Self::base_type_name(&output.ty) else {
                 return Err(CompileError::new(
                     format!("action output '{}' must name a Cell-backed resource, shared cell, or receipt type", output.name),
@@ -2165,7 +2210,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_callable_return_type(&self, callable_kind: &str, callable_name: &str, return_type: &Type, span: Span) -> Result<()> {
-        self.validate_type(return_type)?;
+        self.validate_type_at(return_type, span)?;
         if self.type_contains_reference(return_type) {
             return Err(CompileError::new(
                 format!(
@@ -2219,12 +2264,12 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn type_contains_mutable_reference(ty: &Type) -> bool {
+    fn type_contains_mutable_reference(&self, ty: &Type) -> bool {
         match ty {
             Type::MutRef(_) => true,
-            Type::Array(inner, _) => Self::type_contains_mutable_reference(inner),
-            Type::Tuple(items) => items.iter().any(Self::type_contains_mutable_reference),
-            Type::Named(name) => name.contains("&mut "),
+            Type::Array(inner, _) => self.type_contains_mutable_reference(inner),
+            Type::Tuple(items) => items.iter().any(|item| self.type_contains_mutable_reference(item)),
+            Type::Named(name) => self.named_type_contains_mutable_reference(name),
             _ => false,
         }
     }
@@ -2243,7 +2288,21 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn named_type_contains_reference(&self, name: &str) -> bool {
-        name.contains("read_ref ") || name.contains('&')
+        self.named_type_generic_payload(name).is_some_and(|payload| {
+            split_top_level_type_list(payload)
+                .into_iter()
+                .map(|item| self.parse_named_type_repr(item))
+                .any(|ty| self.type_contains_reference(&ty))
+        })
+    }
+
+    fn named_type_contains_mutable_reference(&self, name: &str) -> bool {
+        self.named_type_generic_payload(name).is_some_and(|payload| {
+            split_top_level_type_list(payload)
+                .into_iter()
+                .map(|item| self.parse_named_type_repr(item))
+                .any(|ty| self.type_contains_mutable_reference(&ty))
+        })
     }
 
     fn named_type_generic_payload<'b>(&self, name: &'b str) -> Option<&'b str> {
@@ -2313,7 +2372,7 @@ impl<'a> TypeChecker<'a> {
                     param.span,
                 ));
             }
-            self.validate_type(&param.ty)?;
+            self.validate_type_at(&param.ty, param.span)?;
             self.validate_callable_param_source(param, callable_kind, callable_name)?;
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
@@ -2907,7 +2966,7 @@ impl<'a> TypeChecker<'a> {
             Stmt::Let(let_stmt) => {
                 let ty = self.infer_let_value_type(env, let_stmt)?;
                 if let Some(ref declared_ty) = let_stmt.ty {
-                    self.validate_type(declared_ty)?;
+                    self.validate_type_at(declared_ty, let_stmt.span)?;
                     if !self.types_equal(&ty, declared_ty) {
                         return Err(CompileError::new(
                             format!("type mismatch: expected {:?}, found {:?}", declared_ty, ty),
@@ -2949,7 +3008,7 @@ impl<'a> TypeChecker<'a> {
             Stmt::Return(Some(expr)) => {
                 let expected_return = self.current_return_type.clone();
                 let ty = match &expected_return {
-                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, expected, expr_span(expr))?,
+                    Some(Some(expected)) => self.infer_expr_with_contextual_literals(env, expr, expected, expr_span(expr))?,
                     _ => self.infer_expr(env, expr)?,
                 };
                 match &self.current_return_type {
@@ -3158,7 +3217,7 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_let_value_type(&mut self, env: &mut TypeEnv, let_stmt: &LetStmt) -> Result<Type> {
         if let Some(declared_ty) = &let_stmt.ty {
-            return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
+            return self.infer_expr_with_contextual_literals(env, &let_stmt.value, declared_ty, let_stmt.span);
         }
         if let Expr::Array(elems, _) = &let_stmt.value {
             if elems.is_empty() {
@@ -3176,15 +3235,37 @@ impl<'a> TypeChecker<'a> {
         self.infer_expr(env, &let_stmt.value)
     }
 
-    fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
+    /// Uses the surrounding expected type only for literal and empty-collection
+    /// refinement. Callers still perform the final compatibility check so they
+    /// can preserve their more specific diagnostics.
+    fn infer_expr_with_contextual_literals(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
             Expr::Integer(value, _) => self.infer_integer_literal_with_expected_type(*value, expected_ty, span),
             Expr::Array(elems, _) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
             _ => {
                 let actual_ty = self.infer_expr(env, expr)?;
-                Ok(actual_ty)
+                if self.types_equal(&actual_ty, expected_ty) {
+                    Ok(actual_ty)
+                } else if self.untyped_vec_constructor_matches_expected(expr, &actual_ty, expected_ty) {
+                    Ok(expected_ty.clone())
+                } else {
+                    Ok(actual_ty)
+                }
             }
         }
+    }
+
+    fn untyped_vec_constructor_matches_expected(&self, expr: &Expr, actual_ty: &Type, expected_ty: &Type) -> bool {
+        matches!(actual_ty, Type::Named(name) if name == "Vec")
+            && matches!(expected_ty, Type::Named(name) if self.parse_named_collection_item_type(name).is_some())
+            && matches!(
+                expr,
+                Expr::Call(call)
+                    if matches!(
+                        call.func.as_ref(),
+                        Expr::Identifier(name, _) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")
+                    )
+            )
     }
 
     fn infer_integer_literal_with_expected_type(&self, value: u64, expected_ty: &Type, span: Span) -> Result<Type> {
@@ -3214,7 +3295,7 @@ impl<'a> TypeChecker<'a> {
         if let Type::Named(name) = expected_ty {
             if let Some(item_ty) = self.parse_named_collection_item_type(name) {
                 for elem in elems {
-                    let actual_ty = self.infer_expr_with_expected_type(env, elem, &item_ty, expr_span(elem))?;
+                    let actual_ty = self.infer_expr_with_contextual_literals(env, elem, &item_ty, expr_span(elem))?;
                     if self.type_contains_reference(&actual_ty) {
                         return Err(CompileError::new(
                             format!(
@@ -3249,7 +3330,7 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             for elem in elems {
-                let actual_ty = self.infer_expr_with_expected_type(env, elem, item_ty, expr_span(elem))?;
+                let actual_ty = self.infer_expr_with_contextual_literals(env, elem, item_ty, expr_span(elem))?;
                 if !self.types_equal(&actual_ty, item_ty) {
                     return Err(CompileError::new(
                         format!("array literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
@@ -3295,13 +3376,13 @@ impl<'a> TypeChecker<'a> {
                 let left_ty = self.infer_expr(env, &bin.left)?;
                 let right_ty = if matches!(bin.right.as_ref(), Expr::Integer(..)) {
                     let expected = self.contextual_integer_type_for_binary_right(bin.op, &left_ty);
-                    self.infer_expr_with_expected_type(env, &bin.right, &expected, bin.span)?
+                    self.infer_expr_with_contextual_literals(env, &bin.right, &expected, bin.span)?
                 } else {
                     self.infer_expr(env, &bin.right)?
                 };
                 let left_ty = if matches!(bin.left.as_ref(), Expr::Integer(..)) {
                     let expected = self.contextual_integer_type_for_binary_left(bin.op, &right_ty);
-                    self.infer_expr_with_expected_type(env, &bin.left, &expected, bin.span)?
+                    self.infer_expr_with_contextual_literals(env, &bin.left, &expected, bin.span)?
                 } else {
                     left_ty
                 };
@@ -3439,7 +3520,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Consume(consume) => {
                 let (consume_ty, name) = self.require_named_linear_cell_operand(env, &consume.expr, "consume", consume.span)?;
                 self.require_capability(&consume_ty, Capability::Consume, "consume", consume.span)?;
-                env.consume(&name)?;
+                env.consume(&name, consume.span)?;
                 Ok(Type::U64)
             }
             Expr::Transfer(transfer) => {
@@ -3455,7 +3536,7 @@ impl<'a> TypeChecker<'a> {
                     "transfer",
                     transfer.span,
                 )?;
-                env.transfer(&name)?;
+                env.transfer(&name, transfer.span)?;
                 Ok(expr_ty)
             }
             Expr::Destroy(destroy) => {
@@ -3469,7 +3550,7 @@ impl<'a> TypeChecker<'a> {
                 )?;
                 let type_name = Self::base_type_name(&destroy_ty).unwrap_or_default();
                 self.validate_destroy_policy(type_name, &destroy.policy, destroy.span)?;
-                env.destroy(&name)?;
+                env.destroy(&name, destroy.span)?;
                 Ok(Type::U64)
             }
             Expr::ReadRef(read_ref) => {
@@ -3483,14 +3564,14 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new("claim requires a receipt value", claim.span));
                 }
                 self.require_capability(&receipt_ty, Capability::Consume, "claim", claim.span)?;
-                env.consume(&name)?;
+                env.consume(&name, claim.span)?;
                 let receipt_name = Self::base_type_name(&receipt_ty).unwrap_or_default();
                 Ok(self.resolve_receipt_claim_output(receipt_name).flatten().unwrap_or(Type::U64))
             }
             Expr::Settle(settle) => {
                 let (settle_ty, name) = self.require_named_linear_cell_operand(env, &settle.expr, "settle", settle.span)?;
                 self.require_capability(&settle_ty, Capability::Consume, "settle", settle.span)?;
-                env.consume(&name)?;
+                env.consume(&name, settle.span)?;
                 Ok(settle_ty)
             }
             Expr::CreateUnique(cu) => {
@@ -3518,7 +3599,7 @@ impl<'a> TypeChecker<'a> {
                 self.require_capability(&input_ty, Capability::Replace, "replace_unique", ru.span)?;
                 self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
                 self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
-                env.consume(&name)?;
+                env.consume(&name, ru.span)?;
                 Ok(input_ty)
             }
             Expr::Assert(assert_expr) => {
@@ -3591,7 +3672,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Cast(cast) => {
-                self.validate_type(&cast.ty)?;
+                self.validate_type_at(&cast.ty, cast.span)?;
                 let source_ty = self.infer_expr(env, &cast.expr)?;
                 self.validate_cast(&source_ty, &cast.ty, cast.expr.as_ref(), cast.span)?;
                 Ok(cast.ty.clone())
@@ -3797,7 +3878,7 @@ impl<'a> TypeChecker<'a> {
                 )?;
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
-                env.consume(&input_name)?;
+                env.consume(&input_name, call.span)?;
                 Ok(Type::Bool)
             }
             "std::receipt::claim" => {
@@ -3809,7 +3890,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 self.validate_receipt_claim_pattern(&input_ty, &output_ty, call.span)?;
                 self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
-                env.consume(&input_name)?;
+                env.consume(&input_name, call.span)?;
                 Ok(Type::Bool)
             }
             "std::lifecycle::settle" => {
@@ -3820,7 +3901,7 @@ impl<'a> TypeChecker<'a> {
                 self.validate_preserve_field_types(&output_ty, &input_ty, &call.preserve_fields, call.span)?;
                 self.validate_stdlib_output_field_coverage(&qualified, &output_ty, &call.preserve_fields, call.span)?;
                 self.require_capability(&input_ty, Capability::Consume, &qualified, call.span)?;
-                env.consume(&input_name)?;
+                env.consume(&input_name, call.span)?;
                 Ok(Type::Bool)
             }
             _ => Err(CompileError::new(
@@ -4089,7 +4170,7 @@ impl<'a> TypeChecker<'a> {
             let actual_ty = if let Some(flow_ty) = self.flow_state_initializer_type(type_name, field_name, value, expected_ty)? {
                 flow_ty
             } else {
-                self.infer_expr_with_expected_type(env, value, expected_ty, expr_span(value))?
+                self.infer_expr_with_contextual_literals(env, value, expected_ty, expr_span(value))?
             };
             if !self.initializer_types_equal(&actual_ty, expected_ty) {
                 return Err(CompileError::new(
@@ -4562,7 +4643,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         if let Stmt::Expr(expr) = last {
-            let tail_ty = self.infer_expr_with_expected_type(&mut tail_env, expr, return_type, expr_span(expr))?;
+            let tail_ty = self.infer_expr_with_contextual_literals(&mut tail_env, expr, return_type, expr_span(expr))?;
             if self.types_equal(&tail_ty, return_type) {
                 return Ok(true);
             }
@@ -4629,7 +4710,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Identifier(name, _) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     if self.is_linear_type(&ty) {
-                        env.consume(name)?;
+                        env.consume(name, expr_span(expr))?;
                     }
                 }
                 Ok(())
@@ -4759,7 +4840,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn reject_local_mutable_reference_alias(&self, ty: &Type, span: Span) -> Result<()> {
-        if Self::type_contains_mutable_reference(ty) {
+        if self.type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
                     "local binding cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
@@ -4847,7 +4928,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn reject_assignment_mutable_reference_alias(&self, ty: &Type, span: Span) -> Result<()> {
-        if Self::type_contains_mutable_reference(ty) {
+        if self.type_contains_mutable_reference(ty) {
             return Err(CompileError::new(
                 format!(
                     "assignment cannot store mutable reference type {}; use signature-direction outputs for Cell updates",
@@ -5465,7 +5546,7 @@ impl<'a> TypeChecker<'a> {
         if type_name == "Vec" {
             return Ok(());
         }
-        self.validate_named_type(type_name)
+        self.validate_named_type(type_name, span)
             .map_err(|_| CompileError::new(format!("unknown namespaced function '{}::{}'", type_name, constructor), span))
     }
 
@@ -5631,18 +5712,18 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn validate_type(&self, ty: &Type) -> Result<()> {
+    fn validate_type_at(&self, ty: &Type, span: Span) -> Result<()> {
         match ty {
             Type::Unit => Ok(()),
-            Type::Array(elem_ty, _) => self.validate_type(elem_ty),
+            Type::Array(elem_ty, _) => self.validate_type_at(elem_ty, span),
             Type::Tuple(types) => {
                 for t in types {
-                    self.validate_type(t)?;
+                    self.validate_type_at(t, span)?;
                 }
                 Ok(())
             }
-            Type::Ref(inner) | Type::MutRef(inner) => self.validate_type(inner),
-            Type::Named(name) => self.validate_named_type(name),
+            Type::Ref(inner) | Type::MutRef(inner) => self.validate_type_at(inner, span),
+            Type::Named(name) => self.validate_named_type(name, span),
             _ => Ok(()),
         }
     }
@@ -5822,13 +5903,13 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn validate_named_type(&self, name: &str) -> Result<()> {
+    fn validate_named_type(&self, name: &str, span: Span) -> Result<()> {
         let base_name = name.split('<').next().unwrap_or(name);
         match base_name {
             "Option" | "Result" => {
                 return Err(CompileError::new(
                     format!("type '{}' is reserved for the explicit error model but is not implemented yet", base_name),
-                    Span::default(),
+                    span,
                 ));
             }
             _ => {}
@@ -5840,17 +5921,17 @@ impl<'a> TypeChecker<'a> {
                     "generic type '{}' is post-v1 template/codegen syntax, not CellScript v1 executable core; use a concrete schema type or generate a specialized .cell module",
                     name
                 ),
-                Span::default(),
+                span,
             ));
         }
         if base_name == "Vec" && name.contains('<') && self.named_type_contains_reference(name) {
             return Err(CompileError::new(
                 format!("type '{}' cannot contain reference type; Vec<T> values must use owned non-reference items", name),
-                Span::default(),
+                span,
             ));
         }
         if base_name == "Vec" && name.contains('<') {
-            self.validate_vec_type_argument(name)?;
+            self.validate_vec_type_argument(name, span)?;
         }
 
         match base_name {
@@ -5869,27 +5950,31 @@ impl<'a> TypeChecker<'a> {
         {
             Ok(())
         } else {
-            Err(CompileError::new(format!("unknown type '{}'", name), Span::default()))
+            Err(CompileError::new(format!("unknown type '{}'", name), span))
         }
     }
 
-    fn validate_vec_type_argument(&self, name: &str) -> Result<()> {
-        let inner = self.vec_type_argument(name)?;
+    fn validate_vec_type_argument(&self, name: &str, span: Span) -> Result<()> {
+        let inner = self.vec_type_argument_at(name, span)?;
         let inner_ty = self.parse_named_type_repr(inner);
-        self.validate_type(&inner_ty)
+        self.validate_type_at(&inner_ty, span)
     }
 
     fn vec_type_argument<'b>(&self, name: &'b str) -> Result<&'b str> {
+        self.vec_type_argument_at(name, Span::default())
+    }
+
+    fn vec_type_argument_at<'b>(&self, name: &'b str, span: Span) -> Result<&'b str> {
         let Some(inner) = name.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) else {
-            return Err(CompileError::new(format!("malformed Vec type '{}'", name), Span::default()));
+            return Err(CompileError::new(format!("malformed Vec type '{}'", name), span));
         };
         let inner = inner.trim();
         if inner.is_empty() {
-            return Err(CompileError::new("Vec<T> requires exactly one type argument", Span::default()));
+            return Err(CompileError::new("Vec<T> requires exactly one type argument", span));
         }
         let args = split_top_level_type_list(inner);
         if args.len() != 1 || args[0].trim() != inner {
-            return Err(CompileError::new(format!("Vec<T> requires exactly one type argument; found '{}'", inner), Span::default()));
+            return Err(CompileError::new(format!("Vec<T> requires exactly one type argument; found '{}'", inner), span));
         }
         Ok(inner)
     }
@@ -5910,11 +5995,50 @@ impl<'a> TypeChecker<'a> {
             (Type::Tuple(a1), Type::Tuple(b1)) => {
                 a1.len() == b1.len() && a1.iter().zip(b1.iter()).all(|(x, y)| self.types_equal(x, y))
             }
-            (Type::Named(a1), Type::Named(b1)) => a1 == b1,
+            (Type::Named(a1), Type::Named(b1)) => self.named_types_equal(a1, b1),
             (Type::Ref(a1), Type::Ref(b1)) => self.types_equal(a1, b1),
             (Type::MutRef(a1), Type::MutRef(b1)) => self.types_equal(a1, b1),
             _ => false,
         }
+    }
+
+    fn named_types_equal(&self, a: &str, b: &str) -> bool {
+        if a == b {
+            return true;
+        }
+
+        match (split_named_generic(a), split_named_generic(b)) {
+            (Some((a_base, a_payload)), Some((b_base, b_payload))) => {
+                if !self.named_type_bases_equal(a_base, b_base) {
+                    return false;
+                }
+                let a_args = split_top_level_type_list(a_payload);
+                let b_args = split_top_level_type_list(b_payload);
+                a_args.len() == b_args.len()
+                    && a_args
+                        .iter()
+                        .zip(b_args.iter())
+                        .all(|(a_arg, b_arg)| self.types_equal(&self.parse_named_type_repr(a_arg), &self.parse_named_type_repr(b_arg)))
+            }
+            (None, None) => self.named_type_bases_equal(a, b),
+            _ => false,
+        }
+    }
+
+    fn named_type_bases_equal(&self, a: &str, b: &str) -> bool {
+        if a == b {
+            return true;
+        }
+        let (Some(resolver), Some(module)) = (self.resolver, self.current_module.as_deref()) else {
+            return false;
+        };
+        let Some((a_module, _)) = resolver.resolve_type_with_module(module, a) else {
+            return false;
+        };
+        let Some((b_module, _)) = resolver.resolve_type_with_module(module, b) else {
+            return false;
+        };
+        a_module == b_module && a.rsplit("::").next().unwrap_or(a) == b.rsplit("::").next().unwrap_or(b)
     }
 
     fn numeric_types_equal(&self, a: &Type, b: &Type) -> bool {
@@ -6074,6 +6198,8 @@ impl<'a> TypeChecker<'a> {
         match ty {
             Type::Array(inner, _) => self.is_linear_type(inner),
             Type::Tuple(items) => items.iter().any(|item| self.is_linear_type(item)),
+            // References borrow a linear value without taking ownership of the Cell lifecycle obligation.
+            Type::Ref(_) | Type::MutRef(_) => false,
             Type::Named(name) => {
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
                 self.linear_types.contains(base_name)
@@ -6165,35 +6291,6 @@ fn collect_named_type_dependencies(
             token.clear();
         }
     }
-}
-
-fn visit_type_dependency_graph(
-    name: &str,
-    graph: &HashMap<String, Vec<TypeDependencyEdge>>,
-    states: &mut HashMap<String, TypeGraphVisitState>,
-    stack: &mut Vec<String>,
-) -> Result<()> {
-    states.insert(name.to_string(), TypeGraphVisitState::Visiting);
-    stack.push(name.to_string());
-
-    if let Some(edges) = graph.get(name) {
-        for edge in edges {
-            match states.get(&edge.target).copied() {
-                Some(TypeGraphVisitState::Done) => {}
-                Some(TypeGraphVisitState::Visiting) => {
-                    let start = stack.iter().position(|entry| entry == &edge.target).unwrap_or(0);
-                    let mut cycle = stack[start..].to_vec();
-                    cycle.push(edge.target.clone());
-                    return Err(CompileError::new(format!("cyclic type dependency detected: {}", cycle.join(" -> ")), edge.span));
-                }
-                None => visit_type_dependency_graph(&edge.target, graph, states, stack)?,
-            }
-        }
-    }
-
-    stack.pop();
-    states.insert(name.to_string(), TypeGraphVisitState::Done);
-    Ok(())
 }
 
 pub(crate) fn lifecycle_effect_keys(expr: &Expr) -> Vec<(String, Span, &'static str)> {
@@ -6845,6 +6942,11 @@ fn split_top_level_type_list(input: &str) -> Vec<&str> {
 
     items.push(input[start..].trim());
     items
+}
+
+fn split_named_generic(input: &str) -> Option<(&str, &str)> {
+    let start = input.find('<')?;
+    input.ends_with('>').then_some((input[..start].trim(), input[start + 1..input.len() - 1].trim()))
 }
 
 fn split_top_level_array_type(input: &str) -> Option<(&str, &str)> {
@@ -7564,6 +7666,33 @@ where
     }
 
     #[test]
+    fn typed_vec_with_capacity_uses_declared_element_type() {
+        check(&source_module(
+            r#"
+module types::typed_vec_capacity_context
+
+action good() -> u64
+where
+    let values: Vec<Address> = Vec::with_capacity(2)
+    return values.capacity()
+"#,
+        ))
+        .expect("Vec::with_capacity should inherit a declared Vec<T> element type");
+    }
+
+    #[test]
+    fn generic_reference_detection_uses_type_structure() {
+        let checker = TypeChecker::new();
+
+        assert!(checker.named_type_contains_reference("Vec<&Address>"));
+        assert!(checker.named_type_contains_mutable_reference("Vec<&mut Address>"));
+        assert!(
+            !checker.named_type_contains_reference("Vec<Foo&Bar>"),
+            "an ampersand inside an opaque named payload must not be treated as a reference sigil"
+        );
+    }
+
+    #[test]
     fn explicit_cast_can_cross_integer_width_boundary() {
         check(&source_module(
             r#"
@@ -8208,6 +8337,37 @@ const SCRIPT: String = "worker"
     }
 
     #[test]
+    fn imported_and_qualified_names_compare_as_same_type() {
+        let token = source_module(
+            r#"
+module token
+
+struct Token {
+    amount: u64
+}
+"#,
+        );
+        let app = source_module(
+            r#"
+module app
+
+use token::Token
+
+fn id(value: token::Token) -> Token {
+    return value
+}
+"#,
+        );
+
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(token).unwrap();
+        resolver.register_module(app.clone()).unwrap();
+        resolver.check_circular_deps().unwrap();
+
+        check_with_resolver(&app, &resolver, &app.name).unwrap();
+    }
+
+    #[test]
     fn imported_type_ids_must_not_collide_in_visible_module_scope() {
         let left = source_module(
             r#"
@@ -8269,6 +8429,32 @@ where
         let err = check(&app).unwrap_err();
 
         assert!(err.message.contains("resolver-aware type checking"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invalid_schema_field_types_are_not_registered_as_valid_fields() {
+        let module = source_module(
+            r#"
+module types::invalid_schema_registration
+
+resource Bad {
+    value: MissingType
+}
+
+resource Wrapper {
+    bad: Bad
+}
+"#,
+        );
+        let mut checker = TypeChecker::new();
+
+        let err = checker.check_module(&module).unwrap_err();
+
+        assert!(err.message.contains("unknown type 'MissingType'"), "unexpected error: {}", err.message);
+        assert!(
+            checker.type_fields.get("Bad").is_some_and(|fields| fields.is_empty()),
+            "invalid schema fields should not be promoted into the registered field map"
+        );
     }
 
     #[test]

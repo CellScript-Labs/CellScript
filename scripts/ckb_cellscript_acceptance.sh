@@ -2149,7 +2149,7 @@ CKB_PID="$!"
 
 ready=0
 for _ in $(seq 1 120); do
-  if curl -sS \
+  if curl -sS --noproxy '*' \
     -H 'Content-Type: application/json' \
     -d '{"id":1,"jsonrpc":"2.0","method":"get_tip_header","params":[]}' \
     "$RPC_URL" > "$RUN_DIR/rpc-ready.json" 2>/dev/null; then

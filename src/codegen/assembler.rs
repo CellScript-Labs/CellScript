@@ -737,6 +737,36 @@ impl MachineLayoutPlan {
     }
 }
 
+pub(crate) fn far_relaxed_jump_scratch_count(parsed: &ParsedAssembly, layout: &SectionLayout) -> Result<usize> {
+    let layouts = text_op_layouts(parsed);
+    let mut scratch_count = 0usize;
+    for op_index in &parsed.relaxed_text_branches {
+        let Some(op_layout) = layouts.get(*op_index) else {
+            continue;
+        };
+        let Some(op) = parsed.text_ops.get(*op_index) else {
+            continue;
+        };
+        let pc = layout.text_user_base + op_layout.offset as u64;
+        match op {
+            AsmOp::Instruction(Instruction::Jump { label }) => {
+                let target = parsed.symbol_address(label, layout)?;
+                if !signed_bits_fit(relative_offset(pc, target)?, 21) {
+                    scratch_count += 1;
+                }
+            }
+            AsmOp::Instruction(inst) if conditional_branch_parts(inst).is_some() => {
+                let target = branch_target(inst, parsed, layout)?;
+                if !signed_bits_fit(relative_offset(pc + 4, target)?, 21) {
+                    scratch_count += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(scratch_count)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TextOpLayout {
     op_index: usize,
@@ -1465,7 +1495,13 @@ fn encode_instruction(
                 let inverse = inverse_branch_funct3(funct3)
                     .ok_or_else(|| CompileError::new("unsupported conditional branch function", crate::error::Span::default()))?;
                 out.extend_from_slice(&encode_b_type(0x63, inverse, rs1, rs2, 12)?.to_le_bytes());
-                encode_long_jump_sequence(out, pc + 4, target)?;
+                let jump_offset = relative_offset(pc + 4, target)?;
+                if signed_bits_fit(jump_offset, 21) {
+                    out.extend_from_slice(&encode_j_type(0x6f, 0, jump_offset)?.to_le_bytes());
+                    out.extend_from_slice(&encode_i_type(0x13, 0, 0b000, 0, 0)?.to_le_bytes());
+                } else {
+                    encode_long_jump_sequence(out, pc + 4, target)?;
+                }
             } else {
                 out.extend_from_slice(&encode_b_type(0x63, funct3, rs1, rs2, relative_offset(pc, target)?)?.to_le_bytes());
             }
@@ -1530,9 +1566,8 @@ fn encode_call_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
 }
 
 fn encode_long_jump_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
-    // Relaxed long jumps use t6 as a dedicated assembler scratch. Codegen's
-    // stack-machine contract must not keep t6 live across labels that can be
-    // reached by a branch or jump relaxation.
+    // Only the far-jump fallback needs a register scratch; relaxed conditional
+    // branches within J-type range use `jal x0` and leave all registers intact.
     let scratch = 31;
     let offset = relative_offset(pc, target)?;
     ensure_uncompressed_instruction_alignment(offset, "jump target")?;
@@ -1866,13 +1901,20 @@ pub(crate) fn encode_ecall() -> u32 {
 }
 
 fn encode_signed_bits(value: i64, bits: u32) -> Result<u32> {
+    if bits > 32 {
+        return Err(CompileError::new(
+            format!("immediate field width '{}' exceeds 32-bit encoder capacity", bits),
+            crate::error::Span::default(),
+        ));
+    }
     if !signed_bits_fit(value, bits) {
         return Err(CompileError::new(
             format!("immediate '{}' does not fit {}-bit signed field", value, bits),
             crate::error::Span::default(),
         ));
     }
-    Ok((value as i32 as u32) & ((1u32 << bits) - 1))
+    let mask = if bits == 32 { u32::MAX } else { ((1u64 << bits) - 1) as u32 };
+    Ok((value as u64 as u32) & mask)
 }
 
 pub(crate) fn signed_bits_fit(value: i64, bits: u32) -> bool {
@@ -2027,6 +2069,36 @@ mod tests {
         assert!(encode_j_type(0x6f, 0, 1_048_576).is_err());
         assert!(encode_j_type(0x6f, 0, 2).is_err());
         assert!(encode_j_type(0x6f, 0, 3).is_err());
+
+        assert_eq!(encode_signed_bits(-1, 32).unwrap(), u32::MAX);
+        assert!(encode_signed_bits(0, 33).is_err());
+    }
+
+    #[test]
+    fn strict_audit_relaxed_conditional_branch_within_jal_range_preserves_registers() {
+        let mut lines = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "addi a0, zero, 0".to_string(),
+            "beqz a0, far_target".to_string(),
+        ];
+        for _ in 0..1500 {
+            lines.push("addi t0, t0, 0".to_string());
+        }
+        lines.push("far_target:".to_string());
+        lines.push("ret".to_string());
+
+        let plan = MachineLayoutPlan::build(&lines).expect("machine layout plan");
+        assert_eq!(plan.metrics.relaxed_branch_count, 1);
+        let mut text = Vec::new();
+        plan.parsed.encode_section(SectionKind::Text, &mut text, &plan.layout, 0).expect("text should encode");
+
+        let relaxed_jump = u32_le(&text, 8);
+        let relaxed_padding = u32_le(&text, 12);
+        assert_eq!(relaxed_jump & 0x7f, 0x6f, "relaxed branch should use jal, not a scratch-register auipc");
+        assert_eq!((relaxed_jump >> 7) & 0x1f, 0, "relaxed branch should jump through x0");
+        assert_eq!(relaxed_padding, encode_i_type(0x13, 0, 0b000, 0, 0).unwrap(), "12-byte relaxed layout should be padded with nop");
     }
 
     #[test]

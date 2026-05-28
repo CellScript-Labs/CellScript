@@ -15,6 +15,7 @@ pub struct IrModule {
     pub external_type_defs: Vec<IrTypeDef>,
     pub external_callable_abis: Vec<IrCallableAbi>,
     pub enum_fixed_sizes: HashMap<String, usize>,
+    pub has_lowering_errors: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +177,8 @@ impl IrValueKind {
 
 impl IrType {
     pub fn value_kind(&self) -> IrValueKind {
+        // Status-like values are assigned only at low-level runtime/syscall
+        // boundaries by instruction_result_value_kind, never from DSL types.
         match self {
             IrType::Bool => IrValueKind::Bool,
             _ => IrValueKind::Domain,
@@ -299,6 +302,7 @@ pub enum CellMetadataField {
 #[derive(Debug, Clone)]
 pub struct IrBlock {
     pub id: BlockId,
+    pub source_span: Option<Span>,
     pub instructions: Vec<IrInstruction>,
     pub terminator: IrTerminator,
 }
@@ -453,6 +457,7 @@ impl IrGenerator {
                 external_type_defs: Vec::new(),
                 external_callable_abis: Vec::new(),
                 enum_fixed_sizes: HashMap::new(),
+                has_lowering_errors: false,
             },
             var_counter: 0,
             block_counter: 0,
@@ -1313,15 +1318,19 @@ impl IrGenerator {
             });
         }
         self.transition_param_ids = ir_params.iter().map(|param| param.binding.id).collect();
+        // Lifecycle metadata collectors are intentionally tied to the
+        // straight-line source statement order certified here.
         let lifecycle_certificate = match certify_straight_line_lifecycle_only(stmts) {
             Ok(certificate) => certificate,
             Err(err) => {
+                self.module.has_lowering_errors = true;
                 self.errors.push(err);
                 StraightLineLifecycleOnly
             }
         };
         let mut blocks = Vec::new();
         let entry = self.push_block(&mut blocks);
+        blocks[entry.0].source_span = stmts.first().map(stmt_source_span);
         let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_return_type.as_ref());
         let consume_set =
             self.collect_straight_line_consume_patterns(&blocks, &ir_params, core_input_bindings, &lifecycle_certificate);
@@ -1614,7 +1623,7 @@ impl IrGenerator {
         source: &IrOperand,
         output_ty: &IrType,
         active: BlockId,
-        blocks: &mut Vec<IrBlock>,
+        blocks: &mut [IrBlock],
     ) -> HashMap<String, IrVar> {
         let (IrOperand::Var(source_var), Some(output_type_name)) = (source, Self::named_type_name_from_ir_type(output_ty)) else {
             return HashMap::new();
@@ -2144,15 +2153,24 @@ impl IrGenerator {
             self.record_error("logical operations require boolean operands", binary.span);
         }
 
+        let short_value = match binary.op {
+            BinaryOp::And => false,
+            BinaryOp::Or => true,
+            _ => {
+                self.record_error("short-circuit lowering only handles logical operators", binary.span);
+                return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: None };
+            }
+        };
+
         let right_block = self.push_block(blocks);
         let short_block = self.push_block(blocks);
         let join = self.push_block(blocks);
         let dest = self.new_var("logical_tmp", IrType::Bool);
 
-        let (then_block, else_block, short_value) = match binary.op {
-            BinaryOp::And => (right_block, short_block, false),
-            BinaryOp::Or => (short_block, right_block, true),
-            _ => unreachable!("short-circuit lowering only handles logical operators"),
+        let (then_block, else_block) = match binary.op {
+            BinaryOp::And => (right_block, short_block),
+            BinaryOp::Or => (short_block, right_block),
+            _ => return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: None },
         };
         self.block_mut(blocks, active).terminator = IrTerminator::Branch { cond: left.operand, then_block, else_block };
 
@@ -2404,7 +2422,7 @@ impl IrGenerator {
 
     fn push_block(&mut self, blocks: &mut Vec<IrBlock>) -> BlockId {
         let id = self.new_block();
-        blocks.push(IrBlock { id, instructions: Vec::new(), terminator: IrTerminator::Return(None) });
+        blocks.push(IrBlock { id, source_span: None, instructions: Vec::new(), terminator: IrTerminator::Return(None) });
         id
     }
 
@@ -2509,7 +2527,7 @@ impl IrGenerator {
         self.aggregate_fields.get(&var.id).and_then(|fields| fields.get(field)).cloned().map(IrOperand::Var)
     }
 
-    fn lower_join_value_into_dest(&mut self, dest: &IrVar, src: IrOperand, block_id: BlockId, blocks: &mut Vec<IrBlock>) {
+    fn lower_join_value_into_dest(&mut self, dest: &IrVar, src: IrOperand, block_id: BlockId, blocks: &mut [IrBlock]) {
         self.block_mut(blocks, block_id).instructions.push(IrInstruction::Move { dest: dest.clone(), src: src.clone() });
 
         if let Some(fields) = self.aggregate_fields.get(&dest.id).cloned() {
@@ -3021,6 +3039,7 @@ impl IrGenerator {
         LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_stdlib_output_create_and_preserve(
         &mut self,
         qualified: &str,
@@ -3700,7 +3719,7 @@ impl IrGenerator {
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
     }
 
-    fn lower_read_ref_expr(&mut self, read_ref: &ReadRefExpr, current: BlockId, blocks: &mut Vec<IrBlock>) -> LoweredExpr {
+    fn lower_read_ref_expr(&mut self, read_ref: &ReadRefExpr, current: BlockId, blocks: &mut [IrBlock]) -> LoweredExpr {
         let dest = self.new_var(format!("read_ref_{}", read_ref.ty), IrType::Ref(Box::new(IrType::Named(read_ref.ty.clone()))));
         self.block_mut(blocks, current).instructions.push(IrInstruction::ReadRef { dest: dest.clone(), ty: read_ref.ty.clone() });
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) }
@@ -4049,7 +4068,7 @@ impl IrGenerator {
         ir_ty: IrType,
         span: Span,
         current: BlockId,
-        blocks: &mut Vec<IrBlock>,
+        blocks: &mut [IrBlock],
     ) -> LoweredExpr {
         if !matches!(ir_ty, IrType::Array(_, 0)) {
             self.record_error("empty array literal requires a zero-length declared array type", span);
@@ -4180,6 +4199,7 @@ impl IrGenerator {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_field_assign(
         &mut self,
         field: &FieldAccessExpr,
@@ -4505,7 +4525,9 @@ impl IrGenerator {
                 break;
             } else {
                 let Some(pattern_operand) = self.lower_match_pattern_operand(&arm.pattern, arm.span) else {
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };
+                    self.block_mut(blocks, check_block).terminator =
+                        IrTerminator::Abort(CellScriptRuntimeError::NumericOrDiscriminantInvalid);
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
                 };
 
                 let cond_var = self.new_var("match_cond", IrType::Bool);
@@ -5162,6 +5184,7 @@ impl IrGenerator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_simple_runtime_call(
         &mut self,
         func: &str,
@@ -5226,6 +5249,7 @@ impl IrGenerator {
     }
 
     fn record_error(&mut self, message: impl Into<String>, span: Span) {
+        self.module.has_lowering_errors = true;
         self.errors.push(CompileError::new(message, span));
     }
 
@@ -5367,13 +5391,7 @@ impl IrGenerator {
             .cloned()
     }
 
-    fn materialize_schema_field(
-        &mut self,
-        base_var: &IrVar,
-        field: &str,
-        current: BlockId,
-        blocks: &mut Vec<IrBlock>,
-    ) -> Option<IrVar> {
+    fn materialize_schema_field(&mut self, base_var: &IrVar, field: &str, current: BlockId, blocks: &mut [IrBlock]) -> Option<IrVar> {
         let field_ty = self.lookup_field_ir_type(&base_var.ty, field)?;
         let field_var = self.new_var(format!("{}_{}", base_var.name, field), field_ty);
         self.block_mut(blocks, current).instructions.push(IrInstruction::FieldAccess {
@@ -5406,6 +5424,17 @@ fn certify_straight_line_lifecycle_only(stmts: &[Stmt]) -> Result<StraightLineLi
     let mut bindings = HashMap::new();
     certify_lifecycle_stmts(stmts, false, &mut bindings)?;
     Ok(StraightLineLifecycleOnly)
+}
+
+fn stmt_source_span(stmt: &Stmt) -> Span {
+    match stmt {
+        Stmt::Let(let_stmt) => let_stmt.span,
+        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => expr.span(),
+        Stmt::Return(None) => Span::default(),
+        Stmt::If(if_stmt) => if_stmt.span,
+        Stmt::For(for_stmt) => for_stmt.span,
+        Stmt::While(while_stmt) => while_stmt.span,
+    }
 }
 
 fn certify_lifecycle_stmts(stmts: &[Stmt], branch_local: bool, bindings: &mut HashMap<String, (&'static str, Span)>) -> Result<()> {
@@ -5606,6 +5635,10 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
 }
 
 pub fn verify_module(module: &IrModule) -> Result<()> {
+    if module.has_lowering_errors {
+        return Err(ir_verify_error("module carries lowering errors; rejecting poisoned IR before downstream verification"));
+    }
+
     let mut callable_returns = HashMap::new();
     let mut callable_params = HashMap::new();
 
@@ -5678,13 +5711,15 @@ fn verify_body(
     let mut block_ids = HashSet::new();
     for (index, block) in body.blocks.iter().enumerate() {
         if !block_ids.insert(block.id) {
-            return Err(ir_verify_error(format!("{label} has duplicate block id {}", block.id.0)));
+            return Err(ir_verify_block_error(label, body, block.id, format!("{label} has duplicate block id {}", block.id.0)));
         }
         if block.id.0 != index {
-            return Err(ir_verify_error(format!(
-                "{label} block id {} is stored at index {}; IR block ids must remain index-addressable",
-                block.id.0, index
-            )));
+            return Err(ir_verify_block_error(
+                label,
+                body,
+                block.id,
+                format!("{label} block id {} is stored at index {}; IR block ids must remain index-addressable", block.id.0, index),
+            ));
         }
     }
 
@@ -5692,7 +5727,12 @@ fn verify_body(
     for block in &body.blocks {
         for target in terminator_targets(&block.terminator) {
             if !block_ids.contains(&target) {
-                return Err(ir_verify_error(format!("{label} block {} terminates to missing block {}", block.id.0, target.0)));
+                return Err(ir_verify_block_error(
+                    label,
+                    body,
+                    block.id,
+                    format!("{label} block {} terminates to missing block {}", block.id.0, target.0),
+                ));
             }
             predecessors.entry(target).or_default().push(block.id);
         }
@@ -5709,7 +5749,7 @@ fn verify_body(
     }
     for block in &body.blocks {
         if block.id != entry && !reachable.contains(&block.id) {
-            return Err(ir_verify_error(format!("{label} contains unreachable block {}", block.id.0)));
+            return Err(ir_verify_block_error(label, body, block.id, format!("{label} contains unreachable block {}", block.id.0)));
         }
     }
 
@@ -5770,6 +5810,7 @@ fn verify_body(
         let mut defs = in_defs.get(&block.id).cloned().unwrap_or_default();
         for instruction in &block.instructions {
             verify_instruction_operands(label, block.id, instruction, &defs, &all_var_types)?;
+            verify_instruction_result_types(label, block.id, instruction)?;
             verify_instruction_abi(label, block.id, instruction, callable_returns, callable_params)?;
             verify_instruction_value_kinds(label, block.id, instruction, &all_value_kinds)?;
             if let Some(dest) = instruction_dest(instruction) {
@@ -6322,6 +6363,46 @@ fn verify_instruction_abi(
     Ok(())
 }
 
+fn verify_instruction_result_types(label: &str, block_id: BlockId, instruction: &IrInstruction) -> Result<()> {
+    match instruction {
+        IrInstruction::LoadConst { dest, value } => {
+            let actual = const_ir_type(value);
+            if actual != dest.ty {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} loads constant type {:?} into destination {:?}",
+                    block_id.0, actual, dest.ty
+                )));
+            }
+        }
+        IrInstruction::Move { dest, src } => {
+            let actual = operand_ir_type(src);
+            if !ir_type_compatible_with_abi(&actual, &dest.ty) && !aggregate_zero_sentinel(&dest.ty, src) {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} moves operand type {:?} into destination {:?}",
+                    block_id.0, actual, dest.ty
+                )));
+            }
+        }
+        IrInstruction::Tuple { dest, fields } => {
+            if let IrType::Tuple(expected) = &dest.ty {
+                let actual = fields.iter().map(operand_ir_type).collect::<Vec<_>>();
+                if actual != *expected {
+                    return Err(ir_verify_error(format!(
+                        "{label} block {} builds tuple fields {:?} into destination {:?}",
+                        block_id.0, actual, dest.ty
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn aggregate_zero_sentinel(dest_ty: &IrType, src: &IrOperand) -> bool {
+    matches!(src, IrOperand::Const(IrConst::U64(0))) && matches!(dest_ty, IrType::Array(..) | IrType::Tuple(_) | IrType::Named(_))
+}
+
 fn verify_instruction_value_kinds(
     label: &str,
     block_id: BlockId,
@@ -6636,6 +6717,15 @@ fn const_ir_type(value: &IrConst) -> IrType {
 
 fn ir_verify_error(message: impl Into<String>) -> CompileError {
     CompileError::without_span(format!("IR verifier failed: {}", message.into()))
+}
+
+fn ir_verify_block_error(_label: &str, body: &IrBody, block_id: BlockId, message: impl Into<String>) -> CompileError {
+    let message = format!("IR verifier failed: {}", message.into());
+    if let Some(span) = body.blocks.get(block_id.0).and_then(|block| block.source_span).filter(|span| *span != Span::default()) {
+        CompileError::new(message, span)
+    } else {
+        CompileError::without_span(message)
+    }
 }
 
 pub fn generate(ast: &Module) -> Result<IrModule> {
@@ -7726,18 +7816,18 @@ mod tests {
     use crate::parser::parse;
 
     fn parse_and_lower(source: &str) -> IrModule {
-        let tokens = lex(source).unwrap();
-        let ast = parse(&tokens).unwrap();
-        crate::types::check(&ast).unwrap();
-        crate::flow::check(&ast).unwrap();
-        let ir = generate(&ast).unwrap();
-        verify_module(&ir).unwrap();
+        let tokens = lex(source).expect("test source should lex before IR lowering");
+        let ast = parse(&tokens).expect("test source should parse before IR lowering");
+        crate::types::check(&ast).expect("test source should type-check before IR lowering");
+        crate::flow::check(&ast).expect("test source should pass flow checks before IR lowering");
+        let ir = generate(&ast).expect("test source should lower to IR");
+        verify_module(&ir).expect("lowered test IR should verify");
         ir
     }
 
     fn parse_and_generate_without_typecheck(source: &str) -> Result<IrModule> {
-        let tokens = lex(source).unwrap();
-        let ast = parse(&tokens).unwrap();
+        let tokens = lex(source).expect("test source should lex before raw IR generation");
+        let ast = parse(&tokens).expect("test source should parse before raw IR generation");
         generate(&ast)
     }
 
@@ -7768,12 +7858,13 @@ mod tests {
                     create_set: Vec::new(),
                     mutate_set: Vec::new(),
                     write_intents: Vec::new(),
-                    blocks: vec![IrBlock { id: BlockId(0), instructions, terminator }],
+                    blocks: vec![IrBlock { id: BlockId(0), source_span: None, instructions, terminator }],
                 },
             })],
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: HashMap::new(),
+            has_lowering_errors: false,
         }
     }
 
@@ -7783,6 +7874,85 @@ mod tests {
 
     fn raw_unit_helper_call(dest: Option<IrVar>) -> IrInstruction {
         IrInstruction::Call { dest, func: "__ckb_close".to_string(), args: vec![IrOperand::Const(IrConst::U64(0))] }
+    }
+
+    #[test]
+    fn ir_type_value_kind_never_derives_status_kinds() {
+        let domain_types = [
+            IrType::U8,
+            IrType::U16,
+            IrType::U32,
+            IrType::U64,
+            IrType::U128,
+            IrType::Unit,
+            IrType::Address,
+            IrType::Hash,
+            IrType::Array(Box::new(IrType::U8), 4),
+            IrType::Tuple(vec![IrType::U8, IrType::Bool]),
+            IrType::Named("Token".to_string()),
+            IrType::Ref(Box::new(IrType::U64)),
+            IrType::MutRef(Box::new(IrType::U64)),
+        ];
+
+        assert_eq!(IrType::Bool.value_kind(), IrValueKind::Bool);
+        for ty in domain_types {
+            assert_eq!(ty.value_kind(), IrValueKind::Domain, "{ty:?} must not derive a status-like value kind");
+        }
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_empty_body_blocks() {
+        let ir = IrModule {
+            name: "ir::empty_blocks".to_string(),
+            items: vec![IrItem::Action(IrAction {
+                name: "bad".to_string(),
+                params: Vec::new(),
+                return_type: None,
+                state_transition_edges: Vec::new(),
+                body: IrBody {
+                    consume_set: Vec::new(),
+                    read_refs: Vec::new(),
+                    create_set: Vec::new(),
+                    mutate_set: Vec::new(),
+                    write_intents: Vec::new(),
+                    blocks: Vec::new(),
+                },
+                effect_class: EffectClass::Pure,
+                scheduler_hints: SchedulerHints::default(),
+            })],
+            external_type_defs: Vec::new(),
+            external_callable_abis: Vec::new(),
+            enum_fixed_sizes: HashMap::new(),
+            has_lowering_errors: false,
+        };
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("action 'bad' has no IR blocks"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_poisoned_lowering_module() {
+        let mut ir = module_with_instructions(Vec::new(), None, IrTerminator::Return(None));
+        ir.has_lowering_errors = true;
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("module carries lowering errors"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_constant_destination_width_mismatch() {
+        let dest = IrVar { id: 0, name: "narrow".to_string(), ty: IrType::U8 };
+        let ir = module_with_instructions(
+            vec![IrInstruction::LoadConst { dest, value: IrConst::U64(1) }],
+            None,
+            IrTerminator::Return(None),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("loads constant type U64 into destination U8"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -8077,6 +8247,7 @@ where
             blocks: vec![
                 IrBlock {
                     id: BlockId(0),
+                    source_span: None,
                     instructions: Vec::new(),
                     terminator: IrTerminator::Branch {
                         cond: IrOperand::Var(cond.clone()),
@@ -8086,12 +8257,14 @@ where
                 },
                 IrBlock {
                     id: BlockId(1),
+                    source_span: None,
                     instructions: vec![IrInstruction::LoadConst { dest: branch_value.clone(), value: IrConst::U64(7) }],
                     terminator: IrTerminator::Jump(BlockId(3)),
                 },
-                IrBlock { id: BlockId(2), instructions: Vec::new(), terminator: IrTerminator::Jump(BlockId(3)) },
+                IrBlock { id: BlockId(2), source_span: None, instructions: Vec::new(), terminator: IrTerminator::Jump(BlockId(3)) },
                 IrBlock {
                     id: BlockId(3),
+                    source_span: None,
                     instructions: Vec::new(),
                     terminator: IrTerminator::Return(Some(IrOperand::Var(branch_value))),
                 },
@@ -8119,6 +8292,7 @@ where
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: HashMap::new(),
+            has_lowering_errors: false,
         };
 
         let err = verify_module(&module).unwrap_err();

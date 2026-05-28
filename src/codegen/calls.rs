@@ -2,7 +2,7 @@
 //!
 //! Contains direct/internal call emission, CKB fixed-hash helper dispatch,
 //! ABI argument placement for calls (scalar, pointer, length, type_hash),
-//! outgoing stack argument area management, signed SP-relative store,
+//! outgoing stack argument area management, frame-local staging,
 //! and ABI register name resolution.
 
 use crate::error::{CompileError, Result};
@@ -10,7 +10,6 @@ use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
-use super::assembler::{scratch_register_avoiding, small_signed_immediate};
 use super::runtime::{is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
 use super::schema::{fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
 use super::CodeGenerator;
@@ -71,7 +70,9 @@ impl CodeGenerator {
         self.emit(format!("# call {}", func));
 
         let abi = self.callable_abis.get(func).cloned();
-        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(call_abi_arg_count(abi.as_ref(), args));
+        let abi_arg_count = call_abi_arg_count(abi.as_ref(), args);
+        let outgoing_stack_arg_value_bytes = abi_arg_count.saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(abi_arg_count);
         let mut abi_index = 0usize;
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi {
@@ -91,6 +92,7 @@ impl CodeGenerator {
         if outgoing_stack_arg_bytes > 0 {
             self.emit(format!("# cellscript abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
             self.emit_large_addi("sp", "sp", -(outgoing_stack_arg_bytes as i64));
+            self.emit_copy_outgoing_call_stack_args(outgoing_stack_arg_bytes, outgoing_stack_arg_value_bytes);
         }
         self.emit(format!("call {}", func));
         if outgoing_stack_arg_bytes > 0 {
@@ -339,31 +341,30 @@ impl CodeGenerator {
             return;
         }
         let stack_slot_offset = (abi_index - 8) * 8;
-        let Some(stack_slot_offset) = self.usize_to_i64_codegen_offset(stack_slot_offset, "call stack slot") else {
+        if stack_slot_offset + 8 > outgoing_stack_arg_bytes || stack_slot_offset + 8 > self.outgoing_stack_arg_staging_bytes {
+            self.record_fatal_error(format!("call stack arg{} exceeds outgoing ABI staging area", abi_index));
+            return;
+        }
+        let Some(staging_offset) = self.outgoing_stack_arg_staging_offset.checked_add(stack_slot_offset) else {
+            self.record_fatal_error("call stack argument staging offset overflow");
             return;
         };
-        let Some(outgoing_stack_arg_bytes) = self.usize_to_i64_codegen_offset(outgoing_stack_arg_bytes, "call stack argument area")
-        else {
-            return;
-        };
-        let offset = stack_slot_offset - outgoing_stack_arg_bytes;
-        self.emit(format!(
-            "# cellscript abi: stage outgoing stack arg{} at pre-call sp{}{}",
-            abi_index,
-            if offset < 0 { "" } else { "+" },
-            offset
-        ));
-        self.emit_sp_store_signed(register, offset);
+        self.emit(format!("# cellscript abi: stage outgoing stack arg{} in frame staging +{}", abi_index, stack_slot_offset));
+        self.emit_stack_store(register, staging_offset);
     }
 
-    pub(crate) fn emit_sp_store_signed(&mut self, register: &str, offset: i64) {
-        if small_signed_immediate(offset) {
-            self.emit(format!("sd {}, {}(sp)", register, offset));
-        } else {
-            let scratch = scratch_register_avoiding(&[register]);
-            self.emit(format!("li {}, {}", scratch, offset));
-            self.emit(format!("add {}, sp, {}", scratch, scratch));
-            self.emit(format!("sd {}, 0({})", register, scratch));
+    fn emit_copy_outgoing_call_stack_args(&mut self, outgoing_stack_arg_bytes: usize, outgoing_stack_arg_value_bytes: usize) {
+        for stack_slot_offset in (0..outgoing_stack_arg_value_bytes).step_by(8) {
+            let Some(source_offset) = outgoing_stack_arg_bytes
+                .checked_add(self.outgoing_stack_arg_staging_offset)
+                .and_then(|offset| offset.checked_add(stack_slot_offset))
+            else {
+                self.record_fatal_error("call stack argument copy offset overflow");
+                return;
+            };
+            self.emit(format!("# cellscript abi: copy staged stack arg at +{}", stack_slot_offset));
+            self.emit_stack_load("t0", source_offset);
+            self.emit_stack_store("t0", stack_slot_offset);
         }
     }
 

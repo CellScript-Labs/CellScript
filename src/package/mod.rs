@@ -494,6 +494,7 @@ dist/
     }
 
     fn git_checkout(clone_dir: &Path, ref_str: &str) -> std::result::Result<(), String> {
+        validate_git_revision(ref_str).map_err(|error| error.message)?;
         let mut fetch_command = Self::git_command();
         let fetch = fetch_command
             .args(Self::git_fetch_ref_args(ref_str))
@@ -1801,6 +1802,14 @@ git = "https://example.com/remote.git"
         assert_eq!(clone, vec!["clone", "--", "--upload-pack=calc.exe", "/tmp/cellscript-git-target"]);
         assert_eq!(fetch, vec!["fetch", "origin", "--", "--upload-pack=calc.exe"]);
         assert_eq!(checkout, vec!["checkout", "--", "--upload-pack=calc.exe"]);
+    }
+
+    #[test]
+    fn package_manager_git_checkout_revalidates_full_commit_refs() {
+        let err = PackageManager::git_checkout(Path::new("/tmp/cellscript-not-a-git-repo"), "--upload-pack=calc.exe")
+            .expect_err("git checkout helper must reject non-commit refs before invoking git");
+
+        assert!(err.contains("full 40-character SHA-1"), "unexpected error: {}", err);
     }
 
     #[test]

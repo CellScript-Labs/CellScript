@@ -239,7 +239,16 @@ impl CodeGenerator {
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
-        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()));
+        let entry_abi_arg_total = entry_abi_arg_count(params, callable_abi.as_ref());
+        let outgoing_stack_arg_value_bytes = entry_abi_arg_total.saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = outgoing_stack_arg_bytes(entry_abi_arg_total);
+        let Some(entry_frame_size) = ENTRY_WITNESS_FRAME_SIZE.checked_add(outgoing_stack_arg_bytes) else {
+            self.record_fatal_error("entry witness frame size overflow while reserving outgoing stack args");
+            return Ok(());
+        };
+        let entry_ra_offset = entry_frame_size - 8;
+        self.outgoing_stack_arg_staging_offset = ENTRY_WITNESS_RA_OFFSET;
+        self.outgoing_stack_arg_staging_bytes = outgoing_stack_arg_bytes;
         let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
@@ -259,8 +268,8 @@ impl CodeGenerator {
             self.emit("# cellscript entry abi: action entries fall back to GroupOutput witness args for output-only type scripts");
         }
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
-        self.emit_large_addi("sp", "sp", -(ENTRY_WITNESS_FRAME_SIZE as i64));
-        self.emit_stack_store("ra", ENTRY_WITNESS_RA_OFFSET);
+        self.emit_large_addi("sp", "sp", -(entry_frame_size as i64));
+        self.emit_stack_store("ra", entry_ra_offset);
         self.emit("mv s10, sp");
         self.emit(format!("la s11, {}", done_label));
         if has_lock_args {
@@ -472,7 +481,7 @@ impl CodeGenerator {
             if has_lock_args {
                 self.emit_entry_lock_args_exact_size_check(&fail_label);
             }
-            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            self.emit_entry_call_target(target, outgoing_stack_arg_bytes, outgoing_stack_arg_value_bytes);
             self.emit(format!("j {}", done_label));
         } else {
             let mut abi_index = 0usize;
@@ -563,7 +572,7 @@ impl CodeGenerator {
             if has_lock_args {
                 self.emit_entry_lock_args_exact_size_check(&fail_label);
             }
-            self.emit_entry_call_target(target, outgoing_stack_arg_bytes);
+            self.emit_entry_call_target(target, outgoing_stack_arg_bytes, outgoing_stack_arg_value_bytes);
             self.emit(format!("j {}", done_label));
         }
 
@@ -571,16 +580,17 @@ impl CodeGenerator {
         self.emit_runtime_error_comment(CellScriptRuntimeError::EntryWitnessAbiInvalid);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::EntryWitnessAbiInvalid.code()));
         self.emit_label(&done_label);
-        self.emit_stack_load("ra", ENTRY_WITNESS_RA_OFFSET);
-        self.emit_large_addi("sp", "sp", ENTRY_WITNESS_FRAME_SIZE as i64);
+        self.emit_stack_load("ra", entry_ra_offset);
+        self.emit_large_addi("sp", "sp", entry_frame_size as i64);
         self.emit("ret");
         Ok(())
     }
 
-    fn emit_entry_call_target(&mut self, target: &str, outgoing_stack_arg_bytes: usize) {
+    fn emit_entry_call_target(&mut self, target: &str, outgoing_stack_arg_bytes: usize, outgoing_stack_arg_value_bytes: usize) {
         if outgoing_stack_arg_bytes > 0 {
             self.emit(format!("# cellscript entry abi: reserve {} bytes for outgoing stack call arguments", outgoing_stack_arg_bytes));
             self.emit_large_addi("sp", "sp", -(outgoing_stack_arg_bytes as i64));
+            self.emit_copy_entry_outgoing_stack_args(outgoing_stack_arg_bytes, outgoing_stack_arg_value_bytes);
         }
         self.emit(format!("call {}", target));
         if outgoing_stack_arg_bytes > 0 {
@@ -637,22 +647,31 @@ impl CodeGenerator {
 
     fn emit_entry_outgoing_stack_arg_store(&mut self, register: &str, abi_index: usize, outgoing_stack_arg_bytes: usize) {
         let stack_slot_offset = (abi_index - 8) * 8;
-        let Some(stack_slot_offset) = self.usize_to_i64_codegen_offset(stack_slot_offset, "entry call stack slot") else {
+        if stack_slot_offset + 8 > outgoing_stack_arg_bytes || stack_slot_offset + 8 > self.outgoing_stack_arg_staging_bytes {
+            self.record_fatal_error(format!("entry call stack arg{} exceeds outgoing ABI staging area", abi_index));
+            return;
+        }
+        let Some(staging_offset) = self.outgoing_stack_arg_staging_offset.checked_add(stack_slot_offset) else {
+            self.record_fatal_error("entry call stack argument staging offset overflow");
             return;
         };
-        let Some(outgoing_stack_arg_bytes) =
-            self.usize_to_i64_codegen_offset(outgoing_stack_arg_bytes, "entry call stack argument area")
-        else {
-            return;
-        };
-        let offset = stack_slot_offset - outgoing_stack_arg_bytes;
-        self.emit(format!(
-            "# cellscript entry abi: stage stack arg{} at pre-call sp{}{}",
-            abi_index,
-            if offset < 0 { "" } else { "+" },
-            offset
-        ));
-        self.emit_sp_store_signed(register, offset);
+        self.emit(format!("# cellscript entry abi: stage stack arg{} in frame staging +{}", abi_index, stack_slot_offset));
+        self.emit_stack_store_avoiding(register, staging_offset, &["t6"]);
+    }
+
+    fn emit_copy_entry_outgoing_stack_args(&mut self, outgoing_stack_arg_bytes: usize, outgoing_stack_arg_value_bytes: usize) {
+        for stack_slot_offset in (0..outgoing_stack_arg_value_bytes).step_by(8) {
+            let Some(source_offset) = outgoing_stack_arg_bytes
+                .checked_add(self.outgoing_stack_arg_staging_offset)
+                .and_then(|offset| offset.checked_add(stack_slot_offset))
+            else {
+                self.record_fatal_error("entry call stack argument copy offset overflow");
+                return;
+            };
+            self.emit(format!("# cellscript entry abi: copy staged stack arg at +{}", stack_slot_offset));
+            self.emit_stack_load("t0", source_offset);
+            self.emit_stack_store("t0", stack_slot_offset);
+        }
     }
 
     fn emit_entry_witness_scalar_load(&mut self, dest_reg: &str, stack_offset: usize, width: usize) {

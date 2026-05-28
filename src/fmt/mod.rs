@@ -195,6 +195,7 @@ impl Formatter {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn format_type_def(
         &mut self,
         keyword: &str,
@@ -571,8 +572,10 @@ impl Formatter {
                 }
             }
             Expr::Preserve(preserve) => {
-                let fields = preserve.fields.join("\n");
-                format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
+                let field_indent = " ".repeat((self.indent_level + 1) * self.config.indent_width);
+                let fields = preserve.fields.iter().map(|field| format!("{}{}", field_indent, field)).collect::<Vec<_>>().join("\n");
+                let closing_indent = " ".repeat(self.indent_level * self.config.indent_width);
+                format!("preserve {} from {} {{\n{}\n{}}}", preserve.output_name, preserve.input_name, fields, closing_indent)
             }
             Expr::Block(stmts, _) => {
                 let inner = stmts
@@ -591,6 +594,7 @@ impl Formatter {
                     format!("{{\n{}\n}}", inner)
                 }
             }
+            Expr::Tuple(items, _) if items.len() == 1 => format!("({},)", self.format_expr(&items[0])),
             Expr::Tuple(items, _) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::Array(items, _) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::If(if_expr) => format!(
@@ -919,6 +923,30 @@ where
     }
 
     #[test]
+    fn format_preserves_single_element_tuple_expression() {
+        let source = r#"
+module demo
+
+const ONE: u64 = (1,)
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("const ONE: u64 = (1,)"), "unexpected formatted source:\n{}", formatted);
+
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let crate::ast::Item::Const(const_def) = &module2.items[0] else {
+            panic!("expected const");
+        };
+        let crate::ast::Expr::Tuple(items, _) = &const_def.value else {
+            panic!("expected formatted value to parse as tuple");
+        };
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
     fn format_round_trips_preserve_block() {
         let source = r#"
 module demo
@@ -954,6 +982,41 @@ where
         let module2 = parser::parse(&tokens2).unwrap();
         let formatted2 = format_default(&module2).unwrap();
         assert_eq!(formatted, formatted2, "formatter round-trip failed for preserve block");
+    }
+
+    #[test]
+    fn format_indents_preserve_fields_inside_expression_block() {
+        let source = r#"
+module demo
+
+resource Offer has store {
+    seller: u64
+    price: u64
+}
+
+action fill(input: Offer) -> (output: Offer)
+where
+    let ignored = {
+        preserve output from input {
+            seller
+            price
+        }
+    }
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(
+            formatted.contains("let ignored = {\n    preserve output from input {\n        seller\n        price\n    }\n}"),
+            "preserve fields inside expression blocks must keep nested indentation:\n{}",
+            formatted
+        );
+
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+        assert_eq!(formatted, formatted2, "formatter round-trip failed for nested preserve block");
     }
 
     #[test]

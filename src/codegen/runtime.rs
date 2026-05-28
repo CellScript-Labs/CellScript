@@ -332,7 +332,9 @@ impl CodeGenerator {
     }
 
     fn emit_blake2b_store_const(&mut self, value: u64, stack_offset: usize) {
-        self.emit(format!("li t0, 0x{:016x}", value));
+        let label = self.const_data_label_for_bytes(value.to_le_bytes().to_vec());
+        self.emit(format!("la t0, {}", label));
+        self.emit("ld t0, 0(t0)");
         self.emit_stack_store("t0", stack_offset);
     }
 

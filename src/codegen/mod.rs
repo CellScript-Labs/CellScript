@@ -152,6 +152,9 @@ pub struct CodeGenerator {
     collection_region_start: usize,
     /// Runtime collection buffer allocator for the current function.
     next_collection_slot: usize,
+    /// Frame-local staging area for ABI stack arguments before `sp` is moved for a call.
+    outgoing_stack_arg_staging_offset: usize,
+    outgoing_stack_arg_staging_bytes: usize,
     /// Named schema field layouts, keyed by type name then field name.
     type_layouts: HashMap<String, HashMap<String, SchemaFieldLayout>>,
     /// Fieldless enum storage widths, keyed by enum name.
@@ -321,6 +324,8 @@ impl CodeGenerator {
             next_virtual_output: 0,
             collection_region_start: 0,
             next_collection_slot: 0,
+            outgoing_stack_arg_staging_offset: 0,
+            outgoing_stack_arg_staging_bytes: 0,
             type_layouts: HashMap::new(),
             enum_fixed_sizes: HashMap::new(),
             type_fixed_sizes: HashMap::new(),
@@ -2065,6 +2070,7 @@ impl CodeGenerator {
         self.emit("# a0 = CKB syscall return code");
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_load_cell_by_field_syscall_to_offsets(
         &mut self,
         reason: &str,
@@ -2091,6 +2097,7 @@ impl CodeGenerator {
         self.emit("# a0 = CKB syscall return code");
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_load_cell_by_field_syscall_to_offsets_dynamic_index(
         &mut self,
         reason: &str,
@@ -2327,6 +2334,14 @@ impl CodeGenerator {
 
     fn assemble(&self, format: ArtifactFormat) -> Result<Vec<u8>> {
         let assembly_text = self.assembly.join("\n");
+        let plan = MachineLayoutPlan::build(&self.assembly)?;
+        let scratch_relaxed_jumps = far_relaxed_jump_scratch_count(&plan.parsed, &plan.layout)?;
+        if scratch_relaxed_jumps > 0 {
+            return Err(CompileError::without_span(format!(
+                "generated assembly requires {} far jump relaxation(s) that would clobber the reserved scratch register t6; split the function or reduce generated text size",
+                scratch_relaxed_jumps
+            )));
+        }
         match format {
             ArtifactFormat::RiscvAssembly => Ok(assembly_text.into_bytes()),
             ArtifactFormat::RiscvElf => {
@@ -2401,12 +2416,13 @@ pub(crate) use runtime::{runtime_syscall_abi, RuntimeSyscallAbi};
 #[allow(unused_imports)] // Many items are used only by the #[cfg(test)] module below
 pub(crate) use assembler::{
     align_frame, align_up, assemble_elf, assemble_elf_internal, build_machine_layout_order, ckb_source_name, encode_ecall,
-    encode_i_type, encode_li_sequence, encode_s_type, is_min_call, is_runtime_header_u64_call, memory_operand_offset_and_base,
-    parse_immediate, parse_register, scratch_register_avoiding, signed_bits_fit, small_signed_immediate, strip_comment,
-    unreachable_machine_block_count, validate_explicit_toolchain_path, validate_machine_layout_order, AsmOp, BackendLayoutMetrics,
-    BranchSizeMode, Instruction, MachineBlock, MachineBlockCoverage, MachineCfg, MachineCfgEdge, MachineCfgEdgeKind,
-    MachineLayoutOrder, MachineLayoutPlan, MachinePlacedBlock, MachineTerminator, ParsedAssembly, SectionKind, SectionLayout,
-    SymbolDef, TextOpLayout, CKB_SCRIPT_STACK_TOP, ELF_HEADER_SIZE, ELF_PROGRAM_HEADER_SIZE,
+    encode_i_type, encode_li_sequence, encode_s_type, far_relaxed_jump_scratch_count, is_min_call, is_runtime_header_u64_call,
+    memory_operand_offset_and_base, parse_immediate, parse_register, scratch_register_avoiding, signed_bits_fit,
+    small_signed_immediate, strip_comment, unreachable_machine_block_count, validate_explicit_toolchain_path,
+    validate_machine_layout_order, AsmOp, BackendLayoutMetrics, BranchSizeMode, Instruction, MachineBlock, MachineBlockCoverage,
+    MachineCfg, MachineCfgEdge, MachineCfgEdgeKind, MachineLayoutOrder, MachineLayoutPlan, MachinePlacedBlock, MachineTerminator,
+    ParsedAssembly, SectionKind, SectionLayout, SymbolDef, TextOpLayout, CKB_SCRIPT_STACK_TOP, ELF_HEADER_SIZE,
+    ELF_PROGRAM_HEADER_SIZE,
 };
 #[allow(unused_imports)]
 pub(crate) use schema::{
@@ -2537,6 +2553,25 @@ mod tests {
     }
 
     #[test]
+    fn strict_audit_outgoing_stack_args_are_staged_inside_current_frame() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.outgoing_stack_arg_staging_offset = 128;
+        generator.outgoing_stack_arg_staging_bytes = 16;
+        let args = (0..9).map(|value| IrOperand::Const(IrConst::U64(value))).collect::<Vec<_>>();
+
+        generator.emit_call(None, "callee", &args).expect("call emission should succeed");
+
+        let assembly = generator.assembly.join("\n");
+        assert!(assembly.contains("sd t0, 128(sp)"), "stack arg should first be staged in the caller frame:\n{}", assembly);
+        assert!(
+            assembly.contains("ld t0, 144(sp)\n    sd t0, 0(sp)\n    call callee"),
+            "staged stack arg should be copied only after reserving outgoing stack space:\n{}",
+            assembly
+        );
+        assert!(!assembly.contains("-16(sp)"), "call emission must not write below the current sp before reservation:\n{}", assembly);
+    }
+
+    #[test]
     fn internal_assembler_keeps_near_unconditional_jump_compact() {
         let lines = vec![
             ".section .text".to_string(),
@@ -2567,6 +2602,12 @@ mod tests {
         lines.push("far_target:".to_string());
         lines.push("ret".to_string());
 
+        let plan = MachineLayoutPlan::build(&lines).expect("relaxed conditional branch should have a machine layout");
+        assert_eq!(
+            far_relaxed_jump_scratch_count(&plan.parsed, &plan.layout).expect("scratch count"),
+            0,
+            "conditional branch within J-type range must not require t6 scratch"
+        );
         let elf = assemble_elf_internal(&lines).expect("internal assembler should relax long conditional branches");
         assert!(elf.starts_with(b"\x7fELF"));
     }
@@ -2583,6 +2624,12 @@ mod tests {
             "ret".to_string(),
         ];
 
+        let plan = MachineLayoutPlan::build(&lines).expect("far unconditional jump should have a machine layout");
+        assert_eq!(
+            far_relaxed_jump_scratch_count(&plan.parsed, &plan.layout).expect("scratch count"),
+            1,
+            "far unconditional jump uses the assembler scratch-register fallback"
+        );
         let elf = assemble_elf_internal(&lines).expect("internal assembler should encode far unconditional jumps");
         assert!(elf.starts_with(b"\x7fELF"));
     }
@@ -2600,8 +2647,32 @@ mod tests {
             "ret".to_string(),
         ];
 
+        let plan = MachineLayoutPlan::build(&lines).expect("far conditional branch should have a machine layout");
+        assert_eq!(
+            far_relaxed_jump_scratch_count(&plan.parsed, &plan.layout).expect("scratch count"),
+            1,
+            "far conditional branch beyond J-type range uses the assembler scratch-register fallback"
+        );
         let elf = assemble_elf_internal(&lines).expect("internal assembler should relax far conditional branches through long jumps");
         assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn codegen_rejects_generated_far_jump_scratch_relaxation() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.assembly = vec![
+            ".section .text".to_string(),
+            ".global entry".to_string(),
+            "entry:".to_string(),
+            "j far_target".to_string(),
+            format!(".ascii \"{}\"", "x".repeat(1_100_000)),
+            "far_target:".to_string(),
+            "ret".to_string(),
+        ];
+
+        let err = generator.assemble(ArtifactFormat::RiscvAssembly).expect_err("codegen must reject t6-clobbering far relaxation");
+
+        assert!(err.message.contains("reserved scratch register t6"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -3122,6 +3193,17 @@ lock helpers(
         let mut assembly = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
         assembly.push_str(std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8"));
 
+        assert!(
+            assembly.contains("__ckb_hash_blake2b:\n") && assembly.contains("la t0, __cellscript_const_data_"),
+            "Blake2b helper constants should be loaded from rodata, not expanded inline:\n{}",
+            assembly
+        );
+        assert!(
+            !assembly.contains("li t0, 0x6a09e667f3bcc908"),
+            "Blake2b IV constants should not be emitted as large inline li sequences:\n{}",
+            assembly
+        );
+
         let helper_symbols = assembly
             .lines()
             .filter_map(|line| line.strip_prefix(".global "))
@@ -3503,6 +3585,43 @@ lock helpers(
     }
 
     #[test]
+    fn entry_dynamic_witness_stack_arg_staging_preserves_cursor_register() {
+        let path = camino::Utf8PathBuf::from(format!("{}/examples/timelock.cell", env!("CARGO_MANIFEST_DIR")));
+        let result = crate::compile_file_with_entry_action(
+            path,
+            crate::CompileOptions {
+                target: Some("riscv64-asm".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..crate::CompileOptions::default()
+            },
+            "request_emergency_release",
+        )
+        .expect("timelock request_emergency_release should compile to assembly");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+        let entry_start = assembly.find("_cellscript_entry:\n").expect("entry wrapper label");
+        let target_start = assembly[entry_start..]
+            .find("\nrequest_emergency_release:\n")
+            .map(|offset| entry_start + offset)
+            .expect("target action label");
+        let entry = &assembly[entry_start..target_start];
+        let stack_stage = entry.find("# cellscript entry abi: stage stack arg8").expect("stack arg staging");
+        let exact_check =
+            entry.find("# cellscript entry abi: reject trailing witness payload bytes").expect("dynamic witness exact-size check");
+        let staging = &entry[stack_stage..exact_check];
+
+        assert!(
+            !staging.contains("li t6,") && !staging.contains("add t6, sp,"),
+            "entry stack-arg staging must not clobber the dynamic witness cursor t6:\n{}",
+            staging
+        );
+        assert!(
+            entry[exact_check..].contains("sub t2, t5, t6"),
+            "dynamic witness exact-size check should still compare against cursor t6:\n{}",
+            entry
+        );
+    }
+
+    #[test]
     fn read_ref_runtime_fallback_records_cell_buffer_state() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.frame_size = align_frame(RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
@@ -3815,6 +3934,7 @@ lock helpers(
                     write_intents: vec![],
                     blocks: vec![IrBlock {
                         id: BlockId(0),
+                        source_span: None,
                         instructions: vec![],
                         terminator: IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(7)))),
                     }],
@@ -3823,6 +3943,7 @@ lock helpers(
             external_type_defs: vec![],
             external_callable_abis: vec![],
             enum_fixed_sizes: HashMap::new(),
+            has_lowering_errors: false,
         };
         let assembly = CodeGenerator::new(CodegenOptions::default()).generate(&ir, ArtifactFormat::RiscvAssembly).unwrap();
         let assembly = String::from_utf8(assembly).unwrap();

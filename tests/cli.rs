@@ -1,6 +1,16 @@
 use std::process::Command;
 
 #[test]
+fn cellc_lsp_flag_rejects_trailing_arguments() {
+    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--lsp").arg("--unexpected").output().unwrap();
+
+    assert!(!run.status.success(), "--lsp with extra args should fail before starting the server");
+    assert_eq!(run.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("--lsp must be used by itself"), "unexpected stderr: {}", stderr);
+}
+
+#[test]
 fn cellc_writes_requested_output_file() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("sample.cell");

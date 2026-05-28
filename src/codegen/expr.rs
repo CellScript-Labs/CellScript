@@ -340,6 +340,7 @@ impl CodeGenerator {
 
     pub(crate) fn emit_tuple(&mut self, dest: &IrVar, fields: &[IrOperand]) -> Result<()> {
         self.emit(format!("# cellscript abi: construct tuple aggregate var{} fields={}", dest.id, fields.len()));
+        // Tuple field values are tracked in tuple_aggregate_fields; this stack slot is only the aggregate sentinel.
         self.emit_stack_store("zero", dest.id * 8);
         Ok(())
     }

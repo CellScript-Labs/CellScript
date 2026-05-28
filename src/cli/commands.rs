@@ -3007,13 +3007,15 @@ fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json
     let changed = old_keys.intersection(&new_keys).filter(|key| old_map.get(*key) != new_map.get(*key)).cloned().collect::<Vec<_>>();
     let changed_records = changed
         .iter()
-        .map(|key| {
-            let old_record = old_map.get(key).expect("changed proof record must exist in old metadata");
-            let new_record = new_map.get(key).expect("changed proof record must exist in new metadata");
-            serde_json::json!({
+        .filter_map(|key| {
+            let (Some(old_record), Some(new_record)) = (old_map.get(key), new_map.get(key)) else {
+                log::warn!("proof diff skipped inconsistent changed proof-plan key '{}'", key);
+                return None;
+            };
+            Some(serde_json::json!({
                 "key": key,
                 "fields": changed_proof_plan_fields(old_record, new_record),
-            })
+            }))
         })
         .collect::<Vec<_>>();
     serde_json::json!({
