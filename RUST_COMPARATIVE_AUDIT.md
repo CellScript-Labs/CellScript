@@ -15,7 +15,7 @@ Ten things the Rust compiler teaches CellScript, ranked by impact:
 
 1. **IR lowering must not produce live sentinel values after errors.** Rust's `ErrorGuaranteed` / `construct_error` pattern prevents semantically poisoned artifacts from reaching codegen. CellScript has several error-path `IrConst::U64(0)` sentinels that continue with `Some(current)`; those paths need a poison/vacuous-body protocol so invalid IR cannot masquerade as real zero. *(Adapt)*
 
-2. **Every IR instruction needs a source span.** Rust MIR carries `SourceInfo` per statement/terminator. CellScript IR has spans only at block level. Verifier errors and debug info are blind without instruction-level provenance. *(Adapt)*
+2. **Every IR instruction needs provenance.** Rust MIR carries `SourceInfo` per statement/terminator. CellScript now has sidecar instruction/terminator spans; the remaining work is richer source scopes, synthetic provenance, and more diagnostic consumption. *(Adapt)*
 
 3. **Parse recovery is not optional for developer experience.** Rust emits errors for every item in a file before stopping. CellScript halts at the first parse error. For a smart-contract DSL, this is a usability showstopper. *(Adapt)*
 
@@ -61,12 +61,12 @@ The original report is directionally strong, but several details needed tighteni
 | Type inference | `Expectation` enum flowing down expression tree | `infer_expr` returns standalone types; `infer_expr_with_contextual_literals` is bolt-on | Adapt | Introduce `ExpectedTy { None, Hint, Exact }` |
 | Type representation | Structural `TyKind` with `Vec<GenericArg>` | `Type::Named(String)` with string-parsing `types_equal()` | Adapt | Add `Type::Named { base, args }` with parsed generics |
 | IR lowering | `construct_error` produces vacuous body + `ErrorGuaranteed`; downstream skips | `record_error` + live `IrConst::U64(0)` sentinels on some error paths; lowering can continue | Adapt | Return `current: None`/poison on lowering errors; terminate blocks deliberately |
-| IR source info | `SourceInfo { span, scope }` on every statement/terminator | `IrBlock.source_span` only; instructions carry no span | Adapt | Add `span: Span` to `IrInstruction` and `IrTerminator` |
+| IR source info | `SourceInfo { span, scope }` on every statement/terminator | `IrBlock.source_span` plus `instruction_spans` / `terminator_span` sidecar provenance | Adapt | Keep span-shape verifier coverage; add source scopes and synthetic reasons later |
 | IR validation | Multi-phase `MirPhase` with per-phase legality | Single `verify_module` pass; no phase distinction | Adapt | Add `IrPhase` enum as documentation marker |
 | Codegen passes | Declared pass ordering; per-pass validation | Linear emit; no pass concept | Adapt | Add `CodegenPhase` state machine for `debug_assert!` |
 | Backend validation | `Validator` + `CfgChecker` after each MIR pass | `reject_unresolved_calls` + `validate_machine_block_coverage` at assembly time | Adopt | Add per-function stack/register/ABI checklist |
-| Register contract | Abstracted via `BackendTypes` trait | `s10`/`s11`/`t6` implicit; documented only in comments | Adapt | Named constants + gate test for callee-saved invariance |
-| Release gates | beta/bors merge gates; sanitizer runs; UI test baselines | `cellscript_gate.sh` with dev/ci/backend/release modes; CKB acceptance | Adopt | Extend gate with syscall ABI baseline + witness fuzzing |
+| Register contract | Abstracted via `BackendTypes` trait | `s10`/`s11` entry registers and `t6` scratch roles are named; s10/s11 plus far-relaxation invariants are gated | Adapt | Extend per-function stack/register checklist in 0.17 |
+| Release gates | beta/bors merge gates; sanitizer runs; UI test baselines | `cellscript_gate.sh` with dev/ci/backend/release modes; CKB acceptance; checked syscall ABI contract baseline | Adopt | Add witness fuzzing and broader backend shape metrics in 0.17 |
 | Diagnostics | `DiagCtxt` with dedup, stash, levels, JSON emitter | `ErrorReporter` = `Vec<CompileError>`; no dedup; no warnings | Adopt | Add severity enum + dedup + warning channel |
 | Test strategy | `compiletest` with `//~ ERROR` location+severity assertions | `expect-error:TEXT` substring matching only | Adapt | Add `expect-error-line:N:TEXT` directive |
 | File organization | Phase-oriented crates; tidy enforces line-length/style conventions | `lib.rs` = 27,411 lines; `types/mod.rs` = 8,806 lines; `commands.rs` = 5,826 lines | Adopt | Split `lib.rs`, `types/mod.rs`, `commands.rs` into submodules |
@@ -143,8 +143,8 @@ The original report is directionally strong, but several details needed tighteni
 | ID | Severity | Issue | Verdict |
 |----|----------|-------|---------|
 | IR-01 | **Critical** | Error-path `U64(0)` sentinels can remain live after `record_error`; invalid IR may continue | Adapt |
-| IR-02 | High | No span on `IrInstruction`; block-level only | Adapt |
-| IR-03 | High | No span on `IrTerminator` | Adapt |
+| IR-02 | High | `IrInstruction` now has sidecar span provenance; diagnostic consumption should keep expanding | Adapt |
+| IR-03 | High | `IrTerminator` now has sidecar span provenance; synthetic provenance remains future work | Adapt |
 | IR-04 | Medium | Unreachable blocks rejected as error vs. cleaned up | Adapt |
 | IR-05 | High | Defined-on-all-paths fixpoint co-mingled with verifier | Adapt |
 | IR-06 | Medium | No `MirPhase` equivalent; single verification gate | Adapt |
@@ -159,7 +159,7 @@ The original report is directionally strong, but several details needed tighteni
 |-----------|----------|---------------|
 | Frontend input | THIR (typed high-level IR) | AST `Module` directly |
 | Terminator variants | 14 (Goto, SwitchInt, Call, Drop, Assert, Return, Unreachable…) | 4 (Jump, Branch, Return, Abort) |
-| Source info | `SourceInfo { span, scope }` on every statement/terminator | `IrBlock.source_span` only; no per-instruction span |
+| Source info | `SourceInfo { span, scope }` on every statement/terminator | `IrBlock.source_span` plus instruction/terminator sidecar spans; no source scopes yet |
 | Error recovery | `construct_error` -> vacuous body + `ErrorGuaranteed` | `record_error` -> live sentinel values on some error paths |
 | Phase gating | `MirPhase::Built/Analysis/Runtime` with per-phase legality | Single `verify_module` pass |
 | Dataflow | Generic `Analysis` trait with lattice join, fixpoint | Hand-rolled defined-on-all-paths intersection inside verifier |
@@ -172,7 +172,7 @@ The original report is directionally strong, but several details needed tighteni
 
 **Key CellScript evidence:**
 - `src/ir/mod.rs:1970-1972` — unresolved identifier records an error but returns a live `IrConst::U64(0)`
-- `src/ir/mod.rs:302-308` — `IrBlock` with `source_span` but no instruction spans
+- `src/ir/mod.rs:302-308` — `IrBlock` with `source_span`, `instruction_spans`, and `terminator_span` sidecar provenance
 - `src/ir/mod.rs:5773-5807` — fixpoint inside verifier
 - `src/ir/mod.rs:6570-6652` — exhaustive `instruction_dest`/`instruction_operands` match sites; add semantic regression tests if IR variants evolve
 
@@ -183,7 +183,7 @@ The original report is directionally strong, but several details needed tighteni
 | ID | Severity | Issue | Verdict |
 |----|----------|-------|---------|
 | CG-01 | High | No per-function assembly validation (stack balance, register clobber) | Adopt |
-| CG-02 | High | s10/s11/t6 register contract is implicit; no invariance check | Adapt |
+| CG-02 | High | s10/s11 register contract and t6 scratch roles need explicit names and invariance checks | Adapt |
 | CG-03 | Medium | No phase transition enforcement in codegen pipeline | Adapt |
 | CG-04 | Medium | No `-Zvalidate-mir` equivalent for dev-time exhaustive checking | Adapt |
 | CG-05 | Medium | Backend shape baseline lacks stack frame depth and register pressure metrics | Adopt |
@@ -284,12 +284,12 @@ The original report is directionally strong, but several details needed tighteni
 | D7 | Introduce `ExpectedTy` for type hint propagation (TS-04) | M |
 | D8 | Define `ResolutionResult` struct as resolve ↔ type-check boundary (TS-05) | M |
 | D9 | Replace `Type::Named(String)` with structured generics (TS-10) | L |
-| D10 | Change live error-path `U64(0)` sentinels to `current: None` or explicit poison + block termination (IR-01) | M |
-| D11 | Add `span: Span` to `IrInstruction` and `IrTerminator` (IR-02/IR-03) | M |
+| D10 | Replace bridge poison IR with `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` after 0.16 (IR-01 refinement) | M |
+| D11 | Add richer source scopes and synthetic provenance reasons on top of current instruction/terminator sidecar spans (IR-02/IR-03) | M |
 | D12 | Extract defined-on-all-paths into separate analysis function (IR-05) | M |
 | D13 | Add `IrPhase` and `CodegenPhase` marker enums (IR-06/CG-03) | S |
-| D14 | Formalise register contract as named constants + gate test (CG-02) | M |
-| D15 | Add `expect-error-line:N:TEXT` test directive (DT-03) | M |
+| D14 | Extend the current register contract into a per-function stack/register checklist (CG-02) | M |
+| D15 | Extend `expect-error-line:N:TEXT` coverage across more diagnostics (DT-03) | M |
 | D16 | Add LSP cancellation via `AtomicBool` (DT-05) | M |
 | D17 | Split `lib.rs` production code into phase-specific submodules (CS-01/CS-08) | L |
 | D18 | Group repeated codegen arguments into structs (CS-03) | M |
@@ -318,15 +318,15 @@ The original report is directionally strong, but several details needed tighteni
 | # | Finding | Action |
 |---|---------|--------|
 | P0-1 | IR-01: Live error sentinels | Return explicit poison after lowering errors; keep value validity separate from block liveness |
-| P0-2 | CG-02: Register contract undocumented | Named constants + gate test for s10/s11/t6 invariance |
-| P0-3 | CG-06: No syscall ABI regression | Create `tests/syscall_abi_baseline.json` + fast-gate check |
+| P0-2 | CG-02: Register contract undocumented | Named constants + gate tests for s10/s11 entry invariants and t6 far-relaxation scratch use |
+| P0-3 | CG-06: No syscall ABI regression | Maintain `tests/syscall_abi_baseline.json` as a checked ABI contract baseline |
 
 ### Key P1: Keep In 0.16 Freeze
 
 | # | Finding | Action |
 |---|---------|--------|
-| P1-Freeze-1 | IR-02/IR-03: Instruction/terminator provenance | Add `SpannedIrInstruction { kind, span }` and `SpannedIrTerminator { kind, span }` wrappers or equivalent sidecar provenance |
-| P1-Freeze-2 | DT-03: No error location tests | Add `expect-error-line:N:TEXT` directive |
+| P1-Freeze-1 | IR-02/IR-03: Instruction/terminator provenance | Keep the implemented sidecar provenance verifier and extend diagnostic use where cheap |
+| P1-Freeze-2 | DT-03: No error location tests | Keep `expect-error-line:N:TEXT` in the gate and add targeted cases for new diagnostics |
 
 ### P1: Diagnostics / Maintainability / Test Confidence Deferred To 0.17
 
@@ -397,12 +397,12 @@ The original report is directionally strong, but several details needed tighteni
 | TS-04 No expected type | `src/types/mod.rs:3347-3350` |
 | TS-10 String type compare | `src/types/mod.rs:5983-6035` |
 | IR-01 Live error sentinel | `src/ir/mod.rs:1970-1972` plus other `record_error` + `IrConst::U64(0)` paths |
-| IR-02 No instruction span | `src/ir/mod.rs:302-308` |
+| IR-02 Instruction provenance sidecar | `src/ir/mod.rs:302-308` |
 | IR-05 Fixpoint in verifier | `src/ir/mod.rs:5773-5807` |
 | IR-10 Visitor helper semantics | `src/ir/mod.rs:6570-6652` |
 | CG-02 Register contract | `src/codegen/abi.rs:229-230`, `src/codegen/frame.rs:56-57` |
 | CG-05 Shape baseline | `tests/backend_shape_baseline.json` |
-| CG-06 Syscall numbers | `src/codegen/runtime.rs:28-56` |
+| CG-06 Syscall ABI contract | `src/syscalls.rs`, `tests/syscall_abi_baseline.json` |
 | DT-02 Mutex poisoning | `src/lsp/server.rs:33-39` |
 | DT-05 No LSP cancel | `src/lsp/server.rs:525-534` |
 | DT-08 Span display | `src/error/mod.rs:23-27` |
@@ -430,13 +430,13 @@ Original agents used read-only tools: `rg`, `git grep`, `ast-outline`, `cat`, `w
 
 1. **Fix IR-01 live error sentinels** — After lowering errors, return an explicit poison result; do not let `IrConst::U64(0)` continue as if it were a legitimate value. This is the single most critical correctness fix for 0.16.
 
-2. **Formalise register contract** — Named constants for s10/s11/t6 + gate test asserting no mutation outside approved entry-wrapper and branch-relaxation sites.
+2. **Formalise register contract** — Named constants for s10/s11 entry registers and t6 scratch roles + gate tests asserting no mutation outside approved entry-wrapper and branch-relaxation sites.
 
-3. **Create syscall ABI baseline** — `tests/syscall_abi_baseline.json` mapping CKB syscall and VM2 helper numbers, checked in the fast gate.
+3. **Maintain syscall ABI baseline** — `tests/syscall_abi_baseline.json` maps CKB syscall and VM2 helper numbers, status registers, return registers, size-check policy, and fail behaviour; keep it checked in the fast gate.
 
-4. **Add IR provenance** — Use `SpannedIrInstruction { kind, span }` and `SpannedIrTerminator { kind, span }` wrappers or equivalent sidecar provenance. Enables precise verifier errors and future debug info.
+4. **Keep expanding IR provenance use** — The current sidecar instruction/terminator spans enable precise verifier errors; next improvements are source scopes, synthetic reasons, and broader diagnostic consumption.
 
-5. **Add `expect-error-line:N:TEXT` test directive** — Verify error locations, not just message substrings. Catches span regression.
+5. **Extend `expect-error-line:N:TEXT` coverage** — Keep verifying error locations, not just message substrings. This catches span regression without pretending substring tests are a personality.
 
 6. **Refine poison representation in 0.17** — Move from bridge `IrConst::Poisoned` toward `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` so poison remains a lowering result rather than a semantic IR constant.
 

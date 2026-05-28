@@ -15,7 +15,7 @@ use crate::ENTRY_WITNESS_ABI_MAGIC;
 use super::assembler::align_up;
 use super::{
     fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width, named_type_name, type_static_length,
-    CellScriptRuntimeError, CodeGenerator, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING, ENTRY_DIRECT_RETURN_REG,
+    CellScriptRuntimeError, CodeGenerator, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING, ENTRY_ABI_CURSOR_REG, ENTRY_DIRECT_RETURN_REG,
     ENTRY_DIRECT_STACK_BASE_REG,
 };
 pub(crate) const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
@@ -347,7 +347,7 @@ impl CodeGenerator {
             let mut abi_index = 0usize;
             self.emit("# cellscript entry abi: witness payload contains schema-backed dynamic segments");
             self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
-            self.emit(format!("li t6, {}", ENTRY_WITNESS_HEADER_SIZE));
+            self.emit(format!("li {}, {}", ENTRY_ABI_CURSOR_REG, ENTRY_WITNESS_HEADER_SIZE));
             for (param_index, param) in params.iter().enumerate() {
                 let param_is_runtime_bound =
                     runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
@@ -378,12 +378,12 @@ impl CodeGenerator {
                         abi_arg_label(abi_index + 1),
                         "len"
                     ));
-                    self.emit("addi t1, t6, 4");
+                    self.emit(format!("addi t1, {}, 4", ENTRY_ABI_CURSOR_REG));
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", len_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&len_ok_label);
-                    self.emit("add t0, sp, t6");
+                    self.emit(format!("add t0, sp, {}", ENTRY_ABI_CURSOR_REG));
                     self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
                     self.emit("li t4, 0");
                     for byte_index in 0..4 {
@@ -393,17 +393,23 @@ impl CodeGenerator {
                         }
                         self.emit("or t4, t4, t1");
                     }
-                    self.emit("addi t1, t6, 4");
+                    self.emit(format!("addi t1, {}, 4", ENTRY_ABI_CURSOR_REG));
                     self.emit("add t1, t1, t4");
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
-                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 4, "t0", outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_pointer_from_dynamic_offset(
+                        abi_index,
+                        ENTRY_ABI_CURSOR_REG,
+                        4,
+                        "t0",
+                        outgoing_stack_arg_bytes,
+                    );
                     self.emit_entry_abi_reg_arg(abi_index + 1, "t4", outgoing_stack_arg_bytes);
                     abi_index += 2;
-                    self.emit("addi t6, t6, 4");
-                    self.emit("add t6, t6, t4");
+                    self.emit(format!("addi {}, {}, 4", ENTRY_ABI_CURSOR_REG, ENTRY_ABI_CURSOR_REG));
+                    self.emit(format!("add {}, {}, t4", ENTRY_ABI_CURSOR_REG, ENTRY_ABI_CURSOR_REG));
                     if type_hash_param_indices.contains(&param_index) {
                         self.emit(format!(
                             "# cellscript entry abi: schema param {} TypeHash witness bytes unavailable; pass null ABI bytes",
@@ -424,14 +430,20 @@ impl CodeGenerator {
                         abi_arg_label(abi_index + 1),
                         width
                     ));
-                    self.emit(format!("addi t1, t6, {}", width));
+                    self.emit(format!("addi t1, {}, {}", ENTRY_ABI_CURSOR_REG, width));
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
-                    self.emit_entry_abi_pointer_from_dynamic_offset(abi_index, "t6", 0, "t0", outgoing_stack_arg_bytes);
+                    self.emit_entry_abi_pointer_from_dynamic_offset(
+                        abi_index,
+                        ENTRY_ABI_CURSOR_REG,
+                        0,
+                        "t0",
+                        outgoing_stack_arg_bytes,
+                    );
                     self.emit_entry_abi_immediate_arg(abi_index + 1, width as u64, outgoing_stack_arg_bytes);
-                    self.emit(format!("addi t6, t6, {}", width));
+                    self.emit(format!("addi {}, {}, {}", ENTRY_ABI_CURSOR_REG, ENTRY_ABI_CURSOR_REG, width));
                     abi_index += 2;
                 } else if let Some(width) = entry_witness_register_param_width(&param.ty) {
                     let bytes_ok_label = self.fresh_label("entry_witness_scalar_bytes_ok");
@@ -441,12 +453,12 @@ impl CodeGenerator {
                         abi_arg_label(abi_index),
                         width
                     ));
-                    self.emit(format!("addi t1, t6, {}", width));
+                    self.emit(format!("addi t1, {}, {}", ENTRY_ABI_CURSOR_REG, width));
                     self.emit("sltu t2, t5, t1");
                     self.emit(format!("beqz t2, {}", bytes_ok_label));
                     self.emit(format!("j {}", fail_label));
                     self.emit_label(&bytes_ok_label);
-                    self.emit("add t0, sp, t6");
+                    self.emit(format!("add t0, sp, {}", ENTRY_ABI_CURSOR_REG));
                     self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
                     if abi_index < 8 {
                         self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", abi_index), "t0", width);
@@ -465,7 +477,7 @@ impl CodeGenerator {
                         ));
                         self.emit_entry_abi_reg_arg(abi_index, "t3", outgoing_stack_arg_bytes);
                     }
-                    self.emit(format!("addi t6, t6, {}", width));
+                    self.emit(format!("addi {}, {}, {}", ENTRY_ABI_CURSOR_REG, ENTRY_ABI_CURSOR_REG, width));
                     abi_index += 1;
                 } else {
                     self.emit(format!("# cellscript entry abi: unsupported param {} shape; fail closed", param.name));
@@ -475,7 +487,7 @@ impl CodeGenerator {
             let exact_size_label = self.fresh_label("entry_witness_exact_size_ok");
             self.emit("# cellscript entry abi: reject trailing witness payload bytes");
             self.emit_stack_load("t5", ENTRY_WITNESS_SIZE_OFFSET);
-            self.emit("sub t2, t5, t6");
+            self.emit(format!("sub t2, t5, {}", ENTRY_ABI_CURSOR_REG));
             self.emit(format!("beqz t2, {}", exact_size_label));
             self.emit(format!("j {}", fail_label));
             self.emit_label(&exact_size_label);
@@ -657,7 +669,7 @@ impl CodeGenerator {
             return;
         };
         self.emit(format!("# cellscript entry abi: stage stack arg{} in frame staging +{}", abi_index, stack_slot_offset));
-        self.emit_stack_store_avoiding(register, staging_offset, &["t6"]);
+        self.emit_stack_store_avoiding(register, staging_offset, &[ENTRY_ABI_CURSOR_REG]);
     }
 
     fn emit_copy_entry_outgoing_stack_args(&mut self, outgoing_stack_arg_bytes: usize, outgoing_stack_arg_value_bytes: usize) {
@@ -785,13 +797,13 @@ impl CodeGenerator {
         self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
         self.emit("add t0, t0, t4");
         self.emit_entry_load_u32_from_reg("t5", "t0");
-        self.emit("addi t6, t4, 4");
-        self.emit("add t1, t6, t5");
+        self.emit(format!("addi {}, t4, 4", ENTRY_ABI_CURSOR_REG));
+        self.emit(format!("add t1, {}, t5", ENTRY_ABI_CURSOR_REG));
         self.emit("sltu t2, t3, t1");
         self.emit(format!("beqz t2, {}", args_span_ok_label));
         self.emit(format!("j {}", fail_label));
         self.emit_label(&args_span_ok_label);
-        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_START_OFFSET);
+        self.emit_stack_store(ENTRY_ABI_CURSOR_REG, ENTRY_SCRIPT_ARGS_START_OFFSET);
         self.emit_stack_store("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
         self.emit("li t0, 0");
         self.emit_stack_store("t0", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
@@ -813,15 +825,15 @@ impl CodeGenerator {
         };
         let bytes_ok_label = self.fresh_label("entry_lock_args_bytes_ok");
         self.emit(format!("# cellscript entry abi: lock_args param {} consumes {} script arg byte(s)", param.name, width));
-        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit_stack_load(ENTRY_ABI_CURSOR_REG, ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
         self.emit_stack_load("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
-        self.emit(format!("addi t1, t6, {}", width));
+        self.emit(format!("addi t1, {}, {}", ENTRY_ABI_CURSOR_REG, width));
         self.emit("sltu t2, t5, t1");
         self.emit(format!("beqz t2, {}", bytes_ok_label));
         self.emit(format!("j {}", fail_label));
         self.emit_label(&bytes_ok_label);
         self.emit_stack_load("t3", ENTRY_SCRIPT_ARGS_START_OFFSET);
-        self.emit("add t3, t3, t6");
+        self.emit(format!("add t3, t3, {}", ENTRY_ABI_CURSOR_REG));
         self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
         self.emit("add t0, t0, t3");
 
@@ -844,9 +856,9 @@ impl CodeGenerator {
             *abi_index += 1;
         }
 
-        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
-        self.emit(format!("addi t6, t6, {}", width));
-        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit_stack_load(ENTRY_ABI_CURSOR_REG, ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit(format!("addi {}, {}, {}", ENTRY_ABI_CURSOR_REG, ENTRY_ABI_CURSOR_REG, width));
+        self.emit_stack_store(ENTRY_ABI_CURSOR_REG, ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
     }
 
     fn emit_entry_lock_args_exact_size_check(&mut self, fail_label: &str) {

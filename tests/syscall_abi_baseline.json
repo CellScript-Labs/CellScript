@@ -1,45 +1,135 @@
 {
-  "version": "cellscript-0.16-ckb-mainnet-syscalls-and-ckb-vm-v2-spawn-ipc",
+  "version": "cellscript-0.16-ckb-mainnet-and-vm2-syscall-abi-contract",
   "ckb_mainnet_syscalls": [
     {
+      "dsl_name": "syscall_load_tx_hash",
       "symbol": "__syscall_load_tx_hash",
-      "number": 2061
+      "number": 2061,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "",
+      "size_check": "caller_checked",
+      "fail_behavior": "return_status",
+      "detail": "load_tx_hash"
     },
     {
+      "dsl_name": "syscall_load_script_hash",
       "symbol": "__syscall_load_script_hash",
-      "number": 2062
+      "number": 2062,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "",
+      "size_check": "caller_checked",
+      "fail_behavior": "return_status",
+      "detail": "load_script_hash"
     },
     {
+      "dsl_name": "syscall_load_cell",
       "symbol": "__syscall_load_cell",
-      "number": 2071
+      "number": 2071,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = index, a1 = source, a2 = field",
+      "size_check": "none",
+      "fail_behavior": "return_status",
+      "detail": "load_cell"
     },
     {
+      "dsl_name": "syscall_load_header",
       "symbol": "__syscall_load_header",
-      "number": 2072
+      "number": 2072,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source",
+      "size_check": "loaded_size_pointer",
+      "fail_behavior": "return_status",
+      "detail": "load_header"
     },
     {
+      "dsl_name": "syscall_load_input",
       "symbol": "__syscall_load_input",
-      "number": 2073
+      "number": 2073,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = index, a1 = source, a2 = field",
+      "size_check": "none",
+      "fail_behavior": "return_status",
+      "detail": "load_input"
     },
     {
+      "dsl_name": "syscall_load_witness",
       "symbol": "__syscall_load_witness",
-      "number": 2074
+      "number": 2074,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source",
+      "size_check": "loaded_size_pointer",
+      "fail_behavior": "return_status",
+      "detail": "load_witness"
     },
     {
+      "dsl_name": "syscall_load_script",
       "symbol": "__syscall_load_script",
-      "number": 2052
+      "number": 2052,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = buffer, a1 = size pointer, a2 = offset",
+      "size_check": "loaded_size_pointer",
+      "fail_behavior": "return_status",
+      "detail": "load_script"
     },
     {
+      "dsl_name": "syscall_load_cell_by_field",
       "symbol": "__syscall_load_cell_by_field",
-      "number": 2081
+      "number": 2081,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source, a5 = field",
+      "size_check": "loaded_size_pointer",
+      "fail_behavior": "return_status",
+      "detail": "load_cell_by_field"
     },
     {
+      "dsl_name": "syscall_load_cell_data",
       "symbol": "__syscall_load_cell_data",
-      "number": 2092
+      "number": 2092,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source",
+      "size_check": "loaded_size_pointer",
+      "fail_behavior": "return_status",
+      "detail": "load_cell_data"
     },
     {
+      "dsl_name": "syscall_current_cycles",
       "symbol": "__syscall_current_cycles",
-      "number": 2042
+      "number": 2042,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a0",
+      "return_regs": ["a0"],
+      "arg_comment": "",
+      "size_check": "none",
+      "fail_behavior": "return_status",
+      "detail": "current_cycles"
     }
   ],
   "runtime_syscall_abi": [
@@ -70,36 +160,108 @@
   ],
   "ckb_vm_v2_spawn_ipc_syscalls": [
     {
+      "dsl_name": "spawn",
       "symbol": "__ckb_spawn",
-      "number": 2601
+      "number": 2601,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_comment": "spawn bounded verifier child",
+      "size_check": "caller_checked",
+      "fail_behavior": "fail_closed",
+      "detail": "spawn bounded verifier child"
     },
     {
+      "dsl_name": "wait",
       "symbol": "__ckb_wait",
-      "number": 2602
+      "number": 2602,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_comment": "wait for bounded verifier child",
+      "size_check": "none",
+      "fail_behavior": "fail_closed",
+      "detail": "wait for bounded verifier child"
     },
     {
+      "dsl_name": "process_id",
       "symbol": "__ckb_process_id",
-      "number": 2603
+      "number": 2603,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_comment": "current process id",
+      "size_check": "none",
+      "fail_behavior": "fail_closed",
+      "detail": "current process id"
     },
     {
+      "dsl_name": "pipe",
       "symbol": "__ckb_pipe",
-      "number": 2604
+      "number": 2604,
+      "kind": "multi_return",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0", "a1"],
+      "arg_comment": "create IPC pipe; returns read fd in a0 and write fd in a1",
+      "size_check": "none",
+      "fail_behavior": "fail_closed",
+      "detail": "create IPC pipe; returns read fd in a0 and write fd in a1"
     },
     {
+      "dsl_name": "pipe_write",
       "symbol": "__ckb_pipe_write",
-      "number": 2605
+      "number": 2605,
+      "kind": "unit",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": [],
+      "arg_comment": "write u64 payload to IPC pipe",
+      "size_check": "caller_checked",
+      "fail_behavior": "fail_closed",
+      "detail": "write u64 payload to IPC pipe"
     },
     {
+      "dsl_name": "pipe_read",
       "symbol": "__ckb_pipe_read",
-      "number": 2606
+      "number": 2606,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_comment": "read u64 payload from IPC pipe",
+      "size_check": "caller_checked",
+      "fail_behavior": "fail_closed",
+      "detail": "read u64 payload from IPC pipe"
     },
     {
+      "dsl_name": "inherited_fd",
       "symbol": "__ckb_inherited_fd",
-      "number": 2607
+      "number": 2607,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_comment": "resolve inherited fd",
+      "size_check": "none",
+      "fail_behavior": "fail_closed",
+      "detail": "resolve inherited fd"
     },
     {
+      "dsl_name": "close",
       "symbol": "__ckb_close",
-      "number": 2608
+      "number": 2608,
+      "kind": "unit",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": [],
+      "arg_comment": "close fd",
+      "size_check": "none",
+      "fail_behavior": "fail_closed",
+      "detail": "close fd"
     }
   ]
 }

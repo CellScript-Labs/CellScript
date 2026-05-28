@@ -15,9 +15,9 @@ use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::{
     ckb_source_name, fixed_register_width, layout_fixed_byte_width, layout_fixed_scalar_width, molecule_vector_element_fixed_width,
-    named_type_name, CodeGenerator, ExpectedFixedByteSource, SchemaFieldLayout, CKB_CELL_FIELD_LOCK_HASH, CKB_CELL_FIELD_TYPE_HASH,
-    CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, RUNTIME_EXPR_TEMP_SLOTS,
-    RUNTIME_SCRATCH_BUFFER_SIZE,
+    named_type_name, CodeGenerator, ExpectedFixedByteSource, SchemaFieldLayout, CELL_OPS_SCAN_INDEX_REG,
+    CELL_OPS_U128_EXPECTED_HI_REG, CKB_CELL_FIELD_LOCK_HASH, CKB_CELL_FIELD_TYPE_HASH, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING,
+    CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_INPUT, CKB_SOURCE_OUTPUT, RUNTIME_EXPR_TEMP_SLOTS, RUNTIME_SCRATCH_BUFFER_SIZE,
 };
 
 pub(crate) fn identity_policy_label(identity: &IrIdentityPolicy) -> String {
@@ -118,12 +118,12 @@ impl CodeGenerator {
         );
         self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
         self.emit_loaded_schema_exact_size_check(input_size_offset, 32, "destroy input type hash");
-        self.emit("li t6, 0");
+        self.emit(format!("li {}, 0", CELL_OPS_SCAN_INDEX_REG));
         self.emit_label(&loop_label);
         self.emit_load_cell_by_field_syscall_to_offsets_dynamic_index(
             "destroy_output_type_hash",
             CKB_SOURCE_OUTPUT,
-            "t6",
+            CELL_OPS_SCAN_INDEX_REG,
             CKB_CELL_FIELD_TYPE_HASH,
             output_size_offset,
             output_buffer_offset,
@@ -140,7 +140,10 @@ impl CodeGenerator {
 
         self.emit_label(&type_hash_label);
         self.emit_loaded_schema_exact_size_check(output_size_offset, 32, "destroy output type hash");
-        self.emit(format!("# cellscript abi: reject destroy successor when Output#t6 TypeHash matches consumed {}", pattern.binding));
+        self.emit(format!(
+            "# cellscript abi: reject destroy successor when Output#{} TypeHash matches consumed {}",
+            CELL_OPS_SCAN_INDEX_REG, pattern.binding
+        ));
         self.emit_sp_addi("t4", output_buffer_offset);
         self.emit_sp_addi("t5", input_buffer_offset);
         for byte_index in 0..32 {
@@ -152,7 +155,7 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
 
         self.emit_label(&next_label);
-        self.emit("addi t6, t6, 1");
+        self.emit(format!("addi {}, {}, 1", CELL_OPS_SCAN_INDEX_REG, CELL_OPS_SCAN_INDEX_REG));
         self.emit(format!("j {}", loop_label));
         self.emit_label(&done_label);
         self.emit("li a0, 0");
@@ -736,30 +739,30 @@ impl CodeGenerator {
         let mismatch_label = self.fresh_label("mutate_preserved_data_mismatch");
         self.emit_sp_addi("a3", input_buffer_offset);
         self.emit_sp_addi("a4", output_buffer_offset);
-        self.emit("li t6, 0");
+        self.emit(format!("li {}, 0", CELL_OPS_SCAN_INDEX_REG));
         self.emit_label(&loop_label);
-        self.emit("sltu t2, t6, t0");
+        self.emit(format!("sltu t2, {}, t0", CELL_OPS_SCAN_INDEX_REG));
         self.emit(format!("beqz t2, {}", done_label));
         for (range_index, (start, end)) in exclusion_ranges.iter().enumerate() {
             let next_range_label = self.fresh_label(&format!("mutate_preserved_data_next_range_{}", range_index));
             self.emit(format!("li t3, {}", start));
-            self.emit("sltu t2, t6, t3");
+            self.emit(format!("sltu t2, {}, t3", CELL_OPS_SCAN_INDEX_REG));
             self.emit(format!("bnez t2, {}", compare_label));
             self.emit(format!("li t3, {}", end));
-            self.emit("sltu t2, t6, t3");
+            self.emit(format!("sltu t2, {}, t3", CELL_OPS_SCAN_INDEX_REG));
             self.emit(format!("beqz t2, {}", next_range_label));
             self.emit(format!("j {}", skip_label));
             self.emit_label(&next_range_label);
         }
         self.emit_label(&compare_label);
-        self.emit("add t3, a3, t6");
+        self.emit(format!("add t3, a3, {}", CELL_OPS_SCAN_INDEX_REG));
         self.emit("lbu t4, 0(t3)");
-        self.emit("add t3, a4, t6");
+        self.emit(format!("add t3, a4, {}", CELL_OPS_SCAN_INDEX_REG));
         self.emit("lbu t5, 0(t3)");
         self.emit("sub t2, t4, t5");
         self.emit(format!("bnez t2, {}", mismatch_label));
         self.emit_label(&skip_label);
-        self.emit("addi t6, t6, 1");
+        self.emit(format!("addi {}, {}, 1", CELL_OPS_SCAN_INDEX_REG, CELL_OPS_SCAN_INDEX_REG));
         self.emit(format!("j {}", loop_label));
         self.emit_label(&mismatch_label);
         self.emit_fail(CellScriptRuntimeError::FieldPreservationMismatch);
@@ -1181,7 +1184,8 @@ impl CodeGenerator {
                     // where carry = (input_lo + delta < input_lo) ? 1 : 0
                     self.emit("add t5, t0, t1"); // expected_lo = input_lo + delta
                     self.emit("sltu t2, t5, t0"); // carry = 1 if addition overflowed
-                    self.emit("add t6, t3, t2"); // expected_hi = input_hi + carry
+                    self.emit(format!("add {}, t3, t2", CELL_OPS_U128_EXPECTED_HI_REG));
+                    // expected_hi = input_hi + carry
                 }
                 MutateTransitionOp::Sub => {
                     // expected_lo = input_lo - delta
@@ -1189,7 +1193,8 @@ impl CodeGenerator {
                     // where borrow = (input_lo < delta) ? 1 : 0
                     self.emit("sub t5, t0, t1"); // expected_lo = input_lo - delta
                     self.emit("sltu t2, t0, t1"); // borrow = 1 if subtraction underflowed
-                    self.emit("sub t6, t3, t2"); // expected_hi = input_hi - borrow
+                    self.emit(format!("sub {}, t3, t2", CELL_OPS_U128_EXPECTED_HI_REG));
+                    // expected_hi = input_hi - borrow
                 }
                 MutateTransitionOp::Set => {
                     self.record_fatal_error("set transition reached u128 add/sub mutation verifier");
@@ -1206,10 +1211,10 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, 8);
             self.emit_unaligned_scalar_load("t4", "t3", "t2", layout.offset + 8, 8);
 
-            // Compare: expected (t5, t6) == actual (t0, t3)
+            // Compare: expected low/high == actual low/high.
             let ok_label = self.fresh_label("mutate_u128_transition_ok");
             self.emit("sub t2, t0, t5"); // diff_lo = actual_lo - expected_lo
-            self.emit("sub t1, t3, t6"); // diff_hi = actual_hi - expected_hi
+            self.emit(format!("sub t1, t3, {}", CELL_OPS_U128_EXPECTED_HI_REG)); // diff_hi = actual_hi - expected_hi
             self.emit("or t2, t2, t1"); // combined diff = diff_lo | diff_hi
             self.emit(format!("beqz t2, {}", ok_label));
             self.emit_fail(CellScriptRuntimeError::MutateTransitionMismatch);
