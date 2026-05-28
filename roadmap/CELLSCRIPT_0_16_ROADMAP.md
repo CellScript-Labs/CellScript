@@ -1,7 +1,7 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release; active
-compiler-freeze hardening is tracked in this roadmap.
+**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release;
+compiler-freeze hardening is complete for the P0 plus key P1 freeze scope.
 **Scope**: Metadata Semantics, Descriptive Standard Compatibility, Production
 Tooling Skeleton, and Rust-comparative compiler hardening.
 **Dependencies**: v0.13, v0.14, and v0.15 complete
@@ -30,7 +30,7 @@ completeness and the non-critical comparative-audit cleanup remain 0.17 work.
 | Deployment governance | Implemented as local manifest/schema/integrity tooling | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` | On-chain deployment verification |
 | Audit/debug UX | Implemented as metadata/IR reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` | Full CellScript-to-RISC-V source maps |
 | Stdlib release track | Implemented as schema stubs only | `src/stdlib/ckb_protocols/*` descriptors marked `schema-stub` | ABI-compatible protocol stdlib implementations and executable coverage |
-| Compiler-freeze hardening | In progress for P0 plus key P1 only | `RUST_COMPARATIVE_AUDIT.md`, IR poison lowering, register contract gate, syscall ABI baseline, IR provenance, error-line tests | Remaining comparative-audit cleanup is 0.17 scope |
+| Compiler-freeze hardening | Implemented for P0 plus key P1 freeze scope | `RUST_COMPARATIVE_AUDIT.md`, IR poison lowering, register contract gate, syscall ABI contract baseline, IR provenance, error-line tests | Remaining comparative-audit cleanup is 0.17 scope |
 
 Boundary: v0.16 does not claim full formal verification or production CKB
 protocol equivalence. The branch implements metadata consistency checking,
@@ -300,7 +300,7 @@ The principle is:
 |---|---|---|---|
 | P0 | IR poison/error lowering | Error recovery must not produce a normal-looking IR value. Lowering errors return explicit poison, not live `IrConst::U64(0)` sentinels. | Invalid source cannot feed semantic `Binary`, `Call`, `Cast`, `Index`, `FieldAccess`, `If`, `Match`, array, or Vec lowering as if it had a valid value; verifier and codegen reject poisoned IR. A deeper `Lowered<T>` representation is tracked for 0.17. |
 | P0 | Register contract constants and gate | `s10`, `s11`, and `t6` conventions are named compiler contracts. | Entry-wrapper writes to reserved registers are whitelisted; non-entry clobbers fail codegen; far branch relaxation reports the named scratch register. |
-| P0 | Syscall ABI baseline | CKB syscall numbers and VM2 spawn/IPC numbers are checked against a versioned baseline. | `tests/syscall_abi_baseline.json` is compared to `syscalls.rs` and runtime ABI fields in the fast test gate. |
+| P0 | Syscall ABI baseline | CKB syscall numbers, status registers, return registers, size-check policy, and fail behaviour are checked against a versioned baseline. | `tests/syscall_abi_baseline.json` is compared to `syscalls.rs` and runtime ABI fields in the fast test gate. |
 
 ### 4B. Key P1 Hardening Kept In 0.16
 
@@ -601,7 +601,8 @@ v0.16 can ship when the scoped metadata/tooling release satisfies:
   poisoned artifacts rather than treating error recovery as a valid value
 - backend register contracts for entry-wrapper registers and branch-relaxation
   scratch registers are named and gate-tested
-- CKB syscall and VM2 spawn/IPC ABI numbers match a checked 0.16 baseline
+- CKB syscall and VM2 spawn/IPC ABI contract fields match a checked 0.16
+  baseline
 - key P1 audit hardening is present: instruction/terminator provenance wrappers
   and `expect-error-line:N:TEXT` diagnostics tests
 - all non-critical Rust-comparative audit cleanup is tracked in the 0.17 roadmap
