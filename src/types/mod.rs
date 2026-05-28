@@ -2289,10 +2289,7 @@ impl<'a> TypeChecker<'a> {
 
     fn named_type_contains_reference(&self, name: &str) -> bool {
         self.named_type_generic_payload(name).is_some_and(|payload| {
-            split_top_level_type_list(payload)
-                .into_iter()
-                .map(|item| self.parse_named_type_repr(item))
-                .any(|ty| self.type_contains_reference(&ty))
+            split_top_level_type_list(payload).into_iter().map(Self::parse_named_type_repr).any(|ty| self.type_contains_reference(&ty))
         })
     }
 
@@ -2300,7 +2297,7 @@ impl<'a> TypeChecker<'a> {
         self.named_type_generic_payload(name).is_some_and(|payload| {
             split_top_level_type_list(payload)
                 .into_iter()
-                .map(|item| self.parse_named_type_repr(item))
+                .map(Self::parse_named_type_repr)
                 .any(|ty| self.type_contains_mutable_reference(&ty))
         })
     }
@@ -4965,7 +4962,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn parse_named_collection_item_type(&self, name: &str) -> Option<Type> {
-        self.vec_type_argument(name).ok().map(|inner| self.parse_named_type_repr(inner))
+        self.vec_type_argument(name).ok().map(Self::parse_named_type_repr)
     }
 
     fn supports_collection_len(&self, ty: &Type) -> bool {
@@ -4985,28 +4982,26 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn parse_named_type_repr(&self, repr: &str) -> Type {
+    fn parse_named_type_repr(repr: &str) -> Type {
         let repr = repr.trim();
         if let Some(tuple_items) = repr.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) {
             if tuple_items.trim().is_empty() {
                 return Type::Unit;
             }
-            return Type::Tuple(
-                split_top_level_type_list(tuple_items).into_iter().map(|item| self.parse_named_type_repr(item)).collect(),
-            );
+            return Type::Tuple(split_top_level_type_list(tuple_items).into_iter().map(Self::parse_named_type_repr).collect());
         }
         if let Some(array_items) = repr.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
             if let Some((elem, len)) = split_top_level_array_type(array_items) {
                 if let Ok(len) = len.trim().parse::<usize>() {
-                    return Type::Array(Box::new(self.parse_named_type_repr(elem)), len);
+                    return Type::Array(Box::new(Self::parse_named_type_repr(elem)), len);
                 }
             }
         }
         if let Some(inner) = repr.strip_prefix("&mut ") {
-            return Type::MutRef(Box::new(self.parse_named_type_repr(inner)));
+            return Type::MutRef(Box::new(Self::parse_named_type_repr(inner)));
         }
         if let Some(inner) = repr.strip_prefix('&') {
-            return Type::Ref(Box::new(self.parse_named_type_repr(inner)));
+            return Type::Ref(Box::new(Self::parse_named_type_repr(inner)));
         }
 
         match repr {
@@ -5956,7 +5951,7 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_vec_type_argument(&self, name: &str, span: Span) -> Result<()> {
         let inner = self.vec_type_argument_at(name, span)?;
-        let inner_ty = self.parse_named_type_repr(inner);
+        let inner_ty = Self::parse_named_type_repr(inner);
         self.validate_type_at(&inner_ty, span)
     }
 
@@ -6015,10 +6010,9 @@ impl<'a> TypeChecker<'a> {
                 let a_args = split_top_level_type_list(a_payload);
                 let b_args = split_top_level_type_list(b_payload);
                 a_args.len() == b_args.len()
-                    && a_args
-                        .iter()
-                        .zip(b_args.iter())
-                        .all(|(a_arg, b_arg)| self.types_equal(&self.parse_named_type_repr(a_arg), &self.parse_named_type_repr(b_arg)))
+                    && a_args.iter().zip(b_args.iter()).all(|(a_arg, b_arg)| {
+                        self.types_equal(&Self::parse_named_type_repr(a_arg), &Self::parse_named_type_repr(b_arg))
+                    })
             }
             (None, None) => self.named_type_bases_equal(a, b),
             _ => false,

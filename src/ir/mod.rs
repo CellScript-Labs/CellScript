@@ -1976,7 +1976,7 @@ impl IrGenerator {
         match operand {
             IrOperand::Var(var) => var,
             IrOperand::Const(value) => {
-                let ty = self.const_type(&value);
+                let ty = Self::const_type(&value);
                 let var = self.new_var(name.to_string(), ty);
                 block.instructions.push(IrInstruction::LoadConst { dest: var.clone(), value });
                 var
@@ -2017,7 +2017,7 @@ impl IrGenerator {
                 dest
             }
             IrOperand::Const(value) => {
-                let ty = self.const_type(&value);
+                let ty = Self::const_type(&value);
                 let dest = self.new_var(name.to_string(), ty);
                 block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value });
                 dest
@@ -2340,7 +2340,7 @@ impl IrGenerator {
         }
     }
 
-    fn const_type(&self, value: &IrConst) -> IrType {
+    fn const_type(value: &IrConst) -> IrType {
         match value {
             IrConst::Poisoned => IrType::Unit,
             IrConst::U8(_) => IrType::U8,
@@ -2352,9 +2352,7 @@ impl IrGenerator {
             IrConst::Bool(_) => IrType::Bool,
             IrConst::Address(_) => IrType::Address,
             IrConst::Hash(_) => IrType::Hash,
-            IrConst::Array(items) => {
-                IrType::Array(Box::new(items.first().map(|item| self.const_type(item)).unwrap_or(IrType::U8)), items.len())
-            }
+            IrConst::Array(items) => IrType::Array(Box::new(items.first().map(Self::const_type).unwrap_or(IrType::U8)), items.len()),
         }
     }
 
@@ -3621,7 +3619,7 @@ impl IrGenerator {
 
             let field_ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", create.ty, field_name), field_ty);
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
@@ -3745,7 +3743,7 @@ impl IrGenerator {
 
             let field_ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", cu.ty, field_name), field_ty);
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
@@ -3814,7 +3812,7 @@ impl IrGenerator {
 
             let field_ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", ru.ty, field_name), field_ty);
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
@@ -3999,7 +3997,7 @@ impl IrGenerator {
 
             let ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             element_ty.get_or_insert_with(|| ty.clone());
             let element_var = self.new_var(format!("array_elem_{}", index), ty);
@@ -4279,7 +4277,7 @@ impl IrGenerator {
 
             let ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("tuple_{}", index), ty.clone());
             self.block_mut(blocks, active)
@@ -4326,7 +4324,7 @@ impl IrGenerator {
 
             let field_ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
-                IrOperand::Const(value) => self.const_type(value),
+                IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", init.ty, field_name), field_ty);
             tuple_operands.push(lowered.operand.clone());
@@ -4801,7 +4799,7 @@ impl IrGenerator {
     fn operand_type(&self, operand: &IrOperand) -> IrType {
         match operand {
             IrOperand::Var(var) => var.ty.clone(),
-            IrOperand::Const(value) => self.const_type(value),
+            IrOperand::Const(value) => Self::const_type(value),
         }
     }
 
@@ -5551,7 +5549,7 @@ impl IrGenerator {
     fn index_result_type(&self, operand: &IrOperand) -> Option<IrType> {
         match operand {
             IrOperand::Var(var) => self.index_result_type_from_ir_type(&var.ty),
-            IrOperand::Const(IrConst::Array(items)) => items.first().map(|item| self.const_type(item)),
+            IrOperand::Const(IrConst::Array(items)) => items.first().map(Self::const_type),
             _ => None,
         }
     }
@@ -5568,7 +5566,7 @@ impl IrGenerator {
     fn iter_item_type(&self, operand: &IrOperand) -> Option<IrType> {
         match operand {
             IrOperand::Var(var) => self.index_result_type_from_ir_type(&var.ty),
-            IrOperand::Const(IrConst::Array(items)) => items.first().map(|item| self.const_type(item)),
+            IrOperand::Const(IrConst::Array(items)) => items.first().map(Self::const_type),
             _ => None,
         }
     }
