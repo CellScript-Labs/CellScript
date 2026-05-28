@@ -1,0 +1,105 @@
+{
+  "version": "cellscript-0.16-ckb-mainnet-syscalls-and-ckb-vm-v2-spawn-ipc",
+  "ckb_mainnet_syscalls": [
+    {
+      "symbol": "__syscall_load_tx_hash",
+      "number": 2061
+    },
+    {
+      "symbol": "__syscall_load_script_hash",
+      "number": 2062
+    },
+    {
+      "symbol": "__syscall_load_cell",
+      "number": 2071
+    },
+    {
+      "symbol": "__syscall_load_header",
+      "number": 2072
+    },
+    {
+      "symbol": "__syscall_load_input",
+      "number": 2073
+    },
+    {
+      "symbol": "__syscall_load_witness",
+      "number": 2074
+    },
+    {
+      "symbol": "__syscall_load_script",
+      "number": 2052
+    },
+    {
+      "symbol": "__syscall_load_cell_by_field",
+      "number": 2081
+    },
+    {
+      "symbol": "__syscall_load_cell_data",
+      "number": 2092
+    },
+    {
+      "symbol": "__syscall_current_cycles",
+      "number": 2042
+    }
+  ],
+  "runtime_syscall_abi": [
+    {
+      "name": "load_header_by_field",
+      "number": 2082
+    },
+    {
+      "name": "load_input_by_field",
+      "number": 2083
+    },
+    {
+      "name": "load_witness",
+      "number": 2074
+    },
+    {
+      "name": "load_script",
+      "number": 2052
+    },
+    {
+      "name": "load_cell_by_field",
+      "number": 2081
+    },
+    {
+      "name": "load_cell_data",
+      "number": 2092
+    }
+  ],
+  "ckb_vm_v2_spawn_ipc_syscalls": [
+    {
+      "symbol": "__ckb_spawn",
+      "number": 2601
+    },
+    {
+      "symbol": "__ckb_wait",
+      "number": 2602
+    },
+    {
+      "symbol": "__ckb_process_id",
+      "number": 2603
+    },
+    {
+      "symbol": "__ckb_pipe",
+      "number": 2604
+    },
+    {
+      "symbol": "__ckb_pipe_write",
+      "number": 2605
+    },
+    {
+      "symbol": "__ckb_pipe_read",
+      "number": 2606
+    },
+    {
+      "symbol": "__ckb_inherited_fd",
+      "number": 2607
+    },
+    {
+      "symbol": "__ckb_close",
+      "number": 2608
+    }
+  ]
+}

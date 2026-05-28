@@ -16,6 +16,9 @@ use super::CodeGenerator;
 impl CodeGenerator {
     pub(crate) fn emit_load_const(&mut self, dest: &IrVar, value: &IrConst) -> Result<()> {
         match value {
+            IrConst::Poisoned => {
+                return Err(CompileError::without_span(format!("codegen received poisoned lowering constant for var{}", dest.id)));
+            }
             IrConst::Unit => self.emit("li t0, 0"),
             IrConst::U8(n) => self.emit(format!("li t0, {}", n)),
             IrConst::U16(n) => self.emit(format!("li t0, {}", n)),
@@ -347,6 +350,10 @@ impl CodeGenerator {
 
     pub(crate) fn emit_operand_to_register(&mut self, register: &str, operand: &IrOperand) {
         match operand {
+            IrOperand::Const(IrConst::Poisoned) => {
+                self.record_fatal_error("codegen received poisoned lowering operand");
+                self.emit(format!("li {}, 0", register));
+            }
             IrOperand::Const(IrConst::U8(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::U16(n)) => self.emit(format!("li {}, {}", register, n)),
             IrOperand::Const(IrConst::U32(n)) => self.emit(format!("li {}, {}", register, n)),

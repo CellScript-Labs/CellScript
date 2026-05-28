@@ -304,11 +304,79 @@ pub struct IrBlock {
     pub id: BlockId,
     pub source_span: Option<Span>,
     pub instructions: Vec<IrInstruction>,
+    pub instruction_spans: Vec<Option<Span>>,
     pub terminator: IrTerminator,
+    pub terminator_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub usize);
+
+#[derive(Debug, Clone)]
+pub struct SpannedIrInstruction {
+    pub kind: IrInstruction,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpannedIrTerminator {
+    pub kind: IrTerminator,
+    pub span: Option<Span>,
+}
+
+impl IrBlock {
+    pub fn new(id: BlockId) -> Self {
+        Self {
+            id,
+            source_span: None,
+            instructions: Vec::new(),
+            instruction_spans: Vec::new(),
+            terminator: IrTerminator::Return(None),
+            terminator_span: None,
+        }
+    }
+
+    pub fn synthetic(id: BlockId, instructions: Vec<IrInstruction>, terminator: IrTerminator) -> Self {
+        let instruction_spans = vec![None; instructions.len()];
+        Self { id, source_span: None, instructions, instruction_spans, terminator, terminator_span: None }
+    }
+
+    pub fn push_instruction(&mut self, kind: IrInstruction, span: Option<Span>) {
+        self.instructions.push(kind);
+        self.instruction_spans.push(span);
+    }
+
+    pub fn set_terminator(&mut self, kind: IrTerminator, span: Option<Span>) {
+        self.terminator = kind;
+        self.terminator_span = span;
+    }
+
+    pub fn spanned_instructions(&self) -> impl Iterator<Item = SpannedIrInstruction> + '_ {
+        self.instructions.iter().enumerate().map(|(index, kind)| SpannedIrInstruction {
+            kind: kind.clone(),
+            span: self.instruction_spans.get(index).copied().flatten(),
+        })
+    }
+
+    pub fn spanned_terminator(&self) -> SpannedIrTerminator {
+        SpannedIrTerminator { kind: self.terminator.clone(), span: self.terminator_span }
+    }
+
+    fn backfill_provenance(&mut self) {
+        let fallback = self.source_span.filter(|span| *span != Span::default());
+        if self.instruction_spans.len() < self.instructions.len() {
+            self.instruction_spans.resize(self.instructions.len(), fallback);
+        }
+        for span in &mut self.instruction_spans {
+            if span.is_none() {
+                *span = fallback;
+            }
+        }
+        if self.terminator_span.is_none() {
+            self.terminator_span = fallback;
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum IrInstruction {
@@ -365,6 +433,7 @@ pub enum IrOperand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrConst {
+    Poisoned,
     Unit,
     U8(u8),
     U16(u16),
@@ -377,7 +446,7 @@ pub enum IrConst {
     Array(Vec<IrConst>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrTerminator {
     Return(Option<IrOperand>),
     Abort(CellScriptRuntimeError),
@@ -1332,6 +1401,7 @@ impl IrGenerator {
         let entry = self.push_block(&mut blocks);
         blocks[entry.0].source_span = stmts.first().map(stmt_source_span);
         let _ = self.lower_stmts(stmts, entry, &mut blocks, &mut vars, tail_return_type.as_ref());
+        Self::backfill_ir_provenance(&mut blocks);
         let consume_set =
             self.collect_straight_line_consume_patterns(&blocks, &ir_params, core_input_bindings, &lifecycle_certificate);
         let mut read_refs = self.collect_read_ref_param_patterns(&ir_params);
@@ -1749,18 +1819,26 @@ impl IrGenerator {
         tail_return_type: Option<&IrType>,
     ) -> Option<BlockId> {
         for (index, stmt) in stmts.iter().enumerate() {
+            let span = stmt_source_span(stmt);
+            let before = Self::instruction_counts(blocks);
+            let before_terminators = Self::terminator_snapshots(blocks);
             if let Some(expected_ty) = tail_return_type.filter(|_| index + 1 == stmts.len()) {
                 if let Stmt::Expr(expr) = stmt {
                     let lowered = self.lower_expr_with_expected_type(expr, expected_ty, current, blocks, vars);
                     let active = lowered.current?;
-                    self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
+                    self.block_mut(blocks, active).set_terminator(IrTerminator::Return(Some(lowered.operand)), Some(span));
+                    Self::mark_provenance_since(blocks, &before, &before_terminators, span);
                     return None;
                 }
                 if let Stmt::If(if_stmt) = stmt {
-                    return self.lower_if_stmt(if_stmt, current, blocks, vars, Some(expected_ty));
+                    let lowered = self.lower_if_stmt(if_stmt, current, blocks, vars, Some(expected_ty));
+                    Self::mark_provenance_since(blocks, &before, &before_terminators, span);
+                    return lowered;
                 }
             }
-            let next = self.lower_stmt(stmt, current, blocks, vars, tail_return_type)?;
+            let next = self.lower_stmt(stmt, current, blocks, vars, tail_return_type);
+            Self::mark_provenance_since(blocks, &before, &before_terminators, span);
+            let next = next?;
             current = next;
         }
 
@@ -1821,7 +1899,7 @@ impl IrGenerator {
             }
             Stmt::Expr(expr) => self.lower_expr(expr, current, blocks, vars).current,
             Stmt::Return(None) => {
-                self.block_mut(blocks, current).terminator = IrTerminator::Return(None);
+                self.block_mut(blocks, current).set_terminator(IrTerminator::Return(None), Some(stmt_source_span(stmt)));
                 None
             }
             Stmt::Return(Some(expr)) => {
@@ -1831,7 +1909,8 @@ impl IrGenerator {
                     self.lower_expr(expr, current, blocks, vars)
                 };
                 let active = lowered.current?;
-                self.block_mut(blocks, active).terminator = IrTerminator::Return(Some(lowered.operand));
+                self.block_mut(blocks, active)
+                    .set_terminator(IrTerminator::Return(Some(lowered.operand)), Some(stmt_source_span(stmt)));
                 None
             }
             Stmt::If(if_stmt) => self.lower_if_stmt(if_stmt, current, blocks, vars, None),
@@ -1921,7 +2000,7 @@ impl IrGenerator {
                     block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value });
                 } else {
                     self.record_error(format!("constant materialization from {:?} to {:?} is not supported", value, dest.ty), span);
-                    block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value: IrConst::U64(0) });
+                    block.instructions.push(IrInstruction::LoadConst { dest: dest.clone(), value: IrConst::Poisoned });
                 }
                 dest
             }
@@ -1944,6 +2023,18 @@ impl IrGenerator {
                 dest
             }
         }
+    }
+
+    fn poisoned_operand() -> IrOperand {
+        IrOperand::Const(IrConst::Poisoned)
+    }
+
+    fn is_poisoned_operand(operand: &IrOperand) -> bool {
+        matches!(operand, IrOperand::Const(IrConst::Poisoned))
+    }
+
+    fn poisoned_expr(current: Option<BlockId>) -> LoweredExpr {
+        LoweredExpr { operand: Self::poisoned_operand(), current }
     }
 
     fn lower_expr(
@@ -1969,7 +2060,7 @@ impl IrGenerator {
                     LoweredExpr { operand: flow_state, current: Some(current) }
                 } else {
                     self.record_error(format!("IR lowering encountered unresolved identifier '{}'", name), expr.span());
-                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                    Self::poisoned_expr(Some(current))
                 }
             }
             Expr::Assign(assign) => self.lower_assign_expr(assign, current, blocks, vars),
@@ -1985,6 +2076,9 @@ impl IrGenerator {
                 let Some(active) = right.current else {
                     return right;
                 };
+                if Self::is_poisoned_operand(&left.operand) || Self::is_poisoned_operand(&right.operand) {
+                    return Self::poisoned_expr(Some(active));
+                }
                 let (left_operand, right_operand) = self.coerce_binary_integer_operands(
                     binary.op,
                     left.operand,
@@ -1994,6 +2088,7 @@ impl IrGenerator {
                 );
                 if let Err(message) = self.validate_binary_operands(binary.op, &left_operand, &right_operand) {
                     self.record_error(message, binary.span);
+                    return Self::poisoned_expr(Some(active));
                 }
                 let dest = self.new_var("tmp", self.binary_result_type(binary.op, &left_operand, &right_operand));
                 self.block_mut(blocks, active).instructions.push(IrInstruction::Binary {
@@ -2009,8 +2104,12 @@ impl IrGenerator {
                 let Some(active) = operand.current else {
                     return operand;
                 };
+                if Self::is_poisoned_operand(&operand.operand) {
+                    return Self::poisoned_expr(Some(active));
+                }
                 if unary.op == UnaryOp::Neg {
                     self.record_error("unary negation is not supported for unsigned integer types", unary.span);
+                    return Self::poisoned_expr(Some(active));
                 }
                 let dest = self.new_var("tmp", self.unary_result_type(unary.op, &operand.operand));
                 let block = self.block_mut(blocks, active);
@@ -2029,6 +2128,9 @@ impl IrGenerator {
                         return lowered;
                     };
                     active = next;
+                    if Self::is_poisoned_operand(&lowered.operand) {
+                        return Self::poisoned_expr(Some(active));
+                    }
                     args.push(lowered.operand);
                 } else if !matches!(call.func.as_ref(), Expr::Identifier(..)) {
                     let lowered = self.lower_expr(&call.func, active, blocks, vars);
@@ -2036,6 +2138,9 @@ impl IrGenerator {
                         return lowered;
                     };
                     active = next;
+                    if Self::is_poisoned_operand(&lowered.operand) {
+                        return Self::poisoned_expr(Some(active));
+                    }
                 }
                 for arg in &call.args {
                     let lowered = self.lower_expr(arg, active, blocks, vars);
@@ -2043,6 +2148,9 @@ impl IrGenerator {
                         return lowered;
                     };
                     active = next;
+                    if Self::is_poisoned_operand(&lowered.operand) {
+                        return Self::poisoned_expr(Some(active));
+                    }
                     args.push(lowered.operand);
                 }
                 let func = match call.func.as_ref() {
@@ -2067,7 +2175,7 @@ impl IrGenerator {
                     }
                     None => {
                         self.record_error(format!("call '{}' has no known return type during IR lowering", source_func), call.span);
-                        LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) }
+                        Self::poisoned_expr(Some(active))
                     }
                 }
             }
@@ -2095,6 +2203,9 @@ impl IrGenerator {
                 let Some(active) = lowered.current else {
                     return lowered;
                 };
+                if Self::is_poisoned_operand(&lowered.operand) {
+                    return Self::poisoned_expr(Some(active));
+                }
                 let target_ty = Self::convert_type(&cast.ty);
                 match &lowered.operand {
                     IrOperand::Const(value) => {
@@ -2105,13 +2216,13 @@ impl IrGenerator {
                                 format!("constant cast from {:?} to {:?} is not supported", value, target_ty),
                                 cast.span,
                             );
-                            LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) }
+                            Self::poisoned_expr(Some(active))
                         }
                     }
                     IrOperand::Var(var) if var.ty == target_ty => lowered,
                     IrOperand::Var(_) if target_ty == IrType::U128 => {
                         self.record_error("cast to u128 from a non-constant expression is not yet supported".to_string(), cast.span);
-                        LoweredExpr { operand: IrOperand::Const(IrConst::U128(0)), current: Some(active) }
+                        Self::poisoned_expr(Some(active))
                     }
                     operand => {
                         let block = self.block_mut(blocks, active);
@@ -2124,7 +2235,7 @@ impl IrGenerator {
             Expr::Tuple(items, _) => self.lower_tuple_expr(items, current, blocks, vars),
             Expr::String(..) => {
                 self.record_error("string literals are only supported in metadata positions such as assert messages", expr.span());
-                LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                Self::poisoned_expr(Some(current))
             }
             Expr::ByteString(bytes, _) => LoweredExpr {
                 operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
@@ -2132,7 +2243,7 @@ impl IrGenerator {
             },
             Expr::Range(_) => {
                 self.record_error("range expressions are only supported as for-loop iterables", expr.span());
-                LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                Self::poisoned_expr(Some(current))
             }
             Expr::StdlibCall(call) => self.lower_stdlib_call(call, current, blocks, vars),
         }
@@ -2231,6 +2342,7 @@ impl IrGenerator {
 
     fn const_type(&self, value: &IrConst) -> IrType {
         match value {
+            IrConst::Poisoned => IrType::Unit,
             IrConst::U8(_) => IrType::U8,
             IrConst::U16(_) => IrType::U16,
             IrConst::U32(_) => IrType::U32,
@@ -2422,12 +2534,51 @@ impl IrGenerator {
 
     fn push_block(&mut self, blocks: &mut Vec<IrBlock>) -> BlockId {
         let id = self.new_block();
-        blocks.push(IrBlock { id, source_span: None, instructions: Vec::new(), terminator: IrTerminator::Return(None) });
+        blocks.push(IrBlock::new(id));
         id
     }
 
     fn block_mut<'a>(&self, blocks: &'a mut [IrBlock], id: BlockId) -> &'a mut IrBlock {
         &mut blocks[id.0]
+    }
+
+    fn instruction_counts(blocks: &[IrBlock]) -> Vec<usize> {
+        blocks.iter().map(|block| block.instructions.len()).collect()
+    }
+
+    fn terminator_snapshots(blocks: &[IrBlock]) -> Vec<IrTerminator> {
+        blocks.iter().map(|block| block.terminator.clone()).collect()
+    }
+
+    fn mark_provenance_since(blocks: &mut [IrBlock], before: &[usize], before_terminators: &[IrTerminator], span: Span) {
+        for (index, block) in blocks.iter_mut().enumerate() {
+            let start = before.get(index).copied().unwrap_or(0);
+            let has_new_instructions = block.instructions.len() > start;
+            let terminator_changed = before_terminators.get(index) != Some(&block.terminator);
+            if !has_new_instructions && !terminator_changed {
+                continue;
+            }
+            if block.source_span.is_none() && span != Span::default() {
+                block.source_span = Some(span);
+            }
+            if has_new_instructions {
+                block.instruction_spans.resize(block.instructions.len(), None);
+                for instruction_span in &mut block.instruction_spans[start..] {
+                    if instruction_span.is_none() {
+                        *instruction_span = Some(span);
+                    }
+                }
+            }
+            if terminator_changed && block.terminator_span.is_none() {
+                block.terminator_span = Some(span);
+            }
+        }
+    }
+
+    fn backfill_ir_provenance(blocks: &mut [IrBlock]) {
+        for block in blocks {
+            block.backfill_provenance();
+        }
     }
 
     fn lower_if_stmt(
@@ -3784,19 +3935,22 @@ impl IrGenerator {
         let Some(active) = lowered_idx.current else {
             return lowered_idx;
         };
+        if Self::is_poisoned_operand(&lowered_arr.operand) || Self::is_poisoned_operand(&lowered_idx.operand) {
+            return Self::poisoned_expr(Some(active));
+        }
 
         if let IrOperand::Var(arr_var) = &lowered_arr.operand {
             if let Some(elements) = self.aggregate_elements.get(&arr_var.id) {
                 let Some(index_value) = const_usize_operand(&lowered_idx.operand) else {
                     self.record_error("local fixed-array indexing requires a compile-time constant index", index.span);
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) };
+                    return Self::poisoned_expr(Some(active));
                 };
                 let Some(element_var) = elements.get(index_value).cloned() else {
                     self.record_error(
                         format!("array index {} is out of bounds for local fixed array of length {}", index_value, elements.len()),
                         index.span,
                     );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) };
+                    return Self::poisoned_expr(Some(active));
                 };
                 return LoweredExpr { operand: IrOperand::Var(element_var), current: Some(active) };
             }
@@ -3804,7 +3958,7 @@ impl IrGenerator {
 
         let Some(result_ty) = self.index_result_type(&lowered_arr.operand) else {
             self.record_error("index expression has no lowered element type", index.span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) };
+            return Self::poisoned_expr(Some(active));
         };
 
         let dest = self.new_var("index_tmp", result_ty);
@@ -3826,7 +3980,7 @@ impl IrGenerator {
     ) -> LoweredExpr {
         if items.is_empty() {
             self.record_error("empty array literal reached IR lowering without a declared array type", span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
+            return Self::poisoned_expr(Some(current));
         }
 
         let mut active = current;
@@ -3839,6 +3993,9 @@ impl IrGenerator {
                 return lowered;
             };
             active = next;
+            if Self::is_poisoned_operand(&lowered.operand) {
+                return Self::poisoned_expr(Some(active));
+            }
 
             let ty = match &lowered.operand {
                 IrOperand::Var(var) => var.ty.clone(),
@@ -3855,7 +4012,7 @@ impl IrGenerator {
 
         let Some(element_ty) = element_ty else {
             self.record_error("non-empty array literal did not produce an element type during IR lowering", span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) };
+            return Self::poisoned_expr(Some(active));
         };
         let array_ty = IrType::Array(Box::new(element_ty), items.len());
         let aggregate = self.new_var("array_tmp", array_ty);
@@ -3879,7 +4036,7 @@ impl IrGenerator {
                 Some(value) => LoweredExpr { operand: IrOperand::Const(value), current: Some(current) },
                 None => {
                     self.record_error(format!("integer literal {} is out of range for {:?}", value, expected_ty), *span);
-                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                    Self::poisoned_expr(Some(current))
                 }
             },
             Expr::ByteString(bytes, span) => match expected_ty {
@@ -3892,11 +4049,11 @@ impl IrGenerator {
                         format!("byte string literal has length {}, expected fixed byte array length {}", bytes.len(), len),
                         *span,
                     );
-                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                    Self::poisoned_expr(Some(current))
                 }
                 _ => {
                     self.record_error("byte string literals require an expected [u8; N] type", *span);
-                    LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
+                    Self::poisoned_expr(Some(current))
                 }
             },
             Expr::Array(items, span) if collection_item_ir_type(expected_ty).is_some() => {
@@ -3924,6 +4081,9 @@ impl IrGenerator {
         let Some(current) = lowered_cond.current else {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
+        if Self::is_poisoned_operand(&cond) {
+            return Self::poisoned_expr(Some(current));
+        }
 
         let then_block = self.push_block(blocks);
         let else_block = self.push_block(blocks);
@@ -3936,6 +4096,18 @@ impl IrGenerator {
 
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        }
+        if then_lowered.current.is_some() && Self::is_poisoned_operand(&then_lowered.operand)
+            || else_lowered.current.is_some() && Self::is_poisoned_operand(&else_lowered.operand)
+        {
+            let join = self.push_block(blocks);
+            if let Some(exit) = then_lowered.current {
+                self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+            }
+            if let Some(exit) = else_lowered.current {
+                self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+            }
+            return Self::poisoned_expr(Some(join));
         }
 
         let dest = self.new_var("if_tmp", expected_ty.clone());
@@ -4032,7 +4204,7 @@ impl IrGenerator {
     ) -> LoweredExpr {
         let Some(item_ty) = collection_item_ir_type(&vec_ty) else {
             self.record_error("Vec literal requires an expected Vec<T> type", span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
+            return Self::poisoned_expr(Some(current));
         };
 
         let dest = self.new_var("vec_literal_tmp", vec_ty);
@@ -4049,10 +4221,14 @@ impl IrGenerator {
                 return lowered;
             };
             active = next;
+            if Self::is_poisoned_operand(&lowered.operand) {
+                return Self::poisoned_expr(Some(active));
+            }
 
             let actual_ty = self.operand_type(&lowered.operand);
             if actual_ty != item_ty {
                 self.record_error(format!("Vec literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty), item.span());
+                return Self::poisoned_expr(Some(active));
             }
 
             self.block_mut(blocks, active)
@@ -4072,7 +4248,7 @@ impl IrGenerator {
     ) -> LoweredExpr {
         if !matches!(ir_ty, IrType::Array(_, 0)) {
             self.record_error("empty array literal requires a zero-length declared array type", span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) };
+            return Self::poisoned_expr(Some(current));
         }
 
         let aggregate = self.new_var("array_tmp", ir_ty);
@@ -4174,6 +4350,9 @@ impl IrGenerator {
         let Some(active) = lowered_base.current else {
             return lowered_base;
         };
+        if Self::is_poisoned_operand(&lowered_base.operand) {
+            return Self::poisoned_expr(Some(active));
+        }
 
         if let IrOperand::Var(base_var) = &lowered_base.operand {
             if let Some(fields) = self.aggregate_fields.get(&base_var.id) {
@@ -4190,7 +4369,7 @@ impl IrGenerator {
         }
 
         self.record_error(format!("field access '.{}' has no lowered schema-backed representation", field.field), field.span);
-        LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(active) }
+        Self::poisoned_expr(Some(active))
     }
 
     fn block_defines_var(&self, blocks: &[IrBlock], block_id: BlockId, var_id: usize) -> bool {
@@ -4430,6 +4609,9 @@ impl IrGenerator {
         let Some(current) = lowered_cond.current else {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
         };
+        if Self::is_poisoned_operand(&cond) {
+            return Self::poisoned_expr(Some(current));
+        }
 
         let then_block = self.push_block(blocks);
         let else_block = self.push_block(blocks);
@@ -4442,6 +4624,18 @@ impl IrGenerator {
 
         if then_lowered.current.is_none() && else_lowered.current.is_none() {
             return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        }
+        if then_lowered.current.is_some() && Self::is_poisoned_operand(&then_lowered.operand)
+            || else_lowered.current.is_some() && Self::is_poisoned_operand(&else_lowered.operand)
+        {
+            let join = self.push_block(blocks);
+            if let Some(exit) = then_lowered.current {
+                self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+            }
+            if let Some(exit) = else_lowered.current {
+                self.block_mut(blocks, exit).terminator = IrTerminator::Jump(join);
+            }
+            return Self::poisoned_expr(Some(join));
         }
 
         let result_ty = match (then_lowered.current.is_some(), else_lowered.current.is_some()) {
@@ -4484,10 +4678,13 @@ impl IrGenerator {
         let Some(mut check_block) = lowered_scrutinee.current else {
             return lowered_scrutinee;
         };
+        if Self::is_poisoned_operand(&lowered_scrutinee.operand) {
+            return Self::poisoned_expr(Some(check_block));
+        }
 
         if match_expr.arms.is_empty() {
             self.record_error("match expression reached IR lowering without arms", match_expr.span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };
+            return Self::poisoned_expr(Some(check_block));
         }
 
         let mut arm_entries = Vec::with_capacity(match_expr.arms.len());
@@ -4508,6 +4705,14 @@ impl IrGenerator {
                 let Some(arm_exit) = lowered_value.current else {
                     break;
                 };
+                if Self::is_poisoned_operand(&lowered_value.operand) {
+                    if join.is_none() {
+                        join = Some(self.push_block(blocks));
+                    }
+                    let join = join.expect("match join block should exist after creation");
+                    self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
+                    return Self::poisoned_expr(Some(join));
+                }
                 if result_dest.is_none() {
                     let ty = self.operand_type(&lowered_value.operand);
                     result_dest = Some(self.new_var("match_tmp", ty));
@@ -4559,6 +4764,14 @@ impl IrGenerator {
             let Some(arm_exit) = lowered_value.current else {
                 continue;
             };
+            if Self::is_poisoned_operand(&lowered_value.operand) {
+                if join.is_none() {
+                    join = Some(self.push_block(blocks));
+                }
+                let join = join.expect("match join block should exist after creation");
+                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
+                continue;
+            }
 
             if result_dest.is_none() {
                 let ty = self.operand_type(&lowered_value.operand);
@@ -5200,6 +5413,9 @@ impl IrGenerator {
         for arg in args {
             let lowered = self.lower_expr(arg, active, blocks, vars);
             active = lowered.current?;
+            if Self::is_poisoned_operand(&lowered.operand) {
+                return Some(Self::poisoned_expr(Some(active)));
+            }
             lowered_args.push(lowered.operand);
         }
         let dest = self.new_var(dest_name, return_ty);
@@ -5224,6 +5440,9 @@ impl IrGenerator {
         for arg in args {
             let lowered = self.lower_expr(arg, active, blocks, vars);
             active = lowered.current?;
+            if Self::is_poisoned_operand(&lowered.operand) {
+                return Some(Self::poisoned_expr(Some(active)));
+            }
             lowered_args.push(lowered.operand);
         }
         self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
@@ -5753,6 +5972,7 @@ fn verify_body(
         }
     }
 
+    verify_body_ir_provenance(label, body)?;
     verify_body_lifecycle_metadata(label, body, params)?;
 
     let all_var_types = collect_body_var_types(body, params)?;
@@ -5822,6 +6042,43 @@ fn verify_body(
     }
     verify_no_unconsumed_status_values(label, body, &all_value_kinds)?;
 
+    Ok(())
+}
+
+fn verify_body_ir_provenance(label: &str, body: &IrBody) -> Result<()> {
+    for block in &body.blocks {
+        if block.instruction_spans.len() != block.instructions.len() {
+            return Err(ir_verify_block_error(
+                label,
+                body,
+                block.id,
+                format!(
+                    "{label} block {} has {} instruction provenance entries for {} instructions",
+                    block.id.0,
+                    block.instruction_spans.len(),
+                    block.instructions.len()
+                ),
+            ));
+        }
+        if block.source_span.filter(|span| *span != Span::default()).is_some() {
+            if let Some((index, _)) = block.instruction_spans.iter().enumerate().find(|(_, span)| span.is_none()) {
+                return Err(ir_verify_block_error(
+                    label,
+                    body,
+                    block.id,
+                    format!("{label} block {} instruction {} is missing source provenance", block.id.0, index),
+                ));
+            }
+            if block.terminator_span.is_none() {
+                return Err(ir_verify_block_error(
+                    label,
+                    body,
+                    block.id,
+                    format!("{label} block {} terminator is missing source provenance", block.id.0),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -6366,6 +6623,12 @@ fn verify_instruction_abi(
 fn verify_instruction_result_types(label: &str, block_id: BlockId, instruction: &IrInstruction) -> Result<()> {
     match instruction {
         IrInstruction::LoadConst { dest, value } => {
+            if matches!(value, IrConst::Poisoned) {
+                return Err(ir_verify_error(format!(
+                    "{label} block {} materializes a poisoned lowering operand into var{}",
+                    block_id.0, dest.id
+                )));
+            }
             let actual = const_ir_type(value);
             if actual != dest.ty {
                 return Err(ir_verify_error(format!(
@@ -6401,6 +6664,10 @@ fn verify_instruction_result_types(label: &str, block_id: BlockId, instruction: 
 
 fn aggregate_zero_sentinel(dest_ty: &IrType, src: &IrOperand) -> bool {
     matches!(src, IrOperand::Const(IrConst::U64(0))) && matches!(dest_ty, IrType::Array(..) | IrType::Tuple(_) | IrType::Named(_))
+}
+
+fn operand_is_poisoned(operand: &IrOperand) -> bool {
+    matches!(operand, IrOperand::Const(IrConst::Poisoned))
 }
 
 fn verify_instruction_value_kinds(
@@ -6528,6 +6795,9 @@ fn verify_operand_defined(
     defs: &HashSet<usize>,
     all_var_types: &HashMap<usize, IrType>,
 ) -> Result<()> {
+    if operand_is_poisoned(operand) {
+        return Err(ir_verify_error(format!("{label} block {} uses a poisoned lowering operand", block_id.0)));
+    }
     let IrOperand::Var(var) = operand else {
         return Ok(());
     };
@@ -6548,6 +6818,7 @@ fn verify_operand_defined(
 fn operand_value_kind(operand: &IrOperand, value_kinds: &HashMap<usize, IrValueKind>) -> Option<IrValueKind> {
     match operand {
         IrOperand::Var(var) => Some(value_kinds.get(&var.id).copied().unwrap_or_else(|| var.ty.value_kind())),
+        IrOperand::Const(IrConst::Poisoned) => None,
         IrOperand::Const(value) => Some(const_ir_type(value).value_kind()),
     }
 }
@@ -6702,6 +6973,7 @@ fn ir_type_compatible_with_abi(actual: &IrType, expected: &IrType) -> bool {
 
 fn const_ir_type(value: &IrConst) -> IrType {
     match value {
+        IrConst::Poisoned => IrType::Unit,
         IrConst::Unit => IrType::Unit,
         IrConst::U8(_) => IrType::U8,
         IrConst::U16(_) => IrType::U16,
@@ -7841,6 +8113,16 @@ mod tests {
             .expect("expected action body")
     }
 
+    fn first_action_body(ir: &IrModule) -> &IrBody {
+        ir.items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(action) => Some(&action.body),
+                _ => None,
+            })
+            .expect("expected action body")
+    }
+
     fn raw_status_var(id: usize) -> IrVar {
         IrVar { id, name: format!("raw_status_{id}"), ty: IrType::U64 }
     }
@@ -7858,7 +8140,7 @@ mod tests {
                     create_set: Vec::new(),
                     mutate_set: Vec::new(),
                     write_intents: Vec::new(),
-                    blocks: vec![IrBlock { id: BlockId(0), source_span: None, instructions, terminator }],
+                    blocks: vec![IrBlock::synthetic(BlockId(0), instructions, terminator)],
                 },
             })],
             external_type_defs: Vec::new(),
@@ -7939,6 +8221,90 @@ mod tests {
         let err = verify_module(&ir).unwrap_err();
 
         assert!(err.message.contains("module carries lowering errors"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_poisoned_lowering_operand() {
+        let dest = IrVar { id: 0, name: "poisoned".to_string(), ty: IrType::U64 };
+        let ir = module_with_instructions(
+            vec![IrInstruction::Move { dest, src: IrOperand::Const(IrConst::Poisoned) }],
+            None,
+            IrTerminator::Return(None),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("uses a poisoned lowering operand"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_verifier_rejects_poisoned_load_const() {
+        let dest = IrVar { id: 0, name: "poisoned".to_string(), ty: IrType::Unit };
+        let ir = module_with_instructions(
+            vec![IrInstruction::LoadConst { dest, value: IrConst::Poisoned }],
+            None,
+            IrTerminator::Return(None),
+        );
+
+        let err = verify_module(&ir).unwrap_err();
+
+        assert!(err.message.contains("materializes a poisoned lowering operand"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn strict_audit_ir_lowering_records_instruction_level_provenance() {
+        let ir = parse_and_lower(
+            "module ir::provenance\n\
+\n\
+action add(a: u64, b: u64) -> u64\n\
+where\n\
+    return a + b\n",
+        );
+        let body = first_action_body(&ir);
+
+        for block in &body.blocks {
+            assert_eq!(block.instruction_spans.len(), block.instructions.len(), "block {} provenance shape drifted", block.id.0);
+            if block.source_span.is_some() {
+                assert!(block.terminator_span.is_some(), "block {} terminator has no provenance", block.id.0);
+            }
+        }
+
+        let binary_span = body
+            .blocks
+            .iter()
+            .flat_map(IrBlock::spanned_instructions)
+            .find_map(|instruction| match instruction.kind {
+                IrInstruction::Binary { .. } => instruction.span,
+                _ => None,
+            })
+            .expect("expected binary instruction provenance");
+
+        assert_eq!(binary_span.line, 5);
+    }
+
+    #[test]
+    fn poison_lowering_keeps_value_invalid_while_block_stays_live() {
+        let span = Span::new(1, 28, 1, 1);
+        let expr = Expr::Binary(BinaryExpr {
+            op: BinaryOp::Add,
+            left: Box::new(Expr::Identifier("missing_one".to_string(), span)),
+            right: Box::new(Expr::Identifier("missing_two".to_string(), span)),
+            span,
+        });
+        let mut generator = IrGenerator::new("ir::poison".to_string());
+        let mut blocks = vec![IrBlock::synthetic(BlockId(0), Vec::new(), IrTerminator::Return(None))];
+        let mut vars = HashMap::new();
+
+        let lowered = generator.lower_expr(&expr, BlockId(0), &mut blocks, &mut vars);
+
+        assert_eq!(lowered.current, Some(BlockId(0)));
+        assert!(IrGenerator::is_poisoned_operand(&lowered.operand), "unexpected operand: {:?}", lowered.operand);
+        assert_eq!(generator.errors.len(), 2, "expected both missing identifiers to be diagnosed");
+        assert!(
+            blocks[0].instructions.iter().all(|instruction| !matches!(instruction, IrInstruction::Binary { .. })),
+            "poisoned operands must not be folded into a real binary instruction: {:#?}",
+            blocks[0].instructions
+        );
     }
 
     #[test]
@@ -8245,29 +8611,18 @@ where
             mutate_set: Vec::new(),
             write_intents: Vec::new(),
             blocks: vec![
-                IrBlock {
-                    id: BlockId(0),
-                    source_span: None,
-                    instructions: Vec::new(),
-                    terminator: IrTerminator::Branch {
-                        cond: IrOperand::Var(cond.clone()),
-                        then_block: BlockId(1),
-                        else_block: BlockId(2),
-                    },
-                },
-                IrBlock {
-                    id: BlockId(1),
-                    source_span: None,
-                    instructions: vec![IrInstruction::LoadConst { dest: branch_value.clone(), value: IrConst::U64(7) }],
-                    terminator: IrTerminator::Jump(BlockId(3)),
-                },
-                IrBlock { id: BlockId(2), source_span: None, instructions: Vec::new(), terminator: IrTerminator::Jump(BlockId(3)) },
-                IrBlock {
-                    id: BlockId(3),
-                    source_span: None,
-                    instructions: Vec::new(),
-                    terminator: IrTerminator::Return(Some(IrOperand::Var(branch_value))),
-                },
+                IrBlock::synthetic(
+                    BlockId(0),
+                    Vec::new(),
+                    IrTerminator::Branch { cond: IrOperand::Var(cond.clone()), then_block: BlockId(1), else_block: BlockId(2) },
+                ),
+                IrBlock::synthetic(
+                    BlockId(1),
+                    vec![IrInstruction::LoadConst { dest: branch_value.clone(), value: IrConst::U64(7) }],
+                    IrTerminator::Jump(BlockId(3)),
+                ),
+                IrBlock::synthetic(BlockId(2), Vec::new(), IrTerminator::Jump(BlockId(3))),
+                IrBlock::synthetic(BlockId(3), Vec::new(), IrTerminator::Return(Some(IrOperand::Var(branch_value)))),
             ],
         };
         let module = IrModule {

@@ -75,6 +75,9 @@ pub(crate) const CKB_CELL_FIELD_LOCK_HASH: u64 = 3;
 pub(crate) const CKB_CELL_FIELD_TYPE_HASH: u64 = 5;
 const CKB_INDEX_OUT_OF_BOUND: u64 = 1;
 const CKB_ITEM_MISSING: u64 = 2;
+pub(crate) const ENTRY_DIRECT_STACK_BASE_REG: &str = "s10";
+pub(crate) const ENTRY_DIRECT_RETURN_REG: &str = "s11";
+pub(crate) const FAR_RELAXATION_SCRATCH_REG: &str = "t6";
 pub(crate) const RUNTIME_SCRATCH_BUFFER_SIZE: usize = 512;
 const RUNTIME_SCRATCH_SLOT_SIZE: usize = 8 + RUNTIME_SCRATCH_BUFFER_SIZE;
 const RUNTIME_SCRATCH_SIZE: usize = RUNTIME_SCRATCH_SLOT_SIZE * 2;
@@ -445,6 +448,7 @@ impl CodeGenerator {
         self.generate_runtime_support(ir);
         self.emit_const_data_pool();
 
+        self.verify_reserved_register_contract()?;
         self.check_fatal_error()?;
         self.assemble(format)
     }
@@ -461,6 +465,38 @@ impl CodeGenerator {
         } else {
             Ok(())
         }
+    }
+
+    fn verify_reserved_register_contract(&self) -> Result<()> {
+        let allowed_stack_base_write = format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG);
+        let allowed_direct_return_label_write = format!("la {}, .Lentry_direct_done_", ENTRY_DIRECT_RETURN_REG);
+        let allowed_witness_return_label_write = format!("la {}, .Lentry_witness_done_", ENTRY_DIRECT_RETURN_REG);
+        for (line_index, line) in self.assembly.iter().enumerate() {
+            let Some(dest) = assembly_destination_register(line) else {
+                continue;
+            };
+            let trimmed = line.trim();
+            if dest == ENTRY_DIRECT_STACK_BASE_REG && trimmed != allowed_stack_base_write {
+                return Err(CompileError::without_span(format!(
+                    "generated assembly writes reserved entry stack register {} outside the entry wrapper at line {}: {}",
+                    ENTRY_DIRECT_STACK_BASE_REG,
+                    line_index + 1,
+                    trimmed
+                )));
+            }
+            if dest == ENTRY_DIRECT_RETURN_REG
+                && !trimmed.starts_with(&allowed_direct_return_label_write)
+                && !trimmed.starts_with(&allowed_witness_return_label_write)
+            {
+                return Err(CompileError::without_span(format!(
+                    "generated assembly writes reserved entry return register {} outside the entry wrapper at line {}: {}",
+                    ENTRY_DIRECT_RETURN_REG,
+                    line_index + 1,
+                    trimmed
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn usize_to_i64_codegen_offset(&mut self, offset: usize, context: &str) -> Option<i64> {
@@ -2338,8 +2374,8 @@ impl CodeGenerator {
         let scratch_relaxed_jumps = far_relaxed_jump_scratch_count(&plan.parsed, &plan.layout)?;
         if scratch_relaxed_jumps > 0 {
             return Err(CompileError::without_span(format!(
-                "generated assembly requires {} far jump relaxation(s) that would clobber the reserved scratch register t6; split the function or reduce generated text size",
-                scratch_relaxed_jumps
+                "generated assembly requires {} far jump relaxation(s) that would clobber the reserved scratch register {}; split the function or reduce generated text size",
+                scratch_relaxed_jumps, FAR_RELAXATION_SCRATCH_REG
             )));
         }
         match format {
@@ -2352,6 +2388,50 @@ impl CodeGenerator {
             }
         }
     }
+}
+
+fn assembly_destination_register(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('.') || trimmed.starts_with('#') {
+        return None;
+    }
+    let (mnemonic, operands) = trimmed.split_once(char::is_whitespace)?;
+    if !instruction_writes_first_operand(mnemonic) {
+        return None;
+    }
+    let register = operands.trim_start().split([',', ' ', '\t']).next()?;
+    (!register.is_empty()).then_some(register)
+}
+
+fn instruction_writes_first_operand(mnemonic: &str) -> bool {
+    !matches!(
+        mnemonic,
+        "beq"
+            | "bne"
+            | "blt"
+            | "bge"
+            | "bltu"
+            | "bgeu"
+            | "bgt"
+            | "bgez"
+            | "ble"
+            | "blez"
+            | "bgtz"
+            | "bltz"
+            | "beqz"
+            | "bnez"
+            | "j"
+            | "jr"
+            | "ret"
+            | "sd"
+            | "sw"
+            | "sh"
+            | "sb"
+            | "call"
+            | "fence"
+            | "ecall"
+            | "ebreak"
+    )
 }
 
 pub fn generate(ir: &IrModule, options: &CodegenOptions, format: ArtifactFormat) -> Result<Vec<u8>> {
@@ -2673,6 +2753,27 @@ mod tests {
         let err = generator.assemble(ArtifactFormat::RiscvAssembly).expect_err("codegen must reject t6-clobbering far relaxation");
 
         assert!(err.message.contains("reserved scratch register t6"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn register_contract_allows_only_entry_wrapper_writes_to_direct_registers() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.assembly = vec![
+            format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG),
+            format!("la {}, .Lentry_direct_done_0", ENTRY_DIRECT_RETURN_REG),
+            format!("la {}, .Lentry_witness_done_0", ENTRY_DIRECT_RETURN_REG),
+            format!("mv sp, {}", ENTRY_DIRECT_STACK_BASE_REG),
+            format!("mv ra, {}", ENTRY_DIRECT_RETURN_REG),
+        ];
+
+        generator.verify_reserved_register_contract().expect("entry wrapper writes should satisfy the register contract");
+
+        generator.assembly.push(format!("li {}, 0", ENTRY_DIRECT_STACK_BASE_REG));
+        let err = generator
+            .verify_reserved_register_contract()
+            .expect_err("non-entry writes to reserved direct-wrapper registers must be rejected");
+
+        assert!(err.message.contains("reserved entry stack register"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -3932,12 +4033,11 @@ lock helpers(
                     create_set: vec![],
                     mutate_set: vec![],
                     write_intents: vec![],
-                    blocks: vec![IrBlock {
-                        id: BlockId(0),
-                        source_span: None,
-                        instructions: vec![],
-                        terminator: IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(7)))),
-                    }],
+                    blocks: vec![IrBlock::synthetic(
+                        BlockId(0),
+                        vec![],
+                        IrTerminator::Return(Some(IrOperand::Const(IrConst::U64(7)))),
+                    )],
                 },
             })],
             external_type_defs: vec![],

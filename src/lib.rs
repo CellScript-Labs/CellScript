@@ -6231,7 +6231,7 @@ fn metadata_operand_type_name(operand: &ir::IrOperand) -> Option<String> {
         ir::IrOperand::Const(ir::IrConst::U64(_)) => Some("u64".to_string()),
         ir::IrOperand::Const(ir::IrConst::Address(_)) => Some("Address".to_string()),
         ir::IrOperand::Const(ir::IrConst::Hash(_)) => Some("Hash".to_string()),
-        ir::IrOperand::Const(ir::IrConst::Array(_) | ir::IrConst::U128(_) | ir::IrConst::Unit) => None,
+        ir::IrOperand::Const(ir::IrConst::Array(_) | ir::IrConst::U128(_) | ir::IrConst::Unit | ir::IrConst::Poisoned) => None,
     }
 }
 

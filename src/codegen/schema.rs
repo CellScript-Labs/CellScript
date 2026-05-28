@@ -245,6 +245,7 @@ pub(crate) fn fixed_scalar_const_value(value: &IrConst) -> Option<u64> {
 
 pub(crate) fn const_ir_type(value: &IrConst) -> IrType {
     match value {
+        IrConst::Poisoned => IrType::Unit,
         IrConst::Unit => IrType::Unit,
         IrConst::U8(_) => IrType::U8,
         IrConst::U16(_) => IrType::U16,

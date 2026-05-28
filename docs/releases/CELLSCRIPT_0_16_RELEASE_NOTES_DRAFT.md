@@ -219,6 +219,11 @@ git diff --check
 The following items are outside the scoped 0.16 release and are tracked by
 `docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
 
+The 0.16 freeze keeps only the P0 plus key P1 compiler-hardening items from
+`RUST_COMPARATIVE_AUDIT.md`: IR poison, register/syscall gates, IR provenance,
+and `expect-error-line:N:TEXT`. The remaining comparative-audit cleanup is
+tracked by the 0.17 roadmap alongside CKB production-completeness work.
+
 - executable CKB VM accepted/rejected fixture runner;
 - full CKB transaction semantic validation and dry-run-backed fixture verdicts;
 - real transaction solver with cell selection, dep/header resolution,
@@ -229,7 +234,11 @@ The following items are outside the scoped 0.16 release and are tracked by
 - ABI-compatible `std::sudt`, `std::xudt`, `std::type_id`, `std::htlc`,
   `std::cheque`, `std::acp`, and DAO helpers;
 - executable aggregate invariant lowering and iCKB differential tests;
-- formal verification backend exploration.
+- production formal-verification guarantees;
+- deeper `Lowered<T>` poison representation, tuple/span hygiene,
+  per-function backend validation, IR helper exhaustiveness tests, phase
+  markers, diagnostic dedup/warnings, module splits, resolver/type cleanup, and
+  release tidy gates.
 
 The following 0.16 boundaries remain intentional:
 

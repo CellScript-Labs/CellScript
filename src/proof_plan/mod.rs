@@ -1265,12 +1265,7 @@ mod tests {
             create_set: Vec::new(),
             mutate_set: Vec::new(),
             write_intents: Vec::new(),
-            blocks: vec![ir::IrBlock {
-                id: ir::BlockId(0),
-                source_span: None,
-                instructions: Vec::new(),
-                terminator: ir::IrTerminator::Return(None),
-            }],
+            blocks: vec![ir::IrBlock::synthetic(ir::BlockId(0), Vec::new(), ir::IrTerminator::Return(None))],
         }
     }
 

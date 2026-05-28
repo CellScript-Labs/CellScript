@@ -1,7 +1,9 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release
-**Scope**: Metadata Semantics, Descriptive Standard Compatibility, and Production Tooling Skeleton
+**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release; active
+compiler-freeze hardening is tracked in this roadmap.
+**Scope**: Metadata Semantics, Descriptive Standard Compatibility, Production
+Tooling Skeleton, and Rust-comparative compiler hardening.
 **Dependencies**: v0.13, v0.14, and v0.15 complete
 
 ---
@@ -11,9 +13,13 @@
 The `nightly-0.16` branch implements the scoped metadata-assurance release.
 It does not claim full production transaction solving, CKB VM compatibility
 execution, stable protocol stdlib implementations, or formal verification.
-Those items are explicitly deferred to 0.17.
 
-| Area | 0.16 Status | Artifact | Deferred To 0.17 |
+After the Rust comparative audit (`RUST_COMPARATIVE_AUDIT.md`), 0.16 also owns
+the freeze-critical compiler hardening needed to make the release credible as a
+compiler release rather than only a metadata/tooling release. CKB production
+completeness and the non-critical comparative-audit cleanup remain 0.17 work.
+
+| Area | 0.16 Status | Artifact | Remaining / next scope |
 |---|---|---|---|
 | Operational semantics | Implemented as mechanically precise prose plus conformance tests | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md` and `tests/v0_16.rs` | Machine-checked/formal proof backend |
 | ProofPlan soundness checks | Implemented as fail-closed metadata consistency checker | `proof_plan::soundness`, `runtime.proof_plan_soundness`, and `--primitive-strict=0.16` enforcement | Formal invariant proof and source-to-assembly coverage |
@@ -24,12 +30,14 @@ Those items are explicitly deferred to 0.17.
 | Deployment governance | Implemented as local manifest/schema/integrity tooling | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` | On-chain deployment verification |
 | Audit/debug UX | Implemented as metadata/IR reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` | Full CellScript-to-RISC-V source maps |
 | Stdlib release track | Implemented as schema stubs only | `src/stdlib/ckb_protocols/*` descriptors marked `schema-stub` | ABI-compatible protocol stdlib implementations and executable coverage |
+| Compiler-freeze hardening | In progress for P0 plus key P1 only | `RUST_COMPARATIVE_AUDIT.md`, IR poison lowering, register contract gate, syscall ABI baseline, IR provenance, error-line tests | Remaining comparative-audit cleanup is 0.17 scope |
 
 Boundary: v0.16 does not claim full formal verification or production CKB
 protocol equivalence. The branch implements metadata consistency checking,
 schema-bound builder evidence, descriptive fixtures, local deployment integrity
-checks, and transaction template generation. CKB VM execution, real transaction
-solving, and protocol stdlib implementation are 0.17 scope.
+checks, transaction template generation, and compiler-freeze hardening. CKB VM
+execution, real transaction solving, and protocol stdlib implementation are
+0.17 scope; non-critical Rust-comparative compiler cleanup is also 0.17 scope.
 
 ## Goal
 
@@ -274,6 +282,76 @@ Add validation APIs:
 
 ---
 
+## P0: Compiler Freeze Hardening From Rust Comparative Audit
+
+This track incorporates the Rust comparative audit into 0.16. It is split into
+`0.16 freeze blockers` and `key P1 hardening`. Everything outside those two
+sets moves to the 0.17 roadmap.
+
+The principle is:
+
+> 0.16 blocks only on correctness, backend contracts, CKB ABI evidence,
+> instruction-level provenance, and line-aware diagnostic tests. Broader
+> maintainability refactors do not block this freeze.
+
+### 4A. 0.16.0 Freeze Blockers
+
+| Priority | Item | 0.16 disposition | Acceptance |
+|---|---|---|---|
+| P0 | IR poison/error lowering | Error recovery must not produce a normal-looking IR value. Lowering errors return explicit poison, not live `IrConst::U64(0)` sentinels. | Invalid source cannot feed semantic `Binary`, `Call`, `Cast`, `Index`, `FieldAccess`, `If`, `Match`, array, or Vec lowering as if it had a valid value; verifier and codegen reject poisoned IR. A deeper `Lowered<T>` representation is tracked for 0.17. |
+| P0 | Register contract constants and gate | `s10`, `s11`, and `t6` conventions are named compiler contracts. | Entry-wrapper writes to reserved registers are whitelisted; non-entry clobbers fail codegen; far branch relaxation reports the named scratch register. |
+| P0 | Syscall ABI baseline | CKB syscall numbers and VM2 spawn/IPC numbers are checked against a versioned baseline. | `tests/syscall_abi_baseline.json` is compared to `syscalls.rs` and runtime ABI fields in the fast test gate. |
+
+### 4B. Key P1 Hardening Kept In 0.16
+
+| Priority | Item | 0.16 disposition | Acceptance |
+|---|---|---|---|
+| P1 | IR provenance wrapper | Add `SpannedIrInstruction { kind, span }` and `SpannedIrTerminator { kind, span }` views without changing semantic helper matches. | Lowered user-originated IR records instruction/terminator provenance; verifier gates provenance shape; synthetic test IR can remain unspanned. |
+| P1 | Error-line regression directives | Extend test directives from substring-only `expect-error:TEXT` to `expect-error-line:N:TEXT`. | Diagnostics assert line and text together; span regressions fail tests. |
+
+### 4C. Comparative-Audit Work Moved To 0.17
+
+The remaining audit recommendations are valuable, but they are no longer 0.16
+freeze items. They are tracked in `docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
+
+- deeper `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` representation;
+- tuple formatter and `Span::Display` hygiene;
+- per-function backend validation beyond the 0.16 register/syscall gates;
+- exhaustive IR helper semantic tests;
+- phase boundary markers;
+- warning/dedup diagnostic model hardening;
+- behaviour-preserving splits of `lib.rs`, `types/mod.rs`, and CLI commands;
+- structured generic/type resolver cleanup;
+- release tidy gate.
+
+### 4D. Rustc Discipline To Adopt Without Rustc Bureaucracy
+
+Adopt these compiler disciplines, with only the freeze-critical subset blocking
+0.16:
+
+- every IR artifact has provenance;
+- user-facing errors flow through diagnostics, not panic paths;
+- error recovery can continue collecting diagnostics but must not create trusted
+  semantic artifacts;
+- backend conventions are named, tested contracts;
+- snapshot and error-line tests are stronger than substring-only tests;
+- phase boundaries are explicit and locally verifiable;
+- release gates validate local invariants, not only final ELF assembly.
+
+Do not copy these rustc-scale systems for 0.16:
+
+- query system / `TyCtxt`;
+- macro hygiene / `SyntaxContext`;
+- full MIR dataflow framework;
+- global `SourceMap` and interning architecture;
+- LLVM/Cranelift abstraction;
+- multi-crate compiler cathedral.
+
+CellScript remains a CKB-first DSL. The target is rustc-level discipline, not
+rustc-level bureaucracy.
+
+---
+
 ## P1: 0.16 Tooling Skeleton
 
 ### 5. Transaction Template Emitter
@@ -422,7 +500,7 @@ Rules:
 
 ---
 
-## Deferred Beyond 0.16
+## P2: 0.16 Long-Horizon Research Tracks
 
 ### 9. Advanced Linear Collections
 
@@ -480,8 +558,10 @@ Explore one or more backends:
 
 ### 11. 0.17 Production-Completeness Tracks
 
-The following are deliberately not 0.16 release gates. They move to
-`docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
+The following are CKB production-completeness tracks, not compiler-freeze
+hardening. They remain in `docs/0.17/CELLSCRIPT_0_17_ROADMAP.md` and should not
+be confused with the freeze-critical Rust-comparative hardening items kept in
+0.16:
 
 - executable CKB VM compatibility fixtures;
 - iCKB-style differential testing;
@@ -517,6 +597,15 @@ v0.16 can ship when the scoped metadata/tooling release satisfies:
   codegen coverage status
 - CKB protocol stdlib descriptors are explicitly marked `schema-stub`, not
   `stable`
+- IR lowering has explicit poison/error semantics; verifier and codegen reject
+  poisoned artifacts rather than treating error recovery as a valid value
+- backend register contracts for entry-wrapper registers and branch-relaxation
+  scratch registers are named and gate-tested
+- CKB syscall and VM2 spawn/IPC ABI numbers match a checked 0.16 baseline
+- key P1 audit hardening is present: instruction/terminator provenance wrappers
+  and `expect-error-line:N:TEXT` diagnostics tests
+- all non-critical Rust-comparative audit cleanup is tracked in the 0.17 roadmap
+  rather than blocking 0.16 freeze
 - `cargo fmt --all`, `cargo check --locked -p cellscript --all-targets`,
   `cargo test --locked -p cellscript`, `cargo clippy --locked -p cellscript
   --all-targets -- -D warnings`, and `git diff --check` pass

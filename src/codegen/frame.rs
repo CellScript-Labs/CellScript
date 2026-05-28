@@ -20,8 +20,8 @@ use super::schema::{
     named_type_name,
 };
 use super::{
-    CodeGenerator, RUNTIME_CELL_SLOT_SIZE, RUNTIME_COLLECTION_BUFFER_SIZE, RUNTIME_EXPR_TEMP_SIZE, RUNTIME_EXPR_TEMP_SLOTS,
-    RUNTIME_SCRATCH_SIZE, RUNTIME_SCRATCH_SLOT_SIZE,
+    CodeGenerator, ENTRY_DIRECT_RETURN_REG, ENTRY_DIRECT_STACK_BASE_REG, RUNTIME_CELL_SLOT_SIZE, RUNTIME_COLLECTION_BUFFER_SIZE,
+    RUNTIME_EXPR_TEMP_SIZE, RUNTIME_EXPR_TEMP_SLOTS, RUNTIME_SCRATCH_SIZE, RUNTIME_SCRATCH_SLOT_SIZE,
 };
 
 impl CodeGenerator {
@@ -53,8 +53,8 @@ impl CodeGenerator {
             self.emit_runtime_error_comment(error);
             self.emit(format!("li a0, {}", error.code()));
             self.emit("# cellscript abi: abort to entry failure context");
-            self.emit("mv sp, s10");
-            self.emit("mv ra, s11");
+            self.emit(format!("mv sp, {}", ENTRY_DIRECT_STACK_BASE_REG));
+            self.emit(format!("mv ra, {}", ENTRY_DIRECT_RETURN_REG));
             self.emit("ret");
         }
         let fail_codes = self.fail_handler_codes.iter().copied().collect::<Vec<_>>();

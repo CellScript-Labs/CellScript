@@ -31,10 +31,14 @@ the same CKB transaction fixtures.
 ProofPlan metadata.
 
 0.16 added metadata assurance, builder assumptions, descriptive compatibility
-fixtures, transaction-shape validation, and deployment/audit tooling.
+fixtures, transaction-shape validation, deployment/audit tooling, and
+Rust-comparative compiler hardening for the freeze-critical subset: IR poison
+semantics, backend register contracts, syscall ABI baselines, IR provenance,
+and line-aware diagnostic tests.
 
 0.17 must convert the important remaining metadata/model claims into executable
-CKB checks and CKB test evidence.
+CKB checks and CKB test evidence, and it owns the non-critical comparative-audit
+cleanup deliberately kept out of the 0.16 freeze.
 
 | Track | 0.15 | 0.16 | 0.17 |
 |---|---|---|---|
@@ -44,11 +48,12 @@ CKB checks and CKB test evidence.
 | Protocol stdlib | Macro provenance | Schema stubs | ABI-compatible DAO/xUDT/script helpers |
 | Evidence | Compiler tests | Metadata/tooling tests | CKB VM and differential tests |
 
-## Deferred From 0.16
+## Production Completeness Deferred From 0.16
 
-0.16 is now scoped to metadata assurance and deterministic local tooling. 0.17
-owns the production-completeness work that would make iCKB-style protocol
-claims meaningful:
+0.16 owns only the P0 plus key P1 compiler-freeze hardening tracked in
+`roadmap/CELLSCRIPT_0_16_ROADMAP.md`. 0.17 owns the CKB
+production-completeness work that would make iCKB-style protocol claims
+meaningful:
 
 - executable CKB VM accepted/rejected fixture runner;
 - iCKB-style differential tests against original Rust scripts and generated
@@ -62,6 +67,28 @@ claims meaningful:
 - on-chain deployment verification;
 - executable aggregate invariant lowering with exact equality, grouping,
   computed per-cell terms, and overflow-safe accounting.
+
+## Comparative Audit Cleanup Deferred From 0.16
+
+The following Rust-comparative audit items remain important, but they do not
+block the 0.16 freeze after IR poison, register/syscall gates, IR provenance,
+and error-line tests are in place:
+
+- replace the bridge `IrConst::Poisoned` representation with a deeper
+  `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` lowering result;
+- fix tuple formatter round-trip and `Span::Display` line/column hygiene;
+- extend backend validation to per-function stack balance, call targets,
+  register clobbers, unsupported pseudo-ops, and ABI drift;
+- add exhaustive semantic tests for `instruction_dest`,
+  `instruction_operands`, and related IR helper coverage;
+- introduce lightweight `IrPhase` / `CodegenPhase` legality markers;
+- harden the diagnostic model with warning-level diagnostics and deduplication;
+- split `lib.rs`, `types/mod.rs`, and CLI command ownership after the freeze
+  without changing behaviour;
+- replace ad hoc generic/type-name parsing with structured resolver/type
+  boundary data;
+- add release tidy checks for debug leftovers, runtime error-code coverage,
+  migration diagnostic tests, and lint posture.
 
 ## Non-Goals
 

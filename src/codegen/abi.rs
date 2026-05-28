@@ -15,7 +15,8 @@ use crate::ENTRY_WITNESS_ABI_MAGIC;
 use super::assembler::align_up;
 use super::{
     fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, fixed_register_width, named_type_name, type_static_length,
-    CellScriptRuntimeError, CodeGenerator, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING,
+    CellScriptRuntimeError, CodeGenerator, CKB_INDEX_OUT_OF_BOUND, CKB_ITEM_MISSING, ENTRY_DIRECT_RETURN_REG,
+    ENTRY_DIRECT_STACK_BASE_REG,
 };
 pub(crate) const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 pub(crate) const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
@@ -226,8 +227,8 @@ impl CodeGenerator {
         self.emit(format!("# cellscript entry abi: {} calls no-arg {}", ENTRY_WITNESS_LABEL, target));
         self.emit_large_addi("sp", "sp", -16);
         self.emit_stack_store("ra", 8);
-        self.emit("mv s10, sp");
-        self.emit(format!("la s11, {}", done_label));
+        self.emit(format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG));
+        self.emit(format!("la {}, {}", ENTRY_DIRECT_RETURN_REG, done_label));
         self.emit(format!("call {}", target));
         self.emit_label(&done_label);
         self.emit_stack_load("ra", 8);
@@ -270,8 +271,8 @@ impl CodeGenerator {
         self.emit("# cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload");
         self.emit_large_addi("sp", "sp", -(entry_frame_size as i64));
         self.emit_stack_store("ra", entry_ra_offset);
-        self.emit("mv s10, sp");
-        self.emit(format!("la s11, {}", done_label));
+        self.emit(format!("mv {}, sp", ENTRY_DIRECT_STACK_BASE_REG));
+        self.emit(format!("la {}, {}", ENTRY_DIRECT_RETURN_REG, done_label));
         if has_lock_args {
             self.emit_entry_load_script_args(&fail_label);
         }

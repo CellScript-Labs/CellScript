@@ -660,6 +660,30 @@ mod tests {
     }
 
     #[test]
+    fn ckb_syscall_abi_matches_checked_baseline() {
+        let expected_stdlib = baseline_number_pairs("ckb_mainnet_syscalls", "symbol");
+        let actual_stdlib = stdlib_syscall_specs(TargetProfile::Ckb)
+            .into_iter()
+            .map(|spec| (spec.symbol.to_string(), spec.number))
+            .collect::<Vec<_>>();
+        assert_eq!(actual_stdlib, expected_stdlib);
+
+        let runtime_abi = crate::codegen::runtime_syscall_abi(TargetProfile::Ckb);
+        let actual_runtime = vec![
+            ("load_header_by_field".to_string(), runtime_abi.load_header_by_field),
+            ("load_input_by_field".to_string(), runtime_abi.load_input_by_field),
+            ("load_witness".to_string(), runtime_abi.load_witness),
+            ("load_script".to_string(), runtime_abi.load_script),
+            ("load_cell_by_field".to_string(), runtime_abi.load_cell_by_field),
+            ("load_cell_data".to_string(), runtime_abi.load_cell_data),
+        ];
+        assert_eq!(actual_runtime, baseline_number_pairs("runtime_syscall_abi", "name"));
+
+        let actual_vm2 = vm2_helper_specs().iter().map(|spec| (spec.symbol.to_string(), spec.number)).collect::<Vec<_>>();
+        assert_eq!(actual_vm2, baseline_number_pairs("ckb_vm_v2_spawn_ipc_syscalls", "symbol"));
+    }
+
+    #[test]
     fn helper_inventory_has_no_duplicate_symbols() {
         let mut seen = BTreeSet::new();
         for entry in helper_inventory_entries(TargetProfile::Ckb) {
@@ -691,5 +715,27 @@ mod tests {
                 "{entry:?}"
             );
         }
+    }
+
+    fn baseline_number_pairs(section: &str, name_key: &str) -> Vec<(String, u64)> {
+        let baseline: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/syscall_abi_baseline.json")).expect("syscall ABI baseline JSON should parse");
+        baseline
+            .get(section)
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or_else(|| panic!("missing syscall ABI baseline section '{section}'"))
+            .iter()
+            .map(|entry| {
+                let name = entry
+                    .get(name_key)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_else(|| panic!("baseline section '{section}' entry is missing string key '{name_key}'"));
+                let number = entry
+                    .get("number")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_else(|| panic!("baseline section '{section}' entry '{name}' is missing u64 number"));
+                (name.to_string(), number)
+            })
+            .collect()
     }
 }

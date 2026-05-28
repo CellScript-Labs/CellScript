@@ -4220,6 +4220,7 @@ struct CompileTestExpectation {
     expect_success: bool,
     expect_fail: bool,
     expected_errors: Vec<String>,
+    expected_error_lines: Vec<ExpectedErrorLine>,
     target: Option<String>,
     production: bool,
     deny_fail_closed: bool,
@@ -4241,6 +4242,12 @@ struct CompileTestExpectation {
     forbidden_functions: Vec<String>,
     expected_locks: Vec<String>,
     forbidden_locks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedErrorLine {
+    line: usize,
+    text: String,
 }
 
 impl CompileTestExpectation {
@@ -4284,6 +4291,9 @@ fn parse_test_expectation(path: &Path, source: &str) -> Result<CompileTestExpect
             if !expected.is_empty() {
                 expectation.expected_errors.push(expected.to_string());
             }
+        } else if let Some(expected) = directive.strip_prefix("expect-error-line:").map(str::trim) {
+            expectation.expect_fail = true;
+            expectation.expected_error_lines.push(parse_expected_error_line(path, line_number, expected)?);
         } else if let Some(target) = directive.strip_prefix("target:").map(str::trim) {
             if target.is_empty() {
                 return Err(compile_test_directive_error(path, line_number, "target directive requires a non-empty target"));
@@ -4382,11 +4392,32 @@ fn parse_test_expectation(path: &Path, source: &str) -> Result<CompileTestExpect
     }
     if expectation.expect_success && expectation.expect_fail {
         return Err(crate::error::CompileError::without_span(format!(
-            "{}: conflicting cellscript-test directives: expect-success cannot be combined with expect-fail/expect-error",
+            "{}: conflicting cellscript-test directives: expect-success cannot be combined with expect-fail/expect-error/expect-error-line",
             path.display()
         )));
     }
     Ok(expectation)
+}
+
+fn parse_expected_error_line(path: &Path, zero_based_line: usize, directive: &str) -> Result<ExpectedErrorLine> {
+    let Some((line, text)) = directive.split_once(':') else {
+        return Err(compile_test_directive_error(
+            path,
+            zero_based_line,
+            "expect-error-line requires N:TEXT, for example expect-error-line:12:type mismatch",
+        ));
+    };
+    let line = line.trim().parse::<usize>().map_err(|_| {
+        compile_test_directive_error(path, zero_based_line, "expect-error-line requires a positive numeric source line")
+    })?;
+    if line == 0 {
+        return Err(compile_test_directive_error(path, zero_based_line, "expect-error-line source line must be greater than zero"));
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(compile_test_directive_error(path, zero_based_line, "expect-error-line requires non-empty error text"));
+    }
+    Ok(ExpectedErrorLine { line, text: text.to_string() })
 }
 
 fn push_non_empty_test_directive(
@@ -4420,17 +4451,30 @@ fn evaluate_compile_test_result(
         (true, Ok(_)) => Err(crate::error::CompileError::without_span(format!("{}: expected compile failure, got success", path))),
         (true, Err(error)) => {
             let message = error.to_string();
-            let missing = expectation
+            let missing_text = expectation
                 .expected_errors
                 .iter()
                 .filter(|expected| !message.contains(expected.as_str()))
                 .cloned()
                 .collect::<Vec<_>>();
-            if missing.is_empty() {
+            let missing_line = expectation
+                .expected_error_lines
+                .iter()
+                .filter(|expected| !compile_error_matches_line(&error, &message, expected))
+                .map(|expected| format!("{}:{}", expected.line, expected.text))
+                .collect::<Vec<_>>();
+            if missing_text.is_empty() && missing_line.is_empty() {
                 Ok(())
             } else {
+                let mut missing = Vec::new();
+                if !missing_text.is_empty() {
+                    missing.push(format!("text [{}]", missing_text.join(", ")));
+                }
+                if !missing_line.is_empty() {
+                    missing.push(format!("line [{}]", missing_line.join(", ")));
+                }
                 Err(crate::error::CompileError::without_span(format!(
-                    "{}: expected error text not found: {}; actual error: {}",
+                    "{}: expected error not found: {}; actual error: {}",
                     path,
                     missing.join(", "),
                     message
@@ -4438,6 +4482,15 @@ fn evaluate_compile_test_result(
             }
         }
     }
+}
+
+fn compile_error_matches_line(error: &crate::error::CompileError, message: &str, expected: &ExpectedErrorLine) -> bool {
+    if error.span.line == expected.line && message.contains(expected.text.as_str()) {
+        return true;
+    }
+
+    let line_marker = format!("line {}", expected.line);
+    message.lines().any(|line| line.contains(expected.text.as_str()) && line.contains(&line_marker))
 }
 
 fn validate_compile_test_metadata(
