@@ -107,6 +107,11 @@ cellc check --target-profile ckb
 cellc metadata examples/token.cell --target-profile ckb --json
 cellc constraints examples/token.cell --target-profile ckb
 cellc scheduler-plan examples/token.cell --target-profile ckb
+cellc explain-assumptions examples/token.cell --target-profile ckb --json
+cellc solve-tx examples/token.cell --target-profile ckb --json
+cellc deploy-plan examples/token.cell --target-profile ckb --json
+cellc profile examples/token.cell --target-profile ckb --json
+cellc audit-bundle examples/token.cell --target-profile ckb --json
 ```
 
 这些命令展示编译器认为协议会 read、write、create、consume、assume 什么，
@@ -269,13 +274,14 @@ artifact 设计——而不是围绕账户存储或单链专用 VM：
 
 CellScript 为早期用户提供 production-style 的本地语言工具：
 
-- **In-process LSP** — 诊断、补全、hover、go-to-definition、引用、重命名、
+- **In-process LSP** — 诊断、补全、hover、go-to-definition、引用、
   格式化和 metadata-oriented code actions。编译器 crate 暴露 `LspServer`；
   `cellc --lsp` 提供完整的 `tower-lsp` JSON-RPC stdio 传输。
 - **VS Code 扩展** — 语法高亮、snippets、on-save 诊断、compiler-backed
-  格式化、scratch compile、metadata/constraints/production report、
-  CKB target-profile 参数和状态栏反馈。它调用 `cellc`（或 `cargo run` 回退），
-  所以编辑器行为和 CLI/CI 保持一致。
+  格式化、scratch compile、metadata/constraints/production report，以及
+  active-file 0.16 builder assumptions、transaction template、deploy plan、
+  profile、audit-bundle report、CKB target-profile 参数和状态栏反馈。它调用
+  `cellc`（或 `cargo run` 回退），所以编辑器行为和 CLI/CI 保持一致。
 
 - [VS Code 扩展](editors/vscode-cellscript/README.md)
 - [运行时错误码](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
@@ -536,6 +542,12 @@ path dependencies、lockfile 刷新，以及 package build/check/doc/fmt 流程
 | `cellc entry-witness` | 编码 `_cellscript_entry` witness 字节 |
 | `cellc scheduler-plan` | 消费 scheduler hints，输出串行/冲突策略报告 |
 | `cellc ckb-hash` | 为 builder 和 release evidence 计算 CKB 默认 Blake2b-256 hash |
+| `cellc explain-assumptions` | 从 ProofPlan metadata 输出 v0.16 builder-assumption evidence |
+| `cellc validate-tx` | 在签名前按 builder assumptions 校验交易 JSON shape |
+| `cellc solve-tx` | 从 metadata 输出 deterministic transaction template |
+| `cellc deploy-plan` | 输出 reproducible deployment plan |
+| `cellc verify-deploy` / `diff-deploy` / `lock-deps` | 校验、对比和锁定 deployment metadata |
+| `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | 输出 v0.16 audit/debug reports |
 | `cellc opt-report` | 对比 O0..O3 的 artifact size 和 constraints status |
 | `cellc verify-artifact` | 用 metadata sidecar 校验 artifact |
 | `cellc test` | 运行编译器/policy 测试（非可信 runtime 执行） |

@@ -6,6 +6,12 @@
   ProofPlan soundness checks, builder-assumption metadata, transaction-shape
   validation, solver templates, deployment reports, proof diffs, profiling,
   transaction traces, and audit bundles.
+- Harden the 0.16 compiler-freeze gate with explicit IR poison rejection,
+  instruction-level IR provenance, reserved-register contract checks, syscall
+  ABI baseline coverage, and line-exact diagnostic regression directives.
+- Align `cellc --help`, README command tables, and the VS Code active-file
+  command surface with the 0.16 builder, transaction-template, deployment,
+  profile, and audit-bundle tooling.
 - Add `--primitive-strict=0.16`, which includes the 0.15 primitive vocabulary
   rules and rejects metadata-only/runtime-required ProofPlan gaps in strict
   assurance mode.

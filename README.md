@@ -110,6 +110,11 @@ Inspect what the compiler can explain about the token example:
 cellc metadata examples/token.cell --target-profile ckb --json
 cellc constraints examples/token.cell --target-profile ckb
 cellc scheduler-plan examples/token.cell --target-profile ckb
+cellc explain-assumptions examples/token.cell --target-profile ckb --json
+cellc solve-tx examples/token.cell --target-profile ckb --json
+cellc deploy-plan examples/token.cell --target-profile ckb --json
+cellc profile examples/token.cell --target-profile ckb --json
+cellc audit-bundle examples/token.cell --target-profile ckb --json
 ```
 
 These commands show what the compiler believes the protocol reads, writes,
@@ -383,15 +388,16 @@ operations, linear checking, schema metadata, and policy-verifiable artifacts.
 CellScript includes production-style local language tooling for early users:
 
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
-  references, rename, formatting, and metadata-oriented code actions. The
+  references, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
   `tower-lsp` JSON-RPC transport over stdio. Completions include flow
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
-  reports, CKB target-profile arguments, and status-bar feedback. It shells out to
-  `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
-  CI gates.
+  reports, active-file 0.16 builder assumptions, transaction template, deploy
+  plan, profile, audit-bundle reports, CKB target-profile arguments, and
+  status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
+  behavior stays identical to CLI and CI gates.
 
 - [VS Code extension](editors/vscode-cellscript)
 - [Runtime error codes](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
@@ -662,6 +668,12 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc entry-witness` | Encode `_cellscript_entry` witness bytes |
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
+| `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
+| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing |
+| `cellc solve-tx` | Emit a deterministic transaction template from metadata |
+| `cellc deploy-plan` | Emit a reproducible deployment plan |
+| `cellc verify-deploy` / `diff-deploy` / `lock-deps` | Verify, compare, and lock deployment metadata |
+| `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | Emit v0.16 audit and debug reports |
 | `cellc opt-report` | Compare O0..O3 artifact size and constraints status |
 | `cellc verify-artifact` | Verify an artifact against its metadata sidecar |
 | `cellc test` | Run compiler and policy tests (no trusted runtime execution) |

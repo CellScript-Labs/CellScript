@@ -9,9 +9,9 @@ go-to-definition, find-references, signature help, document highlighting,
 folding, formatting, code actions, and document symbols — all backed by the
 CellScript compiler's parser, type-checker, and lowering pipeline.
 
-CLI-backed commands (compile, metadata, constraints, production report)
-continue to spawn `cellc` directly for one-shot operations that are
-outside the LSP scope.
+CLI-backed commands continue to spawn `cellc` directly for one-shot operations
+that are outside the LSP scope, including the active-file 0.16 builder,
+transaction-template, deployment, profile, and audit-bundle reports.
 
 ## Features
 
@@ -35,6 +35,11 @@ outside the LSP scope.
 - compile to a scratch artifact for the configured RISC-V target
 - `cellc metadata` JSON report
 - `cellc constraints` JSON report
+- `cellc explain-assumptions --json` builder-assumption report
+- `cellc solve-tx --json` deterministic transaction-template report
+- `cellc deploy-plan --json` deployment-plan report
+- `cellc profile --json` metadata-level profile report
+- `cellc audit-bundle --json` generation into `.cellscript-vscode`
 - production report (version + metadata + constraints)
 - CKB target-profile arguments for compiler-backed reports
 
@@ -139,6 +144,11 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Compile Current File` | Compile the active file to a scratch RISC-V assembly artifact and print compiler output. |
 | `CellScript: Show Metadata` | Run `cellc metadata` for the active file and show JSON in the CellScript output channel. |
 | `CellScript: Show Constraints` | Run `cellc constraints` for the active file and show JSON in the CellScript output channel. |
+| `CellScript: Show Builder Assumptions` | Run `cellc explain-assumptions --json` for the active file. |
+| `CellScript: Show Transaction Template` | Run `cellc solve-tx --json` for the active file. |
+| `CellScript: Show Deploy Plan` | Run `cellc deploy-plan --json` for the active file. |
+| `CellScript: Show Profile` | Run `cellc profile --json` for the active file. |
+| `CellScript: Generate Audit Bundle` | Run `cellc audit-bundle --json` for the active file and write the bundle under `.cellscript-vscode`. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
 Diagnostics, completion, hover, go-to-definition, references, formatting,
@@ -153,7 +163,7 @@ language server — no explicit commands needed.
 | `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable and the workspace is trusted. |
 | `cellscript.commandTimeoutMs` | `15000` | Timeout for compiler-backed CLI commands. |
 | `cellscript.maxOutputBytes` | `4194304` | Captured stdout/stderr limit. |
-| `cellscript.target` | `riscv64-asm` | Compiler target for compile/metadata/constraints commands. |
+| `cellscript.target` | `riscv64-asm` | Compiler target for active-file compiler reports. |
 
 ## Local Validation
 
@@ -188,12 +198,16 @@ check the JSON/prose output for:
 - schema hash and ABI/schema metadata;
 - constraints hash or constraints JSON saved by the build;
 - build provenance and source hash fields;
+- builder assumptions, transaction template, deploy plan, profile report, and audit bundle paths when those active-file commands are used;
 - target profile and entry-action/entry-lock scope;
 - CKB capacity/cycle limits;
 - external audit signatures attached by the release process.
 
 The extension displays compiler evidence. It does not create audit signatures,
 publish packages, deploy code cells, or replace CKB acceptance gates.
+Commands that require extra files, such as `validate-tx`, `trace-tx`,
+`proof-diff`, `verify-deploy`, `diff-deploy`, and `lock-deps`, remain CLI-first
+tools.
 
 ## Scope
 

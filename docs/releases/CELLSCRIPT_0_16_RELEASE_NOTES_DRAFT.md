@@ -1,14 +1,19 @@
 # CellScript 0.16 Release Notes Draft
 
-Status: implementation branch draft for `nightly-0.16`.
+Status: freeze-complete branch draft for `nightly-0.16`.
 
-Updated: 2026-05-26.
+Updated: 2026-05-29.
 
 CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
 assurance toolchain. The release adds operational semantics, ProofPlan
 soundness checks, stable builder assumption metadata, transaction-shape
 validation, deployment and audit reports, standard CKB compatibility
 descriptive fixtures, and CKB stdlib protocol module schema stubs.
+
+The freeze gate also includes the compiler-hardening work from the Rust
+comparative audit: IR poison rejection after recorded lowering errors,
+instruction-level IR provenance, reserved-register contract verification,
+checked syscall ABI baselines, and line-exact diagnostic regression tests.
 
 Production-completeness items such as executable CKB VM fixture execution,
 full transaction solving, source-to-assembly maps, and protocol stdlib
@@ -144,6 +149,12 @@ CellScript-to-RISC-V assembly source maps are not yet available.
 The VS Code extension package is aligned with CellScript 0.16.0. Its README,
 changelog, package metadata, validation script, and packaged VSIX now describe
 the current `cellc --lsp` tooling surface and 0.16 authoring surface.
+
+Active-file editor commands cover the 0.16 report surface that does not need
+extra input files: `explain-assumptions`, `solve-tx`, `deploy-plan`, `profile`,
+and `audit-bundle`. Commands that compare or validate separate files remain
+CLI-first: `validate-tx`, `trace-tx`, `proof-diff`, `verify-deploy`,
+`diff-deploy`, and `lock-deps`.
 
 ### Standard Compatibility Suite
 
