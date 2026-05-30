@@ -1375,13 +1375,32 @@ impl CodeGenerator {
         start: usize,
         width: usize,
     ) {
-        self.emit(format!("li {}, 0", dest_reg));
-        for byte_index in 0..width {
-            self.emit_fixed_byte_source_byte_to(scratch_reg, base_reg, source, start + byte_index);
-            if byte_index != 0 {
-                self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+        match source {
+            ExpectedFixedByteSource::Const(bytes) => {
+                self.emit(format!("li {}, 0", dest_reg));
+                for byte_index in 0..width {
+                    self.emit(format!("li {}, {}", scratch_reg, bytes[start + byte_index]));
+                    if byte_index != 0 {
+                        self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+                    }
+                    self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+                }
             }
-            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+            _ => {
+                if !self.emit_fixed_byte_source_pointer_to(base_reg, source) {
+                    self.emit("# cellscript abi: fail closed because fixed-byte scalar source is not addressable");
+                    self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                    return;
+                }
+                self.emit(format!("li {}, 0", dest_reg));
+                for byte_index in 0..width {
+                    self.emit(format!("lbu {}, {}({})", scratch_reg, start + byte_index, base_reg));
+                    if byte_index != 0 {
+                        self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+                    }
+                    self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+                }
+            }
         }
     }
 

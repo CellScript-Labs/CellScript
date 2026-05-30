@@ -28,6 +28,7 @@ pub(crate) const ENTRY_SCRIPT_ARGS_LEN_OFFSET: usize = ENTRY_SCRIPT_ARGS_START_O
 pub(crate) const ENTRY_SCRIPT_ARGS_CURSOR_OFFSET: usize = ENTRY_SCRIPT_ARGS_LEN_OFFSET + 8;
 pub(crate) const ENTRY_SCRIPT_BUFFER_OFFSET: usize = ENTRY_SCRIPT_ARGS_CURSOR_OFFSET + 8;
 pub(crate) const ENTRY_SCRIPT_BUFFER_SIZE: usize = 1024;
+const ENTRY_WITNESS_CURSOR_SCRATCH_OFFSET: usize = ENTRY_SCRIPT_BUFFER_OFFSET + ENTRY_SCRIPT_BUFFER_SIZE;
 pub(crate) const ENTRY_WITNESS_FRAME_SIZE: usize = 2304;
 pub(crate) const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
 pub(crate) const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
@@ -153,6 +154,11 @@ fn entry_witness_register_param_width(ty: &IrType) -> Option<usize> {
         _ => None,
     })
 }
+
+fn entry_temp_reg(excluded: &[&str]) -> &'static str {
+    ["t0", "t1", "t2", "t3", "t4", "t5", "t6"].into_iter().find(|candidate| !excluded.contains(candidate)).unwrap_or("t6")
+}
+
 // ---------------------------------------------------------------------------
 // CodeGenerator ABI methods
 // ---------------------------------------------------------------------------
@@ -352,7 +358,9 @@ impl CodeGenerator {
                 let param_is_runtime_bound =
                     runtime_bound_param_indices.contains(&param_index) || matches!(param.ty, IrType::Ref(_) | IrType::MutRef(_));
                 if param.source == ParamSource::LockArgs {
+                    self.emit_stack_store(ENTRY_ABI_CURSOR_REG, ENTRY_WITNESS_CURSOR_SCRATCH_OFFSET);
                     self.emit_entry_lock_args_param(&mut abi_index, param, outgoing_stack_arg_bytes, &fail_label);
+                    self.emit_stack_load(ENTRY_ABI_CURSOR_REG, ENTRY_WITNESS_CURSOR_SCRATCH_OFFSET);
                 } else if param_is_runtime_bound {
                     self.emit(format!("# cellscript entry abi: runtime-bound param {} is loaded from transaction cells", param.name));
                     self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
@@ -721,24 +729,33 @@ impl CodeGenerator {
     }
 
     fn emit_entry_load_u32_from_stack(&mut self, dest_reg: &str, stack_offset: usize) {
+        let temp_reg = entry_temp_reg(&[dest_reg]);
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..4 {
-            self.emit_stack_load_byte("t0", stack_offset + byte_index);
+            self.emit_stack_load_byte(temp_reg, stack_offset + byte_index);
             if byte_index != 0 {
-                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+                self.emit(format!("slli {}, {}, {}", temp_reg, temp_reg, byte_index * 8));
             }
-            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, temp_reg));
         }
     }
 
     fn emit_entry_load_u32_from_reg(&mut self, dest_reg: &str, base_reg: &str) {
+        let pointer_reg = if dest_reg == base_reg {
+            let pointer_reg = entry_temp_reg(&[dest_reg]);
+            self.emit(format!("mv {}, {}", pointer_reg, base_reg));
+            pointer_reg
+        } else {
+            base_reg
+        };
+        let temp_reg = entry_temp_reg(&[dest_reg, pointer_reg]);
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..4 {
-            self.emit(format!("lbu t0, {}({})", byte_index, base_reg));
+            self.emit(format!("lbu {}, {}({})", temp_reg, byte_index, pointer_reg));
             if byte_index != 0 {
-                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+                self.emit(format!("slli {}, {}, {}", temp_reg, temp_reg, byte_index * 8));
             }
-            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, temp_reg));
         }
     }
 

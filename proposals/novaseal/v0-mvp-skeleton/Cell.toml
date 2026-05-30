@@ -1,0 +1,44 @@
+[package]
+name = "novaseal"
+version = "0.0.1-v0-mvp"
+authors = ["NovaSeal Design Team (skeleton)"]
+description = "NovaSeal v0 MVP skeleton - BTC key/multisig authorised CKB Cell transitions (strict minimal slice)"
+license = "MIT"
+repository = ""
+homepage = ""
+documentation = ""
+keywords = ["ckb", "btc", "btcfi", "novaseal", "cellscript"]
+categories = ["protocol", "asset", "audit"]
+cellscript_version = "0.16"
+entry = "src/nova_state_type.cell"   # Primary type script entry for now; lock is separate module
+
+source_roots = ["src"]
+include = ["schemas/**/*", "proofs/**/*", "fixtures/**/*"]
+exclude = []
+
+[dependencies]
+
+[dev_dependencies]
+
+[build.dependencies]
+
+[policy]
+# v0 MVP is explicitly non-production until verifier TCB + full acceptance matrix exist
+production = false
+deny_fail_closed = true
+deny_ckb_runtime = false
+deny_runtime_obligations = false
+
+[[deploy.ckb.cell_deps]]
+name = "novaseal_btc_verifier_riscv"
+out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
+dep_type = "code"
+hash_type = "data1"
+
+[metadata]
+protocol_family = "NovaSeal"
+v0_slice = "key-auth-cell-movement-only"
+strict_acceptance_criteria = 9
+btc_verifier_tcb = "external-delegate-required"
+fiber_profile = "xudt-shape-only-skeleton"
+molecule_alignment_gate = "schemas-are-source-of-truth"

@@ -260,7 +260,7 @@ impl CodeGenerator {
                 body.read_refs.iter().enumerate().map(|(index, pattern)| (pattern.binding.as_str(), index)).collect::<HashMap<_, _>>();
             let mut read_ref_param_index = 0usize;
             for param in params {
-                if param.source == ParamSource::Output {
+                if matches!(param.source, ParamSource::Output | ParamSource::LockArgs) {
                     continue;
                 }
                 if !self.param_is_runtime_bound(param) {

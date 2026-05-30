@@ -16,7 +16,16 @@ __pycache__/
 .cell/
 Cell.lock
 
-proposals/
+proposals/*
+!proposals/novaseal/
+proposals/novaseal/*
+!proposals/novaseal/v0-mvp-skeleton/
+!proposals/novaseal/v0-mvp-skeleton/**
+proposals/novaseal/v0-mvp-skeleton/build/
+proposals/novaseal/v0-mvp-skeleton/target/
+proposals/novaseal/v0-mvp-skeleton/src/.cell/
+proposals/novaseal/v0-mvp-skeleton/scripts/__pycache__/
+proposals/novaseal/v0-mvp-skeleton/verifier/**/target/
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

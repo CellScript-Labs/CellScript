@@ -1,0 +1,124 @@
+module novaseal::state_type::v0_mvp;
+
+// =============================================================================
+// NovaSeal v0 MVP - State Transition Type Script
+// =============================================================================
+//
+// This is the primary executable artefact for v0.
+//
+// It starts the 9 strict acceptance criteria using only CellScript 0.16
+// constructs: resource, consume/create, require guards, explicit policy_hash
+// binding, and ProofPlan-visible obligations. Signature verification remains
+// delegated to nova_btc_authority_lock plus its external verifier TCB.
+//
+// Receipt handling in v0 is intentionally "checked obligation" style, not
+// "magic output cell" style (see nova_receipt_type.cell stub).
+// =============================================================================
+
+// Types inlined for skeleton. See schemas/ for the source-of-truth definitions.
+// NovaSealCellV0 must be a resource because it represents a linear Cell that is consumed + recreated.
+resource NovaSealCellV0 has store, create, consume {
+    version: u16,
+    btc_authority_hash: Hash,
+    state_hash: Hash,
+    policy_hash: Hash,
+    receipt_root: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+struct NovaSealIntentV0 {
+    domain: Hash,
+    action: u8,
+    old_cell: OutPoint,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    policy_hash: Hash,
+    receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+// Top-level invariant (skeleton): policy preservation will be declared here in the real implementation.
+
+
+// The core transition action. This is what builders and the acceptance harness
+// will target for the 9 criteria.
+action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealIntentV0, witness receipt_hash: Hash, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> new_cell: NovaSealCellV0
+where
+    let now = env::current_timepoint()
+    let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)
+    require intent.old_state_hash == old_cell.state_hash
+    require actual_state_hash_commitment == state_hash_commitment
+    require intent.policy_hash == old_cell.policy_hash
+    require intent.nonce == old_cell.nonce + 1
+    require now <= intent.expiry
+    require receipt_hash == intent.receipt_hash
+
+    consume old_cell
+    create new_cell = NovaSealCellV0 {
+        version: old_cell.version,
+        btc_authority_hash: old_cell.btc_authority_hash,
+        state_hash: intent.new_state_hash,
+        policy_hash: old_cell.policy_hash,
+        receipt_root: old_cell.receipt_root,
+        nonce: intent.nonce,
+        expiry: intent.expiry
+    }
+
+
+// The type script entry point will normally be a thin wrapper that
+// dispatches to the appropriate action based on witness action kind.
+// For the MVP skeleton we expose the single key_auth_transition action
+// explicitly so that `cellc --entry-action key_auth_transition` works.
+
+// Default-entry lock surface. The same lock shape is also kept in
+// nova_btc_authority_lock.cell for targeted standalone compilation, but this
+// copy makes the package audit-bundle expose a real locks[] record for the
+// active NovaSeal resource.
+lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealIntentV0, witness receipt_hash: Hash, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
+    let digest = compute_intent_hash(&intent)
+    require expected_btc_authority_hash == cell.btc_authority_hash
+    require intent.policy_hash == cell.policy_hash
+
+    let fds = pipe()
+    let read_fd = fds.0
+    let write_fd = fds.1
+    let pid = spawn_with_fd("novaseal_btc_verifier_riscv", read_fd)
+    pipe_write(write_fd, 0x435049305642534e)
+    pipe_write(write_fd, 65536)
+    pipe_write(write_fd, fixed_u64_le(digest, 0))
+    pipe_write(write_fd, fixed_u64_le(digest, 1))
+    pipe_write(write_fd, fixed_u64_le(digest, 2))
+    pipe_write(write_fd, fixed_u64_le(digest, 3))
+    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 0))
+    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 1))
+    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 2))
+    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 3))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 0))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 1))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 2))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 3))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 4))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 5))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 6))
+    pipe_write(write_fd, fixed_u64_le(sig.signature, 7))
+    close(write_fd)
+    let status = wait(pid)
+    status == 0
+}
+
+fn compute_intent_hash(intent: &NovaSealIntentV0) -> Hash {
+    // Placeholder only. The canonical preimage is frozen in schemas/ and docs/.
+    hash_blake2b(intent.domain)
+}

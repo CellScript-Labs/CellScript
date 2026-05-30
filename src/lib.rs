@@ -1409,7 +1409,7 @@ fn collect_ckb_entry_script_references(
     }
     for access in accesses {
         match access.operation.as_str() {
-            "spawn" => refs.push(CkbScriptReferenceMetadata {
+            "spawn" | "spawn-with-fd" => refs.push(CkbScriptReferenceMetadata {
                 scope: scope.clone(),
                 purpose: "spawn-target".to_string(),
                 name: access.binding.clone(),
@@ -6478,7 +6478,7 @@ fn body_verifier_obligations(
             "ckb-runtime",
             &format!("{} {} from {}#{} bound to {}", access.syscall, access.operation, access.source, access.index, access.binding),
         );
-        if access.operation == "spawn" {
+        if matches!(access.operation.as_str(), "spawn" | "spawn-with-fd") {
             let target_suffix = access
                 .binding
                 .strip_prefix("spawn-target-tag:")
@@ -11153,7 +11153,7 @@ fn body_fail_closed_runtime_features(
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { obj, field, .. } => {
-                    if !is_executable_schema_field_access(obj, field, param_schema_vars, type_layouts)
+                    if !is_executable_schema_field_access(obj, field, &prelude_availability.schema_pointer_vars, type_layouts)
                         && !is_executable_aggregate_field_access(obj, field, &prelude_availability, type_layouts)
                         && !is_executable_tuple_call_return_field_access(obj, field, &prelude_availability)
                     {
@@ -11501,6 +11501,7 @@ fn metadata_prelude_availability(
     let schema_param_ids =
         params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<HashSet<_>>();
     availability.schema_pointer_vars.extend(schema_param_ids.iter().copied());
+    availability.schema_pointer_vars.extend(param_schema_vars.iter().copied());
 
     for param in params {
         if metadata_fixed_scalar_size(&param.ty).is_some() {
@@ -12748,13 +12749,13 @@ fn merge_ckb_runtime_accesses(
 fn is_executable_schema_field_access(
     obj: &ir::IrOperand,
     field: &str,
-    param_schema_vars: &BTreeSet<usize>,
+    schema_pointer_vars: &HashSet<usize>,
     type_layouts: &MetadataTypeLayouts,
 ) -> bool {
     let ir::IrOperand::Var(var) = obj else {
         return false;
     };
-    if !param_schema_vars.contains(&var.id) {
+    if !schema_pointer_vars.contains(&var.id) {
         return false;
     }
     let Some(type_name) = named_type_name(&var.ty) else {
@@ -12900,9 +12901,9 @@ fn body_ckb_runtime_accesses(
                 });
             }
             if let ir::IrInstruction::Call { func, args, .. } = instruction {
-                if func == "__ckb_spawn" {
+                if matches!(func.as_str(), "__ckb_spawn" | "__ckb_spawn_with_fd1") {
                     accesses.push(CkbRuntimeAccessMetadata {
-                        operation: "spawn".to_string(),
+                        operation: if func == "__ckb_spawn_with_fd1" { "spawn-with-fd" } else { "spawn" }.to_string(),
                         syscall: "SPAWN".to_string(),
                         source: "CellDep".to_string(),
                         index: 0,
@@ -19018,9 +19019,23 @@ where
             "lock_args Address should consume exactly 32 script arg bytes:\n{}",
             asm
         );
+        let script_args_decode = asm
+            .split("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)")
+            .next()
+            .expect("Script.args decode block");
+        assert!(
+            !script_args_decode.contains("lbu t0, 1(t0)"),
+            "Script.args u32 decoder must not clobber its base pointer while reading the args byte length:\n{}",
+            script_args_decode
+        );
         assert!(
             !asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args"),
             "lock_args-only wrapper should not require a witness payload:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("bind read-only param owner to Input#"),
+            "lock_args parameters must remain bound to Script.args and must not be rebound from transaction input data:\n{}",
             asm
         );
 
@@ -19031,6 +19046,49 @@ where
         let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
         assert_eq!(ckb_constraints.min_witness_bytes, 0);
         assert_eq!(ckb_constraints.max_entry_witness_bytes, 0);
+    }
+
+    #[test]
+    fn compile_preserves_dynamic_witness_cursor_after_lock_args() {
+        let result = compile(
+            r#"
+module test
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    owner: Address,
+}
+
+struct Intent {
+    owner: Address,
+}
+
+lock guarded(protected token: Token, lock_args owner: Address, witness intent: Intent) -> bool {
+    require owner == token.owner
+    require intent.owner == token.owner
+}
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("# cellscript entry abi: witness payload contains schema-backed dynamic segments"),
+            "expected dynamic witness wrapper:\n{}",
+            asm
+        );
+        let dynamic_payload_block = asm
+            .split("# cellscript entry abi: witness payload contains schema-backed dynamic segments")
+            .nth(1)
+            .expect("dynamic witness payload block should be present");
+        let before_intent = dynamic_payload_block
+            .split("# cellscript entry abi: schema param intent")
+            .next()
+            .expect("schema param should follow lock_args");
+        assert!(
+            before_intent.contains("li t5, 2088") && before_intent.contains("sd t6, 0(t5)") && before_intent.contains("ld t6, 0(t5)"),
+            "dynamic witness cursor must be saved across Script.args lock_args decoding:\n{}",
+            before_intent
+        );
     }
 
     #[test]
@@ -26321,6 +26379,63 @@ lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
         let schema = proposal.molecule_schema.as_ref().expect("Proposal schema should be generated in scoped CKB compile");
         assert!(schema.schema.contains("struct Signature"), "Vec<Signature> dependency was not retained:\n{}", schema.schema);
         assert!(scoped.metadata.types.iter().any(|ty| ty.name == "Signature"));
+    }
+
+    #[test]
+    fn optimized_entry_lock_keeps_inlined_schema_pointer_field_access_checked() {
+        let source = r#"
+module optimized_lock_schema_pointer
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+struct Intent {
+    domain: Hash,
+    old_cell: OutPoint,
+    policy_hash: Hash,
+}
+
+resource ProtectedCell has store, create, consume {
+    policy_hash: Hash,
+}
+
+lock owner(protected cell: ProtectedCell, witness intent: Intent) -> bool {
+    let digest = intent_digest(&intent)
+    fixed_u64_le(digest, 0) == fixed_u64_le(cell.policy_hash, 0)
+}
+
+fn intent_digest(intent: &Intent) -> Hash {
+    hash_blake2b(intent.domain)
+}
+"#;
+        let temp = tempdir().unwrap();
+        let entry = Utf8Path::from_path(temp.path()).unwrap().join("optimized_lock_schema_pointer.cell");
+        std::fs::write(&entry, source).unwrap();
+
+        let scoped = compile_file_with_entry_lock(
+            &entry,
+            CompileOptions {
+                opt_level: 1,
+                target_profile: Some("ckb".to_string()),
+                target: Some("riscv64-asm".to_string()),
+                ..CompileOptions::default()
+            },
+            "owner",
+        )
+        .unwrap();
+        let lock = scoped.metadata.locks.iter().find(|lock| lock.name == "owner").expect("owner lock metadata");
+        assert!(
+            !lock.fail_closed_runtime_features.contains(&"field-access".to_string()),
+            "inlined &Intent field access should stay schema-backed:\n{:?}",
+            lock.fail_closed_runtime_features
+        );
+        assert!(
+            !scoped.metadata.runtime.fail_closed_runtime_features.contains(&"field-access".to_string()),
+            "optimized entry-lock metadata should not report field-access fail-closed debt:\n{:?}",
+            scoped.metadata.runtime.fail_closed_runtime_features
+        );
     }
 
     #[test]

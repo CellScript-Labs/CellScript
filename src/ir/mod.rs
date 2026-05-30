@@ -4950,40 +4950,31 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "fixed_u64_le" if call.args.len() == 2 => self.lower_fixed_u64_le_call(call, current, blocks, vars),
                 "spawn" if call.args.len() == 1 => {
                     let dest = self.new_var("spawn_result", IrType::U64);
-                    let target = match &call.args[0] {
-                        Expr::String(value, _) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                        Expr::Identifier(name, _) => match self.constants.get(name) {
-                            Some((_, Expr::String(value, _))) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                            _ => {
-                                let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
-                                let active = lowered.current?;
-                                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                    dest: Some(dest.clone()),
-                                    func: "__ckb_spawn".to_string(),
-                                    args: vec![lowered.operand],
-                                });
-                                return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                            }
-                        },
-                        other => {
-                            let lowered = self.lower_expr(other, current, blocks, vars);
-                            let active = lowered.current?;
-                            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                dest: Some(dest.clone()),
-                                func: "__ckb_spawn".to_string(),
-                                args: vec![lowered.operand],
-                            });
-                            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                        }
-                    };
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
+                    let (target, active) = self.lower_static_spawn_target_operand(&call.args[0], current, blocks, vars)?;
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
                         dest: Some(dest.clone()),
                         func: "__ckb_spawn".to_string(),
                         args: vec![target],
                     });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
+                "spawn_with_fd" if call.args.len() == 2 => {
+                    let (target, active) = self.lower_static_spawn_target_operand(&call.args[0], current, blocks, vars)?;
+                    let lowered_fd = self.lower_expr(&call.args[1], active, blocks, vars);
+                    let active = lowered_fd.current?;
+                    if Self::is_poisoned_operand(&lowered_fd.operand) {
+                        return Some(Self::poisoned_expr(Some(active)));
+                    }
+                    let dest = self.new_var("spawn_result", IrType::U64);
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_spawn_with_fd1".to_string(),
+                        args: vec![target, lowered_fd.operand],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
                 }
                 "pipe" if call.args.is_empty() => {
                     let dest = self.new_var("pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
@@ -5392,6 +5383,59 @@ impl IrGenerator {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_fixed_u64_le_call(
+        &mut self,
+        call: &CallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let lowered_bytes = self.lower_expr(&call.args[0], current, blocks, vars);
+        let active = lowered_bytes.current?;
+        if Self::is_poisoned_operand(&lowered_bytes.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_index = self.lower_expr(&call.args[1], active, blocks, vars);
+        let active = lowered_index.current?;
+        if Self::is_poisoned_operand(&lowered_index.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let dest = self.new_var("fixed_u64_le", IrType::U64);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(dest.clone()),
+            func: "__cellscript_fixed_u64_le".to_string(),
+            args: vec![lowered_bytes.operand, lowered_index.operand],
+        });
+        Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_static_spawn_target_operand(
+        &mut self,
+        target: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<(IrOperand, BlockId)> {
+        match target {
+            Expr::String(value, _) => Some((IrOperand::Const(IrConst::U64(stable_u64_tag(value))), current)),
+            Expr::Identifier(name, _) => match self.constants.get(name) {
+                Some((_, Expr::String(value, _))) => Some((IrOperand::Const(IrConst::U64(stable_u64_tag(value))), current)),
+                _ => {
+                    let lowered = self.lower_expr(target, current, blocks, vars);
+                    let active = lowered.current?;
+                    Some((lowered.operand, active))
+                }
+            },
+            other => {
+                let lowered = self.lower_expr(other, current, blocks, vars);
+                let active = lowered.current?;
+                Some((lowered.operand, active))
+            }
         }
     }
 

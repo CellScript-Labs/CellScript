@@ -1,0 +1,74 @@
+# NovaSeal Combined Lock + Type Transaction Harness
+
+**Date**: 2026-05-30
+**Harness**: `verifier/novaseal_ckb_vm_harness/src/bin/novaseal_combined_tx_harness.rs`
+**Report**: `target/novaseal-combined-tx-report.json`
+**Classification**: six-fixture combined lock + type full `ckb-script` transaction-verifier evidence.
+
+## Command
+
+```bash
+cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty
+```
+
+## Current Result
+
+```text
+combined_full_transaction_executed=true
+total_cases=6
+expected_accept=1
+expected_reject=5
+accepted=1
+rejected=5
+matched_expected=6
+mismatched=0
+failure_scope_matched=6
+failure_scope_mismatched=0
+lock_and_type_script_groups_present=true
+child_spawn_target_cell_dep0_modelled=true
+shared_witness_abi_aligned=true
+shared_witness_size_bytes=389
+builder_shape_checks_passed=true
+fee_shape_checks_passed=true
+under_capacity_shape_rejects=true
+min_fee_shannons=100000
+max_fee_shannons=100000
+max_full_transaction_cycles=3703418
+max_consensus_tx_size_bytes=972
+max_output_occupied_capacity_shannons=25200000000
+min_capacity_margin_shannons=10000000000
+```
+
+## What It Executes
+
+For each of the six fixture JSONs, the harness constructs an in-memory `ckb-types` `ResolvedTransaction` with:
+
+- the compiled `btc_authority` parent lock,
+- the compiled `key_auth_transition` type/action script,
+- `cell_deps[0]` bound to the staged `novaseal_btc_verifier_riscv` child verifier ELF,
+- one shared `CSARGv1` witness payload: `intent`, `receipt_hash`, `state_hash_commitment`, `SignaturePayload`,
+- matching input/output type scripts so the official type `ScriptGroup` is present,
+- a header dep carrying the fixture timepoint used by `env::current_timepoint()`.
+
+It then runs official `ckb-script::TransactionScriptsVerifier::verify` over the full transaction. The valid fixture accepts; the five negative fixtures reject for the expected fixture-level outcome and expected lock/type script scope.
+
+The same report now records production-builder candidate shape facts:
+
+- input capacity exceeds output capacity by a fixed 100000-shannon fee,
+- output capacity covers occupied capacity,
+- an under-capacity output value is rejected by the shape checker,
+- `cell_deps[0]` is derived from the constructed transaction plus resolved deps and must match the child verifier spawn target,
+- parent lock and state type code deps are derived from the constructed transaction plus resolved deps and must both be present.
+
+## Boundary
+
+This closes the previous "no combined six-fixture lock+type transaction evidence" gap at harness level.
+
+It is still not production acceptance evidence:
+
+- transactions are constructed in memory, not by a production builder,
+- cell deps and input cells are deterministic harness cells, not live chain cells,
+- no full node submission or mempool acceptance path is exercised,
+- fee/capacity checks are builder-shape checks, not consensus/full-node acceptance,
+- negative fixture matching is outcome plus lock/type script-scope matching, not yet a semantic error-code proof for every failure mode,
+- Molecule/wallet signing alignment and receipt output materialisation remain separate blockers.

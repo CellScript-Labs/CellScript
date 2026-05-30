@@ -11,10 +11,68 @@ use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
 use super::runtime::{ckb_checked_runtime_status_reg, is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
-use super::schema::{fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
+use super::schema::{const_usize_operand, fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
 use super::CodeGenerator;
 
 impl CodeGenerator {
+    fn emit_fixed_u64_le_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if func != "__cellscript_fixed_u64_le" {
+            return Ok(false);
+        }
+        self.emit(format!("# call {}", func));
+        let Some(dest) = dest else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le result has no destination");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(bytes_operand) = args.first() else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le is missing fixed bytes input");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(index_operand) = args.get(1) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le is missing word_index");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(word_index) = const_usize_operand(index_operand) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le word_index is not a static integer");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(width) = fixed_u64_le_operand_width(bytes_operand) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le input is not Hash, Address, or [u8; N]");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(start) = word_index.checked_mul(8) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le word_index overflows byte offset");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(end) = start.checked_add(8) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le byte window overflows");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        if end > width {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le byte window exceeds fixed input width");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+        let Some(source) = self.expected_fixed_byte_source(bytes_operand, width) else {
+            self.emit("# cellscript abi: fail closed because fixed_u64_le input is not materializable as fixed bytes");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+
+        self.emit(format!("# cellscript abi: fixed_u64_le word={} offset={} width={}", word_index, start, width));
+        self.emit_prepare_fixed_byte_source(&source, width, "fixed_u64_le input");
+        self.emit_fixed_byte_source_scalar_to("a0", "t1", "t2", &source, start, 8);
+        self.emit_stack_store("a0", dest.id * 8);
+        Ok(true)
+    }
+
     fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
         if !is_ckb_fixed_hash_helper(func) {
             return Ok(false);
@@ -55,6 +113,9 @@ impl CodeGenerator {
     }
 
     pub(crate) fn emit_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<()> {
+        if self.emit_fixed_u64_le_call(dest, func, args)? {
+            return Ok(());
+        }
         if self.emit_ckb_fixed_hash_call(dest, func, args)? {
             return Ok(());
         }
@@ -375,5 +436,18 @@ impl CodeGenerator {
         } else {
             "t0".to_string()
         }
+    }
+}
+
+fn fixed_u64_le_operand_width(operand: &IrOperand) -> Option<usize> {
+    match operand {
+        IrOperand::Const(IrConst::Address(_)) | IrOperand::Const(IrConst::Hash(_)) => Some(32),
+        IrOperand::Const(IrConst::Array(values)) if values.iter().all(|value| matches!(value, IrConst::U8(_))) => Some(values.len()),
+        IrOperand::Var(var) => match &var.ty {
+            IrType::Address | IrType::Hash => Some(32),
+            IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
+            _ => None,
+        },
+        _ => None,
     }
 }

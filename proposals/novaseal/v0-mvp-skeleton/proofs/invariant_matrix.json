@@ -1,0 +1,25 @@
+{
+  "schema": "novaseal-v0-invariant-matrix-v0.1",
+  "package": "novaseal 0.0.1-v0-mvp",
+  "invariants": [
+    {
+      "name": "policy_preserved",
+      "location": "nova_state_type.cell",
+      "criteria": [7],
+      "status": "declared"
+    },
+    {
+      "name": "nonce_monotonic",
+      "location": "key_auth_transition where clause",
+      "criteria": [4],
+      "status": "declared"
+    },
+    {
+      "name": "receipt_obligation_matched",
+      "location": "key_auth_transition + lock",
+      "criteria": [8],
+      "status": "declared"
+    }
+  ],
+  "notes": "This matrix will be used by the acceptance harness to prove that every one of the 9 strict criteria has at least one invariant or action-level check that covers it. Gaps here are release blockers for v0."
+}

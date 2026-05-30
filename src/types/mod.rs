@@ -357,6 +357,7 @@ pub struct TypeChecker<'a> {
 struct SpawnIpcFdState {
     aliases: HashMap<String, String>,
     closed: HashSet<String>,
+    transferred: HashSet<String>,
     pipe_tuples: HashMap<String, (String, String)>,
 }
 
@@ -2701,6 +2702,13 @@ impl<'a> TypeChecker<'a> {
                         .cloned()
                         .collect();
                     state.closed.extend(closed_on_both_paths);
+                    let transferred_on_both_paths: Vec<String> = then_state
+                        .transferred
+                        .intersection(&else_state.transferred)
+                        .filter(|fd_key| !state.transferred.contains(*fd_key))
+                        .cloned()
+                        .collect();
+                    state.transferred.extend(transferred_on_both_paths);
                 }
             }
             Stmt::For(for_stmt) => {
@@ -2727,10 +2735,22 @@ impl<'a> TypeChecker<'a> {
                     match name {
                         "pipe_read" => self.require_open_spawn_ipc_fd(call.args.first(), state, "pipe_read", call.span)?,
                         "pipe_write" => self.require_open_spawn_ipc_fd(call.args.first(), state, "pipe_write", call.span)?,
+                        "spawn_with_fd" => {
+                            self.require_open_spawn_ipc_fd(call.args.get(1), state, "spawn_with_fd", call.span)?;
+                            if let Some(fd_key) = call.args.get(1).and_then(|arg| self.spawn_ipc_fd_key(arg, state)) {
+                                state.transferred.insert(fd_key);
+                            }
+                        }
                         "close" => {
                             let Some(fd_key) = call.args.first().and_then(|arg| self.spawn_ipc_fd_key(arg, state)) else {
                                 return Ok(());
                             };
+                            if state.transferred.contains(&fd_key) {
+                                return Err(CompileError::new(
+                                    "close uses a Spawn/IPC file descriptor after it was transferred to a spawned process",
+                                    call.span,
+                                ));
+                            }
                             if state.closed.contains(&fd_key) {
                                 return Err(CompileError::new(
                                     "close uses a Spawn/IPC file descriptor after it was already closed",
@@ -2807,6 +2827,13 @@ impl<'a> TypeChecker<'a> {
                     .cloned()
                     .collect();
                 state.closed.extend(closed_on_both_paths);
+                let transferred_on_both_paths: Vec<String> = then_state
+                    .transferred
+                    .intersection(&else_state.transferred)
+                    .filter(|fd_key| !state.transferred.contains(*fd_key))
+                    .cloned()
+                    .collect();
+                state.transferred.extend(transferred_on_both_paths);
             }
             Expr::Cast(cast) => self.validate_spawn_ipc_fd_usage_expr(&cast.expr, state)?,
             Expr::Range(range) => {
@@ -2821,6 +2848,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Match(match_expr) => {
                 self.validate_spawn_ipc_fd_usage_expr(&match_expr.expr, state)?;
                 let mut shared_closed: Option<HashSet<String>> = None;
+                let mut shared_transferred: Option<HashSet<String>> = None;
                 for arm in &match_expr.arms {
                     let mut arm_state = state.clone();
                     self.validate_spawn_ipc_fd_usage_expr(&arm.value, &mut arm_state)?;
@@ -2828,11 +2856,20 @@ impl<'a> TypeChecker<'a> {
                         Some(previous) => previous.intersection(&arm_state.closed).cloned().collect(),
                         None => arm_state.closed,
                     });
+                    shared_transferred = Some(match shared_transferred {
+                        Some(previous) => previous.intersection(&arm_state.transferred).cloned().collect(),
+                        None => arm_state.transferred,
+                    });
                 }
                 if let Some(shared_closed) = shared_closed {
                     let closed_on_all_arms: Vec<String> =
                         shared_closed.into_iter().filter(|fd_key| !state.closed.contains(fd_key)).collect();
                     state.closed.extend(closed_on_all_arms);
+                }
+                if let Some(shared_transferred) = shared_transferred {
+                    let transferred_on_all_arms: Vec<String> =
+                        shared_transferred.into_iter().filter(|fd_key| !state.transferred.contains(fd_key)).collect();
+                    state.transferred.extend(transferred_on_all_arms);
                 }
             }
             Expr::StdlibCall(call) => {
@@ -2900,6 +2937,12 @@ impl<'a> TypeChecker<'a> {
         if state.closed.contains(&fd_key) {
             return Err(CompileError::new(format!("{} uses a Spawn/IPC file descriptor after close", operation), span));
         }
+        if state.transferred.contains(&fd_key) {
+            return Err(CompileError::new(
+                format!("{} uses a Spawn/IPC file descriptor after transfer to spawned process", operation),
+                span,
+            ));
+        }
         Ok(())
     }
 
@@ -2926,7 +2969,7 @@ impl<'a> TypeChecker<'a> {
             .aliases
             .values()
             .chain(state.pipe_tuples.values().flat_map(|(read_fd, write_fd)| [read_fd, write_fd]))
-            .filter(|fd_key| !state.closed.contains(*fd_key))
+            .filter(|fd_key| !state.closed.contains(*fd_key) && !state.transferred.contains(*fd_key))
             .cloned()
             .collect::<HashSet<_>>()
             .into_iter()
@@ -5158,10 +5201,25 @@ impl<'a> TypeChecker<'a> {
                     return Ok(Type::U64);
                 }
                 match name.as_str() {
+                    "fixed_u64_le" => {
+                        self.validate_fixed_u64_le_call(call, arg_types)?;
+                        return Ok(Type::U64);
+                    }
                     "spawn" => {
                         self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                         if !matches!(arg_types[0], Type::Named(ref ty) if ty == "String") {
                             return Err(CompileError::new("spawn expects a static script name String", call.span));
+                        }
+                        self.validate_static_spawn_target_expr(&call.args[0], call.span)?;
+                        return Ok(Type::U64);
+                    }
+                    "spawn_with_fd" => {
+                        self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                        if !matches!(arg_types[0], Type::Named(ref ty) if ty == "String") {
+                            return Err(CompileError::new("spawn_with_fd expects a static script name String", call.span));
+                        }
+                        if arg_types[1] != Type::U64 {
+                            return Err(CompileError::new("spawn_with_fd expects (target: String, fd: u64)", call.span));
                         }
                         self.validate_static_spawn_target_expr(&call.args[0], call.span)?;
                         return Ok(Type::U64);
@@ -5658,6 +5716,34 @@ impl<'a> TypeChecker<'a> {
                 span,
             )),
         }
+    }
+
+    fn validate_fixed_u64_le_call(&self, call: &CallExpr, arg_types: &[Type]) -> Result<()> {
+        self.validate_builtin_arity("fixed_u64_le", 2, arg_types, call.span)?;
+        let Some(width) = fixed_u64_le_input_width(&arg_types[0]) else {
+            return Err(CompileError::new("fixed_u64_le expects (bytes: Hash | Address | [u8; N], word_index: u64)", call.span));
+        };
+        if arg_types[1] != Type::U64 {
+            return Err(CompileError::new("fixed_u64_le expects (bytes: Hash | Address | [u8; N], word_index: u64)", call.span));
+        }
+        let word_index = self
+            .const_integer_value(&call.args[1])
+            .ok_or_else(|| CompileError::new("fixed_u64_le word_index must be a static u64 literal or const", call.args[1].span()))?;
+        let word_index = usize::try_from(word_index)
+            .map_err(|_| CompileError::new("fixed_u64_le word_index is out of range for this target", call.args[1].span()))?;
+        let start = word_index
+            .checked_mul(8)
+            .ok_or_else(|| CompileError::new("fixed_u64_le word_index is out of range for the input width", call.args[1].span()))?;
+        let end = start
+            .checked_add(8)
+            .ok_or_else(|| CompileError::new("fixed_u64_le word_index is out of range for the input width", call.args[1].span()))?;
+        if end > width {
+            return Err(CompileError::new(
+                format!("fixed_u64_le requires 8 bytes at word_index {}; input width is {} bytes", word_index, width),
+                call.args[1].span(),
+            ));
+        }
+        Ok(())
     }
 
     fn is_string_constant(&self, name: &str) -> bool {
@@ -6545,6 +6631,14 @@ fn lock_args_static_type_len(ty: &Type) -> Option<usize> {
         Type::Tuple(items) => items.iter().try_fold(0usize, |acc, item| lock_args_static_type_len(item).map(|len| acc + len)),
         Type::Unit => Some(0),
         Type::Named(_) | Type::Ref(_) | Type::MutRef(_) => None,
+    }
+}
+
+fn fixed_u64_le_input_width(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Address | Type::Hash => Some(32),
+        Type::Array(inner, len) if matches!(inner.as_ref(), Type::U8) => Some(*len),
+        _ => None,
     }
 }
 

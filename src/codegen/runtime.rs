@@ -239,6 +239,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: executable CKB VM v2 syscall {} ({})", spec.number, spec.detail));
         match spec.symbol {
             "__ckb_spawn" => self.emit_runtime_vm2_spawn(spec.number),
+            "__ckb_spawn_with_fd1" => self.emit_runtime_vm2_spawn_with_fd1(spec.number),
             "__ckb_wait" => self.emit_runtime_vm2_wait(spec.number),
             "__ckb_process_id" => self.emit_runtime_vm2_process_id(spec.number),
             "__ckb_pipe" => self.emit_runtime_vm2_pipe(spec.number),
@@ -255,6 +256,31 @@ impl CodeGenerator {
         self.emit_large_addi("sp", "sp", -80);
         self.emit_stack_store("zero", 0);
         self.emit_stack_store("zero", 8);
+        self.emit_stack_store("zero", 16);
+        self.emit_stack_store("zero", 24);
+        self.emit_stack_store("zero", 32);
+        self.emit_sp_addi("t0", 0);
+        self.emit_stack_store("t0", 40);
+        self.emit_sp_addi("t0", 8);
+        self.emit_stack_store("t0", 48);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CKB_SOURCE_CELL_DEP));
+        self.emit("li a2, 0");
+        self.emit("li a3, 0");
+        self.emit_sp_addi("a4", 24);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv a1, a0");
+        self.emit_stack_load("a0", 0);
+        self.emit_large_addi("sp", "sp", 80);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_spawn_with_fd1(&mut self, syscall_number: u64) {
+        self.emit("# cellscript abi: spawn_with_fd resolves the static target to CellDep#0 with no argv and one inherited fd from a1");
+        self.emit_large_addi("sp", "sp", -80);
+        self.emit_stack_store("zero", 0);
+        self.emit_stack_store("a1", 8);
         self.emit_stack_store("zero", 16);
         self.emit_stack_store("zero", 24);
         self.emit_stack_store("zero", 32);

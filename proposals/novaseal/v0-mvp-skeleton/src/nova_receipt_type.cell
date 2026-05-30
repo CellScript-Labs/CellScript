@@ -1,0 +1,43 @@
+module novaseal::receipt_type::v0_mvp;
+
+// =============================================================================
+// NovaSeal v0 MVP - ProofReceipt Type Script (STUB)
+// =============================================================================
+//
+// In v0 the primary enforcement of the receipt is done **inside**
+// nova_state_type via the receipt_hash obligation check.
+//
+// This file exists so the package layout matches the Architecture doc and
+// future slices can promote the receipt to a first-class output cell type
+// script without restructuring.
+//
+// For the strict MVP skeleton this file is intentionally minimal / stub.
+// It does not yet define a full resource or action surface.
+// =============================================================================
+
+// Placeholder. When promoted, this will look similar to:
+//
+// receipt ProofReceiptV0 has store, create, consume {
+//     protocol: Hash,           // "NovaSeal"
+//     version: u16,
+//     action: u8,
+//     old_cell: OutPoint,
+//     ...
+//     intent_hash: Hash,
+//     signer_authority_hash: Hash,
+//     tx_hash: Hash,
+// }
+//
+// action emit_receipt(...) -> receipt: ProofReceiptV0
+// where
+//     create receipt = ProofReceiptV0 { ... }
+//     // and the state transition asserts that the receipt_hash matches
+
+// For now we only document the intended surface.
+struct ProofReceiptV0Stub {
+    protocol: Hash,
+    version: u16,
+    action: u8,
+    intent_hash: Hash,
+    policy_hash: Hash,
+}

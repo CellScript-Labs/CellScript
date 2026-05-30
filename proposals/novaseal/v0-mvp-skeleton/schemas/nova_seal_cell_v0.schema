@@ -1,0 +1,46 @@
+# NovaSealCellV0 - Source of Truth Schema (v0 MVP)
+#
+# This file is the frozen layout definition for the on-chain representation
+# of a NovaSeal v0 Cell's data.
+#
+# IMPORTANT: Any change to field order, sizes, or encoding rules after
+# the first real deployment is a breaking change for all adapters,
+# explorers, and Fiber funding logic.
+#
+# Encoding target: Molecule (or explicit hand-written equivalent for v0).
+# All integers are little-endian unless otherwise noted.
+
+version: u16                    # 0 for v0 MVP
+
+btc_authority_hash: Byte32      # Hash of the BTC key / multisig policy descriptor
+                                # that is allowed to authorise transitions for this cell.
+
+state_hash: Byte32              # Hash of the logical application state governed by this cell.
+                                # Changed only through a signed intent.
+
+policy_hash: Byte32             # Hash of the governing CellScript package + entry point(s)
+                                # that define the allowed state machine for this cell.
+                                # Must be preserved across transitions (see invariant).
+
+receipt_root: Byte32            # Root (or rolling hash) of the ProofReceipt chain emitted
+                                # by transitions on this lineage.
+
+nonce: u64                      # Strictly monotonic replay protection counter.
+                                # Must increment by exactly 1 on every successful transition.
+
+expiry: u64                     # Absolute or relative time/epoch bound after which
+                                # no further transitions using this cell are valid.
+                                # Interpretation (block number vs timestamp) is profile-dependent.
+
+# v0 MVP deliberately does NOT contain:
+# - explicit seal_mode (added in later profiles)
+# - settlement_status (can be derived from receipt history + on-chain state)
+# - btc_anchor / fiber_anchor (v0.2+)
+# - object_id / class_id (can be added later without breaking v0 cells if versioned carefully)
+
+# xUDT-compatible fungible profile note (for Fiber skeleton):
+# When this cell carries a fungible balance profile, the first 16 bytes after
+# the fixed header (or a well-known offset) contain the amount as u128
+# in a layout that existing xUDT tooling can recognise for amount extraction.
+# Exact offset must be documented in a separate "fungible_profile.md" before
+# any real Fiber admission test.

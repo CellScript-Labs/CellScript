@@ -1,0 +1,38 @@
+# ProofReceiptV0 - Source of Truth Schema (v0 MVP)
+#
+# This is the audit artefact of a NovaSeal transition.
+#
+# In the strict v0 MVP, the receipt is primarily an *obligation* checked
+# by hash inside the state transition script. It may later be promoted
+# to a first-class CKB output cell (see nova_receipt_type.cell).
+
+protocol: Byte32                # blake2b("NovaSeal") or equivalent fixed tag.
+
+version: u16                    # 0 for v0 MVP
+
+action: u8                      # Same ActionKind as in the signed intent.
+
+old_cell: OutPoint
+old_state_hash: Byte32
+new_state_hash: Byte32
+
+intent_hash: Byte32             # The exact digest that the BTC key signed.
+                                # Excluded from the v0 receipt_hash commitment preimage
+                                # to avoid the intent_hash / receipt_hash cycle.
+
+policy_hash: Byte32
+
+signer_authority_hash: Byte32   # The btc_authority_hash that was active for this transition.
+
+tx_hash: Byte32                 # The CKB transaction that performed the transition.
+
+nonce: u64
+expiry: u64
+
+# Receipt modes supported in v0 (documented, not all necessarily implemented):
+# - Witness receipt (hash only, for audit tooling)
+# - Output receipt cell (future, when nova_receipt_type is promoted)
+# - ProofPlan receipt (the hash is a checked obligation visible in audit-bundle)
+#
+# The skeleton deliberately starts with the "checked obligation + ProofPlan"
+# mode so we do not over-claim automatic on-chain receipt cells.

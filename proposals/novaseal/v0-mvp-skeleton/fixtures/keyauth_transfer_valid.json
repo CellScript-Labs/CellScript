@@ -1,0 +1,24 @@
+{
+  "name": "keyauth_transfer_valid",
+  "description": "Happy path: BTC key (or simple multisig) signs a well-formed intent. Old NovaSealCell is consumed, new one is created with incremented nonce and updated state_hash. Receipt obligation is satisfied.",
+  "category": "positive",
+  "acceptance_criteria_covered": [1,2,3,4,9],
+  "inputs": {
+    "old_cell": { "nonce": 42, "state_hash": "0xabc...", "policy_hash": "0xpolicy..." },
+    "intent": {
+      "nonce": 43,
+      "old_state_hash": "0xabc...",
+      "new_state_hash": "0xdef...",
+      "expiry": 9999999999,
+      "policy_hash": "0xpolicy...",
+      "receipt_hash": "0xreceipt..."
+    },
+    "btc_signature": "valid (delegate returns success)"
+  },
+  "expected": {
+    "result": "accepted",
+    "new_cell": { "nonce": 43, "state_hash": "0xdef..." },
+    "receipt_emitted": true,
+    "notes": "This is the primary positive case that must pass before any v0 claim."
+  }
+}
