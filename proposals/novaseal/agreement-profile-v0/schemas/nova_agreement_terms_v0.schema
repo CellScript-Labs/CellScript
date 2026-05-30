@@ -1,0 +1,34 @@
+# NovaAgreementTermsV0 - Source of Truth Schema (Agreement Profile v0)
+#
+# Encoding target: Molecule or equivalent fixed little-endian layout.
+# v0 is CKB-native only: both collateral and principal must use asset_kind = 0
+# and zero asset_hash. Cross-asset, iCKB, xUDT, and BTC-backed profiles are
+# future extensions.
+
+version: u16                    # 0 for Agreement Profile v0
+agreement_id: Byte32            # deterministic profile-level agreement id
+terms_hash: Byte32              # builder-supplied pre-agreed terms commitment
+
+borrower_authority_hash: Byte32 # v0 actor identity hash; cryptographic lock is future work
+lender_authority_hash: Byte32
+
+collateral_asset_kind: u8       # 0 = CKB
+collateral_asset_hash: Byte32   # zero hash for CKB
+collateral_amount: u64          # CKB shannons represented at profile level
+
+principal_asset_kind: u8        # 0 = CKB
+principal_asset_hash: Byte32    # zero hash for CKB
+principal_amount: u64           # CKB shannons represented at profile level
+
+fixed_fee_amount: u64           # fixed fee only; no pro-rata interest in v0
+
+start_timepoint: u64
+expiry_timepoint: u64
+
+early_close_policy: u8          # 0 = fixed fee
+
+# Important boundary:
+# The profile checks these fields in CellScript and has a local transaction
+# shape harness for native CKB output amounts. It does not yet prove CKB VM
+# transaction execution, wallet signatures, or a canonical Molecule terms_hash
+# preimage.

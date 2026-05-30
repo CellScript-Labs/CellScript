@@ -1,0 +1,136 @@
+# NovaSeal Agreement Profile v0
+
+**Status**: reviewable CKB-native agreement skeleton with audited terminal-path
+structure, local transaction-shape evidence, action VM evidence, and resolved
+transaction verifier evidence.
+
+This package is inspired by Matt's Minimum Viable Borrowing idea, but it does
+not claim to implement production lending. It models a Cell-native financial
+agreement with pre-agreed terms and deterministic terminal paths.
+
+## Boundary
+
+NovaSeal core stays thin; profiles carry meaning.
+
+This package is separate from `../v0-mvp-skeleton/`. It does not modify the
+NovaSeal core state type, BTC verifier surface, or generic verifier registry.
+
+Implemented in this slice:
+
+| Area | Status | Classification |
+| --- | --- | --- |
+| Separate Agreement Profile package | implemented | source-guard-present |
+| CKB/CKB terms only | implemented | source-guard-present |
+| `originate_agreement` | compiles | source-guard-present |
+| `repay_before_expiry` | compiles | source-guard-present |
+| `claim_after_expiry` | compiles | source-guard-present |
+| Receipt output materialization | implemented | generated-audit-covered |
+| Primitive-strict 0.16 | passes | generated-audit-covered |
+| Fixture shape harness | implemented | local-transaction-shape-covered |
+| Action CKB VM harness | implemented | action-ckb-vm-covered |
+| Resolved transaction harness | implemented | resolved-transaction-covered |
+| Native CKB occupied-capacity rejection | implemented | resolved-transaction-covered |
+| Native CKB payout-cell settlement binding | local harness only | local-transaction-shape-covered |
+| Canonical terms hash preimage | not implemented | blocked |
+| Canonical receipt hash preimage | not implemented | blocked |
+| BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
+
+Do not call this "trustless borrowing". Better names:
+
+- Agreement Profile
+- Cell-native financial agreement
+- pre-agreed terminal contract
+- handshake / option-like agreement
+- oracle-free BTCFi primitive
+
+## Actions
+
+`originate_agreement`
+
+- creates an `Active` agreement from pre-agreed CKB/CKB terms
+- checks positive collateral/principal
+- checks start/expiry window
+- checks borrower-originated actor hash
+- creates a `NovaAgreementReceiptV0`
+
+`repay_before_expiry`
+
+- consumes an `Active` agreement
+- requires `now <= expiry`
+- requires borrower actor hash
+- creates a terminal `Repaid` agreement
+- creates a receipt with `terminal_amount = principal + fixed_fee`
+
+`claim_after_expiry`
+
+- consumes an `Active` agreement
+- requires `now > expiry`
+- requires lender actor hash
+- creates a terminal `Defaulted` agreement
+- creates a receipt with `terminal_amount = collateral`
+
+The default path intentionally does not add `fixed_fee` on top of collateral.
+The agreement cell only models locked collateral, so default claim must not
+imply extra CKB is minted or supplied by the claimant.
+
+## Receipt Semantics
+
+Receipts are runtime-relevant because the actions materialize
+`NovaAgreementReceiptV0` outputs. The actions also update `receipt_root` from the
+witness `receipt_hash`.
+
+This slice does **not** yet compute a canonical hash of the full receipt fields
+inside CellScript. `receipt_hash_mismatch_reject.json` is therefore marked
+`blocked`, not `fixture-covered`.
+
+## Commands
+
+```bash
+/home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
+/home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
+/home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
+/home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
+python3 scripts/nova_agreement_tx_shape_harness.py --pretty
+/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
+/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action repay_before_expiry -o target/nova-agreement-repay-action.elf
+/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action claim_after_expiry -o target/nova-agreement-claim-action.elf
+/home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
+```
+
+Latest local result: all CellScript commands pass. The generated audit bundle
+reports 3 actions, 0 locks, 2 source units, 63 ProofPlan records, and 17 builder
+assumptions. The local transaction-shape harness reports 8/8 fixture
+expectations matched: 3 accepted shapes and 5 rejected shapes. The action CKB VM
+harness reports 11/11 expectations matched: 3 accepted action executions and 8
+rejected action executions. The resolved transaction harness reports 12/12
+script-layer expectations matched and 12/12 node-verifier expectations matched.
+
+## Harness Boundary
+
+`scripts/nova_agreement_tx_shape_harness.py` checks builder-visible CKB output
+amount and occupied-capacity shapes.
+
+`harness/ckb_vm` executes the compiled action ELFs in `ckb-vm` with harnessed
+`LOAD_WITNESS`, `LOAD_CELL_DATA`, and `LOAD_HEADER_BY_FIELD` syscalls. It covers
+origination, repayment, default claim, time rejects, party rejects, nonce
+mismatch, receipt-root mismatch, and preserved-field mutation.
+
+`harness/ckb_vm` also contains `novaseal_agreement_tx_harness`, which constructs
+deterministic resolved CKB transactions and runs both `ckb-script` and
+`ckb-verification` over them. It uses a local always-success lock only so the
+terminal input transactions can reach the Agreement Profile type/action script.
+It fails if the fixtures outside resolved transaction coverage are anything
+other than the current explicit blocker set.
+
+These harnesses are still not live-chain evidence. Deployment wiring, canonical
+terms hash, canonical receipt hash, cryptographic authority locks, and live
+CellDep liveness remain future work.
+
+## Honest Next Slice
+
+The next conservative slice should add canonical terms/receipt hash preimage
+checks and replace the local always-success lock with real borrower/lender
+authority locks. Only after that should we consider BTC authority hooks or
+iCKB/xUDT variants.

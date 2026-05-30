@@ -8,7 +8,7 @@
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Status**: RISC-V ELF shell exists; inherited-fd spawn input adapter uses the official VM2 buffer/length ABI; no-std BIP340 verification is wired; child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group execution, and official full transaction script-verifier execution exist.
 
-This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all six fixtures with both lock and type/action ScriptGroups present. The remaining gap is production builder/full-node acceptance.
+This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all six fixtures with both lock and type/action ScriptGroups present. The remaining gap is live-chain NovaSeal RPC submission.
 
 ## Current Behaviour
 
@@ -36,7 +36,7 @@ cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --ta
 cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --release --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
 python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
 python3 scripts/novaseal_riscv_shell_artifact.py --sync --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
 ```
 
 Current summary:
@@ -63,7 +63,7 @@ child_vm_max_cycles=3487024
 ```
 
 The staged release ELF at `target/novaseal-btc-verifier-riscv-shell-release.elf` is now checked against the current release build by `scripts/novaseal_riscv_shell_artifact.py`. The preflight also confirms that the generated CellScript audit surface exposes the intended lock spawn/pipe/wait records.
-The same staged ELF is executed by `verifier/novaseal_ckb_vm_harness` with harness-provided official VM2 inherited-fd, pipe-read, and close syscalls.
+The same staged ELF is executed by `harness/ckb_vm` with harness-provided official VM2 inherited-fd, pipe-read, and close syscalls.
 
 ## Unsafe Boundary
 
@@ -79,6 +79,6 @@ This still does not prove criterion 6 on chain:
 - `nova_btc_authority_lock.cell` now spawns this binary through `spawn_with_fd`, and the parent-lock CKB VM harness executes that parent/child path,
 - the current CellScript VM2 `spawn_with_fd` helper emits executable `ecall`, but only first-CellDep `code` target binding is modelled (see `docs/SPAWN_BACKEND_BLOCKER.md`),
 - the generated `btc_authority` lock surface covers Script.args binding and spawn/IPC shell wiring, while the crypto decision is evidenced by verifier vectors, RISC-V build/tests, child-verifier CKB VM execution, parent-lock CKB VM execution, official resolved lock-group execution, and official full transaction script-verifier execution,
-- the parent-lock harness now records transaction-shape occupied-capacity, transaction-size, under-capacity checks, resolved lock-group cycles, and full transaction script-verifier cycles, but this is not production builder/full-node acceptance.
+- the parent-lock harness now records transaction-shape occupied-capacity, transaction-size, under-capacity checks, resolved lock-group cycles, and full transaction script-verifier cycles, but this is not live-chain NovaSeal RPC submission.
 
-The next shell slice should extend the full transaction script-verifier layer into production builder/full-node evidence while preserving strict-mode honesty.
+The next shell slice should extend the full transaction script-verifier layer into live-chain NovaSeal RPC submission evidence while preserving strict-mode honesty.

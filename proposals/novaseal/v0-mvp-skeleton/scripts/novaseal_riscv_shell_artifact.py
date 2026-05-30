@@ -203,7 +203,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "limits": [
             "The staged ELF matches BIP340 IPC vectors at model/unit-test level, not through a CKB VM transaction.",
             "The generated CellScript audit surface has lock spawn/pipe/wait records, but this artifact preflight is not parent-lock CKB VM execution evidence.",
-            "This artifact preflight does not execute the staged ELF through inherited fd/pipe IPC; use novaseal_ckb_vm_harness for child-verifier VM evidence.",
+            "This artifact preflight does not execute the staged ELF through inherited fd/pipe IPC; use harness/ckb_vm for child-verifier VM evidence.",
             "No occupied capacity or tx-size evidence is produced by this artifact preflight.",
         ],
     }

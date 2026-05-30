@@ -47,12 +47,19 @@ const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
 
 const NOVASEAL_CELL_LEN: usize = 146;
 const INTENT_LEN: usize = 213;
+const PROOF_RECEIPT_LEN: usize = 279;
+const CELL_BTC_AUTHORITY_HASH_OFFSET: usize = 2;
 const CELL_STATE_HASH_OFFSET: usize = 34;
 const CELL_POLICY_HASH_OFFSET: usize = 66;
 const CELL_RECEIPT_ROOT_OFFSET: usize = 98;
 const CELL_NONCE_OFFSET: usize = 130;
 const CELL_EXPIRY_OFFSET: usize = 138;
+const INTENT_DOMAIN_OFFSET: usize = 0;
+const INTENT_ACTION_OFFSET: usize = 32;
+const INTENT_OLD_CELL_OFFSET: usize = 33;
+const INTENT_OLD_STATE_HASH_OFFSET: usize = 69;
 const INTENT_NEW_STATE_HASH_OFFSET: usize = 101;
+const INTENT_POLICY_HASH_OFFSET: usize = 133;
 const INTENT_NONCE_OFFSET: usize = 197;
 const INTENT_EXPIRY_OFFSET: usize = 205;
 const BYTE32_LEN: usize = 32;
@@ -141,6 +148,7 @@ struct CaseReport {
     witness_size_bytes: usize,
     input_cell_data_size_bytes: usize,
     output_cell_data_size_bytes: usize,
+    receipt_cell_data_size_bytes: usize,
     intent_size_bytes: usize,
     canonical_intent_size_bytes: usize,
     receipt_hash: String,
@@ -161,7 +169,7 @@ struct StateTypeTrace {
 struct StateTypeSyscalls {
     witness: Vec<u8>,
     input_cell_data: Vec<u8>,
-    output_cell_data: Vec<u8>,
+    output_cell_data: Vec<Vec<u8>>,
     current_timepoint: u64,
     trace: Arc<Mutex<StateTypeTrace>>,
 }
@@ -175,6 +183,7 @@ struct StateTypeCase {
     current_timepoint: u64,
     input_cell_data: Vec<u8>,
     output_cell_data: Vec<u8>,
+    receipt_cell_data: Vec<u8>,
     intent: Vec<u8>,
     canonical_intent: Vec<u8>,
     receipt_hash: Vec<u8>,
@@ -230,14 +239,21 @@ impl StateTypeSyscalls {
         let offset = machine.registers()[A2];
         let index = machine.registers()[A3];
         let source = machine.registers()[A4];
-        if index != 0 {
+        let Ok(index) = usize::try_from(index) else {
             self.trace.lock().expect("trace mutex poisoned").load_cell_data_failures += 1;
             machine.set_register(A0, 1);
             return Ok(());
-        }
+        };
         let source_bytes = match source {
-            CKB_SOURCE_INPUT => self.input_cell_data.clone(),
-            CKB_SOURCE_OUTPUT => self.output_cell_data.clone(),
+            CKB_SOURCE_INPUT | CKB_SOURCE_GROUP_INPUT if index == 0 => self.input_cell_data.clone(),
+            CKB_SOURCE_OUTPUT | CKB_SOURCE_GROUP_OUTPUT => match self.output_cell_data.get(index) {
+                Some(data) => data.clone(),
+                None => {
+                    self.trace.lock().expect("trace mutex poisoned").load_cell_data_failures += 1;
+                    machine.set_register(A0, 1);
+                    return Ok(());
+                }
+            },
             _ => {
                 self.trace.lock().expect("trace mutex poisoned").load_cell_data_failures += 1;
                 machine.set_register(A0, 1);
@@ -384,6 +400,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<StateTypeCase, Harne
     let state_hash_commitment =
         ckb_blake2b256(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]).to_vec();
     let output_cell_data = build_output_cell(&old_cell, &intent);
+    let receipt_cell_data = build_receipt_cell(&old_cell, &intent)?;
     let witness = build_witness(&intent, &receipt_hash, &state_hash_commitment);
     Ok(StateTypeCase {
         fixture,
@@ -394,6 +411,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<StateTypeCase, Harne
         current_timepoint,
         input_cell_data: old_cell,
         output_cell_data,
+        receipt_cell_data,
         canonical_intent: intent.clone(),
         intent,
         receipt_hash,
@@ -407,7 +425,7 @@ fn run_case(args: &Args, action_elf: &[u8], case: &StateTypeCase) -> Result<Case
     let syscall = StateTypeSyscalls {
         witness: case.witness.clone(),
         input_cell_data: case.input_cell_data.clone(),
-        output_cell_data: case.output_cell_data.clone(),
+        output_cell_data: vec![case.output_cell_data.clone(), case.receipt_cell_data.clone()],
         current_timepoint: case.current_timepoint,
         trace: Arc::clone(&trace),
     };
@@ -447,6 +465,7 @@ fn run_case(args: &Args, action_elf: &[u8], case: &StateTypeCase) -> Result<Case
         witness_size_bytes: case.witness.len(),
         input_cell_data_size_bytes: case.input_cell_data.len(),
         output_cell_data_size_bytes: case.output_cell_data.len(),
+        receipt_cell_data_size_bytes: case.receipt_cell_data.len(),
         intent_size_bytes: case.intent.len(),
         canonical_intent_size_bytes: case.canonical_intent.len(),
         receipt_hash: hex0x(&case.receipt_hash),
@@ -466,6 +485,32 @@ fn build_output_cell(old_cell: &[u8], intent: &[u8]) -> Vec<u8> {
     output[CELL_NONCE_OFFSET..CELL_NONCE_OFFSET + 8].copy_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
     output[CELL_EXPIRY_OFFSET..CELL_EXPIRY_OFFSET + 8].copy_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
     output
+}
+
+fn build_receipt_cell(old_cell: &[u8], intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
+    if old_cell.len() != NOVASEAL_CELL_LEN {
+        return Err(HarnessError::Message(format!("old_cell has {} bytes, expected {NOVASEAL_CELL_LEN}", old_cell.len())));
+    }
+    if intent.len() != INTENT_LEN {
+        return Err(HarnessError::Message(format!("intent has {} bytes, expected {INTENT_LEN}", intent.len())));
+    }
+    let mut receipt = Vec::with_capacity(PROOF_RECEIPT_LEN);
+    receipt.extend_from_slice(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&old_cell[0..2]);
+    receipt.push(intent[INTENT_ACTION_OFFSET]);
+    receipt.extend_from_slice(&intent[INTENT_OLD_CELL_OFFSET..INTENT_OLD_CELL_OFFSET + 36]);
+    receipt.extend_from_slice(&intent[INTENT_OLD_STATE_HASH_OFFSET..INTENT_OLD_STATE_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&ckb_blake2b256(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]));
+    receipt.extend_from_slice(&intent[INTENT_POLICY_HASH_OFFSET..INTENT_POLICY_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&old_cell[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&[0u8; BYTE32_LEN]);
+    receipt.extend_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
+    receipt.extend_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
+    if receipt.len() != PROOF_RECEIPT_LEN {
+        return Err(HarnessError::Message(format!("receipt has {} bytes, expected {PROOF_RECEIPT_LEN}", receipt.len())));
+    }
+    Ok(receipt)
 }
 
 fn build_witness(intent: &[u8], receipt_hash: &[u8], state_hash_commitment: &[u8]) -> Vec<u8> {
@@ -524,6 +569,7 @@ fn build_report(args: &Args, action_elf: &[u8], cases: Vec<CaseReport>) -> Repor
             "The wrong_signature_reject fixture is expected to pass at this layer because signature rejection is authority-lock scope.",
             "The .cell inline NovaSealIntentV0 now uses the same 213-byte old_cell: OutPoint shape as schemas/nova_intent_v0.schema; no intent-shortening adapter is used.",
             "The action entry parses the shared lock+type witness payload: intent, receipt_hash, state_hash_commitment, and SignaturePayload. The signature bytes are ignored at type scope so the same witness can be used by the authority lock.",
+            "Receipt output data is materialised as Output#1, matching the combined transaction harness.",
             "The transaction context is harnessed directly, not produced by a production builder/full-node acceptance path.",
         ],
     }

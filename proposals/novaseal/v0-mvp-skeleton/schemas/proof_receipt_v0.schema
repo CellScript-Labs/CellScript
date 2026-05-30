@@ -2,9 +2,9 @@
 #
 # This is the audit artefact of a NovaSeal transition.
 #
-# In the strict v0 MVP, the receipt is primarily an *obligation* checked
-# by hash inside the state transition script. It may later be promoted
-# to a first-class CKB output cell (see nova_receipt_type.cell).
+# In the strict v0 MVP, the receipt is materialised as a first-class
+# ProofReceiptV0 output cell and the receipt_hash equality remains checked
+# inside the state transition script.
 
 protocol: Byte32                # blake2b("NovaSeal") or equivalent fixed tag.
 
@@ -29,10 +29,10 @@ tx_hash: Byte32                 # The CKB transaction that performed the transit
 nonce: u64
 expiry: u64
 
-# Receipt modes supported in v0 (documented, not all necessarily implemented):
-# - Witness receipt (hash only, for audit tooling)
-# - Output receipt cell (future, when nova_receipt_type is promoted)
-# - ProofPlan receipt (the hash is a checked obligation visible in audit-bundle)
+# Receipt modes supported in v0:
+# - Output receipt cell (implemented by nova_state_type.cell)
+# - ProofPlan receipt output obligation (visible in audit-bundle)
+# - Witness receipt hash equality (checked by the action)
 #
-# The skeleton deliberately starts with the "checked obligation + ProofPlan"
-# mode so we do not over-claim automatic on-chain receipt cells.
+# The current CellScript skeleton still uses a placeholder intent digest rule
+# until Molecule/wallet signing alignment is frozen.

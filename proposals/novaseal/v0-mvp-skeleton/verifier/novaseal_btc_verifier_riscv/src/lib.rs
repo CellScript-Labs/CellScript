@@ -125,6 +125,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_tampered_signature_as_crypto_failure() {
+        let mut blob = valid_ipc_blob();
+        blob[143] ^= 1;
+        let decision = decide(&blob);
+
+        assert_eq!(decision, ShellDecision::RejectCrypto(VerifyError::VerificationFailed));
+        assert_eq!(decision.exit_code(), EXIT_REJECT_CRYPTO);
+        assert!(!decision.accepted());
+    }
+
+    #[test]
     fn reconstructs_ipc_blob_from_spawn_word_stream() {
         let blob = valid_ipc_blob();
         let words = ipc_words(&blob);
@@ -140,6 +151,16 @@ mod tests {
         let decision = decide_words(&words);
 
         assert_eq!(decision, ShellDecision::RejectSpawnInput(SpawnInputError::WordCount { actual: IPC_WORD_COUNT - 1 }));
+        assert_eq!(decision.exit_code(), EXIT_REJECT_SPAWN_IO);
+        assert!(!decision.accepted());
+    }
+
+    #[test]
+    fn rejects_extra_spawn_word_stream_before_envelope_parse() {
+        let words = [0u64; IPC_WORD_COUNT + 1];
+        let decision = decide_words(&words);
+
+        assert_eq!(decision, ShellDecision::RejectSpawnInput(SpawnInputError::WordCount { actual: IPC_WORD_COUNT + 1 }));
         assert_eq!(decision.exit_code(), EXIT_REJECT_SPAWN_IO);
         assert!(!decision.accepted());
     }

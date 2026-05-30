@@ -5,7 +5,7 @@
 **No-std core**: `verifier/novaseal_btc_verifier_core`
 **RISC-V shell**: `verifier/novaseal_btc_verifier_riscv`
 **Report**: `target/novaseal-btc-verifier-ipc-vectors.json`
-**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence; no production builder/full-node evidence yet.
+**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence; no live-chain NovaSeal RPC submission evidence yet.
 
 This document freezes the first v0 binary request shape that `nova_btc_authority_lock.cell` must eventually pass to `novaseal_btc_verifier`.
 
@@ -56,8 +56,8 @@ cargo test --manifest-path verifier/novaseal_btc_verifier_core/Cargo.toml
 cargo run --manifest-path verifier/novaseal_btc_verifier/Cargo.toml -- verify-ipc-vectors --vectors target/novaseal-btc-verifier-ipc-vectors.json
 cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
 python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 ```
 
 Current summary:
@@ -100,7 +100,7 @@ This is still not criterion 6 on chain:
 - the current RISC-V verifier binary shell reads inherited fd index `0` as 18 little-endian `u64` words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
 - the no-std core currently covers both the envelope parser and BIP340 verification,
 - child-verifier and parent-lock CKB VM harness evidence exists, and the parent-lock harness now records transaction-shape tx-size/capacity facts plus official resolved lock-group verifier success and full transaction script-verifier success,
-- no production builder/full-node evidence exists,
+- no live-chain NovaSeal RPC submission evidence exists,
 - the generated `btc_authority` lock surface proves Script.args binding and spawn/IPC wiring, while crypto execution remains external harness evidence.
 
-This contract is deliberately small so the next slice can turn the current full transaction script-verifier evidence into production builder/full-node evidence without changing the signed message or public vector set.
+This contract is deliberately small so the next slice can turn the current full transaction script-verifier evidence into live-chain NovaSeal RPC submission evidence without changing the signed message or public vector set.

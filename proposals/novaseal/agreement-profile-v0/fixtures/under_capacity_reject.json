@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "under_capacity_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "local-transaction-shape-covered + resolved-transaction-covered",
+  "reject_guard": "output capacity must be greater than or equal to occupied capacity",
+  "description": "A terminal agreement output below occupied capacity must reject in the local transaction-shape harness and at the CKB contextual transaction verifier layer."
+}

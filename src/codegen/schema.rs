@@ -328,6 +328,10 @@ impl CodeGenerator {
         fixed_byte_width(ty, type_static_length(ty)).or_else(|| self.fixed_named_type_width(ty))
     }
 
+    pub(crate) fn layout_fixed_byte_like_width(&self, layout: &SchemaFieldLayout) -> Option<usize> {
+        layout_fixed_byte_width(layout).or_else(|| self.fixed_byte_like_width(&layout.ty))
+    }
+
     pub(crate) fn constructed_byte_vector_part_width(&self, operand: &IrOperand) -> Option<usize> {
         constructed_byte_vector_part_width(operand).or_else(|| match operand {
             IrOperand::Var(var) => self.fixed_named_type_width(&var.ty),
@@ -663,7 +667,7 @@ impl CodeGenerator {
         let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(2) else {
             return;
         };
-        if let Some(width) = layout_fixed_byte_width(layout) {
+        if let Some(width) = self.layout_fixed_byte_like_width(layout) {
             self.emit_dynamic_table_fixed_field_pointer_to_stack(
                 input_size_offset,
                 input_buffer_offset,
@@ -894,7 +898,7 @@ impl CodeGenerator {
             self.emit_loaded_field_equals_expected(size_offset, buffer_offset, layout, expected, context);
             return true;
         }
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(layout) else {
             return false;
         };
         let Some(source) = self.expected_fixed_byte_source(expected, width) else {
@@ -1049,7 +1053,7 @@ impl CodeGenerator {
     pub(crate) fn emit_fixed_byte_source_pointer_to(&mut self, dest_reg: &str, source: &ExpectedFixedByteSource) -> bool {
         match source {
             ExpectedFixedByteSource::SchemaField(source) => {
-                let Some(width) = layout_fixed_byte_width(&source.layout) else {
+                let Some(width) = self.layout_fixed_byte_like_width(&source.layout) else {
                     return false;
                 };
                 self.emit_schema_field_source_pointer_to(dest_reg, source, width)
@@ -1182,7 +1186,7 @@ impl CodeGenerator {
             IrOperand::Var(var) if self.fixed_byte_like_width(&var.ty).is_some() => {
                 let var_width = self.fixed_byte_like_width(&var.ty)?;
                 if let Some(source) = self.schema_field_value_sources.get(&var.id).cloned() {
-                    let source_width = layout_fixed_byte_width(&source.layout)?;
+                    let source_width = self.layout_fixed_byte_like_width(&source.layout)?;
                     if source_width == expected_width {
                         return Some(ExpectedFixedByteSource::SchemaField(source));
                     }
@@ -1673,7 +1677,7 @@ impl CodeGenerator {
         let Some(layout) = layouts.get(field).cloned() else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return self.emit_dynamic_schema_field_access(dest, var, type_name, field, &layout);
         };
 
@@ -1772,7 +1776,7 @@ impl CodeGenerator {
         let Some(layout) = aggregate_field_layout(&source_ty, field) else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return false;
         };
 
@@ -1825,7 +1829,7 @@ impl CodeGenerator {
         let Some(layout) = self.type_layouts.get(type_name).and_then(|fields| fields.get(field)).cloned() else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return false;
         };
 

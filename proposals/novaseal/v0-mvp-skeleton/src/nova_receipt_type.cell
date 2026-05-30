@@ -1,43 +1,33 @@
 module novaseal::receipt_type::v0_mvp;
 
 // =============================================================================
-// NovaSeal v0 MVP - ProofReceipt Type Script (STUB)
+// NovaSeal v0 MVP - ProofReceipt Type Script
 // =============================================================================
 //
-// In v0 the primary enforcement of the receipt is done **inside**
-// nova_state_type via the receipt_hash obligation check.
+// In v0 the state transition creates a materialised ProofReceiptV0 output and
+// also checks the receipt_hash obligation inside nova_state_type.
 //
 // This file exists so the package layout matches the Architecture doc and
-// future slices can promote the receipt to a first-class output cell type
-// script without restructuring.
-//
-// For the strict MVP skeleton this file is intentionally minimal / stub.
-// It does not yet define a full resource or action surface.
+// This file keeps the standalone receipt schema compileable for review. The
+// package default entry defines the executable transition surface.
 // =============================================================================
 
-// Placeholder. When promoted, this will look similar to:
-//
-// receipt ProofReceiptV0 has store, create, consume {
-//     protocol: Hash,           // "NovaSeal"
-//     version: u16,
-//     action: u8,
-//     old_cell: OutPoint,
-//     ...
-//     intent_hash: Hash,
-//     signer_authority_hash: Hash,
-//     tx_hash: Hash,
-// }
-//
-// action emit_receipt(...) -> receipt: ProofReceiptV0
-// where
-//     create receipt = ProofReceiptV0 { ... }
-//     // and the state transition asserts that the receipt_hash matches
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
 
-// For now we only document the intended surface.
-struct ProofReceiptV0Stub {
+receipt ProofReceiptV0 has store, create, consume {
     protocol: Hash,
     version: u16,
     action: u8,
+    old_cell: OutPoint,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
     intent_hash: Hash,
     policy_hash: Hash,
+    signer_authority_hash: Hash,
+    tx_hash: Hash,
+    nonce: u64,
+    expiry: u64,
 }

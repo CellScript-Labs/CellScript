@@ -161,8 +161,8 @@ pub fn verify_ipc_blob(blob: &[u8]) -> Result<(), IpcVerificationError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        IPC_BLOB_LEN, IPC_FLAGS_NONE, IPC_MAGIC, IPC_SCHEME_BIP340, IPC_VERSION, IpcEnvelopeError, VerifyError, parse_ipc_request,
-        verify_bip340_message32, verify_ipc_blob,
+        IPC_BLOB_LEN, IPC_FLAGS_NONE, IPC_MAGIC, IPC_SCHEME_BIP340, IPC_VERSION, IpcEnvelopeError, IpcVerificationError, VerifyError,
+        parse_ipc_request, verify_bip340_message32, verify_ipc_blob,
     };
 
     const MESSAGE: &str = "47b7551bbdb7061ffdea17a9f3049503e676e8612b5af2a7103bfd4f23524d08";
@@ -184,6 +184,7 @@ mod tests {
         let mut blob = ipc_blob();
 
         assert_eq!(parse_ipc_request(&blob[..143]), Err(IpcEnvelopeError::BlobLength));
+        assert_eq!(parse_ipc_request(&[0u8; IPC_BLOB_LEN + 1]), Err(IpcEnvelopeError::BlobLength));
 
         blob[0] ^= 1;
         assert_eq!(parse_ipc_request(&blob), Err(IpcEnvelopeError::Magic));
@@ -215,6 +216,32 @@ mod tests {
     }
 
     #[test]
+    fn rejects_wrong_lengths_and_invalid_encodings() {
+        let message = fixed_hex::<32>(MESSAGE);
+        let pubkey = fixed_hex::<32>(PUBKEY);
+        let signature = fixed_hex::<64>(SIGNATURE);
+
+        assert_eq!(verify_bip340_message32(&message[..31], &pubkey, &signature), Err(VerifyError::MessageLength));
+        assert_eq!(verify_bip340_message32(&[0u8; 33], &pubkey, &signature), Err(VerifyError::MessageLength));
+        assert_eq!(verify_bip340_message32(&message, &pubkey[..31], &signature), Err(VerifyError::PubkeyLength));
+        assert_eq!(verify_bip340_message32(&message, &[0u8; 33], &signature), Err(VerifyError::PubkeyLength));
+        assert_eq!(verify_bip340_message32(&message, &pubkey, &signature[..63]), Err(VerifyError::SignatureLength));
+        assert_eq!(verify_bip340_message32(&message, &pubkey, &[0u8; 65]), Err(VerifyError::SignatureLength));
+        assert_eq!(verify_bip340_message32(&message, &[0xff; 32], &signature), Err(VerifyError::InvalidPubkey));
+        assert_eq!(verify_bip340_message32(&message, &pubkey, &[0xff; 64]), Err(VerifyError::InvalidSignature));
+    }
+
+    #[test]
+    fn rejects_tampered_signature_after_valid_decoding() {
+        let message = fixed_hex::<32>(MESSAGE);
+        let pubkey = fixed_hex::<32>(PUBKEY);
+        let mut signature = fixed_hex::<64>(SIGNATURE);
+        signature[63] ^= 1;
+
+        assert_eq!(verify_bip340_message32(&message, &pubkey, &signature), Err(VerifyError::VerificationFailed));
+    }
+
+    #[test]
     fn verifies_reference_ipc_blob() {
         let mut blob = [0u8; IPC_BLOB_LEN];
         blob[0..8].copy_from_slice(IPC_MAGIC);
@@ -228,7 +255,24 @@ mod tests {
         assert_eq!(verify_ipc_blob(&blob), Ok(()));
 
         blob[16] ^= 1;
-        assert!(verify_ipc_blob(&blob).is_err());
+        assert_eq!(verify_ipc_blob(&blob), Err(IpcVerificationError::Verification(VerifyError::VerificationFailed)));
+    }
+
+    #[test]
+    fn classifies_ipc_envelope_errors_before_crypto_errors() {
+        let mut blob = [0u8; IPC_BLOB_LEN];
+        blob[0..8].copy_from_slice(IPC_MAGIC);
+        blob[8..10].copy_from_slice(&IPC_VERSION.to_le_bytes());
+        blob[10..12].copy_from_slice(&IPC_SCHEME_BIP340.to_le_bytes());
+        blob[12..16].copy_from_slice(&IPC_FLAGS_NONE.to_le_bytes());
+        blob[16..48].copy_from_slice(&fixed_hex::<32>(MESSAGE));
+        blob[48..80].copy_from_slice(&fixed_hex::<32>(PUBKEY));
+        blob[80..144].copy_from_slice(&[0xff; 64]);
+
+        assert_eq!(verify_ipc_blob(&blob), Err(IpcVerificationError::Verification(VerifyError::InvalidSignature)));
+
+        blob[0] ^= 1;
+        assert_eq!(verify_ipc_blob(&blob), Err(IpcVerificationError::Envelope(IpcEnvelopeError::Magic)));
     }
 
     fn ipc_blob() -> [u8; IPC_BLOB_LEN] {

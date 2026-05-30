@@ -4518,6 +4518,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Identifier(name, _)
                 if name.starts_with("env::")
                     || name.starts_with("ckb::")
+                    || name.starts_with("verifier::")
                     || name.starts_with("source::")
                     || name.starts_with("witness::")
                     || matches!(
@@ -5168,6 +5169,10 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
+                        ("verifier::btc::bip340", "require_signature") => {
+                            self.validate_btc_bip340_require_signature_call(call, arg_types)?;
+                            Type::Unit
+                        }
                         ("Address", "zero") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::Address
@@ -5742,6 +5747,19 @@ impl<'a> TypeChecker<'a> {
                 format!("fixed_u64_le requires 8 bytes at word_index {}; input width is {} bytes", word_index, width),
                 call.args[1].span(),
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_btc_bip340_require_signature_call(&self, call: &CallExpr, arg_types: &[Type]) -> Result<()> {
+        const SIGNATURE: &str =
+            "verifier::btc::bip340::require_signature expects (message: Hash, pubkey: [u8; 32], signature: [u8; 64])";
+        self.validate_builtin_arity("verifier::btc::bip340::require_signature", 3, arg_types, call.span)?;
+        if arg_types[0] != Type::Hash
+            || arg_types[1] != Type::Array(Box::new(Type::U8), 32)
+            || arg_types[2] != Type::Array(Box::new(Type::U8), 64)
+        {
+            return Err(CompileError::new(SIGNATURE, call.span));
         }
         Ok(())
     }

@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_settlement_amount_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "local-transaction-shape-covered",
+  "reject_guard": "lender repayment output must equal principal plus fixed fee",
+  "description": "A repayment transaction shape that underpays the lender must reject in the local transaction-shape harness. This is not resolved-transaction-covered yet because the current profile records terminal_amount but does not bind concrete payout cells on-chain."
+}

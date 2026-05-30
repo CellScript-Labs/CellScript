@@ -21,11 +21,19 @@ proposals/*
 proposals/novaseal/*
 !proposals/novaseal/v0-mvp-skeleton/
 !proposals/novaseal/v0-mvp-skeleton/**
+!proposals/novaseal/agreement-profile-v0/
+!proposals/novaseal/agreement-profile-v0/**
 proposals/novaseal/v0-mvp-skeleton/build/
 proposals/novaseal/v0-mvp-skeleton/target/
 proposals/novaseal/v0-mvp-skeleton/src/.cell/
 proposals/novaseal/v0-mvp-skeleton/scripts/__pycache__/
 proposals/novaseal/v0-mvp-skeleton/verifier/**/target/
+proposals/novaseal/v0-mvp-skeleton/harness/**/target/
+proposals/novaseal/agreement-profile-v0/target/
+proposals/novaseal/agreement-profile-v0/harness/**/target/
+proposals/novaseal/agreement-profile-v0/src/.cell/
+proposals/novaseal/agreement-profile-v0/harness/**/.cell/
+proposals/novaseal/agreement-profile-v0/scripts/__pycache__/
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

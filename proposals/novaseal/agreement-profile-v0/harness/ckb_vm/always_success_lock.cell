@@ -1,0 +1,6 @@
+module novaseal::agreement_profile::harness::always_success_lock;
+
+// Local transaction harness lock only. Not part of Agreement Profile runtime.
+lock always_success() -> bool {
+    return true
+}

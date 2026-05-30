@@ -1,0 +1,38 @@
+[package]
+name = "novaseal-agreement-profile-v0"
+version = "0.0.1"
+authors = ["NovaSeal Design Team"]
+description = "NovaSeal Agreement Profile v0 - CKB-native pre-agreed terminal contract skeleton"
+license = "MIT"
+repository = ""
+homepage = ""
+documentation = ""
+keywords = ["ckb", "novaseal", "agreement", "oracle-free"]
+categories = ["protocol", "audit"]
+cellscript_version = "0.16"
+entry = "src/nova_agreement_type.cell"
+
+source_roots = ["src"]
+include = ["schemas/**/*", "proofs/**/*", "fixtures/**/*", "docs/**/*", "scripts/**/*", "harness/**/*"]
+exclude = []
+
+[dependencies]
+
+[dev_dependencies]
+
+[build.dependencies]
+
+[policy]
+production = false
+deny_fail_closed = true
+deny_ckb_runtime = false
+deny_runtime_obligations = false
+
+[metadata]
+protocol_family = "NovaSeal"
+profile = "agreement-profile-v0"
+status = "reviewable-ckb-native-agreement-skeleton"
+oracle_dependency = "none"
+margin_call_dependency = "none"
+btc_utxo_mirror = "not-implemented"
+receipt_mode = "materialized-output-cell"

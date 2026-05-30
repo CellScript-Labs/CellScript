@@ -30,7 +30,7 @@ deny_ckb_runtime = false
 deny_runtime_obligations = false
 
 [[deploy.ckb.cell_deps]]
-name = "novaseal_btc_verifier_riscv"
+name = "cellscript_btc_bip340_verifier_riscv"
 out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
 dep_type = "code"
 hash_type = "data1"

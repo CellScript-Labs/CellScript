@@ -4950,6 +4950,9 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
+                    self.lower_btc_bip340_require_signature_call(call, current, blocks, vars)
+                }
                 "fixed_u64_le" if call.args.len() == 2 => self.lower_fixed_u64_le_call(call, current, blocks, vars),
                 "spawn" if call.args.len() == 1 => {
                     let dest = self.new_var("spawn_result", IrType::U64);
@@ -5384,6 +5387,118 @@ impl IrGenerator {
             },
             _ => None,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_btc_bip340_require_signature_call(
+        &mut self,
+        call: &CallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let lowered_message = self.lower_expr(&call.args[0], current, blocks, vars);
+        let mut active = lowered_message.current?;
+        if Self::is_poisoned_operand(&lowered_message.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_pubkey = self.lower_expr(&call.args[1], active, blocks, vars);
+        active = lowered_pubkey.current?;
+        if Self::is_poisoned_operand(&lowered_pubkey.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_signature = self.lower_expr(&call.args[2], active, blocks, vars);
+        active = lowered_signature.current?;
+        if Self::is_poisoned_operand(&lowered_signature.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+
+        let pipe_pair = self.new_var("btc_bip340_pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(pipe_pair.clone()),
+            func: "__ckb_pipe".to_string(),
+            args: Vec::new(),
+        });
+        let read_fd = self.new_var("btc_bip340_read_fd", IrType::U64);
+        let write_fd = self.new_var("btc_bip340_write_fd", IrType::U64);
+        let block = self.block_mut(blocks, active);
+        block.instructions.push(IrInstruction::FieldAccess {
+            dest: read_fd.clone(),
+            obj: IrOperand::Var(pipe_pair.clone()),
+            field: "0".to_string(),
+        });
+        block.instructions.push(IrInstruction::FieldAccess {
+            dest: write_fd.clone(),
+            obj: IrOperand::Var(pipe_pair),
+            field: "1".to_string(),
+        });
+
+        let pid = self.new_var("btc_bip340_pid", IrType::U64);
+        let target = IrOperand::Const(IrConst::U64(stable_u64_tag(crate::verifier_registry::btc::BIP340_RISCV_TARGET)));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(pid.clone()),
+            func: "__ckb_spawn_with_fd1".to_string(),
+            args: vec![target, IrOperand::Var(read_fd)],
+        });
+
+        self.push_pipe_write_u64(blocks, active, &write_fd, IrOperand::Const(IrConst::U64(0x4350_4930_5642_534e)));
+        self.push_pipe_write_u64(blocks, active, &write_fd, IrOperand::Const(IrConst::U64(65_536)));
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_message.operand, 4);
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_pubkey.operand, 4);
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_signature.operand, 8);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: "__ckb_close".to_string(),
+            args: vec![IrOperand::Var(write_fd)],
+        });
+
+        let status = self.new_var("btc_bip340_exit_status", IrType::U64);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(status.clone()),
+            func: "__ckb_wait".to_string(),
+            args: vec![IrOperand::Var(pid)],
+        });
+        let ok = self.new_var("btc_bip340_status_ok", IrType::Bool);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Binary {
+            dest: ok.clone(),
+            op: BinaryOp::Eq,
+            left: IrOperand::Var(status),
+            right: IrOperand::Const(IrConst::U64(0)),
+        });
+        let ok_block = self.push_block(blocks);
+        let fail_block = self.push_block(blocks);
+        self.block_mut(blocks, active).terminator =
+            IrTerminator::Branch { cond: IrOperand::Var(ok), then_block: ok_block, else_block: fail_block };
+        self.block_mut(blocks, fail_block).terminator = self.fail_closed_terminator();
+
+        Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(ok_block) })
+    }
+
+    fn push_fixed_word_pipe_writes(
+        &mut self,
+        blocks: &mut [IrBlock],
+        active: BlockId,
+        write_fd: &IrVar,
+        bytes: IrOperand,
+        word_count: u64,
+    ) {
+        for word_index in 0..word_count {
+            let word = self.new_var("btc_bip340_word", IrType::U64);
+            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                dest: Some(word.clone()),
+                func: "__cellscript_fixed_u64_le".to_string(),
+                args: vec![bytes.clone(), IrOperand::Const(IrConst::U64(word_index))],
+            });
+            self.push_pipe_write_u64(blocks, active, write_fd, IrOperand::Var(word));
+        }
+    }
+
+    fn push_pipe_write_u64(&mut self, blocks: &mut [IrBlock], active: BlockId, write_fd: &IrVar, value: IrOperand) {
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: "__ckb_pipe_write".to_string(),
+            args: vec![IrOperand::Var(write_fd.clone()), value],
+        });
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -4,7 +4,7 @@
 **Status**: packed-reference candidate rule.
 **Applies to**: `scripts/novaseal_canonical_vectors.py` and `target/novaseal-canonical-vectors.json`.
 
-This document resolves the direct `receipt_hash` / `intent_hash` commitment cycle for the current packed-reference vectors. It does not yet change on-chain `.cell` logic or implement a BTC verifier.
+This document resolves the direct `receipt_hash` / `intent_hash` commitment cycle for the current packed-reference vectors. The `.cell` action now materialises a `ProofReceiptV0` output, but its `intent_hash` field still uses the current placeholder signing digest rule (`hash_blake2b(intent.domain)`) until Molecule/wallet signing alignment is frozen.
 
 ## Problem
 
@@ -70,6 +70,13 @@ The first number is the legacy full-receipt candidate. It remains zero, as expec
 
 The latter two numbers prove the selected candidate rule is internally consistent across all six fixtures.
 
+## Current On-Chain Skeleton Delta
+
+The generated state action now checks a `ProofReceiptV0` output at `Output#1`.
+That closes the former "no receipt output" audit blocker. It does not yet mean
+the packed-reference `signed_intent_hash = blake2b(full NovaSealIntentV0)` rule
+has been adopted by the lock, wallet, and verifier path.
+
 ## Remaining Limits
 
 This is still not production evidence:
@@ -77,13 +84,14 @@ This is still not production evidence:
 - not Molecule output,
 - not CKB VM witness encoding,
 - not BTC wallet signing material,
-- not implemented in `nova_btc_authority_lock.cell`,
-- not enforced as a named generated ProofPlan obligation.
+- not implemented as the final lock/wallet/verifier signing digest rule,
+- the receipt output is generated-audit checked, but the final Molecule/wallet
+  receipt preimage alignment is still pending.
 
 Before production, the same preimage rule must be adopted by:
 
 1. off-chain signer / wallet tooling,
 2. `nova_btc_authority_lock.cell` intent hash construction,
 3. external `novaseal_btc_verifier`,
-4. receipt materialisation or witness receipt checker,
+4. production receipt output checker and wallet preimage builder,
 5. fixture/VM transaction harness.

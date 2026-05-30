@@ -7,9 +7,9 @@ module novaseal::btc_authority_lock::v0_mvp;
 // This lock proves that a typed intent was authorised by a BTC key. It does NOT
 // perform the crypto itself.
 //
-// CRITICAL: All real signature verification is delegated via spawn_with_fd() to
-// an external, auditable RISC-V binary (novaseal_btc_verifier_riscv). That binary is
-// part of the v0 Trusted Computing Base (TCB).
+// CRITICAL: All real signature verification is delegated to the generic
+// runtime verifier capability verifier::btc::bip340. The deployed verifier
+// artifact remains part of the v0 Trusted Computing Base (TCB).
 //
 // The delegated shell now has BIP340 vector coverage and child-verifier CKB VM
 // execution evidence, but this lock remains non-production until a parent-lock
@@ -25,38 +25,15 @@ module novaseal::btc_authority_lock::v0_mvp;
 //   witness payload; this lock only enforces the authority-relevant fields.
 
 lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealIntentV0, witness receipt_hash: Hash, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
-    // Domain separation + binding + delegate-to-verifier hook. The delegated
-    // RISC-V shell performs the BIP340 decision, but production evidence still
-    // requires a parent-lock CKB VM transaction that spawns the staged child.
+    // Domain separation + binding + delegate-to-verifier hook. The generic
+    // runtime verifier performs the BIP340 decision, but production evidence
+    // still requires builder/full-node acceptance for the deployed child.
     let digest = compute_intent_hash(&intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
     require intent.policy_hash == cell.policy_hash
 
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-    let pid = spawn_with_fd("novaseal_btc_verifier_riscv", read_fd)
-    pipe_write(write_fd, 0x435049305642534e)
-    pipe_write(write_fd, 65536)
-    pipe_write(write_fd, fixed_u64_le(digest, 0))
-    pipe_write(write_fd, fixed_u64_le(digest, 1))
-    pipe_write(write_fd, fixed_u64_le(digest, 2))
-    pipe_write(write_fd, fixed_u64_le(digest, 3))
-    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 0))
-    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 1))
-    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 2))
-    pipe_write(write_fd, fixed_u64_le(sig.pubkey, 3))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 0))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 1))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 2))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 3))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 4))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 5))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 6))
-    pipe_write(write_fd, fixed_u64_le(sig.signature, 7))
-    close(write_fd)
-    let status = wait(pid)
-    status == 0
+    verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
+    true
 }
 
 // -----------------------------------------------------------------------------

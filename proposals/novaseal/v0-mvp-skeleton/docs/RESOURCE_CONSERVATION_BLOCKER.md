@@ -58,9 +58,9 @@ This is useful progress: the NovaSeal protocol-level conservation relation is ge
 
 This does not prove on-chain BTC signature correctness. The `btc_authority` lock now has generated spawn/IPC shell wiring and the delegated RISC-V shell has local plus child-verifier CKB VM BIP340 evidence, but no parent/child CKB VM transaction result is generated in the ProofPlan.
 
-This does not prove receipt output materialisation. The receipt remains a hash obligation in the action plus a stub type surface.
+Receipt output materialisation is now covered separately by `create-output:ProofReceiptV0:receipt`; resource conservation still only proves the `NovaSealCellV0` linear transition.
 
-This does not provide transaction builder acceptance, CKB VM dry-run, cycle measurement, transaction size, or occupied-capacity evidence.
+This does not provide live-chain NovaSeal transaction submission. Harness-level CKB VM, cycle, transaction-size, and occupied-capacity evidence is tracked separately.
 
 ## What Not To Do
 

@@ -1049,7 +1049,7 @@ impl CodeGenerator {
                             continue;
                         };
                         let layout = source.layout.clone();
-                        if layout_fixed_byte_width(&layout).is_some() && layout.ty == dest.ty {
+                        if self.layout_fixed_byte_like_width(&layout).is_some() && layout.ty == dest.ty {
                             self.schema_field_value_sources.insert(dest.id, source.clone());
                             if layout_fixed_scalar_width(&layout).is_some() {
                                 self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::Field(source));

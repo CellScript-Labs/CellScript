@@ -15,17 +15,18 @@ use std::{
 
 use ckb_chain_spec::consensus::{Consensus, ConsensusBuilder};
 use ckb_script::{TransactionScriptsVerifier, TxVerifyEnv};
-use ckb_traits::{CellDataProvider, ExtensionProvider, HeaderProvider};
+use ckb_traits::{CellDataProvider, EpochProvider, ExtensionProvider, HeaderFields, HeaderFieldsProvider, HeaderProvider};
 use ckb_types::{
     bytes::Bytes as CkbBytes,
     core::{
-        Capacity, DepType, EpochNumberWithFraction, HeaderBuilder, ScriptHashType, TransactionView,
+        BlockExt, BlockNumber, Capacity, DepType, EpochExt, EpochNumberWithFraction, HeaderBuilder, ScriptHashType, TransactionView,
         cell::{CellMetaBuilder, ResolvedTransaction},
         hardfork::{CKB2021, CKB2023, HardForks},
     },
     packed,
     prelude::*,
 };
+use ckb_verification::{ContextualTransactionVerifier, NonContextualTransactionVerifier};
 use k256::schnorr::SigningKey;
 use serde::Serialize;
 use serde_json::Value;
@@ -47,6 +48,7 @@ const MIN_BUILDER_FEE_SHANNONS: u64 = 100_000;
 
 const NOVASEAL_CELL_LEN: usize = 146;
 const NOVASEAL_INTENT_LEN: usize = 213;
+const PROOF_RECEIPT_LEN: usize = 279;
 const BYTE32_LEN: usize = 32;
 const SIGNATURE_PAYLOAD_LEN: usize = 96;
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -59,7 +61,11 @@ const CELL_RECEIPT_ROOT_OFFSET: usize = 98;
 const CELL_NONCE_OFFSET: usize = 130;
 const CELL_EXPIRY_OFFSET: usize = 138;
 const INTENT_DOMAIN_OFFSET: usize = 0;
+const INTENT_ACTION_OFFSET: usize = 32;
+const INTENT_OLD_CELL_OFFSET: usize = 33;
+const INTENT_OLD_STATE_HASH_OFFSET: usize = 69;
 const INTENT_NEW_STATE_HASH_OFFSET: usize = 101;
+const INTENT_POLICY_HASH_OFFSET: usize = 133;
 const INTENT_NONCE_OFFSET: usize = 197;
 const INTENT_EXPIRY_OFFSET: usize = 205;
 
@@ -100,6 +106,36 @@ impl CellDataProvider for HarnessDataLoader {
 impl HeaderProvider for HarnessDataLoader {
     fn get_header(&self, hash: &packed::Byte32) -> Option<ckb_types::core::HeaderView> {
         self.headers.get(hash).cloned()
+    }
+}
+
+impl HeaderFieldsProvider for HarnessDataLoader {
+    fn get_header_fields(&self, hash: &packed::Byte32) -> Option<HeaderFields> {
+        self.headers.get(hash).map(|header| HeaderFields {
+            hash: hash.clone(),
+            number: header.number(),
+            epoch: header.epoch(),
+            timestamp: header.timestamp(),
+            parent_hash: header.parent_hash(),
+        })
+    }
+}
+
+impl EpochProvider for HarnessDataLoader {
+    fn get_epoch_ext(&self, _block_header: &ckb_types::core::HeaderView) -> Option<EpochExt> {
+        None
+    }
+
+    fn get_block_hash(&self, _number: BlockNumber) -> Option<packed::Byte32> {
+        None
+    }
+
+    fn get_block_ext(&self, _block_hash: &packed::Byte32) -> Option<BlockExt> {
+        None
+    }
+
+    fn get_block_header(&self, hash: &packed::Byte32) -> Option<ckb_types::core::HeaderView> {
+        self.get_header(hash)
     }
 }
 
@@ -145,6 +181,7 @@ struct CombinedCase {
     current_timepoint: u64,
     old_cell: Vec<u8>,
     output_cell: Vec<u8>,
+    receipt_cell: Vec<u8>,
     witness: Vec<u8>,
     signature_mutation: Option<&'static str>,
 }
@@ -190,15 +227,22 @@ struct ElfReport {
 #[derive(Debug, Serialize)]
 struct Summary {
     combined_full_transaction_executed: bool,
+    ckb_node_verification_stack_executed: bool,
     total_cases: usize,
     expected_accept: usize,
     expected_reject: usize,
     accepted: usize,
     rejected: usize,
+    node_stack_accepted: usize,
+    node_stack_rejected: usize,
     matched_expected: usize,
+    node_stack_matched_expected: usize,
     mismatched: usize,
+    node_stack_mismatched: usize,
     failure_scope_matched: usize,
+    node_stack_failure_scope_matched: usize,
     failure_scope_mismatched: usize,
+    node_stack_failure_scope_mismatched: usize,
     lock_and_type_script_groups_present: bool,
     child_spawn_target_cell_dep0_modelled: bool,
     shared_witness_abi_aligned: bool,
@@ -206,9 +250,14 @@ struct Summary {
     builder_shape_checks_passed: bool,
     fee_shape_checks_passed: bool,
     under_capacity_shape_rejects: bool,
+    non_contextual_checks_passed: bool,
+    contextual_checks_match_expected: bool,
     min_fee_shannons: u64,
     max_fee_shannons: u64,
+    min_node_stack_fee_shannons: u64,
+    max_node_stack_fee_shannons: u64,
     max_full_transaction_cycles: u64,
+    max_node_stack_cycles: u64,
     max_consensus_tx_size_bytes: usize,
     max_output_occupied_capacity_shannons: u64,
     min_capacity_margin_shannons: u64,
@@ -228,11 +277,13 @@ struct CaseReport {
     matched_expected: bool,
     full_transaction_cycles: Option<u64>,
     full_transaction_error: Option<String>,
+    ckb_node_verifier: NodeVerifierReport,
     transaction_hash: String,
     consensus_tx_size_bytes: usize,
     witness_size_bytes: usize,
     input_cell_data_size_bytes: usize,
     output_cell_data_size_bytes: usize,
+    receipt_cell_data_size_bytes: usize,
     output_occupied_capacity_shannons: u64,
     capacity_margin_shannons: u64,
     builder_shape: BuilderShapeReport,
@@ -273,6 +324,21 @@ struct CellDepReport {
     out_point_tx_hash_placeholder: String,
 }
 
+#[derive(Debug, Serialize)]
+struct NodeVerifierReport {
+    classification: &'static str,
+    non_contextual_verified: bool,
+    non_contextual_error: Option<String>,
+    contextual_verified: bool,
+    contextual_error: Option<String>,
+    accepted: bool,
+    observed_failure_scope: Option<&'static str>,
+    failure_scope_matched: bool,
+    matched_expected: bool,
+    cycles: Option<u64>,
+    fee_shannons: Option<u64>,
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("error: {error}");
@@ -291,10 +357,13 @@ fn run() -> Result<(), HarnessError> {
     let report = build_report(&args, &parent_elf, &type_elf, &child_elf, reports);
     write_report(&args.output, &report, args.pretty)?;
     print_summary(&args.output, &report);
-    if report.summary.mismatched == 0 {
+    if report.summary.mismatched == 0 && report.summary.node_stack_mismatched == 0 {
         Ok(())
     } else {
-        Err(HarnessError::Message(format!("{} combined transaction case(s) mismatched", report.summary.mismatched)))
+        Err(HarnessError::Message(format!(
+            "{} script-verifier case(s) mismatched; {} CKB node-verifier stack case(s) mismatched",
+            report.summary.mismatched, report.summary.node_stack_mismatched
+        )))
     }
 }
 
@@ -381,6 +450,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
         None
     };
     let output_cell = build_output_cell(&old_cell, &intent);
+    let receipt_cell = build_receipt_cell(&old_cell, &intent)?;
     let witness = build_witness(&intent, &receipt_hash, &state_hash_commitment, &signature_payload);
     Ok(CombinedCase {
         fixture,
@@ -390,6 +460,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
         current_timepoint,
         old_cell,
         output_cell,
+        receipt_cell,
         witness,
         signature_mutation,
     })
@@ -403,8 +474,8 @@ fn run_case(parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8], case: &Combine
     let verifier = TransactionScriptsVerifier::new(
         Arc::new(context.resolved_transaction.clone()),
         context.data_loader.clone(),
-        consensus,
-        tx_env,
+        Arc::clone(&consensus),
+        Arc::clone(&tx_env),
     );
     let groups: Vec<_> =
         verifier.groups_with_type().map(|(group_type, hash, group)| (group_type, hash.clone(), group.clone())).collect();
@@ -415,6 +486,13 @@ fn run_case(parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8], case: &Combine
         Ok(cycles) => (true, Some(cycles), None),
         Err(error) => (false, None, Some(format!("{error}"))),
     };
+    let ckb_node_verifier = run_ckb_node_verifier(
+        &context,
+        Arc::clone(&consensus),
+        Arc::clone(&tx_env),
+        case.expected.as_str(),
+        expected_failure_scope(case.expected_failure_mode.as_deref()),
+    );
     let outcome_matched = match case.expected.as_str() {
         "accepted" => accepted,
         "rejected" => !accepted,
@@ -470,11 +548,13 @@ fn run_case(parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8], case: &Combine
         matched_expected,
         full_transaction_cycles,
         full_transaction_error,
+        ckb_node_verifier,
         transaction_hash: hex0x(context.transaction_view.hash().as_slice()),
         consensus_tx_size_bytes: context.transaction.as_bytes().len(),
         witness_size_bytes: case.witness.len(),
         input_cell_data_size_bytes: case.old_cell.len(),
         output_cell_data_size_bytes: case.output_cell.len(),
+        receipt_cell_data_size_bytes: case.receipt_cell.len(),
         output_occupied_capacity_shannons: context.output_occupied_capacity,
         capacity_margin_shannons: capacity_margin,
         builder_shape,
@@ -497,6 +577,60 @@ fn run_case(parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8], case: &Combine
     })
 }
 
+fn run_ckb_node_verifier(
+    context: &TransactionContext,
+    consensus: Arc<Consensus>,
+    tx_env: Arc<TxVerifyEnv>,
+    expected: &str,
+    expected_failure_scope: Option<&'static str>,
+) -> NodeVerifierReport {
+    let non_contextual = NonContextualTransactionVerifier::new(&context.transaction_view, consensus.as_ref()).verify();
+    let (non_contextual_verified, non_contextual_error) = match non_contextual {
+        Ok(()) => (true, None),
+        Err(error) => (false, Some(format!("{error}"))),
+    };
+    let (contextual_verified, contextual_error, cycles, fee_shannons) = if non_contextual_verified {
+        match ContextualTransactionVerifier::new(
+            Arc::new(context.resolved_transaction.clone()),
+            consensus,
+            context.data_loader.clone(),
+            tx_env,
+        )
+        .verify(VERIFY_MAX_CYCLES, false)
+        {
+            Ok(completed) => (true, None, Some(completed.cycles), Some(completed.fee.as_u64())),
+            Err(error) => (false, Some(format!("{error}")), None, None),
+        }
+    } else {
+        (false, Some("skipped contextual verification after non-contextual failure".to_string()), None, None)
+    };
+    let accepted = non_contextual_verified && contextual_verified;
+    let observed_failure_scope = observed_failure_scope(contextual_error.as_deref().or(non_contextual_error.as_deref()));
+    let failure_scope_matched = match expected {
+        "accepted" => expected_failure_scope.is_none() && observed_failure_scope.is_none(),
+        "rejected" => expected_failure_scope.is_some() && expected_failure_scope == observed_failure_scope,
+        _ => false,
+    };
+    let matched_expected = match expected {
+        "accepted" => accepted && failure_scope_matched,
+        "rejected" => !accepted && failure_scope_matched,
+        _ => false,
+    };
+    NodeVerifierReport {
+        classification: "ckb_verification_non_contextual_contextual_stack",
+        non_contextual_verified,
+        non_contextual_error,
+        contextual_verified,
+        contextual_error,
+        accepted,
+        observed_failure_scope,
+        failure_scope_matched,
+        matched_expected,
+        cycles,
+        fee_shannons,
+    }
+}
+
 fn build_transaction_context(
     parent_elf: &[u8],
     type_elf: &[u8],
@@ -509,14 +643,26 @@ fn build_transaction_context(
     let lock_args = cell_authority_hash(&case.old_cell)?;
     let lock_script = build_packed_script(&parent_code_hash, &lock_args);
     let type_script = build_packed_script_no_args(&type_code_hash);
-    let output_without_capacity =
+    let state_output_without_capacity =
         packed::CellOutput::new_builder().lock(lock_script.clone()).type_(Some(type_script.clone()).pack()).build();
-    let output_occupied_capacity = output_without_capacity
+    let receipt_output_without_capacity = packed::CellOutput::new_builder().lock(lock_script.clone()).build();
+    let state_output_occupied_capacity = state_output_without_capacity
         .occupied_capacity(capacity_bytes(case.output_cell.len())?)
-        .map_err(|error| HarnessError::Message(format!("failed to compute occupied capacity: {error}")))?
+        .map_err(|error| HarnessError::Message(format!("failed to compute state output occupied capacity: {error}")))?
         .as_u64();
-    let output_capacity = output_occupied_capacity
+    let receipt_output_occupied_capacity = receipt_output_without_capacity
+        .occupied_capacity(capacity_bytes(case.receipt_cell.len())?)
+        .map_err(|error| HarnessError::Message(format!("failed to compute receipt output occupied capacity: {error}")))?
+        .as_u64();
+    let output_occupied_capacity = state_output_occupied_capacity
+        .checked_add(receipt_output_occupied_capacity)
+        .ok_or_else(|| HarnessError::Message("transaction occupied capacity overflow".to_string()))?;
+    let state_output_capacity = state_output_occupied_capacity
         .checked_add(TRANSACTION_SHAPE_OUTPUT_MARGIN_SHANNONS)
+        .ok_or_else(|| HarnessError::Message("transaction output capacity overflow".to_string()))?;
+    let receipt_output_capacity = receipt_output_occupied_capacity;
+    let output_capacity = state_output_capacity
+        .checked_add(receipt_output_capacity)
         .ok_or_else(|| HarnessError::Message("transaction output capacity overflow".to_string()))?;
     let input_capacity = output_capacity
         .checked_add(BUILDER_FEE_SHANNONS)
@@ -524,7 +670,9 @@ fn build_transaction_context(
     let fee_shannons =
         input_capacity.checked_sub(output_capacity).ok_or_else(|| HarnessError::Message("transaction fee underflow".to_string()))?;
     let under_capacity = output_occupied_capacity.saturating_sub(1);
-    let output = output_without_capacity.as_builder().capacity(Capacity::shannons(output_capacity).pack()).build();
+    let state_output = state_output_without_capacity.as_builder().capacity(Capacity::shannons(state_output_capacity).pack()).build();
+    let receipt_output =
+        receipt_output_without_capacity.as_builder().capacity(Capacity::shannons(receipt_output_capacity).pack()).build();
 
     let child_dep_out_point = build_out_point(&child_code_hash, 0);
     let parent_dep_out_point = build_out_point(&parent_code_hash, 0);
@@ -544,8 +692,8 @@ fn build_transaction_context(
         .cell_deps(vec![child_dep, parent_dep, type_dep].pack())
         .header_deps(vec![header_hash].pack())
         .inputs(vec![input].pack())
-        .outputs(vec![output.clone()].pack())
-        .outputs_data(vec![CkbBytes::from(case.output_cell.clone()).pack()].pack())
+        .outputs(vec![state_output.clone(), receipt_output.clone()].pack())
+        .outputs_data(vec![CkbBytes::from(case.output_cell.clone()).pack(), CkbBytes::from(case.receipt_cell.clone()).pack()].pack())
         .build();
     let transaction = packed::Transaction::new_builder()
         .raw(raw_transaction)
@@ -609,8 +757,11 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
     let expected_reject = cases.iter().filter(|case| case.expected == "rejected").count();
     let accepted = cases.iter().filter(|case| case.accepted).count();
     let matched_expected = cases.iter().filter(|case| case.matched_expected).count();
+    let node_stack_accepted = cases.iter().filter(|case| case.ckb_node_verifier.accepted).count();
+    let node_stack_matched_expected = cases.iter().filter(|case| case.ckb_node_verifier.matched_expected).count();
     let witness_sizes = cases.iter().map(|case| case.witness_size_bytes).collect::<Vec<_>>();
     let failure_scope_matched = cases.iter().filter(|case| case.failure_scope_matched).count();
+    let node_stack_failure_scope_matched = cases.iter().filter(|case| case.ckb_node_verifier.failure_scope_matched).count();
     let builder_shape_checks_passed = cases.iter().all(|case| {
         case.builder_shape.output_capacity_covers_occupied_capacity
             && case.builder_shape.cell_dep0_is_spawn_target
@@ -619,23 +770,31 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
     });
     let fee_shape_checks_passed = cases.iter().all(|case| case.builder_shape.fee_covers_minimum);
     let under_capacity_shape_rejects = cases.iter().all(|case| case.builder_shape.under_capacity_rejected_by_shape);
+    let node_stack_fees = cases.iter().filter_map(|case| case.ckb_node_verifier.fee_shannons).collect::<Vec<_>>();
     Report {
         schema: "novaseal-combined-tx-report-v0.1",
-        classification: "six_fixture_combined_lock_type_full_ckb_script_verifier_evidence",
+        classification: "six_fixture_combined_lock_type_ckb_node_verification_stack_evidence",
         parent_elf: elf_report(&args.parent_elf, parent_elf),
         type_elf: elf_report(&args.type_elf, type_elf),
         child_elf: elf_report(&args.child_elf, child_elf),
         summary: Summary {
             combined_full_transaction_executed: true,
+            ckb_node_verification_stack_executed: true,
             total_cases,
             expected_accept,
             expected_reject,
             accepted,
             rejected: total_cases - accepted,
+            node_stack_accepted,
+            node_stack_rejected: total_cases - node_stack_accepted,
             matched_expected,
+            node_stack_matched_expected,
             mismatched: total_cases - matched_expected,
+            node_stack_mismatched: total_cases - node_stack_matched_expected,
             failure_scope_matched,
+            node_stack_failure_scope_matched,
             failure_scope_mismatched: total_cases - failure_scope_matched,
+            node_stack_failure_scope_mismatched: total_cases - node_stack_failure_scope_matched,
             lock_and_type_script_groups_present: cases.iter().all(|case| case.lock_group_present && case.type_group_present),
             child_spawn_target_cell_dep0_modelled: cases.iter().all(|case| case.child_cell_dep0.index == 0),
             shared_witness_abi_aligned: !witness_sizes.is_empty() && witness_sizes.iter().all(|size| *size == witness_sizes[0]),
@@ -643,9 +802,14 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
             builder_shape_checks_passed,
             fee_shape_checks_passed,
             under_capacity_shape_rejects,
+            non_contextual_checks_passed: cases.iter().all(|case| case.ckb_node_verifier.non_contextual_verified),
+            contextual_checks_match_expected: cases.iter().all(|case| case.ckb_node_verifier.matched_expected),
             min_fee_shannons: cases.iter().map(|case| case.builder_shape.fee_shannons).min().unwrap_or_default(),
             max_fee_shannons: cases.iter().map(|case| case.builder_shape.fee_shannons).max().unwrap_or_default(),
+            min_node_stack_fee_shannons: node_stack_fees.iter().min().copied().unwrap_or_default(),
+            max_node_stack_fee_shannons: node_stack_fees.iter().max().copied().unwrap_or_default(),
             max_full_transaction_cycles: cases.iter().filter_map(|case| case.full_transaction_cycles).max().unwrap_or_default(),
+            max_node_stack_cycles: cases.iter().filter_map(|case| case.ckb_node_verifier.cycles).max().unwrap_or_default(),
             max_consensus_tx_size_bytes: cases.iter().map(|case| case.consensus_tx_size_bytes).max().unwrap_or_default(),
             max_output_occupied_capacity_shannons: cases
                 .iter()
@@ -656,13 +820,14 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
         },
         cases,
         limits: vec![
-            "Runs ckb-script TransactionScriptsVerifier::verify over six constructed transactions containing the parent lock script, state type/action script, and staged child verifier cell_dep.",
+            "Runs ckb-verification NonContextualTransactionVerifier and ContextualTransactionVerifier over six constructed transactions containing the parent lock script, state type/action script, and staged child verifier cell_dep.",
+            "Also records ckb-script TransactionScriptsVerifier::verify cycles for comparison against the script-verifier-only layer.",
             "Uses the shared CSARGv1 witness payload for both lock and type/action execution.",
-            "The transactions are in-memory harness ResolvedTransaction values, not production builder or full-node submissions.",
-            "Builder-shape checks derive fee, occupied-capacity floor, under-capacity negative shape, and expected code dep roles from the constructed transaction and resolved deps, but still do not prove live dep liveness or mempool acceptance.",
+            "The transactions are deterministic builder outputs backed by in-memory ResolvedTransaction values; no live-chain RPC submission is performed.",
+            "Builder-shape checks derive fee, occupied-capacity floor, under-capacity negative shape, and expected code dep roles from the constructed transaction and resolved deps, but still do not prove live dep liveness or mempool propagation.",
             "Resolved code deps and input cells are deterministic harness cells, not live chain cells.",
             "Negative fixture matching is outcome plus lock/type script-scope matching; it is not yet a full semantic error-code proof for every failure mode.",
-            "Receipt output materialisation and Molecule/wallet signing alignment remain out of scope.",
+            "Receipt output data is materialised as Output#1 and checked by the state type/action script; live full-node RPC submission and Molecule/wallet signing alignment remain out of scope.",
         ],
     }
 }
@@ -678,6 +843,32 @@ fn build_output_cell(old_cell: &[u8], intent: &[u8]) -> Vec<u8> {
     output[CELL_NONCE_OFFSET..CELL_NONCE_OFFSET + 8].copy_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
     output[CELL_EXPIRY_OFFSET..CELL_EXPIRY_OFFSET + 8].copy_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
     output
+}
+
+fn build_receipt_cell(old_cell: &[u8], intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
+    if old_cell.len() != NOVASEAL_CELL_LEN {
+        return Err(HarnessError::Message(format!("old_cell has {} bytes, expected {NOVASEAL_CELL_LEN}", old_cell.len())));
+    }
+    if intent.len() != NOVASEAL_INTENT_LEN {
+        return Err(HarnessError::Message(format!("intent has {} bytes, expected {NOVASEAL_INTENT_LEN}", intent.len())));
+    }
+    let mut receipt = Vec::with_capacity(PROOF_RECEIPT_LEN);
+    receipt.extend_from_slice(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&old_cell[0..2]);
+    receipt.push(intent[INTENT_ACTION_OFFSET]);
+    receipt.extend_from_slice(&intent[INTENT_OLD_CELL_OFFSET..INTENT_OLD_CELL_OFFSET + 36]);
+    receipt.extend_from_slice(&intent[INTENT_OLD_STATE_HASH_OFFSET..INTENT_OLD_STATE_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&ckb_blake2b256(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]));
+    receipt.extend_from_slice(&intent[INTENT_POLICY_HASH_OFFSET..INTENT_POLICY_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&old_cell[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]);
+    receipt.extend_from_slice(&[0u8; BYTE32_LEN]);
+    receipt.extend_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
+    receipt.extend_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
+    if receipt.len() != PROOF_RECEIPT_LEN {
+        return Err(HarnessError::Message(format!("receipt has {} bytes, expected {PROOF_RECEIPT_LEN}", receipt.len())));
+    }
+    Ok(receipt)
 }
 
 fn build_witness(intent: &[u8], receipt_hash: &[u8], state_hash_commitment: &[u8], signature_payload: &[u8]) -> Vec<u8> {
@@ -899,20 +1090,27 @@ fn write_report(path: &Path, report: &Report, pretty: bool) -> Result<(), Harnes
 fn print_summary(path: &Path, report: &Report) {
     println!("wrote {}", path.display());
     println!(
-        "summary: combined_full_tx_executed={} total={} accepted={} rejected={} matched_expected={} mismatched={} failure_scope_matched={} failure_scope_mismatched={} lock_and_type_groups_present={} shared_witness_abi_aligned={} builder_shape_checks_passed={} fee_shape_checks_passed={} max_cycles={} max_tx_size_bytes={} max_occupied_capacity_shannons={}",
+        "summary: combined_full_tx_executed={} ckb_node_stack_executed={} total={} accepted={} rejected={} matched_expected={} mismatched={} node_stack_matched_expected={} node_stack_mismatched={} failure_scope_matched={} failure_scope_mismatched={} node_stack_failure_scope_matched={} lock_and_type_groups_present={} shared_witness_abi_aligned={} builder_shape_checks_passed={} fee_shape_checks_passed={} non_contextual_checks_passed={} contextual_checks_match_expected={} max_cycles={} max_node_stack_cycles={} max_tx_size_bytes={} max_occupied_capacity_shannons={}",
         report.summary.combined_full_transaction_executed,
+        report.summary.ckb_node_verification_stack_executed,
         report.summary.total_cases,
         report.summary.accepted,
         report.summary.rejected,
         report.summary.matched_expected,
         report.summary.mismatched,
+        report.summary.node_stack_matched_expected,
+        report.summary.node_stack_mismatched,
         report.summary.failure_scope_matched,
         report.summary.failure_scope_mismatched,
+        report.summary.node_stack_failure_scope_matched,
         report.summary.lock_and_type_script_groups_present,
         report.summary.shared_witness_abi_aligned,
         report.summary.builder_shape_checks_passed,
         report.summary.fee_shape_checks_passed,
+        report.summary.non_contextual_checks_passed,
+        report.summary.contextual_checks_match_expected,
         report.summary.max_full_transaction_cycles,
+        report.summary.max_node_stack_cycles,
         report.summary.max_consensus_tx_size_bytes,
         report.summary.max_output_occupied_capacity_shannons
     );

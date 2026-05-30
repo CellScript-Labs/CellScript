@@ -1231,7 +1231,7 @@ impl CodeGenerator {
         }
         pattern.fields.iter().all(|(field, value)| {
             self.type_layouts.get(&pattern.ty).and_then(|layouts| layouts.get(field)).is_some_and(|layout| {
-                if let Some(width) = layout_fixed_byte_width(layout) {
+                if let Some(width) = self.layout_fixed_byte_like_width(layout) {
                     self.is_prelude_available_fixed_value(value, width)
                 } else {
                     self.can_verify_dynamic_create_output_field_value(value, layout)
@@ -1282,7 +1282,7 @@ impl CodeGenerator {
                 self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                 continue;
             };
-            if layout_fixed_byte_width(&layout).is_some() {
+            if self.layout_fixed_byte_like_width(&layout).is_some() {
                 if is_fixed_type {
                     self.emit_loaded_field_bytes_equals_expected(
                         size_offset,
@@ -1344,7 +1344,7 @@ impl CodeGenerator {
         field_count: usize,
         expected: &IrOperand,
     ) -> bool {
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(layout) else {
             return false;
         };
         let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(0) else {

@@ -43,7 +43,7 @@ If `target/novaseal-ckb-vm-child-verifier-report.json` exists, the report also a
 
 If `target/novaseal-parent-lock-abi-preflight.json` exists, the report also attaches the parent-lock ASM/ELF ABI preflight summary. This proves parent artifact shape, not VM execution by itself.
 
-If `target/novaseal-parent-lock-ckb-vm-report.json` exists, the report also attaches the parent-lock CKB VM summary. This proves the parent lock ELF can construct the IPC envelope, spawn the staged child verifier ELF, wait, and observe valid/wrong signature outcomes in a harnessed VM setting. It also attaches the current consensus-packed transaction-shape measurements, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence for the three parent authority cases: tx size, ScriptGroup shape, `cell_deps[0]` spawn-target model, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles. It is still not a six-fixture transaction run or production builder/full-node acceptance.
+If `target/novaseal-parent-lock-ckb-vm-report.json` exists, the report also attaches the parent-lock CKB VM summary. This proves the parent lock ELF can construct the IPC envelope, spawn the staged child verifier ELF, wait, and observe valid/wrong signature outcomes in a harnessed VM setting. It also attaches the current consensus-packed transaction-shape measurements, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence for the three parent authority cases: tx size, ScriptGroup shape, `cell_deps[0]` spawn-target model, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles. It is still not a six-fixture transaction run or live-chain NovaSeal RPC submission.
 
 If `target/novaseal-state-type-ckb-vm-report.json` exists, the report also attaches the state type action CKB VM summary. This executes `key_auth_transition` for all six fixtures at action/type scope. It is not lock execution: `wrong_signature_reject` must still be rejected by `btc_authority`, and the current state harness records that explicitly. The `.cell` action ABI now uses the same 213-byte `old_cell: OutPoint` intent shape as the canonical schema vectors.
 
@@ -59,9 +59,9 @@ python3 scripts/novaseal_canonical_vectors.py --pretty
 python3 scripts/novaseal_btc_verifier_vectors.py --pretty
 python3 scripts/novaseal_btc_verifier_ipc_vectors.py --pretty
 python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
 python3 scripts/novaseal_parent_lock_abi_preflight.py --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 python3 scripts/novaseal_fixture_harness.py --pretty
 ```
 
@@ -101,9 +101,9 @@ combined_fee_shape_checks_passed=true
 combined_under_capacity_shape_rejects=true
 combined_min_fee_shannons=100000
 combined_max_fee_shannons=100000
-combined_full_transaction_max_cycles=3703418
-combined_max_consensus_tx_size_bytes=972
-combined_max_output_occupied_capacity_shannons=25200000000
+combined_full_transaction_max_cycles=3784234
+combined_max_consensus_tx_size_bytes=1372
+combined_max_output_occupied_capacity_shannons=60400000000
 parent_lock_max_consensus_tx_size_bytes=850
 parent_lock_max_output_occupied_capacity_shannons=21900000000
 ```
@@ -116,7 +116,7 @@ It does **not** prove:
 
 - live-chain ScriptGroup/cell_deps resolution selects the staged verifier shell,
 - Molecule/wallet signing encoders are aligned with the `.schema` and `.cell` intent layout,
-- production builder/full-node capacity/cycles/transaction size are acceptable.
+- live-chain NovaSeal capacity/cycles/transaction size are acceptable.
 
 It does prove:
 
@@ -142,8 +142,8 @@ The next harness slice should promote the current harness evidence toward produc
 2. Keep the receipt commitment rule from `docs/CANONICAL_VECTORS.md` aligned with those Molecule bytes.
 3. Compare real Molecule bytes against `target/novaseal-schema-layout.json`.
 4. Build real entry witnesses from each fixture.
-5. Feed the combined six-fixture transactions through the production builder/full-node acceptance path.
+5. Feed the combined six-fixture transactions through the live-chain NovaSeal RPC submission path.
 6. Record production-style cycles, transaction size, occupied capacity, and under-capacity rejection.
 7. Record valid and invalid authority-lock runs against the same staged ELF hash.
 8. Keep the resolved `NovaSealIntentV0.old_cell: OutPoint` schema/.cell alignment covered by Molecule and wallet signing vectors.
-9. Extend the current full transaction script-verifier layer into production builder/full-node acceptance and combined six-fixture lock+type transaction coverage.
+9. Extend the current full transaction script-verifier layer into live-chain NovaSeal RPC submission and combined six-fixture lock+type transaction coverage.

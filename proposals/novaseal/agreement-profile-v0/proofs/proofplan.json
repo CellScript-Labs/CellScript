@@ -1,0 +1,135 @@
+{
+  "schema": "novaseal-agreement-proofplan-v0.1",
+  "generated_by": "hand-authored target; compare against cellc audit-bundle output, local transaction-shape harness, action CKB VM harness, and resolved transaction harness",
+  "package": "novaseal-agreement-profile-v0 0.0.1",
+  "status": "reviewable_ckb_native_agreement_skeleton_with_local_shape_action_vm_and_resolved_tx_evidence",
+  "entries": [
+    {
+      "origin": "nova_agreement_type::originate_agreement",
+      "trigger": "type_group",
+      "scope": "group",
+      "on_chain_checked": [
+        "version_is_v0",
+        "ckb_native_collateral_and_principal",
+        "positive_collateral",
+        "positive_principal",
+        "start_before_expiry",
+        "now_within_origination_window",
+        "borrower_originator_guard",
+        "active_agreement_output",
+        "origination_receipt_output"
+      ],
+      "builder_required": [
+        "native_ckb_funding_cells_match_declared_amounts",
+        "canonical_terms_hash_preimage",
+        "canonical_receipt_hash_preimage"
+      ],
+      "local_harness_checked": [
+        "agreement_collateral_output_capacity_floor",
+        "borrower_principal_payout_output_amount",
+        "receipt_output_capacity_floor"
+      ],
+      "action_vm_checked": [
+        "valid_origination_accept",
+        "wrong_originator_reject",
+        "active_agreement_output_fields",
+        "origination_receipt_output_fields"
+      ],
+      "resolved_transaction_checked": [
+        "originate_valid",
+        "wrong_originator_reject",
+        "type_group_present",
+        "local_lock_group_present",
+        "non_contextual_transaction_valid",
+        "contextual_transaction_valid_for_accepted_case"
+      ],
+      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+    },
+    {
+      "origin": "nova_agreement_type::repay_before_expiry",
+      "trigger": "type_group",
+      "scope": "group",
+      "on_chain_checked": [
+        "active_status_required",
+        "now_lte_expiry",
+        "borrower_actor_guard",
+        "status_active_to_repaid",
+        "nonce_increment",
+        "receipt_root_update",
+        "repayment_terminal_amount_principal_plus_fee",
+        "repayment_receipt_output"
+      ],
+      "builder_required": [
+        "native_ckb_repayment_outputs_match_principal_plus_fee",
+        "borrower_collateral_return_output_shape"
+      ],
+      "local_harness_checked": [
+        "lender_repayment_output_principal_plus_fee",
+        "borrower_collateral_return_output_collateral",
+        "closed_agreement_capacity_floor",
+        "under_capacity_reject",
+        "wrong_settlement_amount_reject_local_shape_only"
+      ],
+      "action_vm_checked": [
+        "valid_repayment_accept",
+        "expired_repay_reject",
+        "wrong_borrower_actor_reject",
+        "nonce_mismatch_reject",
+        "receipt_root_mismatch_reject",
+        "preserved_field_mutation_reject"
+      ],
+      "resolved_transaction_checked": [
+        "repay_before_expiry_valid",
+        "expired_repay_reject",
+        "wrong_party_reject:repay_wrong_party",
+        "nonce_mismatch_reject",
+        "receipt_root_mismatch_reject",
+        "preserved_field_mutation_reject",
+        "under_capacity_reject_node_contextual_reject"
+      ],
+      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+    },
+    {
+      "origin": "nova_agreement_type::claim_after_expiry",
+      "trigger": "type_group",
+      "scope": "group",
+      "on_chain_checked": [
+        "active_status_required",
+        "now_gt_expiry",
+        "lender_actor_guard",
+        "status_active_to_defaulted",
+        "nonce_increment",
+        "receipt_root_update",
+        "claim_terminal_amount_locked_collateral",
+        "default_receipt_output"
+      ],
+      "builder_required": [
+        "native_ckb_claim_outputs_match_locked_collateral"
+      ],
+      "local_harness_checked": [
+        "lender_default_claim_output_locked_collateral",
+        "closed_agreement_capacity_floor"
+      ],
+      "action_vm_checked": [
+        "valid_default_claim_accept",
+        "early_claim_reject",
+        "wrong_lender_actor_reject"
+      ],
+      "resolved_transaction_checked": [
+        "claim_after_expiry_valid",
+        "early_claim_reject",
+        "wrong_party_reject:claim_wrong_party"
+      ],
+      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+    }
+  ],
+  "non_goals": [
+    "no BTC UTXO mirror",
+    "no SPV",
+    "no OP_RETURN",
+    "no oracle",
+    "no margin call",
+    "no dynamic liquidation",
+    "no native Lightning or Fiber execution"
+  ]
+}

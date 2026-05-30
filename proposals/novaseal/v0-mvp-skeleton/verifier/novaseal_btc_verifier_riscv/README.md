@@ -11,4 +11,4 @@ cargo clippy --lib -- -D warnings
 cargo build --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
 ```
 
-This crate is evidence that the verifier shell boundary can compile for RISC-V, has a fixed spawn-input adapter, and makes the expected BIP340 decision over the frozen vector set. The staged ELF is also executed by `../novaseal_ckb_vm_harness` with child-side inherited-fd input. It is not yet production on-chain verifier evidence because no CKB VM transaction dry-run has executed the parent lock spawning this exact staged binary.
+This crate is evidence that the verifier shell boundary can compile for RISC-V, has a fixed spawn-input adapter, and makes the expected BIP340 decision over the frozen vector set. The staged ELF is also executed by `../../harness/ckb_vm` with child-side inherited-fd input. It is not yet production on-chain verifier evidence because no CKB VM transaction dry-run has executed the parent lock spawning this exact staged binary.

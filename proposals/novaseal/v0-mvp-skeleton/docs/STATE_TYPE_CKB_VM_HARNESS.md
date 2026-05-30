@@ -1,7 +1,7 @@
 # NovaSeal State Type CKB VM Harness
 
 **Date**: 2026-05-30
-**Harness**: `verifier/novaseal_ckb_vm_harness/src/bin/novaseal_state_type_harness.rs`
+**Harness**: `harness/ckb_vm/src/bin/novaseal_state_type_harness.rs`
 **Report**: `target/novaseal-state-type-ckb-vm-report.json`
 **Classification**: state-transition action CKB VM fixture evidence.
 
@@ -9,7 +9,7 @@
 
 ```bash
 /Users/arthur/RustroverProjects/CellScript/target/debug/cellc src/nova_state_type.cell --target riscv64-elf --target-profile ckb --entry-action key_auth_transition -o target/novaseal-state-type-action.elf
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_state_type_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_harness -- --pretty
 ```
 
 ## Current Result

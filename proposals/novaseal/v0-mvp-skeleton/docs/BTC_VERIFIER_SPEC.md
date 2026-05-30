@@ -6,12 +6,12 @@
 **Host verifier**: `verifier/novaseal_btc_verifier`
 **No-std IPC core**: `verifier/novaseal_btc_verifier_core`
 **RISC-V shell**: `verifier/novaseal_btc_verifier_riscv`
-**CKB VM child harness**: `verifier/novaseal_ckb_vm_harness`
+**CKB VM child harness**: `harness/ckb_vm`
 **Report**: `target/novaseal-btc-verifier-vectors.json`
 **IPC report**: `target/novaseal-btc-verifier-ipc-vectors.json`
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Parent VM report**: `target/novaseal-parent-lock-ckb-vm-report.json`
-**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, and official full transaction script-verifier execution; no production builder/full-node evidence yet.
+**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, and official full transaction script-verifier execution; no live-chain NovaSeal RPC submission evidence yet.
 
 This spec fixes the v0 MVP verifier shape to a single-key BIP340 Schnorr profile. ECDSA and multisig descriptors remain out of scope for this strict MVP slice.
 
@@ -45,8 +45,8 @@ cargo run --manifest-path verifier/novaseal_btc_verifier/Cargo.toml -- verify-ve
 cargo run --manifest-path verifier/novaseal_btc_verifier/Cargo.toml -- verify-ipc-vectors --vectors target/novaseal-btc-verifier-ipc-vectors.json
 cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
 python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 ```
 
 Current summary:
@@ -122,6 +122,6 @@ This does not yet prove criterion 6 on chain:
 - the current CellScript VM2 spawn helper emits executable VM2 `ecall` wrappers and static spawn targets have a strict first-CellDep `code` manifest-bound builder model; the NovaSeal lock uses `spawn_with_fd` and the fixed 18-word IPC envelope,
 - the Rust verifier is implemented in the shared no-std core and reused by the host verifier and RISC-V shell; the staged child ELF now executes in CKB VM with harness-provided inherited-fd input,
 - resolved lock-group and full transaction script-verifier evidence now record `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles for the three parent authority cases,
-- no production builder/full-node acceptance exists; six-fixture combined transaction verifier evidence is harness-level only.
+- no live-chain NovaSeal RPC submission exists; six-fixture combined transaction verifier evidence is harness-level only.
 
-The next implementation slice should turn the current full transaction script-verifier execution into production builder/full-node evidence without pretending that harness-level VM success alone is production coverage.
+The next implementation slice should turn the current full transaction script-verifier execution into live-chain NovaSeal RPC submission evidence without pretending that harness-level VM success alone is production coverage.

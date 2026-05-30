@@ -26,6 +26,7 @@ pub mod stdlib;
 pub(crate) mod syscalls;
 pub(crate) mod type_graph;
 pub mod types;
+pub mod verifier_registry;
 pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
@@ -6497,6 +6498,38 @@ fn body_verifier_obligations(
                 ),
             );
         }
+        if access.operation == "runtime-verifier-btc-bip340" {
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:signature",
+                "builder-required",
+                &format!(
+                    "BIP340 signature verification is delegated to verifier artifact {}; builder and deployment evidence must bind the reviewed artifact source, hash, and CellDep",
+                    access.binding
+                ),
+            );
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:ipc-envelope",
+                "checked-runtime",
+                "Compiler emits the fixed 18-word BTC BIP340 verifier IPC envelope; ipc-envelope=checked-runtime",
+            );
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:exit-status",
+                "checked-runtime",
+                "Compiler fail-closes unless the spawned BTC BIP340 verifier exits with status 0; exit-status=checked-runtime",
+            );
+        }
     }
 
     for check in body_static_resource_operation_checks(body) {
@@ -11675,7 +11708,7 @@ fn metadata_prelude_availability(
                         };
                         layout
                     };
-                    if metadata_layout_fixed_byte_width(&layout).is_some() && layout.ty == dest.ty {
+                    if metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_some() && layout.ty == dest.ty {
                         availability.fixed_value_vars.insert(dest.id);
                     }
                     if metadata_layout_fixed_scalar_width(&layout).is_some() && layout.ty == dest.ty {
@@ -11685,7 +11718,7 @@ fn metadata_prelude_availability(
                             availability.u64_operand_vars.insert(dest.id);
                         }
                     }
-                    if metadata_layout_fixed_byte_width(&layout).is_none()
+                    if metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_none()
                         && metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
                         && layout.ty == dest.ty
                     {
@@ -12016,8 +12049,8 @@ fn metadata_can_verify_create_output_fields(
     }
     pattern.fields.iter().all(|(field, value)| {
         layouts.get(field).is_some_and(|layout| {
-            if let Some(width) = metadata_layout_fixed_byte_width(layout) {
-                metadata_fixed_value_available_with_width(value, availability, width)
+            if let Some(width) = metadata_layout_verifiable_fixed_byte_width(layout, type_layouts) {
+                metadata_fixed_value_available_with_layout_width(value, availability, width, type_layouts)
             } else {
                 metadata_dynamic_create_output_value_available(value, layout, availability, type_layouts)
             }
@@ -12477,6 +12510,10 @@ fn metadata_layout_fixed_byte_width(layout: &MetadataFieldLayout) -> Option<usiz
     metadata_fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
 }
 
+fn metadata_layout_verifiable_fixed_byte_width(layout: &MetadataFieldLayout, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    metadata_layout_fixed_byte_width(layout).or_else(|| metadata_ir_type_fixed_width(&layout.ty, type_layouts))
+}
+
 fn metadata_fixed_aggregate_pointer_size(ty: &ir::IrType) -> Option<usize> {
     match ty {
         ir::IrType::Array(_, _) | ir::IrType::Tuple(_) => type_static_length(ty).filter(|width| *width > 8),
@@ -12516,9 +12553,9 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
         "u128" => Some(16),
         "Address" | "Hash" => Some(32),
         other => type_layouts.get(other).and_then(|fields| {
-            fields
-                .values()
-                .try_fold(0usize, |acc, layout| metadata_layout_fixed_byte_width(layout).and_then(|width| acc.checked_add(width)))
+            fields.values().try_fold(0usize, |acc, layout| {
+                metadata_layout_verifiable_fixed_byte_width(layout, type_layouts).and_then(|width| acc.checked_add(width))
+            })
         }),
     }
 }
@@ -12666,8 +12703,11 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_input_since" => {
                     features.insert("ckb-input-since".to_string());
                 }
-                ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
+                ir::IrInstruction::Call { func, args, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
+                    if is_btc_bip340_spawn_call(func, args) {
+                        features.insert("runtime-verifier:btc-bip340:signature".to_string());
+                    }
                 }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(
@@ -12764,7 +12804,7 @@ fn is_executable_schema_field_access(
     let Some(layout) = type_layouts.get(type_name).and_then(|fields| fields.get(field)) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(layout).is_some()
+    metadata_layout_verifiable_fixed_byte_width(layout, type_layouts).is_some()
         || metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
 }
 
@@ -12783,7 +12823,7 @@ fn is_executable_aggregate_field_access(
     let Some(layout) = metadata_aggregate_or_named_field_layout(&source.ty, field, type_layouts) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(&layout).is_some()
+    metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_some()
 }
 
 fn is_executable_tuple_call_return_field_access(obj: &ir::IrOperand, field: &str, availability: &MetadataPreludeAvailability) -> bool {
@@ -12909,6 +12949,20 @@ fn body_ckb_runtime_accesses(
                         index: 0,
                         binding: ckb_spawn_target_binding(args),
                     });
+                    if is_btc_bip340_spawn_call(func, args) {
+                        accesses.push(CkbRuntimeAccessMetadata {
+                            operation: "runtime-verifier-btc-bip340".to_string(),
+                            syscall: "SPAWN".to_string(),
+                            source: "CellDep".to_string(),
+                            index: 0,
+                            binding: format!(
+                                "{}:{}:{}",
+                                verifier_registry::btc::BIP340_VERIFIER_ID,
+                                verifier_registry::btc::BIP340_IPC_ABI,
+                                verifier_registry::btc::BIP340_RISCV_TARGET
+                            ),
+                        });
+                    }
                     continue;
                 }
                 if let Some((operation, syscall, source, binding)) = ckb_v014_runtime_access(func) {
@@ -13057,6 +13111,14 @@ fn ckb_spawn_target_binding(args: &[ir::IrOperand]) -> String {
         Some(ir::IrOperand::Const(ir::IrConst::U64(tag))) => format!("spawn-target-tag:0x{tag:016x}"),
         _ => "spawn-target:dynamic".to_string(),
     }
+}
+
+fn is_btc_bip340_spawn_call(func: &str, args: &[ir::IrOperand]) -> bool {
+    matches!(func, "__ckb_spawn" | "__ckb_spawn_with_fd1") && is_spawn_target(args, verifier_registry::btc::BIP340_RISCV_TARGET)
+}
+
+fn is_spawn_target(args: &[ir::IrOperand], target: &str) -> bool {
+    matches!(args.first(), Some(ir::IrOperand::Const(ir::IrConst::U64(tag))) if *tag == ir::stable_u64_tag(target))
 }
 
 fn scheduler_accesses_from_metadata(accesses: &[CkbRuntimeAccessMetadata]) -> Vec<crate::stdlib::SchedulerAccess> {

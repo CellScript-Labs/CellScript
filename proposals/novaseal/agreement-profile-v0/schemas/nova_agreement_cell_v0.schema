@@ -1,0 +1,26 @@
+# NovaAgreementCellV0 - Source of Truth Schema (Agreement Profile v0)
+#
+# This state cell represents a pre-agreed terminal contract. It is not a BTC
+# mirror, not an oracle-backed lending vault, and not a liquidation engine.
+
+version: u16
+agreement_id: Byte32
+terms_hash: Byte32
+
+borrower_authority_hash: Byte32
+lender_authority_hash: Byte32
+
+collateral_asset_kind: u8
+collateral_asset_hash: Byte32
+collateral_amount: u64
+
+principal_asset_kind: u8
+principal_asset_hash: Byte32
+principal_amount: u64
+
+fixed_fee_amount: u64
+expiry_timepoint: u64
+status: u8                      # 0 Offered, 1 Active, 2 Repaid, 3 Defaulted, 4 Cancelled
+
+receipt_root: Byte32            # latest receipt commitment chosen by the terminal transition
+nonce: u64                      # increments on terminal transitions

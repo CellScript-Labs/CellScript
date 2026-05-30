@@ -1,20 +1,21 @@
 # NovaSeal Combined Lock + Type Transaction Harness
 
 **Date**: 2026-05-30
-**Harness**: `verifier/novaseal_ckb_vm_harness/src/bin/novaseal_combined_tx_harness.rs`
+**Harness**: `harness/ckb_vm/src/bin/novaseal_combined_tx_harness.rs`
 **Report**: `target/novaseal-combined-tx-report.json`
-**Classification**: six-fixture combined lock + type full `ckb-script` transaction-verifier evidence.
+**Classification**: six-fixture combined lock + type local CKB node-verification-stack evidence.
 
 ## Command
 
 ```bash
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty
 ```
 
 ## Current Result
 
 ```text
 combined_full_transaction_executed=true
+ckb_node_stack_executed=true
 total_cases=6
 expected_accept=1
 expected_reject=5
@@ -22,8 +23,11 @@ accepted=1
 rejected=5
 matched_expected=6
 mismatched=0
+node_stack_matched_expected=6
+node_stack_mismatched=0
 failure_scope_matched=6
 failure_scope_mismatched=0
+node_stack_failure_scope_matched=6
 lock_and_type_script_groups_present=true
 child_spawn_target_cell_dep0_modelled=true
 shared_witness_abi_aligned=true
@@ -31,11 +35,14 @@ shared_witness_size_bytes=389
 builder_shape_checks_passed=true
 fee_shape_checks_passed=true
 under_capacity_shape_rejects=true
+non_contextual_checks_passed=true
+contextual_checks_match_expected=true
 min_fee_shannons=100000
 max_fee_shannons=100000
-max_full_transaction_cycles=3703418
-max_consensus_tx_size_bytes=972
-max_output_occupied_capacity_shannons=25200000000
+max_full_transaction_cycles=3784234
+max_node_stack_cycles=3784234
+max_consensus_tx_size_bytes=1372
+max_output_occupied_capacity_shannons=60400000000
 min_capacity_margin_shannons=10000000000
 ```
 
@@ -48,9 +55,10 @@ For each of the six fixture JSONs, the harness constructs an in-memory `ckb-type
 - `cell_deps[0]` bound to the staged `novaseal_btc_verifier_riscv` child verifier ELF,
 - one shared `CSARGv1` witness payload: `intent`, `receipt_hash`, `state_hash_commitment`, `SignaturePayload`,
 - matching input/output type scripts so the official type `ScriptGroup` is present,
+- materialised `ProofReceiptV0` data at `Output#1`,
 - a header dep carrying the fixture timepoint used by `env::current_timepoint()`.
 
-It then runs official `ckb-script::TransactionScriptsVerifier::verify` over the full transaction. The valid fixture accepts; the five negative fixtures reject for the expected fixture-level outcome and expected lock/type script scope.
+It then runs official `ckb-script::TransactionScriptsVerifier::verify` and the CKB `ckb-verification` non-contextual + contextual transaction verifier stack over the same transaction. The valid fixture accepts; the five negative fixtures reject for the expected fixture-level outcome and expected lock/type script scope in both verifier layers.
 
 The same report now records production-builder candidate shape facts:
 
@@ -62,13 +70,13 @@ The same report now records production-builder candidate shape facts:
 
 ## Boundary
 
-This closes the previous "no combined six-fixture lock+type transaction evidence" gap at harness level.
+This closes the previous "no combined six-fixture lock+type transaction evidence" gap at the local CKB node verification-stack layer.
 
-It is still not production acceptance evidence:
+Remaining production limits:
 
-- transactions are constructed in memory, not by a production builder,
+- transactions are deterministic builder outputs represented as in-memory `ResolvedTransaction` values,
 - cell deps and input cells are deterministic harness cells, not live chain cells,
-- no full node submission or mempool acceptance path is exercised,
-- fee/capacity checks are builder-shape checks, not consensus/full-node acceptance,
+- no NovaSeal-specific live full-node RPC submission or mempool propagation path is exercised,
+- fee/capacity checks are now covered by the local CKB contextual verifier stack and still also recorded as builder-shape facts,
 - negative fixture matching is outcome plus lock/type script-scope matching, not yet a semantic error-code proof for every failure mode,
-- Molecule/wallet signing alignment and receipt output materialisation remain separate blockers.
+- Molecule/wallet signing alignment remains a separate blocker.

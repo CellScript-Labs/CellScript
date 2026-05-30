@@ -1,7 +1,7 @@
 # NovaSeal v0 CKB VM Child Verifier Harness
 
 **Date**: 2026-05-30
-**Harness**: `verifier/novaseal_ckb_vm_harness`
+**Harness**: `harness/ckb_vm`
 **Report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Classification**: child verifier CKB VM dry-run evidence.
 
@@ -21,7 +21,7 @@ transaction-size checks.
 Run from the package root:
 
 ```bash
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
 ```
 
 Expected summary:
@@ -76,5 +76,5 @@ It does not prove:
 ## Closure Path
 
 The child harness now remains a lower-level oracle under the parent-lock
-harness. The remaining production path is builder/full-node acceptance and
+harness. The remaining production path is live-chain NovaSeal RPC submission and
 six-fixture transaction coverage.

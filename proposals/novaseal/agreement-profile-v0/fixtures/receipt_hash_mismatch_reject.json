@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "receipt_hash_mismatch_reject",
+  "action": "originate_agreement / terminal paths",
+  "expected": "rejected",
+  "coverage": "blocked",
+  "description": "The receipt is materialized and receipt_root is updated from the witness receipt_hash, but this slice does not compute a canonical receipt hash inside CellScript.",
+  "blocker": "Need frozen receipt preimage hashing or a generated receipt commitment helper."
+}

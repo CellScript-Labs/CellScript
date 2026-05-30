@@ -20,6 +20,7 @@ SCHEMA = "novaseal-audit-surface-v0.1"
 
 DEFAULT_BUNDLE = Path("target/cellscript-audit-bundle/audit-bundle.json")
 DEFAULT_SOURCE = Path("src/nova_state_type.cell")
+DEFAULT_COMBINED_TX_REPORT = Path("target/novaseal-combined-tx-report.json")
 DEFAULT_OUTPUT = Path("target/novaseal-audit-surface.json")
 
 FIELD_GUARDS = [
@@ -81,6 +82,18 @@ def read_text_if_present(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
+
+
+def load_optional_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON in {path}: {exc}") from None
+    if not isinstance(value, dict):
+        raise SystemExit(f"expected JSON object in {path}")
+    return value
 
 
 def compact_record(record: dict[str, Any], keys: list[str]) -> dict[str, Any]:
@@ -246,7 +259,85 @@ def capacity_evidence(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_surface(bundle: dict[str, Any], bundle_path: Path, source_path: Path, source_text: str) -> dict[str, Any]:
+def positive_int(value: Any) -> bool:
+    return isinstance(value, int) and value > 0
+
+
+def transaction_measurement_evidence(
+    bundle: dict[str, Any],
+    combined_tx_report: dict[str, Any],
+    combined_tx_report_path: Path,
+) -> dict[str, Any]:
+    bundle_capacity = capacity_evidence(bundle)
+    summary = combined_tx_report.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+
+    combined = {
+        "source": str(combined_tx_report_path),
+        "present": bool(combined_tx_report),
+        "classification": combined_tx_report.get("classification"),
+        "combined_full_transaction_executed": bool(summary.get("combined_full_transaction_executed")),
+        "ckb_node_verification_stack_executed": bool(summary.get("ckb_node_verification_stack_executed")),
+        "total_cases": summary.get("total_cases"),
+        "matched_expected": summary.get("matched_expected"),
+        "node_stack_matched_expected": summary.get("node_stack_matched_expected"),
+        "node_stack_mismatched": summary.get("node_stack_mismatched"),
+        "node_stack_failure_scope_matched": summary.get("node_stack_failure_scope_matched"),
+        "builder_shape_checks_passed": bool(summary.get("builder_shape_checks_passed")),
+        "fee_shape_checks_passed": bool(summary.get("fee_shape_checks_passed")),
+        "under_capacity_shape_rejects": bool(summary.get("under_capacity_shape_rejects")),
+        "non_contextual_checks_passed": bool(summary.get("non_contextual_checks_passed")),
+        "contextual_checks_match_expected": bool(summary.get("contextual_checks_match_expected")),
+        "max_full_transaction_cycles": summary.get("max_full_transaction_cycles"),
+        "max_node_stack_cycles": summary.get("max_node_stack_cycles"),
+        "max_consensus_tx_size_bytes": summary.get("max_consensus_tx_size_bytes"),
+        "max_output_occupied_capacity_shannons": summary.get("max_output_occupied_capacity_shannons"),
+        "min_capacity_margin_shannons": summary.get("min_capacity_margin_shannons"),
+    }
+    node_stack_verified = (
+        combined["ckb_node_verification_stack_executed"]
+        and combined["non_contextual_checks_passed"]
+        and combined["contextual_checks_match_expected"]
+        and combined["node_stack_mismatched"] == 0
+        and combined["node_stack_matched_expected"] == combined["total_cases"]
+        and positive_int(combined["max_node_stack_cycles"])
+    )
+    combined_measured = (
+        combined["combined_full_transaction_executed"]
+        and positive_int(combined["max_full_transaction_cycles"])
+        and positive_int(combined["max_consensus_tx_size_bytes"])
+        and positive_int(combined["max_output_occupied_capacity_shannons"])
+        and combined["builder_shape_checks_passed"]
+        and combined["under_capacity_shape_rejects"]
+        and node_stack_verified
+    )
+    bundle_measured = (
+        positive_int(bundle_capacity.get("measured_cycles"))
+        and positive_int(bundle_capacity.get("tx_size_bytes"))
+        and positive_int(bundle_capacity.get("capacity_evidence_contract", {}).get("measured_occupied_capacity_shannons"))
+    )
+    return {
+        "bundle_capacity_evidence": bundle_capacity,
+        "combined_tx_report": combined,
+        "measured": bundle_measured or combined_measured,
+        "measurement_layer": "audit-bundle" if bundle_measured else "ckb-node-verification-stack-harness" if combined_measured else None,
+        "node_verification_stack_verified": node_stack_verified,
+        "limits": [
+            "Combined transaction measurements now include ckb-verification NonContextualTransactionVerifier and ContextualTransactionVerifier over deterministic builder outputs.",
+            "This is the local CKB node verification stack, not live-chain RPC submission, dep liveness, or mempool propagation for NovaSeal.",
+        ],
+    }
+
+
+def build_surface(
+    bundle: dict[str, Any],
+    bundle_path: Path,
+    source_path: Path,
+    source_text: str,
+    combined_tx_report: dict[str, Any],
+    combined_tx_report_path: Path,
+) -> dict[str, Any]:
     plan = proof_plan_records(bundle)
     lock_records = bundle.get("locks", [])
     if not isinstance(lock_records, list):
@@ -298,6 +389,7 @@ def build_surface(bundle: dict[str, Any], bundle_path: Path, source_path: Path, 
     strict_predictions = strict_mode_predictions(bundle)
     field_visibility = field_guard_visibility(bundle, source_text)
     plan_features = [str(record.get("feature", "")) for record in proof_plan_records(bundle)]
+    measurement_evidence = transaction_measurement_evidence(bundle, combined_tx_report, combined_tx_report_path)
 
     production_blockers = []
     if gaps:
@@ -310,7 +402,7 @@ def build_surface(bundle: dict[str, Any], bundle_path: Path, source_path: Path, 
         production_blockers.append("btc_authority has no generated spawn/IPC wiring")
     if not any(feature.startswith("create-output:ProofReceiptV0") for feature in plan_features):
         production_blockers.append("ProofReceiptV0 output cell materialisation is not generated")
-    if capacity_evidence(bundle).get("measured_cycles") is None:
+    if not measurement_evidence["measured"]:
         production_blockers.append("cycles, tx size, and occupied capacity are not measured")
 
     return {
@@ -340,6 +432,7 @@ def build_surface(bundle: dict[str, Any], bundle_path: Path, source_path: Path, 
         "strict_mode_predictions": strict_predictions,
         "field_guard_visibility": field_visibility,
         "capacity_evidence": capacity_evidence(bundle),
+        "transaction_measurement_evidence": measurement_evidence,
         "builder_assumptions": generated_assumptions,
         "production_blockers": production_blockers,
     }
@@ -349,13 +442,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit-bundle", type=Path, default=DEFAULT_BUNDLE)
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--combined-tx-report", type=Path, default=DEFAULT_COMBINED_TX_REPORT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     args = parser.parse_args()
 
     bundle = load_json(args.audit_bundle)
     source_text = read_text_if_present(args.source)
-    surface = build_surface(bundle, args.audit_bundle, args.source, source_text)
+    combined_tx_report = load_optional_json(args.combined_tx_report)
+    surface = build_surface(bundle, args.audit_bundle, args.source, source_text, combined_tx_report, args.combined_tx_report)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     indent = 2 if args.pretty else None

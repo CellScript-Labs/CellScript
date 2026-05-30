@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Probe the current CellScript VM2 spawn/IPC backend boundary.
 
-The NovaSeal lock wiring depends on the compiler backend emitting executable
-VM2 syscall wrappers, modelling the spawn target soundly in strict ProofPlan
-mode, exposing a concrete inherited-fd contract for the child verifier, and
-building a conservative fixed-word verifier envelope without learning
+The NovaSeal lock wiring now depends on the generic
+verifier::btc::bip340::require_signature capability. The compiler must still
+emit executable VM2 syscall wrappers, model the spawn target soundly in strict
+ProofPlan mode, expose a concrete inherited-fd contract for the child verifier,
+and build a conservative fixed-word verifier envelope without learning
 NovaSeal-specific field names. This probe records that compiler/backend state
-using a temporary protocol-agnostic spawn/pipe action.
+using a temporary protocol-agnostic verifier action.
 """
 
 from __future__ import annotations
@@ -23,41 +24,14 @@ from typing import Any
 SCHEMA = "novaseal-spawn-backend-probe-v0.1"
 
 DEFAULT_OUTPUT = Path("target/novaseal-spawn-backend-probe.json")
+DEFAULT_AUDIT_SURFACE = Path("target/novaseal-audit-surface.json")
 
 PROBE_SOURCE = """module novaseal::spawn_backend_probe
 
 action probe(message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64
 where
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-
-    let pid = spawn_with_fd("novaseal_btc_verifier_riscv", read_fd)
-    pipe_write(write_fd, 0x435049305642534e)
-    pipe_write(write_fd, 65536)
-    pipe_write(write_fd, fixed_u64_le(message, 0))
-    pipe_write(write_fd, fixed_u64_le(message, 1))
-    pipe_write(write_fd, fixed_u64_le(message, 2))
-    pipe_write(write_fd, fixed_u64_le(message, 3))
-    pipe_write(write_fd, fixed_u64_le(pubkey, 0))
-    pipe_write(write_fd, fixed_u64_le(pubkey, 1))
-    pipe_write(write_fd, fixed_u64_le(pubkey, 2))
-    pipe_write(write_fd, fixed_u64_le(pubkey, 3))
-    pipe_write(write_fd, fixed_u64_le(signature, 0))
-    pipe_write(write_fd, fixed_u64_le(signature, 1))
-    pipe_write(write_fd, fixed_u64_le(signature, 2))
-    pipe_write(write_fd, fixed_u64_le(signature, 3))
-    pipe_write(write_fd, fixed_u64_le(signature, 4))
-    pipe_write(write_fd, fixed_u64_le(signature, 5))
-    pipe_write(write_fd, fixed_u64_le(signature, 6))
-    pipe_write(write_fd, fixed_u64_le(signature, 7))
-
-    close(write_fd)
-    let status = wait(pid)
-
-    require pid >= 0
-    require status == 0
-    return status
+    verifier::btc::bip340::require_signature(message, pubkey, signature)
+    return 0
 """
 
 BOUND_CELL_TOML = """[package]
@@ -69,7 +43,7 @@ entry = "src/main.cell"
 target_profile = "ckb"
 
 [[deploy.ckb.cell_deps]]
-name = "novaseal_btc_verifier_riscv"
+name = "cellscript_btc_bip340_verifier_riscv"
 out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
 dep_type = "code"
 hash_type = "data1"
@@ -84,6 +58,47 @@ def run_command(args: list[str], cwd: Path) -> dict[str, Any]:
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "passed": completed.returncode == 0,
+    }
+
+
+def load_optional_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return value
+
+
+def audit_surface_status(path: Path) -> dict[str, Any]:
+    surface = load_optional_json(path)
+    proof_plan = surface.get("proof_plan", [])
+    if not isinstance(proof_plan, list):
+        proof_plan = []
+    receipt_output_materialised = any(
+        isinstance(record, dict)
+        and str(record.get("feature", "")).startswith("create-output:ProofReceiptV0")
+        and record.get("status") == "checked-runtime"
+        and record.get("on_chain_checked") is True
+        for record in proof_plan
+    )
+    measurement = surface.get("transaction_measurement_evidence", {})
+    if not isinstance(measurement, dict):
+        measurement = {}
+    combined = measurement.get("combined_tx_report", {})
+    if not isinstance(combined, dict):
+        combined = {}
+    return {
+        "source": str(path),
+        "present": bool(surface),
+        "receipt_output_materialised": receipt_output_materialised,
+        "transaction_measurement_present": measurement.get("measured") is True,
+        "measurement_layer": measurement.get("measurement_layer"),
+        "node_verification_stack_verified": measurement.get("node_verification_stack_verified") is True,
+        "ckb_node_verification_stack_executed": combined.get("ckb_node_verification_stack_executed") is True,
+        "node_stack_matched_expected": combined.get("node_stack_matched_expected"),
+        "node_stack_mismatched": combined.get("node_stack_mismatched"),
     }
 
 
@@ -120,6 +135,13 @@ def analyse_assembly(assembly_path: Path) -> dict[str, Any]:
             "fixed_u64_le_markers": fixed_u64_le_markers,
             "pipe_write_instruction_count": pipe_write_instruction_count,
             "contains_last_signature_word": fixed_u64_le_last_signature_word,
+        },
+        "generic_verifier_surface": {
+            "source_uses_btc_bip340_helper": "verifier::btc::bip340::require_signature" in PROBE_SOURCE,
+            "lowers_to_spawn_with_fd": "call __ckb_spawn_with_fd1" in assembly,
+            "lowers_to_fixed_18_word_envelope": fixed_u64_le_markers == 16
+            and pipe_write_instruction_count == 18
+            and fixed_u64_le_last_signature_word,
         },
         "spawn_helper": {
             "present": bool(spawn_body),
@@ -199,7 +221,7 @@ def build_manifest_bound_probe(cellc: str, tmpdir: Path) -> dict[str, Any]:
     }
 
 
-def build_report(cellc: str, output: Path) -> dict[str, Any]:
+def build_report(cellc: str, output: Path, audit_surface_path: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="novaseal-spawn-probe-") as tmp:
         tmpdir = Path(tmp)
         source_path = tmpdir / "spawn_backend_probe.cell"
@@ -240,10 +262,18 @@ def build_report(cellc: str, output: Path) -> dict[str, Any]:
         and fixed_word_envelope.get("contains_last_signature_word") is True
     )
     classification = (
-        "cellscript_vm2_spawn_with_fd_and_fixed_word_envelope_ready_for_lock_wiring"
+        "cellscript_btc_bip340_verifier_surface_ready_for_lock_wiring"
         if backend_executable and fixed_word_envelope_lowered
-        else "cellscript_vm2_spawn_with_fd_or_fixed_word_envelope_compiler_blocker"
+        else "cellscript_btc_bip340_verifier_surface_compiler_blocker"
     )
+    surface_status = audit_surface_status(audit_surface_path)
+    remaining_blockers = []
+    if not surface_status["receipt_output_materialised"]:
+        remaining_blockers.append("proof_receipt_v0_output_materialisation_missing")
+    if not surface_status["transaction_measurement_present"]:
+        remaining_blockers.append("production_cycle_capacity_tx_size_measurement_missing")
+    if not surface_status["node_verification_stack_verified"]:
+        remaining_blockers.append("ckb_node_verification_stack_missing")
 
     return {
         "schema": SCHEMA,
@@ -257,6 +287,7 @@ def build_report(cellc: str, output: Path) -> dict[str, Any]:
         "assembly": assembly,
         "strict_0_16": strict_summary,
         "manifest_bound_strict_0_16": manifest_bound_strict,
+        "novaseal_audit_surface": surface_status,
         "status": {
             "all_spawn_ipc_calls_lowered": all_calls_present,
             "backend_ecall_boundary_closed": backend_executable,
@@ -267,6 +298,11 @@ def build_report(cellc: str, output: Path) -> dict[str, Any]:
             and not bool(spawn_with_fd_helper.get("contains_ecall_instruction")),
             "spawn_with_fd_helper_uses_static_cell_dep0_with_one_inherited_fd": static_cell_dep0_one_fd,
             "fixed_word_envelope_lowered": fixed_word_envelope_lowered,
+            "generic_btc_bip340_helper_lowered": bool(
+                assembly.get("generic_verifier_surface", {}).get("source_uses_btc_bip340_helper")
+                and assembly.get("generic_verifier_surface", {}).get("lowers_to_spawn_with_fd")
+                and assembly.get("generic_verifier_surface", {}).get("lowers_to_fixed_18_word_envelope")
+            ),
             "strict_rejects_spawn_target": strict_rejects_spawn_target,
             "manifest_bound_spawn_target_strict_passes": bool(manifest_bound_strict["passed"]),
             "manifest_bound_spawn_target_builder_required": manifest_bound_builder_required,
@@ -278,12 +314,9 @@ def build_report(cellc: str, output: Path) -> dict[str, Any]:
                 and manifest_bound_builder_required
             ),
             "ready_for_parent_child_ckb_vm_dry_run": False,
+            "combined_ckb_node_verification_stack_verified": surface_status["node_verification_stack_verified"],
         },
-        "remaining_runtime_evidence_blockers": [
-            "novaseal_verifier_riscv_shell_has_no_ckb_vm_dry_run_evidence",
-            "novaseal_parent_lock_and_child_verifier_not_executed_in_one_ckb_vm_transaction",
-            "novaseal_cycle_capacity_builder_evidence_missing",
-        ],
+        "remaining_runtime_evidence_blockers": remaining_blockers,
         "limits": [
             "This is a compiler/backend probe, not a NovaSeal lock implementation.",
             "A source-level spawn_with_fd call plus a generic fixed-word envelope is not CKB VM transaction execution evidence.",
@@ -297,10 +330,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cellc", default="cellc", help="cellc binary to execute")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--audit-surface", type=Path, default=DEFAULT_AUDIT_SURFACE)
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     args = parser.parse_args()
 
-    report = build_report(args.cellc, args.output)
+    report = build_report(args.cellc, args.output, args.audit_surface)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2 if args.pretty else None, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -309,6 +343,7 @@ def main() -> int:
         "summary: "
         f"compile_passed={report['compile']['passed']} "
         f"all_calls_lowered={report['status']['all_spawn_ipc_calls_lowered']} "
+        f"generic_btc_bip340_helper_lowered={report['status']['generic_btc_bip340_helper_lowered']} "
         f"spawn_with_fd_helper_executable={report['status']['spawn_with_fd_helper_executable']} "
         f"fail_closed_stub={report['status']['spawn_with_fd_helper_fail_closed_stub']} "
         f"strict_rejects_spawn_target={report['status']['strict_rejects_spawn_target']} "

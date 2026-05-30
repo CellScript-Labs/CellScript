@@ -1,0 +1,23 @@
+module novaseal::agreement_profile::receipt_v0;
+
+// Standalone receipt shape for tools that want to inspect the profile without
+// compiling the primary type/action entry. The runtime-enforced receipt output
+// is declared in src/nova_agreement_type.cell.
+
+receipt NovaAgreementReceiptV0 has store, create, consume {
+    action: u8,
+    agreement_id: Hash,
+    old_status: u8,
+    new_status: u8,
+    terms_hash: Hash,
+    borrower_authority_hash: Hash,
+    lender_authority_hash: Hash,
+    collateral_amount: u64,
+    principal_amount: u64,
+    fixed_fee_amount: u64,
+    terminal_amount: u64,
+    old_receipt_root: Hash,
+    new_receipt_root: Hash,
+    nonce: u64,
+    timepoint: u64,
+}

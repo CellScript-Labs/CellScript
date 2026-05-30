@@ -1,14 +1,14 @@
 # NovaSeal Parent Lock CKB VM Harness
 
 **Date**: 2026-05-30
-**Harness**: `verifier/novaseal_ckb_vm_harness/src/bin/novaseal_parent_lock_harness.rs`
+**Harness**: `harness/ckb_vm/src/bin/novaseal_parent_lock_harness.rs`
 **Report**: `target/novaseal-parent-lock-ckb-vm-report.json`
 **Classification**: parent-lock + child-verifier CKB VM harness evidence, consensus-packed transaction-shape measurement, official `ckb-script` resolved lock-group verifier evidence, and official full transaction script-verifier evidence.
 
 ## Command
 
 ```bash
-cargo run --manifest-path verifier/novaseal_ckb_vm_harness/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
+cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 ```
 
 ## What It Executes
@@ -80,7 +80,7 @@ The parent lock now parses the same 389-byte `CSARGv1` witness payload shape as 
 
 It is still not production acceptance evidence:
 
-- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a production builder/full-node acceptance flow,
+- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a live-chain NovaSeal RPC submission flow,
 - the resolved transaction is harness-constructed and not yet produced by a production builder,
 - capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements,
 - the six transition fixtures are still model-level, not full parent-lock transaction runs.

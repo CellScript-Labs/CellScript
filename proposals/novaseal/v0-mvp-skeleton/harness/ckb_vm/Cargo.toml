@@ -1,0 +1,28 @@
+[package]
+name = "novaseal_ckb_vm_harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[dependencies]
+ckb-vm = { version = "0.24", features = ["asm", "detect-asm"] }
+blake2b_simd = "1.0"
+ckb-chain-spec = "0.119"
+ckb-script = "0.119"
+ckb-traits = "0.119"
+ckb-types = "0.119"
+ckb-verification = "0.119"
+hex = "0.4"
+k256 = { version = "0.13.4", default-features = false, features = ["schnorr"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "1.0"
