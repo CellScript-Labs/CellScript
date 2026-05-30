@@ -226,14 +226,23 @@ fn snapshot_collection_lowering_assembly() {
 }
 
 #[test]
-fn snapshot_spawn_ipc_fail_closed_stub_assembly() {
+fn snapshot_spawn_ipc_executable_status_checked_assembly() {
     let assembly = compile_to_asm(SPAWN_IPC_SOURCE);
     let n = normalise_assembly(&assembly);
 
-    for helper in ["__ckb_pipe", "__ckb_pipe_write", "__ckb_spawn", "__ckb_wait", "__ckb_pipe_read", "__ckb_close"] {
+    for (helper, status_reg) in [
+        ("__ckb_pipe", "a2"),
+        ("__ckb_pipe_write", "a1"),
+        ("__ckb_spawn", "a1"),
+        ("__ckb_wait", "a1"),
+        ("__ckb_pipe_read", "a1"),
+        ("__ckb_close", "a1"),
+    ] {
         assert!(n.contains(&format!("call {helper}")), "pipeline action should call {helper}:\n{}", n);
         let after_call = n.split_once(&format!("\n    call {helper}")).map(|(_, after)| after).expect("helper call should be present");
-        let status_check = after_call.find("beqz a1").unwrap_or_else(|| panic!("{helper} status should be checked"));
+        let status_check = after_call
+            .find(&format!("beqz {status_reg}"))
+            .unwrap_or_else(|| panic!("{helper} status should be checked in {status_reg}"));
         let epilogue_jump = after_call.find("j .Lpipe_to_delegate_epilogue").unwrap_or_else(|| panic!("{helper} failure should exit"));
         assert!(status_check < epilogue_jump, "{helper} status must be checked before continuing or returning:\n{}", after_call);
     }
@@ -241,10 +250,31 @@ fn snapshot_spawn_ipc_fail_closed_stub_assembly() {
     let spawn_helper = n.split_once("__ckb_spawn:").map(|(_, after)| after).expect("spawn helper body should be present");
     let spawn_helper = spawn_helper.split_once(".global ").map(|(body, _)| body).unwrap_or(spawn_helper);
     assert!(
-        spawn_helper.contains("withheld raw syscall 2601") && !spawn_helper.contains("ecall"),
-        "spawn helper should remain a fail-closed VM2 stub without issuing ecall:\n{}",
+        spawn_helper.contains("li a7, 2601")
+            && spawn_helper.contains("ecall")
+            && spawn_helper.contains("spawn resolves the static target to CellDep#0 with no argv and no inherited fds")
+            && !spawn_helper.contains("withheld raw syscall 2601"),
+        "spawn helper should issue the VM2 spawn syscall through the conservative static CellDep#0 wrapper:\n{}",
         spawn_helper
     );
+
+    let pipe_helper = n.split_once("__ckb_pipe:").map(|(_, after)| after).expect("pipe helper body should be present");
+    let pipe_helper = pipe_helper.split_once(".global ").map(|(body, _)| body).unwrap_or(pipe_helper);
+    assert!(
+        pipe_helper.contains("li a7, 2604") && pipe_helper.contains("ecall") && pipe_helper.contains("mv a2, a0"),
+        "pipe helper should preserve read/write fds in a0/a1 and move raw status to a2:\n{}",
+        pipe_helper
+    );
+
+    for (helper, syscall) in [("__ckb_pipe_write", 2605), ("__ckb_pipe_read", 2606), ("__ckb_wait", 2602), ("__ckb_close", 2608)] {
+        let helper_body = n.split_once(&format!("{helper}:")).map(|(_, after)| after).expect("helper body should be present");
+        let helper_body = helper_body.split_once(".global ").map(|(body, _)| body).unwrap_or(helper_body);
+        assert!(
+            helper_body.contains(&format!("li a7, {syscall}")) && helper_body.contains("ecall"),
+            "{helper} should issue VM2 syscall {syscall}:\n{}",
+            helper_body
+        );
+    }
 }
 
 #[test]

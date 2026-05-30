@@ -713,6 +713,7 @@ fn on_chain_checked(status: &str) -> bool {
 
 fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_primitives: &[PoolPrimitiveMetadata]) -> Vec<String> {
     let mut checks = checked_runtime_subconditions(&obligation.detail);
+    checks.extend(resource_field_classification_checks(&obligation.detail));
     if obligation.category == "transaction-invariant" && obligation.status == "checked-runtime" {
         checks.push(format!("{}=checked-runtime", obligation.feature));
     }
@@ -722,6 +723,33 @@ fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_pr
     }
     dedup(&mut checks);
     checks
+}
+
+fn resource_field_classification_checks(detail: &str) -> Vec<String> {
+    let mut checks = Vec::new();
+    for (label, status) in [
+        ("preserved fields:", "preserved"),
+        ("guarded fields:", "guarded"),
+        ("allowed fresh fields:", "allowed-fresh"),
+        ("unchecked fields:", "unchecked"),
+    ] {
+        let Some(fields) = detail_section_after_label(detail, label) else {
+            continue;
+        };
+        for field in fields.split(',').map(str::trim).filter(|field| !field.is_empty() && *field != "-") {
+            checks.push(format!("resource-field:{}={}", field, status));
+        }
+    }
+    dedup(&mut checks);
+    checks
+}
+
+fn detail_section_after_label<'a>(detail: &'a str, label: &str) -> Option<&'a str> {
+    detail.split(';').find_map(|segment| {
+        let segment = segment.trim();
+        let offset = segment.find(label)?;
+        Some(segment[offset + label.len()..].trim())
+    })
 }
 
 fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<String> {

@@ -10,9 +10,9 @@ use std::collections::BTreeSet;
 use crate::ir::*;
 use crate::syscalls::{
     checked_runtime_helper_spec, fail_closed_helper_spec, fail_closed_runtime_helper_specs, runtime_helper_symbols,
-    source_constant_specs, vm2_helper_specs, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
+    source_constant_specs, vm2_helper_specs, SyscallSpec, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
     CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
-    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_GROUP_OUTPUT, CKB_SOURCE_HEADER_DEP,
+    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_CELL_DEP, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_GROUP_OUTPUT, CKB_SOURCE_HEADER_DEP,
 };
 use crate::TargetProfile;
 
@@ -106,6 +106,10 @@ pub(crate) fn is_ckb_checked_runtime_helper(func: &str) -> bool {
         )
 }
 
+pub(crate) fn ckb_checked_runtime_status_reg(func: &str) -> &'static str {
+    checked_runtime_helper_spec(func).map_or("a1", |spec| spec.semantic_status_reg)
+}
+
 // ---------------------------------------------------------------------------
 // CodeGenerator runtime support methods
 // ---------------------------------------------------------------------------
@@ -182,12 +186,7 @@ impl CodeGenerator {
             if !enabled {
                 self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
             } else {
-                self.emit(format!(
-                    "# cellscript abi: {} is status-checked but not value-typed yet; fail closed until VM2 ABI values are modeled",
-                    spec.symbol
-                ));
-                self.emit(format!("# cellscript abi: withheld raw syscall {} so status cannot become a DSL value", spec.number));
-                self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+                self.emit_runtime_vm2_helper(*spec);
             }
         }
 
@@ -234,6 +233,179 @@ impl CodeGenerator {
         if referenced_helpers.contains("__ckb_hash_chain") || referenced_helpers.contains("__ckb_hash_blake2b") {
             self.emit_runtime_blake2b_hash32(enabled);
         }
+    }
+
+    fn emit_runtime_vm2_helper(&mut self, spec: SyscallSpec) {
+        self.emit(format!("# cellscript abi: executable CKB VM v2 syscall {} ({})", spec.number, spec.detail));
+        match spec.symbol {
+            "__ckb_spawn" => self.emit_runtime_vm2_spawn(spec.number),
+            "__ckb_wait" => self.emit_runtime_vm2_wait(spec.number),
+            "__ckb_process_id" => self.emit_runtime_vm2_process_id(spec.number),
+            "__ckb_pipe" => self.emit_runtime_vm2_pipe(spec.number),
+            "__ckb_pipe_write" => self.emit_runtime_vm2_pipe_write(spec.number),
+            "__ckb_pipe_read" => self.emit_runtime_vm2_pipe_read(spec.number),
+            "__ckb_inherited_fd" => self.emit_runtime_vm2_inherited_fd(spec.number),
+            "__ckb_close" => self.emit_runtime_vm2_close(spec.number),
+            _ => self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed),
+        }
+    }
+
+    fn emit_runtime_vm2_spawn(&mut self, syscall_number: u64) {
+        self.emit("# cellscript abi: spawn resolves the static target to CellDep#0 with no argv and no inherited fds");
+        self.emit_large_addi("sp", "sp", -80);
+        self.emit_stack_store("zero", 0);
+        self.emit_stack_store("zero", 8);
+        self.emit_stack_store("zero", 16);
+        self.emit_stack_store("zero", 24);
+        self.emit_stack_store("zero", 32);
+        self.emit_sp_addi("t0", 0);
+        self.emit_stack_store("t0", 40);
+        self.emit_sp_addi("t0", 8);
+        self.emit_stack_store("t0", 48);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CKB_SOURCE_CELL_DEP));
+        self.emit("li a2, 0");
+        self.emit("li a3, 0");
+        self.emit_sp_addi("a4", 24);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv a1, a0");
+        self.emit_stack_load("a0", 0);
+        self.emit_large_addi("sp", "sp", 80);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_wait(&mut self, syscall_number: u64) {
+        self.emit("# cellscript abi: wait consumes child pid in a0 and supplies exit-code pointer in a1");
+        self.emit_large_addi("sp", "sp", -16);
+        self.emit_stack_store("zero", 0);
+        self.emit_sp_addi("a1", 0);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv a1, a0");
+        self.emit_stack_load("a0", 0);
+        self.emit_large_addi("sp", "sp", 16);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_process_id(&mut self, syscall_number: u64) {
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("li a1, 0");
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_pipe(&mut self, syscall_number: u64) {
+        self.emit_large_addi("sp", "sp", -32);
+        self.emit_stack_store("zero", 0);
+        self.emit_stack_store("zero", 8);
+        self.emit_sp_addi("a0", 0);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv a2, a0");
+        self.emit_stack_load("a0", 0);
+        self.emit_stack_load("a1", 8);
+        self.emit_large_addi("sp", "sp", 32);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_pipe_write(&mut self, syscall_number: u64) {
+        let fail = self.fresh_label("runtime_vm2_pipe_write_fail");
+        let done = self.fresh_label("runtime_vm2_pipe_write_done");
+        self.emit_large_addi("sp", "sp", -32);
+        self.emit_stack_store("a1", 0);
+        self.emit("li t0, 8");
+        self.emit_stack_store("t0", 8);
+        self.emit_sp_addi("a1", 0);
+        self.emit_sp_addi("a2", 8);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv t0, a0");
+        self.emit(format!("bnez t0, {}", fail));
+        self.emit_stack_load("t1", 8);
+        self.emit("li t2, 8");
+        self.emit(format!("bne t1, t2, {}", fail));
+        self.emit("li a0, 0");
+        self.emit("li a1, 0");
+        self.emit(format!("j {}", done));
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_label(&done);
+        self.emit_large_addi("sp", "sp", 32);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_pipe_read(&mut self, syscall_number: u64) {
+        let fail = self.fresh_label("runtime_vm2_pipe_read_fail");
+        let done = self.fresh_label("runtime_vm2_pipe_read_done");
+        self.emit_large_addi("sp", "sp", -32);
+        self.emit_stack_store("zero", 0);
+        self.emit("li t0, 8");
+        self.emit_stack_store("t0", 8);
+        self.emit_sp_addi("a1", 0);
+        self.emit_sp_addi("a2", 8);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv t0, a0");
+        self.emit(format!("bnez t0, {}", fail));
+        self.emit_stack_load("t1", 8);
+        self.emit("li t2, 8");
+        self.emit(format!("bne t1, t2, {}", fail));
+        self.emit_stack_load("a0", 0);
+        self.emit("li a1, 0");
+        self.emit(format!("j {}", done));
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_label(&done);
+        self.emit_large_addi("sp", "sp", 32);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_inherited_fd(&mut self, syscall_number: u64) {
+        let status_fail = self.fresh_label("runtime_vm2_inherited_fd_status_fail");
+        let bounds_fail = self.fresh_label("runtime_vm2_inherited_fd_bounds_fail");
+        let done = self.fresh_label("runtime_vm2_inherited_fd_done");
+        self.emit_large_addi("sp", "sp", -96);
+        self.emit_stack_store("a0", 8);
+        self.emit("li t0, 8");
+        self.emit_stack_store("t0", 0);
+        self.emit_sp_addi("a0", 16);
+        self.emit_sp_addi("a1", 0);
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv t0, a0");
+        self.emit(format!("bnez t0, {}", status_fail));
+        self.emit_stack_load("t1", 0);
+        self.emit_stack_load("t2", 8);
+        self.emit(format!("bgeu t2, t1, {}", bounds_fail));
+        self.emit("li t3, 8");
+        self.emit(format!("bgeu t2, t3, {}", bounds_fail));
+        self.emit("slli t2, t2, 3");
+        self.emit_sp_addi("t3", 16);
+        self.emit("add t3, t3, t2");
+        self.emit("ld a0, 0(t3)");
+        self.emit("li a1, 0");
+        self.emit(format!("j {}", done));
+        self.emit_label(&status_fail);
+        self.emit("li a0, 0");
+        self.emit("mv a1, t0");
+        self.emit(format!("j {}", done));
+        self.emit_label(&bounds_fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_label(&done);
+        self.emit_large_addi("sp", "sp", 96);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_vm2_close(&mut self, syscall_number: u64) {
+        self.emit(format!("li a7, {}", syscall_number));
+        self.emit("ecall");
+        self.emit("mv a1, a0");
+        self.emit("li a0, 0");
+        self.emit("ret");
     }
 
     fn emit_runtime_blake2b_hash32(&mut self, enabled: bool) {

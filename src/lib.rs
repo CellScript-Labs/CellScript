@@ -1506,8 +1506,147 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
         };
     }
 
+    bind_manifest_spawn_targets(metadata);
     refresh_constraints_status(&mut metadata.constraints);
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ManifestSpawnTargetBinding {
+    tag: u64,
+    dep_position: usize,
+    dep_name: String,
+    dep_type: String,
+}
+
+fn bind_manifest_spawn_targets(metadata: &mut CompileMetadata) {
+    let bindings = manifest_spawn_target_bindings(metadata);
+    if bindings.is_empty() {
+        return;
+    }
+
+    bind_manifest_spawn_targets_in_obligations(&mut metadata.runtime.verifier_obligations, &bindings);
+    bind_manifest_spawn_targets_in_proof_plan(&mut metadata.runtime.proof_plan, &bindings);
+    metadata.runtime.transaction_runtime_input_requirements =
+        transaction_runtime_input_requirements_from_obligations(&metadata.runtime.verifier_obligations);
+
+    for action in &mut metadata.actions {
+        bind_manifest_spawn_targets_in_obligations(&mut action.verifier_obligations, &bindings);
+        bind_manifest_spawn_targets_in_proof_plan(&mut action.proof_plan, &bindings);
+        action.transaction_runtime_input_requirements =
+            transaction_runtime_input_requirements_from_obligations(&action.verifier_obligations);
+    }
+    for function in &mut metadata.functions {
+        bind_manifest_spawn_targets_in_obligations(&mut function.verifier_obligations, &bindings);
+        bind_manifest_spawn_targets_in_proof_plan(&mut function.proof_plan, &bindings);
+        function.transaction_runtime_input_requirements =
+            transaction_runtime_input_requirements_from_obligations(&function.verifier_obligations);
+    }
+    for lock in &mut metadata.locks {
+        bind_manifest_spawn_targets_in_obligations(&mut lock.verifier_obligations, &bindings);
+        bind_manifest_spawn_targets_in_proof_plan(&mut lock.proof_plan, &bindings);
+        lock.transaction_runtime_input_requirements =
+            transaction_runtime_input_requirements_from_obligations(&lock.verifier_obligations);
+    }
+
+    for reference in metadata
+        .constraints
+        .ckb
+        .iter_mut()
+        .flat_map(|ckb| ckb.script_references.iter_mut())
+        .filter(|reference| reference.purpose == "spawn-target")
+    {
+        let Some(tag) = spawn_target_tag_from_binding(&reference.name) else {
+            continue;
+        };
+        let Some(binding) = bindings.iter().find(|binding| binding.tag == tag) else {
+            continue;
+        };
+        reference.name = binding.dep_name.clone();
+        reference.dep_source = format!("{}#{}", manifest_spawn_dep_source_label(&binding.dep_type), binding.dep_position);
+        reference.status = "builder-required-manifest-bound-cell-dep".to_string();
+    }
+}
+
+fn manifest_spawn_target_bindings(metadata: &CompileMetadata) -> Vec<ManifestSpawnTargetBinding> {
+    metadata
+        .constraints
+        .ckb
+        .as_ref()
+        .into_iter()
+        .flat_map(|ckb| ckb.dep_group_manifest.declared_cell_deps.iter().enumerate())
+        .filter(|(dep_position, dep)| *dep_position == 0 && dep.dep_type == "code")
+        .map(|(dep_position, dep)| ManifestSpawnTargetBinding {
+            tag: ir::stable_u64_tag(&dep.name),
+            dep_position,
+            dep_name: dep.name.clone(),
+            dep_type: dep.dep_type.clone(),
+        })
+        .collect()
+}
+
+fn bind_manifest_spawn_targets_in_obligations(
+    obligations: &mut [VerifierObligationMetadata],
+    bindings: &[ManifestSpawnTargetBinding],
+) {
+    for obligation in obligations.iter_mut().filter(|obligation| obligation.category == "spawn-target") {
+        let Some(tag) = spawn_target_tag_from_feature(&obligation.feature) else {
+            continue;
+        };
+        let Some(binding) = bindings.iter().find(|binding| binding.tag == tag) else {
+            continue;
+        };
+        obligation.status = "builder-required".to_string();
+        obligation.detail = manifest_spawn_target_detail(binding);
+    }
+}
+
+fn bind_manifest_spawn_targets_in_proof_plan(plans: &mut [ProofPlanMetadata], bindings: &[ManifestSpawnTargetBinding]) {
+    for plan in plans.iter_mut().filter(|plan| plan.category == "spawn-target") {
+        let Some(tag) = spawn_target_tag_from_feature(&plan.feature) else {
+            continue;
+        };
+        let Some(binding) = bindings.iter().find(|binding| binding.tag == tag) else {
+            continue;
+        };
+        let detail = manifest_spawn_target_detail(binding);
+        plan.status = "builder-required".to_string();
+        plan.detail = detail.clone();
+        plan.on_chain_checked = false;
+        plan.on_chain_checked_obligations.clear();
+        plan.executable_evidence.clear();
+        plan.builder_assumptions = vec![format!("declared(builder-required: {detail})")];
+        plan.codegen_coverage_status = "builder-required".to_string();
+        plan.diagnostics
+            .retain(|diagnostic| !diagnostic.message.contains("obligation is not fully covered by generated on-chain code"));
+    }
+}
+
+fn manifest_spawn_target_detail(binding: &ManifestSpawnTargetBinding) -> String {
+    format!(
+        "Spawn target '{}' is bound by Cell.toml deploy.ckb.cell_deps[{}] as {}; current VM2 spawn lowering resolves only CellDep#0, so the builder must include this matching first CellDep and preserve the child script identity",
+        binding.dep_name,
+        binding.dep_position,
+        binding.dep_type
+    )
+}
+
+fn manifest_spawn_dep_source_label(dep_type: &str) -> &'static str {
+    if dep_type == "dep_group" {
+        "DepGroup"
+    } else {
+        "CellDep"
+    }
+}
+
+fn spawn_target_tag_from_binding(binding: &str) -> Option<u64> {
+    let hex = binding.strip_prefix("spawn-target-tag:0x")?;
+    u64::from_str_radix(hex, 16).ok()
+}
+
+fn spawn_target_tag_from_feature(feature: &str) -> Option<u64> {
+    let (_, hex) = feature.rsplit_once("@0x")?;
+    u64::from_str_radix(hex, 16).ok()
 }
 
 fn validate_ckb_hash_type(hash_type: &str) -> Result<()> {
@@ -2472,17 +2611,58 @@ fn validate_ckb_script_reference_metadata(metadata: &CompileMetadata) -> Result<
                         prefix
                     )));
                 }
-                if reference.dep_source != "CellDep-or-DepGroup" {
-                    return Err(CompileError::without_span(format!(
-                        "{}.dep_source '{}' does not match expected 'CellDep-or-DepGroup'",
-                        prefix, reference.dep_source
-                    )));
-                }
-                if reference.status != "runtime-required-builder-resolved" {
-                    return Err(CompileError::without_span(format!(
-                        "{}.status '{}' does not match expected 'runtime-required-builder-resolved'",
-                        prefix, reference.status
-                    )));
+                match reference.status.as_str() {
+                    "runtime-required-builder-resolved" => {
+                        if reference.dep_source != "CellDep-or-DepGroup" {
+                            return Err(CompileError::without_span(format!(
+                                "{}.dep_source '{}' does not match expected 'CellDep-or-DepGroup'",
+                                prefix, reference.dep_source
+                            )));
+                        }
+                    }
+                    "builder-required-manifest-bound-cell-dep" => {
+                        let (source_label, index_text) = if let Some(index_text) = reference.dep_source.strip_prefix("CellDep#") {
+                            ("CellDep", index_text)
+                        } else if let Some(index_text) = reference.dep_source.strip_prefix("DepGroup#") {
+                            ("DepGroup", index_text)
+                        } else {
+                            return Err(CompileError::without_span(format!(
+                                "{}.dep_source '{}' must use CellDep#<index> or DepGroup#<index>",
+                                prefix, reference.dep_source
+                            )));
+                        };
+                        let Ok(index) = index_text.parse::<usize>() else {
+                            return Err(CompileError::without_span(format!(
+                                "{}.dep_source '{}' has an invalid manifest cell_dep index",
+                                prefix, reference.dep_source
+                            )));
+                        };
+                        let Some(declared_dep) = ckb_constraints.dep_group_manifest.declared_cell_deps.get(index) else {
+                            return Err(CompileError::without_span(format!(
+                                "{}.dep_source '{}' points outside deploy.ckb.cell_deps",
+                                prefix, reference.dep_source
+                            )));
+                        };
+                        if reference.name != declared_dep.name {
+                            return Err(CompileError::without_span(format!(
+                                "{}.name '{}' does not match deploy.ckb.cell_deps[{}].name '{}'",
+                                prefix, reference.name, index, declared_dep.name
+                            )));
+                        }
+                        let expected_source_label = manifest_spawn_dep_source_label(&declared_dep.dep_type);
+                        if source_label != expected_source_label {
+                            return Err(CompileError::without_span(format!(
+                                "{}.dep_source '{}' does not match deploy.ckb.cell_deps[{}].dep_type '{}'",
+                                prefix, reference.dep_source, index, declared_dep.dep_type
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(CompileError::without_span(format!(
+                            "{}.status '{}' does not match expected spawn-target status",
+                            prefix, reference.status
+                        )));
+                    }
                 }
             }
             "read-ref-cell-dep" => {
@@ -2541,20 +2721,32 @@ type CkbScriptReferenceFingerprint = (String, String, String, Option<String>, Op
 fn ckb_script_reference_fingerprints<'a>(
     refs: impl Iterator<Item = &'a CkbScriptReferenceMetadata>,
 ) -> Vec<CkbScriptReferenceFingerprint> {
-    refs.map(|reference| {
-        (
-            reference.scope.clone(),
-            reference.purpose.clone(),
-            reference.name.clone(),
-            reference.code_hash.clone(),
-            reference.hash_type.clone(),
-            reference.args.clone(),
-            reference.dep_source.clone(),
-            reference.profile.clone(),
-            reference.status.clone(),
-        )
-    })
-    .collect()
+    refs.map(ckb_script_reference_fingerprint).collect()
+}
+
+fn ckb_script_reference_fingerprint(reference: &CkbScriptReferenceMetadata) -> CkbScriptReferenceFingerprint {
+    let (name, dep_source, status) =
+        if reference.purpose == "spawn-target" && reference.status == "builder-required-manifest-bound-cell-dep" {
+            (
+                format!("spawn-target-tag:0x{:016x}", ir::stable_u64_tag(&reference.name)),
+                "CellDep-or-DepGroup".to_string(),
+                "runtime-required-builder-resolved".to_string(),
+            )
+        } else {
+            (reference.name.clone(), reference.dep_source.clone(), reference.status.clone())
+        };
+
+    (
+        reference.scope.clone(),
+        reference.purpose.clone(),
+        name,
+        reference.code_hash.clone(),
+        reference.hash_type.clone(),
+        reference.args.clone(),
+        dep_source,
+        reference.profile.clone(),
+        status,
+    )
 }
 
 fn ckb_script_reference_multiset_difference(
@@ -3984,7 +4176,7 @@ fn ir_has_backend_entry(ir: &ir::IrModule) -> bool {
 }
 
 fn compile_ast(ast: &ast::Module, options: &CompileOptions, resolver: Option<(&ModuleResolver, &str)>) -> Result<CompileResult> {
-    compile_ast_with_build(ast, options, resolver, None, None)
+    compile_ast_with_build(ast, options, resolver, None, None, None)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3999,6 +4191,7 @@ fn compile_ast_with_build(
     resolver: Option<(&ModuleResolver, &str)>,
     build: Option<&CellBuildConfig>,
     entry_scope: Option<&CompileEntryScope>,
+    manifest: Option<&CellManifest>,
 ) -> Result<CompileResult> {
     validate_compile_options(options)?;
     let target_profile = TargetProfile::from_options(options, build)?;
@@ -4093,6 +4286,9 @@ fn compile_ast_with_build(
     let artifact_hash = ckb_blake2b256(&artifact_bytes);
     bind_artifact_metadata(&mut metadata, &artifact_bytes, &artifact_hash);
     bind_constraints_metadata(&mut metadata, &artifact_bytes, artifact_format, target_profile, ir, &codegen_options)?;
+    if let Some(manifest) = manifest {
+        apply_manifest_deploy_metadata(&mut metadata, manifest)?;
+    }
     metadata.runtime.builder_assumptions = crate::assumptions::builder_assumptions_from_metadata(&metadata);
     metadata.runtime.proof_plan_soundness = crate::proof_plan::soundness::check_metadata(&metadata, options.is_assurance_strict_016());
     if options.is_assurance_strict_016() {
@@ -4173,11 +4369,9 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
         Some((&resolver, &ast.name)),
         manifest.as_ref().map(|manifest| &manifest.build),
         entry_scope.as_ref(),
+        manifest.as_ref(),
     )?;
     bind_source_metadata(&mut result.metadata, collect_source_units_for_compile_file(path)?);
-    if let Some(manifest) = manifest.as_ref() {
-        apply_manifest_deploy_metadata(&mut result.metadata, manifest)?;
-    }
     result.validate()?;
 
     // Incremental compilation: store successful compilation result in cache
@@ -6285,14 +6479,22 @@ fn body_verifier_obligations(
             &format!("{} {} from {}#{} bound to {}", access.syscall, access.operation, access.source, access.index, access.binding),
         );
         if access.operation == "spawn" {
+            let target_suffix = access
+                .binding
+                .strip_prefix("spawn-target-tag:")
+                .map(|tag| format!("@{tag}"))
+                .unwrap_or_else(|| "@dynamic".to_string());
             push_verifier_obligation(
                 &mut obligations,
                 &mut seen,
                 &scope,
                 "spawn-target",
-                &format!("spawn-target:{}#{}", access.source, access.index),
+                &format!("spawn-target:{}#{}{}", access.source, access.index, target_suffix),
                 "runtime-required",
-                "Spawn target must resolve to a transaction CellDep or DepGroup script reference; DSL spawn syntax does not inline or authenticate the child script",
+                &format!(
+                    "Spawn target {} must resolve to a transaction CellDep or DepGroup script reference; DSL spawn syntax does not inline or authenticate the child script",
+                    access.binding
+                ),
             );
         }
     }
@@ -6517,6 +6719,7 @@ fn body_transaction_resource_obligations(
             }
         }
     }
+    checks.extend(body_guard_equality_obligations(body, &availability, params));
     checks.extend(read_ref_cell_dep_data_obligations(body));
     checks.extend(body_resource_conservation_obligations(name, body, type_layouts, &availability, params, cell_type_kinds));
     checks
@@ -6575,6 +6778,211 @@ fn cell_metadata_field_byte_len(field_name: &str) -> Option<usize> {
         "lock_hash" => Some(32),
         "capacity" => Some(8),
         _ => None,
+    }
+}
+
+fn body_guard_equality_obligations(
+    body: &ir::IrBody,
+    availability: &MetadataPreludeAvailability,
+    params: &[ir::IrParam],
+) -> Vec<TransactionResourceObligation> {
+    let labels = metadata_guard_operand_labels(body, params);
+    let mut equalities_by_cond = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            let ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } = instruction else {
+                continue;
+            };
+            if !metadata_guard_equality_operands_are_checked(left, right, availability) {
+                continue;
+            }
+            let Some((left_label, right_label)) = metadata_guard_equality_labels(left, right, &labels) else {
+                continue;
+            };
+            equalities_by_cond.insert(dest.id, (left_label, right_label));
+        }
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut checks = Vec::new();
+    for block in &body.blocks {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            continue;
+        };
+        if !block_returns_error(body, *else_block) {
+            continue;
+        }
+        let Some((left_label, right_label)) = equalities_by_cond.get(&cond.id) else {
+            continue;
+        };
+        if !seen.insert((left_label.clone(), right_label.clone())) {
+            continue;
+        }
+        let relation = format!("guard-equality:{}=={}", left_label, right_label);
+        checks.push(TransactionResourceObligation {
+            category: "transaction-invariant",
+            feature: relation.clone(),
+            status: "checked-runtime",
+            detail: format!(
+                "Compiler-emitted runtime verifier checks fail-closed guard equality '{} == {}'; {}=checked-runtime",
+                left_label, right_label, relation
+            ),
+        });
+    }
+    checks
+}
+
+fn metadata_guard_equality_labels(
+    left: &ir::IrOperand,
+    right: &ir::IrOperand,
+    labels: &HashMap<usize, String>,
+) -> Option<(String, String)> {
+    let left_label = metadata_guard_operand_label(left, labels)?;
+    let right_label = metadata_guard_operand_label(right, labels)?;
+    if left_label == right_label {
+        return None;
+    }
+    if left_label <= right_label {
+        Some((left_label, right_label))
+    } else {
+        Some((right_label, left_label))
+    }
+}
+
+fn metadata_guard_operand_labels(body: &ir::IrBody, params: &[ir::IrParam]) -> HashMap<usize, String> {
+    let mut labels = params.iter().map(|param| (param.binding.id, param.name.clone())).collect::<HashMap<_, _>>();
+    let mut named_labels = params.iter().map(|param| (param.name.clone(), param.name.clone())).collect::<HashMap<_, _>>();
+
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::LoadVar { dest, name } => {
+                    if let Some(label) = named_labels.get(name).cloned() {
+                        labels.insert(dest.id, label);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(label) = metadata_guard_operand_label(src, &labels) {
+                        named_labels.insert(name.clone(), label);
+                    }
+                }
+                ir::IrInstruction::FieldAccess { dest, obj, field } => {
+                    if let Some(root) = metadata_guard_operand_label(obj, &labels) {
+                        labels.insert(dest.id, format!("{}.{}", root, field));
+                    }
+                }
+                ir::IrInstruction::Move { dest, src } | ir::IrInstruction::Cast { dest, src } => {
+                    if let Some(label) = metadata_guard_operand_label(src, &labels) {
+                        labels.insert(dest.id, label);
+                    }
+                }
+                ir::IrInstruction::Unary { dest, op: ast::UnaryOp::Ref | ast::UnaryOp::Deref, operand } => {
+                    if let Some(label) = metadata_guard_operand_label(operand, &labels) {
+                        labels.insert(dest.id, label);
+                    }
+                }
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Add | ast::BinaryOp::Sub, left, right }
+                    if dest.ty == ir::IrType::U64 =>
+                {
+                    let Some(left_label) = metadata_guard_operand_label(left, &labels) else {
+                        continue;
+                    };
+                    let Some(right_label) = metadata_guard_operand_label(right, &labels) else {
+                        continue;
+                    };
+                    let operator = match instruction {
+                        ir::IrInstruction::Binary { op: ast::BinaryOp::Add, .. } => "+",
+                        ir::IrInstruction::Binary { op: ast::BinaryOp::Sub, .. } => "-",
+                        _ => unreachable!("matched arithmetic binary instruction"),
+                    };
+                    labels.insert(dest.id, format!("{left_label}{operator}{right_label}"));
+                }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if matches!(func.as_str(), "__ckb_hash_blake2b" | "__ckb_hash_chain") =>
+                {
+                    let helper = match func.as_str() {
+                        "__ckb_hash_blake2b" => "hash_blake2b",
+                        "__ckb_hash_chain" => "hash_chain",
+                        _ => unreachable!("matched hash helper"),
+                    };
+                    let arg_labels = args.iter().map(|arg| metadata_guard_operand_label(arg, &labels)).collect::<Option<Vec<_>>>();
+                    if let Some(arg_labels) = arg_labels {
+                        labels.insert(dest.id, format!("{}({})", helper, arg_labels.join(",")));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    labels
+}
+
+fn metadata_guard_operand_label(operand: &ir::IrOperand, labels: &HashMap<usize, String>) -> Option<String> {
+    match operand {
+        ir::IrOperand::Var(var) => labels.get(&var.id).cloned(),
+        ir::IrOperand::Const(value) => metadata_guard_const_label(value),
+    }
+}
+
+fn metadata_guard_const_label(value: &ir::IrConst) -> Option<String> {
+    match value {
+        ir::IrConst::Bool(value) => Some(value.to_string()),
+        ir::IrConst::U8(value) => Some(value.to_string()),
+        ir::IrConst::U16(value) => Some(value.to_string()),
+        ir::IrConst::U32(value) => Some(value.to_string()),
+        ir::IrConst::U64(value) => Some(value.to_string()),
+        ir::IrConst::U128(value) => Some(value.to_string()),
+        ir::IrConst::Poisoned | ir::IrConst::Unit | ir::IrConst::Address(_) | ir::IrConst::Hash(_) | ir::IrConst::Array(_) => None,
+    }
+}
+
+fn metadata_guard_equality_operands_are_checked(
+    left: &ir::IrOperand,
+    right: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    metadata_can_verify_fixed_byte_comparison(left, right, availability)
+        || metadata_can_verify_scalar_guard_equality(left, right, availability)
+}
+
+fn metadata_can_verify_scalar_guard_equality(
+    left: &ir::IrOperand,
+    right: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    let Some(width) = metadata_guard_scalar_operand_width(left) else {
+        return false;
+    };
+    metadata_guard_scalar_operand_width(right) == Some(width)
+        && metadata_guard_scalar_operand_available(left, availability)
+        && metadata_guard_scalar_operand_available(right, availability)
+}
+
+fn metadata_guard_scalar_operand_width(operand: &ir::IrOperand) -> Option<usize> {
+    match operand {
+        ir::IrOperand::Const(value) => metadata_fixed_scalar_const_value(value).map(|_| metadata_const_scalar_width(value)),
+        ir::IrOperand::Var(var) => metadata_fixed_scalar_size(&var.ty),
+    }
+}
+
+fn metadata_const_scalar_width(value: &ir::IrConst) -> usize {
+    match value {
+        ir::IrConst::Bool(_) | ir::IrConst::U8(_) => 1,
+        ir::IrConst::U16(_) => 2,
+        ir::IrConst::U32(_) => 4,
+        ir::IrConst::U64(_) => 8,
+        ir::IrConst::U128(_) => 16,
+        ir::IrConst::Poisoned | ir::IrConst::Unit | ir::IrConst::Address(_) | ir::IrConst::Hash(_) | ir::IrConst::Array(_) => {
+            unreachable!("non-scalar const passed to scalar width")
+        }
+    }
+}
+
+fn metadata_guard_scalar_operand_available(operand: &ir::IrOperand, availability: &MetadataPreludeAvailability) -> bool {
+    match operand {
+        ir::IrOperand::Const(value) => metadata_fixed_scalar_const_value(value).is_some(),
+        ir::IrOperand::Var(var) => availability.scalar_vars.contains(&var.id) && metadata_fixed_scalar_size(&var.ty).is_some(),
     }
 }
 
@@ -6825,6 +7233,7 @@ struct MetadataFieldAlias {
 #[derive(Debug, Clone)]
 enum MetadataU64Source {
     Field(MetadataFieldAlias),
+    Const,
     Add(Box<MetadataU64Source>, Box<MetadataU64Source>),
     Sub(Box<MetadataU64Source>, ir::IrOperand),
 }
@@ -6889,12 +7298,13 @@ fn body_resource_conservation_obligations(
                 feature: format!("resource-conservation:{}", type_name),
                 status: if checked_detail.is_some() { "checked-runtime" } else { "runtime-required" },
                 detail: checked_detail.unwrap_or_else(|| {
-                    format!(
+                    resource_conservation_runtime_required_detail(body, type_layouts, availability, type_name, &consumed, &created)
+                        .unwrap_or_else(|| format!(
                         "Runtime verifier must prove '{}' resource conservation across {} consumed Input cell(s) and {} created Output cell(s); resource-conservation=runtime-required",
                         type_name,
                         consumed.len(),
                         created.len()
-                    )
+                    ))
                 }),
             })
         })
@@ -6920,6 +7330,21 @@ fn resource_conservation_checked_detail(
             "Compiler-emitted runtime verifier checks one consumed '{}' Input is preserved into one created Output; resource-conservation=checked-runtime; fields: {}",
             type_name, fields
         ));
+    }
+
+    if let Some(classification) =
+        resource_conservation_guarded_transition_classification(body, type_layouts, availability, consumed, created)
+    {
+        if classification.checked() {
+            return Some(format!(
+                "Compiler-emitted runtime verifier checks one consumed '{}' Input is advanced into one created Output by a guarded resource transition; resource-conservation=checked-runtime; preserved fields: {}; guarded fields: {}; allowed fresh fields: {}; unchecked fields: {}",
+                type_name,
+                metadata_join_or_dash(&classification.preserved),
+                metadata_join_or_dash(&classification.guarded),
+                metadata_join_or_dash(&classification.allowed_fresh),
+                metadata_join_or_dash(&classification.unchecked)
+            ));
+        }
     }
 
     if resource_conservation_amount_merge_is_checked(body, type_layouts, availability, consumed, created) {
@@ -6948,6 +7373,29 @@ fn resource_conservation_checked_detail(
     None
 }
 
+fn resource_conservation_runtime_required_detail(
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+    type_name: &str,
+    consumed: &[ir::IrVar],
+    created: &[ir::CreatePattern],
+) -> Option<String> {
+    let classification = resource_conservation_guarded_transition_classification(body, type_layouts, availability, consumed, created)?;
+    (!classification.checked()).then(|| {
+        format!(
+            "Runtime verifier must prove '{}' resource conservation across {} consumed Input cell(s) and {} created Output cell(s); guarded resource transition classification has unchecked fields: {}; preserved fields: {}; guarded fields: {}; allowed fresh fields: {}; resource-conservation=runtime-required",
+            type_name,
+            consumed.len(),
+            created.len(),
+            metadata_join_or_dash(&classification.unchecked),
+            metadata_join_or_dash(&classification.preserved),
+            metadata_join_or_dash(&classification.guarded),
+            metadata_join_or_dash(&classification.allowed_fresh)
+        )
+    })
+}
+
 fn resource_conservation_pair_is_checked(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
@@ -6967,6 +7415,103 @@ fn resource_conservation_pair_is_checked(
         };
         aliases.get(&var.id).is_some_and(|alias| alias.root_id == consumed.id && alias.field == field.as_str())
     })
+}
+
+#[derive(Debug, Default)]
+struct ResourceTransitionFieldClassification {
+    preserved: Vec<String>,
+    guarded: Vec<String>,
+    allowed_fresh: Vec<String>,
+    unchecked: Vec<String>,
+}
+
+impl ResourceTransitionFieldClassification {
+    fn checked(&self) -> bool {
+        self.unchecked.is_empty() && !self.preserved.is_empty() && !(self.guarded.is_empty() && self.allowed_fresh.is_empty())
+    }
+}
+
+fn metadata_join_or_dash(items: &[String]) -> String {
+    if items.is_empty() {
+        "-".to_string()
+    } else {
+        items.join(", ")
+    }
+}
+
+fn resource_conservation_guarded_transition_classification(
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+    consumed: &[ir::IrVar],
+    created: &[ir::CreatePattern],
+) -> Option<ResourceTransitionFieldClassification> {
+    if consumed.len() != 1 || created.len() != 1 {
+        return None;
+    }
+    let consumed = &consumed[0];
+    let created = &created[0];
+    if !metadata_can_verify_create_output_fields(created, type_layouts, availability)
+        || !metadata_can_verify_output_lock(created, availability)
+    {
+        return None;
+    }
+
+    let aliases = metadata_field_aliases(body);
+    let const_vars = metadata_const_vars(body);
+    let u64_sources = metadata_u64_sources(body);
+    let derived_alias_sources = metadata_derived_alias_sources(body, &aliases, &u64_sources);
+    let guarded_aliases = metadata_asserted_guarded_aliases(body, &aliases, &u64_sources, &derived_alias_sources);
+    let mut classification = ResourceTransitionFieldClassification::default();
+
+    for (field, operand) in &created.fields {
+        if resource_transition_operand_is_preserved(operand, field, consumed, &aliases) {
+            classification.preserved.push(field.clone());
+            continue;
+        }
+        if resource_transition_operand_is_allowed_fresh(operand, &const_vars) {
+            classification.allowed_fresh.push(field.clone());
+            continue;
+        }
+        if resource_transition_operand_is_guarded(operand, &aliases, &guarded_aliases, &u64_sources, &derived_alias_sources) {
+            classification.guarded.push(field.clone());
+            continue;
+        }
+        classification.unchecked.push(field.clone());
+    }
+
+    Some(classification)
+}
+
+fn resource_transition_operand_is_preserved(
+    operand: &ir::IrOperand,
+    field: &str,
+    consumed: &ir::IrVar,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+) -> bool {
+    let ir::IrOperand::Var(var) = operand else {
+        return false;
+    };
+    aliases.get(&var.id).is_some_and(|alias| alias.root_id == consumed.id && alias.field == field)
+}
+
+fn resource_transition_operand_is_allowed_fresh(operand: &ir::IrOperand, const_vars: &BTreeSet<usize>) -> bool {
+    match operand {
+        ir::IrOperand::Const(_) => true,
+        ir::IrOperand::Var(var) => const_vars.contains(&var.id),
+    }
+}
+
+fn resource_transition_operand_is_guarded(
+    operand: &ir::IrOperand,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    guarded_aliases: &BTreeSet<(usize, String)>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+) -> bool {
+    let mut operand_aliases = BTreeSet::new();
+    metadata_collect_alias_keys_from_operand(operand, aliases, u64_sources, derived_alias_sources, &mut operand_aliases);
+    !operand_aliases.is_empty() && operand_aliases.iter().all(|alias| guarded_aliases.contains(alias))
 }
 
 fn resource_conservation_amount_merge_is_checked(
@@ -7186,6 +7731,164 @@ fn metadata_asserted_field_equalities(
     asserted
 }
 
+fn metadata_asserted_guarded_aliases(
+    body: &ir::IrBody,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+) -> BTreeSet<(usize, String)> {
+    let mut guarded_by_var: HashMap<usize, BTreeSet<(usize, String)>> = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            if let ir::IrInstruction::Binary { dest, op, left, right } = instruction {
+                if !matches!(
+                    op,
+                    ast::BinaryOp::Eq
+                        | ast::BinaryOp::Ne
+                        | ast::BinaryOp::Lt
+                        | ast::BinaryOp::Le
+                        | ast::BinaryOp::Gt
+                        | ast::BinaryOp::Ge
+                ) {
+                    continue;
+                }
+                let mut left_aliases = BTreeSet::new();
+                let mut right_aliases = BTreeSet::new();
+                metadata_collect_alias_keys_from_operand(left, aliases, u64_sources, derived_alias_sources, &mut left_aliases);
+                metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, &mut right_aliases);
+                if left_aliases.is_empty() && right_aliases.is_empty() {
+                    continue;
+                }
+                if left_aliases == right_aliases {
+                    continue;
+                }
+                let mut expression_aliases = left_aliases;
+                expression_aliases.extend(right_aliases);
+                guarded_by_var.insert(dest.id, expression_aliases);
+            }
+        }
+    }
+
+    let mut asserted = BTreeSet::new();
+    for block in &body.blocks {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            continue;
+        };
+        if !block_returns_error(body, *else_block) {
+            continue;
+        }
+        if let Some(alias) = aliases.get(&cond.id) {
+            asserted.insert((alias.root_id, alias.field.clone()));
+        }
+        if let Some(guarded) = guarded_by_var.get(&cond.id) {
+            asserted.extend(guarded.iter().cloned());
+        }
+    }
+    asserted
+}
+
+fn metadata_const_vars(body: &ir::IrBody) -> BTreeSet<usize> {
+    let mut const_vars = BTreeSet::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::LoadConst { dest, value } if !matches!(value, ir::IrConst::Poisoned) => {
+                    const_vars.insert(dest.id);
+                }
+                ir::IrInstruction::Move { dest, src } | ir::IrInstruction::Cast { dest, src } => match src {
+                    ir::IrOperand::Const(value) if !matches!(value, ir::IrConst::Poisoned) => {
+                        const_vars.insert(dest.id);
+                    }
+                    ir::IrOperand::Var(src) if const_vars.contains(&src.id) => {
+                        const_vars.insert(dest.id);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+    const_vars
+}
+
+fn metadata_derived_alias_sources(
+    body: &ir::IrBody,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+) -> HashMap<usize, BTreeSet<(usize, String)>> {
+    let mut derived = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::Move { dest, src } | ir::IrInstruction::Cast { dest, src } => {
+                    let mut sources = BTreeSet::new();
+                    metadata_collect_alias_keys_from_operand(src, aliases, u64_sources, &derived, &mut sources);
+                    if !sources.is_empty() {
+                        derived.insert(dest.id, sources);
+                    }
+                }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b") =>
+                {
+                    let mut sources = BTreeSet::new();
+                    for arg in args {
+                        metadata_collect_alias_keys_from_operand(arg, aliases, u64_sources, &derived, &mut sources);
+                    }
+                    if !sources.is_empty() {
+                        derived.insert(dest.id, sources);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    derived
+}
+
+fn metadata_collect_alias_keys_from_operand(
+    operand: &ir::IrOperand,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+    output: &mut BTreeSet<(usize, String)>,
+) {
+    let ir::IrOperand::Var(var) = operand else {
+        return;
+    };
+    if let Some(alias) = aliases.get(&var.id) {
+        output.insert((alias.root_id, alias.field.clone()));
+    }
+    if let Some(source) = u64_sources.get(&var.id) {
+        metadata_collect_alias_keys_from_u64_source(source, aliases, u64_sources, derived_alias_sources, output);
+    }
+    if let Some(sources) = derived_alias_sources.get(&var.id) {
+        output.extend(sources.iter().cloned());
+    }
+}
+
+fn metadata_collect_alias_keys_from_u64_source(
+    source: &MetadataU64Source,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+    output: &mut BTreeSet<(usize, String)>,
+) {
+    match source {
+        MetadataU64Source::Field(alias) => {
+            output.insert((alias.root_id, alias.field.clone()));
+        }
+        MetadataU64Source::Const => {}
+        MetadataU64Source::Add(left, right) => {
+            metadata_collect_alias_keys_from_u64_source(left, aliases, u64_sources, derived_alias_sources, output);
+            metadata_collect_alias_keys_from_u64_source(right, aliases, u64_sources, derived_alias_sources, output);
+        }
+        MetadataU64Source::Sub(left, right) => {
+            metadata_collect_alias_keys_from_u64_source(left, aliases, u64_sources, derived_alias_sources, output);
+            metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, output);
+        }
+    }
+}
+
 fn canonical_metadata_field_equality(
     left_root: usize,
     left_field: &str,
@@ -7264,6 +7967,7 @@ fn metadata_u64_sources(body: &ir::IrBody) -> HashMap<usize, MetadataU64Source> 
 fn metadata_u64_source_for_operand(operand: &ir::IrOperand, sources: &HashMap<usize, MetadataU64Source>) -> Option<MetadataU64Source> {
     match operand {
         ir::IrOperand::Var(var) => sources.get(&var.id).cloned(),
+        ir::IrOperand::Const(ir::IrConst::U64(_)) => Some(MetadataU64Source::Const),
         ir::IrOperand::Const(_) => None,
     }
 }
@@ -7275,6 +7979,7 @@ fn metadata_u64_source_collect_field_roots(source: &MetadataU64Source, field: &s
             true
         }
         MetadataU64Source::Field(_) => false,
+        MetadataU64Source::Const => false,
         MetadataU64Source::Add(left, right) => {
             metadata_u64_source_collect_field_roots(left, field, roots) && metadata_u64_source_collect_field_roots(right, field, roots)
         }
@@ -7293,7 +7998,7 @@ fn metadata_u64_source_collect_amount_split_subtrahends(
             subtrahends.push(right.clone());
             Some(subtrahends)
         }
-        MetadataU64Source::Field(_) | MetadataU64Source::Add(_, _) => None,
+        MetadataU64Source::Field(_) | MetadataU64Source::Const | MetadataU64Source::Add(_, _) => None,
     }
 }
 
@@ -7320,15 +8025,19 @@ fn transaction_runtime_input_requirements_from_obligations(
 ) -> Vec<TransactionRuntimeInputRequirementMetadata> {
     let mut requirements = Vec::new();
     for obligation in obligations {
-        if obligation.category == "spawn-target" && obligation.status == "runtime-required" {
+        if obligation.category == "spawn-target" && matches!(obligation.status.as_str(), "runtime-required" | "builder-required") {
+            let binding = spawn_target_tag_from_feature(&obligation.feature)
+                .map(|tag| format!("spawn-target-tag:0x{tag:016x}"))
+                .unwrap_or_else(|| "spawn-target".to_string());
             requirements.push(transaction_runtime_input_requirement(
                 obligation,
                 "spawn-target-cell-dep",
-                "runtime-required",
-                Some("spawn target script reference must be supplied by the transaction builder as a resolvable CellDep or DepGroup entry"),
-                Some("spawn-target-cell-dep-gap"),
+                obligation.status.as_str(),
+                (obligation.status == "runtime-required")
+                    .then_some("spawn target script reference must be supplied by the transaction builder as a resolvable CellDep or DepGroup entry"),
+                (obligation.status == "runtime-required").then_some("spawn-target-cell-dep-gap"),
                 "CellDep",
-                "spawn-target",
+                &binding,
                 Some("script"),
                 "ckb-spawn-cell-dep-script-reference",
                 None,
@@ -10897,6 +11606,13 @@ fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                     }
                 }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b")
+                        && dest.ty == ir::IrType::Hash
+                        && args.first().is_some_and(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32)) =>
+                {
+                    availability.fixed_value_vars.insert(dest.id);
+                }
                 ir::IrInstruction::Create { dest, .. }
                 | ir::IrInstruction::CreateUnique { dest, .. }
                 | ir::IrInstruction::ReplaceUnique { dest, .. } => {
@@ -12183,7 +12899,17 @@ fn body_ckb_runtime_accesses(
                     binding: "ckb::input_since".to_string(),
                 });
             }
-            if let ir::IrInstruction::Call { func, .. } = instruction {
+            if let ir::IrInstruction::Call { func, args, .. } = instruction {
+                if func == "__ckb_spawn" {
+                    accesses.push(CkbRuntimeAccessMetadata {
+                        operation: "spawn".to_string(),
+                        syscall: "SPAWN".to_string(),
+                        source: "CellDep".to_string(),
+                        index: 0,
+                        binding: ckb_spawn_target_binding(args),
+                    });
+                    continue;
+                }
                 if let Some((operation, syscall, source, binding)) = ckb_v014_runtime_access(func) {
                     accesses.push(CkbRuntimeAccessMetadata {
                         operation: operation.to_string(),
@@ -12322,6 +13048,13 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
         "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
         _ => None,
+    }
+}
+
+fn ckb_spawn_target_binding(args: &[ir::IrOperand]) -> String {
+    match args.first() {
+        Some(ir::IrOperand::Const(ir::IrConst::U64(tag))) => format!("spawn-target-tag:0x{tag:016x}"),
+        _ => "spawn-target:dynamic".to_string(),
     }
 }
 
@@ -16178,6 +16911,139 @@ where
     return out
 "#;
 
+    const CONSUME_CREATE_GUARDED_TRANSITION_CONSERVATION_PROGRAM: &str = r#"
+module test
+
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
+    owner: Hash,
+    status: u64,
+    nonce: u64,
+    expires_at: u64,
+    version: u64,
+}
+
+struct TransitionIntent {
+    status: u64,
+    nonce: u64,
+    expires_at: u64,
+}
+
+action advance(ticket: Ticket, intent: TransitionIntent) -> Ticket
+where
+    let expected_nonce = ticket.nonce + 1
+    require intent.status > 0
+    require intent.nonce == expected_nonce
+    require intent.expires_at > 0
+    let owner = ticket.owner
+    let status = intent.status
+    let nonce = intent.nonce
+    let expires_at = intent.expires_at
+    consume ticket
+    let out = create Ticket {
+        owner: owner,
+        status: status,
+        nonce: nonce,
+        expires_at: expires_at,
+        version: 1
+    }
+    return out
+"#;
+
+    const CONSUME_CREATE_UNCHECKED_TRANSITION_CONSERVATION_PROGRAM: &str = r#"
+module test
+
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
+    owner: Hash,
+    status: u64,
+    nonce: u64,
+    expires_at: u64,
+    version: u64,
+}
+
+struct TransitionIntent {
+    status: u64,
+    nonce: u64,
+    expires_at: u64,
+}
+
+action advance(ticket: Ticket, intent: TransitionIntent) -> Ticket
+where
+    let expected_nonce = ticket.nonce + 1
+    require intent.status == intent.status
+    require intent.nonce == expected_nonce
+    require intent.expires_at > 0
+    let owner = ticket.owner
+    let status = intent.status
+    let nonce = intent.nonce
+    let expires_at = intent.expires_at
+    consume ticket
+    let out = create Ticket {
+        owner: owner,
+        status: status,
+        nonce: nonce,
+        expires_at: expires_at,
+        version: 1
+    }
+    return out
+"#;
+
+    const CONSUME_CREATE_HASH_COMMITMENT_TRANSITION_CONSERVATION_PROGRAM: &str = r#"
+module test
+
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
+    owner: Hash,
+    state_hash: Hash,
+    nonce: u64,
+}
+
+struct TransitionIntent {
+    new_state_hash: Hash,
+    nonce: u64,
+}
+
+action advance(ticket: Ticket, intent: TransitionIntent, state_hash_commitment: Hash) -> Ticket
+where
+    let expected_nonce = ticket.nonce + 1
+    let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)
+    require actual_state_hash_commitment == state_hash_commitment
+    require intent.nonce == expected_nonce
+    let owner = ticket.owner
+    let state_hash = intent.new_state_hash
+    let nonce = intent.nonce
+    consume ticket
+    let out = create Ticket {
+        owner: owner,
+        state_hash: state_hash,
+        nonce: nonce
+    }
+    return out
+"#;
+
+    const GUARDED_EQUALITY_PROOFPLAN_PROGRAM: &str = r#"
+module test
+
+struct ReceiptIntent {
+    receipt_hash: Hash,
+    nonce: u64,
+}
+
+action verify(intent: ReceiptIntent, receipt_hash: Hash, old_nonce: u64) -> u64
+where
+    let expected_nonce = old_nonce + 1
+    require receipt_hash == intent.receipt_hash
+    require intent.nonce == expected_nonce
+    return intent.nonce
+"#;
+
+    const TRIVIAL_SELF_EQUALITY_GUARD_PROGRAM: &str = r#"
+module test
+
+action verify(receipt_hash: Hash) -> u64
+where
+    require receipt_hash == receipt_hash
+    return 0
+"#;
+
     const DUPLICATE_READ_REF_PROGRAM: &str = r#"
 module test
 
@@ -19032,6 +19898,224 @@ where
             "checked direct conservation should expose a checked transaction input component: {:?}",
             action.transaction_runtime_input_requirements
         );
+    }
+
+    #[test]
+    fn compile_classifies_protocol_agnostic_guarded_transition_as_checked_runtime() {
+        let result = compile(CONSUME_CREATE_GUARDED_TRANSITION_CONSERVATION_PROGRAM, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "advance").expect("advance metadata");
+        let obligation = action
+            .verifier_obligations
+            .iter()
+            .find(|obligation| obligation.category == "transaction-invariant" && obligation.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation obligation");
+
+        assert_eq!(obligation.status, "checked-runtime", "guarded transition should be checked: {:?}", obligation);
+        assert!(
+            obligation.detail.contains("guarded resource transition")
+                && obligation.detail.contains("preserved fields: owner")
+                && obligation.detail.contains("guarded fields: status, nonce, expires_at")
+                && obligation.detail.contains("allowed fresh fields: version"),
+            "guarded transition detail should classify every output field: {}",
+            obligation.detail
+        );
+        assert!(
+            !obligation.detail.contains("NovaSeal"),
+            "guarded transition recogniser must remain protocol-agnostic: {}",
+            obligation.detail
+        );
+        assert!(
+            action.transaction_runtime_input_requirements.iter().any(|requirement| {
+                requirement.feature == "resource-conservation:Ticket"
+                    && requirement.component == "resource-conservation-proof"
+                    && requirement.status == "checked-runtime"
+                    && requirement.blocker_class.is_none()
+            }),
+            "checked guarded transition should expose a checked transaction input component: {:?}",
+            action.transaction_runtime_input_requirements
+        );
+        let plan = action
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation proof plan");
+        for expected in [
+            "resource-field:owner=preserved",
+            "resource-field:status=guarded",
+            "resource-field:nonce=guarded",
+            "resource-field:expires_at=guarded",
+            "resource-field:version=allowed-fresh",
+        ] {
+            assert!(
+                plan.input_output_relation_checks.iter().any(|check| check == expected),
+                "missing generated field classification {expected}: {:?}",
+                plan.input_output_relation_checks
+            );
+        }
+    }
+
+    #[test]
+    fn compile_classifies_hash_committed_output_field_as_guarded() {
+        let result = compile(CONSUME_CREATE_HASH_COMMITMENT_TRANSITION_CONSERVATION_PROGRAM, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "advance").expect("advance metadata");
+        let obligation = action
+            .verifier_obligations
+            .iter()
+            .find(|obligation| obligation.category == "transaction-invariant" && obligation.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation obligation");
+
+        assert_eq!(obligation.status, "checked-runtime", "hash-committed field should close the guarded transition: {:?}", obligation);
+        assert!(
+            obligation.detail.contains("preserved fields: owner")
+                && obligation.detail.contains("guarded fields: state_hash, nonce")
+                && obligation.detail.contains("unchecked fields: -"),
+            "hash-committed transition detail should classify the output field as guarded: {}",
+            obligation.detail
+        );
+        let plan = action
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation proof plan");
+        for expected in ["resource-field:owner=preserved", "resource-field:state_hash=guarded", "resource-field:nonce=guarded"] {
+            assert!(
+                plan.input_output_relation_checks.iter().any(|check| check == expected),
+                "missing generated field classification {expected}: {:?}",
+                plan.input_output_relation_checks
+            );
+        }
+    }
+
+    #[test]
+    fn compile_lowers_ckb_hash_commitment_comparison_without_fixed_byte_fail_closed() {
+        let result = compile(
+            CONSUME_CREATE_HASH_COMMITMENT_TRANSITION_CONSERVATION_PROGRAM,
+            CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "advance").expect("advance metadata");
+
+        assert!(asm.contains("call __ckb_hash_blake2b"), "hash commitment call was not lowered:\n{}", asm);
+        assert!(
+            asm.contains("# cellscript abi: fixed-byte Eq comparison size=32"),
+            "hash commitment comparison should use the verifier fixed-byte path:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("fixed-byte operand sources are not available"),
+            "hash commitment comparison should not hit the fixed-byte fail-closed path:\n{}",
+            asm
+        );
+        assert!(
+            !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
+            "metadata should classify hash helper output as fixed-byte verifier material: {:?}",
+            action.fail_closed_runtime_features
+        );
+    }
+
+    #[test]
+    fn compile_emits_protocol_agnostic_guard_equality_proofplan_records() {
+        let result = compile(GUARDED_EQUALITY_PROOFPLAN_PROGRAM, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify").expect("verify metadata");
+        for (feature_fragment, relation_check) in [
+            ("guard-equality:intent.receipt_hash==receipt_hash", "guard-equality:intent.receipt_hash==receipt_hash"),
+            ("guard-equality:intent.nonce==old_nonce+1", "guard-equality:intent.nonce==old_nonce+1"),
+        ] {
+            let obligation = action
+                .verifier_obligations
+                .iter()
+                .find(|obligation| {
+                    obligation.category == "transaction-invariant"
+                        && obligation.feature == feature_fragment
+                        && obligation.status == "checked-runtime"
+                })
+                .unwrap_or_else(|| {
+                    panic!("missing checked guard equality obligation {feature_fragment}: {:?}", action.verifier_obligations)
+                });
+            assert!(
+                obligation.detail.contains(relation_check) && obligation.detail.contains("=checked-runtime"),
+                "guard equality detail should name the exact checked relation: {}",
+                obligation.detail
+            );
+            let plan = action
+                .proof_plan
+                .iter()
+                .find(|plan| plan.feature == feature_fragment)
+                .unwrap_or_else(|| panic!("missing guard equality proof plan {feature_fragment}: {:?}", action.proof_plan));
+            assert!(plan.on_chain_checked, "guard equality should be on-chain checked: {:?}", plan);
+            assert_eq!(plan.codegen_coverage_status, "covered", "guard equality should expose executable evidence: {:?}", plan);
+            assert!(
+                plan.input_output_relation_checks.iter().any(|check| check == relation_check),
+                "guard equality proof plan should include the named relation check: {:?}",
+                plan.input_output_relation_checks
+            );
+        }
+    }
+
+    #[test]
+    fn compile_ignores_trivial_self_equality_guard_records() {
+        let result = compile(TRIVIAL_SELF_EQUALITY_GUARD_PROGRAM, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify").expect("verify metadata");
+        assert!(
+            !action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("guard-equality:")),
+            "trivial self-equality must not create guard equality evidence: {:?}",
+            action.verifier_obligations
+        );
+    }
+
+    #[test]
+    fn compile_keeps_unchecked_transition_field_runtime_required() {
+        let result = compile(CONSUME_CREATE_UNCHECKED_TRANSITION_CONSERVATION_PROGRAM, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "advance").expect("advance metadata");
+        let obligation = action
+            .verifier_obligations
+            .iter()
+            .find(|obligation| obligation.category == "transaction-invariant" && obligation.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation obligation");
+
+        assert_eq!(
+            obligation.status, "runtime-required",
+            "unchecked transition and trivial self-guards must not be promoted: {:?}",
+            obligation
+        );
+        assert!(
+            obligation.detail.contains("unchecked fields: status")
+                && obligation.detail.contains("preserved fields: owner")
+                && obligation.detail.contains("guarded fields: nonce, expires_at")
+                && obligation.detail.contains("allowed fresh fields: version")
+                && obligation.detail.contains("resource-conservation=runtime-required"),
+            "runtime-required detail should expose the conservative field classification: {}",
+            obligation.detail
+        );
+        assert!(
+            action.transaction_runtime_input_requirements.iter().any(|requirement| {
+                requirement.feature == "resource-conservation:Ticket"
+                    && requirement.component == "resource-conservation-proof"
+                    && requirement.status == "runtime-required"
+                    && requirement.blocker_class.as_deref() == Some("resource-conservation-proof-gap")
+            }),
+            "unchecked transition should keep the strict blocker visible: {:?}",
+            action.transaction_runtime_input_requirements
+        );
+        let plan = action
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature == "resource-conservation:Ticket")
+            .expect("resource-conservation proof plan");
+        for expected in [
+            "resource-field:owner=preserved",
+            "resource-field:status=unchecked",
+            "resource-field:nonce=guarded",
+            "resource-field:expires_at=guarded",
+            "resource-field:version=allowed-fresh",
+        ] {
+            assert!(
+                plan.input_output_relation_checks.iter().any(|check| check == expected),
+                "missing generated field classification {expected}: {:?}",
+                plan.input_output_relation_checks
+            );
+        }
     }
 
     #[test]

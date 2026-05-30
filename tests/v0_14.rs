@@ -21,7 +21,7 @@ struct Proof {
 action delegate_verify(proof: Proof) -> u64
 where
     let pid = spawn("secp256k1_verifier")
-    let status = wait()
+    let status = wait(pid)
     assert_invariant(status == 0, "delegate failed")
     return pid
 
@@ -124,16 +124,16 @@ lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Addres
     assert!(delegate_group.cell_dep_sources.contains(&"CellDep".to_string()));
     assert!(delegate_verify.verifier_obligations.iter().any(|obligation| {
         obligation.category == "spawn-target"
-            && obligation.feature == "spawn-target:CellDep#0"
+            && obligation.feature.starts_with("spawn-target:CellDep#0@0x")
             && obligation.status == "runtime-required"
             && obligation.detail.contains("CellDep or DepGroup")
     }));
     assert!(delegate_verify.transaction_runtime_input_requirements.iter().any(|requirement| {
-        requirement.feature == "spawn-target:CellDep#0"
+        requirement.feature.starts_with("spawn-target:CellDep#0@0x")
             && requirement.component == "spawn-target-cell-dep"
             && requirement.status == "runtime-required"
             && requirement.source == "CellDep"
-            && requirement.binding == "spawn-target"
+            && requirement.binding.starts_with("spawn-target-tag:0x")
             && requirement.field.as_deref() == Some("script")
             && requirement.abi == "ckb-spawn-cell-dep-script-reference"
             && requirement.blocker_class.as_deref() == Some("spawn-target-cell-dep-gap")
@@ -644,6 +644,24 @@ where
     .unwrap_err();
 
     assert!(err.message.contains("spawn target must be a static script reference"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn v0_14_wait_requires_child_pid() {
+    let err = compile(
+        r#"
+module cellscript::wait_pid
+
+action delegate() -> u64
+where
+    let pid = spawn("secp256k1_verifier")
+    return wait()
+"#,
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .unwrap_err();
+
+    assert!(err.message.contains("wait expects 1 argument"), "unexpected error: {}", err.message);
 }
 
 #[test]

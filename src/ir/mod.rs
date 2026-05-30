@@ -4994,7 +4994,7 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
-                "wait" if call.args.is_empty() => {
+                "wait" if call.args.len() == 1 => {
                     self.lower_simple_runtime_call("__ckb_wait", "wait_result", IrType::U64, &call.args, current, blocks, vars)
                 }
                 "process_id" if call.args.is_empty() => {
@@ -8092,7 +8092,7 @@ pub(crate) fn type_hash_for_name(name: &str) -> [u8; 32] {
     crate::ckb_blake2b256(name.as_bytes())
 }
 
-fn stable_u64_tag(value: &str) -> u64 {
+pub(crate) fn stable_u64_tag(value: &str) -> u64 {
     value.bytes().fold(0xcbf2_9ce4_8422_2325u64, |acc, byte| acc.wrapping_mul(0x100_0000_01b3).wrapping_add(byte as u64))
 }
 

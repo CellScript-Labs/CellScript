@@ -204,10 +204,10 @@
       "return_regs": ["a0"],
       "arg_regs": ["a0"],
       "clobbers": ["a0", "a1"],
-      "arg_comment": "wait for bounded verifier child",
+      "arg_comment": "a0 = child pid; a1 = exit-code pointer supplied by wrapper",
       "size_check": "none",
       "fail_behavior": "fail_closed",
-      "detail": "wait for bounded verifier child"
+      "detail": "wait for bounded verifier child pid"
     },
     {
       "dsl_name": "process_id",
@@ -230,10 +230,10 @@
       "number": 2604,
       "kind": "multi_return",
       "raw_status_reg": "a0",
-      "semantic_status_reg": "a1",
+      "semantic_status_reg": "a2",
       "return_regs": ["a0", "a1"],
       "arg_regs": [],
-      "clobbers": ["a0", "a1"],
+      "clobbers": ["a0", "a1", "a2"],
       "arg_comment": "create IPC pipe; returns read fd in a0 and write fd in a1",
       "size_check": "none",
       "fail_behavior": "fail_closed",

@@ -3260,7 +3260,7 @@ lock enough(emergency: protected Emergency, required: witness u8) -> bool {
     }
 
     #[test]
-    fn vm2_syscall_helpers_fail_closed_instead_of_returning_raw_status_values() {
+    fn vm2_syscall_helpers_emit_executable_status_checked_wrappers() {
         let program = r#"
 module codegen::vm2_fd
 
@@ -3278,14 +3278,16 @@ lock always_ok(fd_index: witness u64) -> bool {
                 ..crate::CompileOptions::default()
             },
         )
-        .expect("VM2 helper use should compile to fail-closed runtime helpers");
+        .expect("VM2 helper use should compile to executable status-checked runtime helpers");
         let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
 
         assert!(
             assembly.contains("__ckb_inherited_fd:\n")
                 && assembly.contains("__ckb_close:\n")
-                && assembly.contains("status-checked but not value-typed yet; fail closed"),
-            "VM2 helper wrappers must not be raw ecall; ret value shims:\n{}",
+                && assembly.contains("# cellscript abi: executable CKB VM v2 syscall 2607 (resolve inherited fd)")
+                && assembly.contains("li a7, 2607")
+                && assembly.contains("ecall"),
+            "VM2 helper wrappers should lower to executable VM2 syscall shims:\n{}",
             assembly
         );
         assert!(
@@ -3295,11 +3297,8 @@ lock always_ok(fd_index: witness u64) -> bool {
             assembly
         );
         assert!(
-            !assembly.contains("__ckb_inherited_fd:\n# cellscript abi: CKB VM v2 syscall 2607")
-                || !assembly.contains(
-                    "__ckb_inherited_fd:\n# cellscript abi: CKB VM v2 syscall 2607 (resolve inherited fd)\nli a7, 2607\necall\nret"
-                ),
-            "VM2 inherited_fd must not expose raw ecall result as a DSL value:\n{}",
+            !assembly.contains("withheld raw syscall") && !assembly.contains("status-checked but not value-typed yet; fail closed"),
+            "VM2 helper wrappers should no longer be fail-closed stubs:\n{}",
             assembly
         );
     }

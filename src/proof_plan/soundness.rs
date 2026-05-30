@@ -117,7 +117,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if strict && matches!(plan.status.as_str(), "checked-runtime" | "checked-static" | "ckb-runtime") && !plan.on_chain_checked {
+    if strict && plan.status == "checked-runtime" && !plan.on_chain_checked {
         push_issue(
             issues,
             "error",
@@ -298,4 +298,62 @@ fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &
 #[allow(dead_code)]
 fn _obligation_debug_key(obligation: &VerifierObligationMetadata) -> String {
     obligation_key(&obligation.scope, &obligation.category, &obligation.feature, &obligation.status, &obligation.detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan_with_status(status: &str, on_chain_checked: bool, codegen_coverage_status: &str) -> ProofPlanMetadata {
+        ProofPlanMetadata {
+            name: "fixture".to_string(),
+            origin: "action:fixture".to_string(),
+            category: "fixture".to_string(),
+            feature: "fixture".to_string(),
+            source_span: None,
+            trigger: "explicit_entry".to_string(),
+            scope: "selected_cells".to_string(),
+            reads: Vec::new(),
+            coverage: Vec::new(),
+            input_output_relation_checks: Vec::new(),
+            group_cardinality: "not a script-group cardinality obligation".to_string(),
+            identity_lifecycle_policy: "none".to_string(),
+            preserved_fields: Vec::new(),
+            witness_fields: Vec::new(),
+            lock_args_fields: Vec::new(),
+            on_chain_checked,
+            on_chain_checked_obligations: Vec::new(),
+            executable_evidence: Vec::new(),
+            builder_assumptions: Vec::new(),
+            codegen_coverage_status: codegen_coverage_status.to_string(),
+            status: status.to_string(),
+            detail: "fixture detail".to_string(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn strict_pp0103_only_applies_to_checked_runtime_records() {
+        for status in ["ckb-runtime", "checked-static"] {
+            let plan = plan_with_status(status, false, status);
+            let mut issues = Vec::new();
+
+            check_plan_record(&plan, true, &mut issues);
+
+            assert!(
+                !issues.iter().any(|issue| issue.code == "PP0103"),
+                "{status} must not be treated as an on-chain checked runtime proof: {issues:?}"
+            );
+        }
+
+        let checked_runtime = plan_with_status("checked-runtime", false, "gap:evidence-missing");
+        let mut issues = Vec::new();
+
+        check_plan_record(&checked_runtime, true, &mut issues);
+
+        assert!(
+            issues.iter().any(|issue| issue.code == "PP0103"),
+            "checked-runtime without on_chain_checked must remain a strict soundness error: {issues:?}"
+        );
+    }
 }

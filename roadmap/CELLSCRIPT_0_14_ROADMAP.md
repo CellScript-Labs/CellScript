@@ -149,9 +149,9 @@ where
 action multi_step_verify(data: VerifyData)
 where
     let (read_fd, write_fd) = pipe()
-    spawn("hash_checker", fds: [read_fd])
+    let pid = spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
-    let hash_result = wait()
+    let hash_result = wait(pid)
     assert(hash_result == 0, "hash check failed")
 ```
 

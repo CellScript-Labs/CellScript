@@ -5167,10 +5167,13 @@ impl<'a> TypeChecker<'a> {
                         return Ok(Type::U64);
                     }
                     "wait" | "process_id" | "pipe_read" | "inherited_fd" => {
-                        let expected = if matches!(name.as_str(), "wait" | "process_id") { 0 } else { 1 };
+                        let expected = if name == "process_id" { 0 } else { 1 };
                         self.validate_builtin_arity(name, expected, arg_types, call.span)?;
                         if expected == 1 && arg_types[0] != Type::U64 {
-                            return Err(CompileError::new(format!("{} expects a u64 file descriptor or index", name), call.span));
+                            return Err(CompileError::new(
+                                format!("{} expects a u64 pid, file descriptor, or index", name),
+                                call.span,
+                            ));
                         }
                         return Ok(Type::U64);
                     }

@@ -131,6 +131,7 @@ const ARG_A0_A1_A2_A3_A4: &[&str] = &["a0", "a1", "a2", "a3", "a4"];
 const ARG_A0_A1_A2_A3_A4_A5: &[&str] = &["a0", "a1", "a2", "a3", "a4", "a5"];
 const CLOBBER_A0: &[&str] = &["a0"];
 const CLOBBER_A0_A1: &[&str] = &["a0", "a1"];
+const CLOBBER_A0_A1_A2: &[&str] = &["a0", "a1", "a2"];
 
 pub(crate) fn stdlib_syscall_specs(_target_profile: TargetProfile) -> Vec<SyscallSpec> {
     vec![
@@ -314,10 +315,10 @@ pub(crate) fn vm2_helper_specs() -> &'static [SyscallSpec] {
             return_regs: VM2_RETURN_A0,
             arg_regs: ARG_A0,
             clobbers: CLOBBER_A0_A1,
-            arg_comment: "wait for bounded verifier child",
+            arg_comment: "a0 = child pid; a1 = exit-code pointer supplied by wrapper",
             size_check: SyscallSizeCheck::None,
             fail_behavior: SyscallFailBehavior::FailClosed,
-            detail: "wait for bounded verifier child",
+            detail: "wait for bounded verifier child pid",
         },
         SyscallSpec {
             dsl_name: "process_id",
@@ -340,10 +341,10 @@ pub(crate) fn vm2_helper_specs() -> &'static [SyscallSpec] {
             number: CKB_VM2_PIPE_SYSCALL_NUMBER,
             kind: SyscallKind::MultiReturn,
             raw_status_reg: "a0",
-            semantic_status_reg: "a1",
+            semantic_status_reg: "a2",
             return_regs: VM2_RETURN_A0_A1,
             arg_regs: ARG_NONE,
-            clobbers: CLOBBER_A0_A1,
+            clobbers: CLOBBER_A0_A1_A2,
             arg_comment: "create IPC pipe; returns read fd in a0 and write fd in a1",
             size_check: SyscallSizeCheck::None,
             fail_behavior: SyscallFailBehavior::FailClosed,

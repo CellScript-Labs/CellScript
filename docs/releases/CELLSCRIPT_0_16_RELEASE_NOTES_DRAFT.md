@@ -85,6 +85,10 @@ validation, not full CKB transaction semantic verification. Non-structural
 assumption evidence must bind to the assumption id, kind, origin, feature, and
 ProofPlan status and include a non-empty evidence payload, but CKB dry-run
 remains the production acceptance layer.
+For manifest-bound spawn targets, `validate-tx` now also checks the actual
+`cell_deps[index]` object against the declared CellDep identity and requires
+matching spawn-target evidence; an empty dep object plus a self-asserted payload
+is rejected.
 
 ### Transaction Validation
 

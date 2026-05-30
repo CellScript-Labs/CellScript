@@ -24,6 +24,19 @@ pub struct BuilderAssumptionMetadata {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedCellDepBinding {
+    dep_source: String,
+    index: usize,
+    name: Option<String>,
+    dep_type: Option<String>,
+    tx_hash: Option<String>,
+    out_index: Option<u32>,
+    hash_type: Option<String>,
+    data_hash: Option<String>,
+    type_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TxValidationReport {
     pub status: String,
@@ -118,15 +131,18 @@ pub fn builder_assumptions_from_metadata(metadata: &CompileMetadata) -> Vec<Buil
         push_assumption(&mut assumptions, &mut seen, &synthetic, "capacity_policy", detail.to_string());
     }
 
+    enrich_manifest_bound_spawn_target_assumptions(&mut assumptions, metadata);
+
     assumptions
 }
 
 pub fn validate_transaction_against_metadata(metadata: &CompileMetadata, tx: &Value) -> TxValidationReport {
-    let assumptions = if metadata.runtime.builder_assumptions.is_empty() {
+    let mut assumptions = if metadata.runtime.builder_assumptions.is_empty() {
         builder_assumptions_from_metadata(metadata)
     } else {
         metadata.runtime.builder_assumptions.clone()
     };
+    enrich_manifest_bound_spawn_target_assumptions(&mut assumptions, metadata);
     validate_transaction_against_assumptions(&assumptions, tx)
 }
 
@@ -146,8 +162,20 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
         if !assumption.required_outputs.is_empty() && output_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no outputs required by this assumption");
         }
-        if !assumption.required_cell_deps.is_empty() && cell_dep_count == 0 {
-            push_violation(&mut violations, assumption, "transaction has no cell_deps required by this assumption");
+        if !assumption.required_cell_deps.is_empty() {
+            if let Some(expected) = expected_spawn_cell_dep_binding(assumption) {
+                if cell_dep_count <= expected.index {
+                    push_violation(
+                        &mut violations,
+                        assumption,
+                        &format!("transaction is missing required {} for this spawn target", expected.dep_source),
+                    );
+                } else {
+                    validate_spawn_target_cell_dep_in_tx(tx, assumption, &expected, &mut violations);
+                }
+            } else if cell_dep_count == 0 {
+                push_violation(&mut violations, assumption, "transaction has no cell_deps required by this assumption");
+            }
         }
         if !assumption.required_witness_fields.is_empty() && witness_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no witnesses required by this assumption");
@@ -222,6 +250,8 @@ fn classify_plan_assumption(plan: &ProofPlanMetadata, assumption: &str) -> &'sta
     let text = format!("{} {} {}", plan.feature, plan.detail, assumption).to_ascii_lowercase();
     if text.contains("lock transaction scan") || text.contains("only protects the lock group") {
         "lock_group_transaction_scope"
+    } else if plan.category == "spawn-target" || plan.feature.starts_with("spawn-target:") || text.contains("spawn target") {
+        "spawn_target_cell_dep_binding"
     } else if text.contains("runtime-required") {
         "runtime_required_proof_plan"
     } else if text.contains("metadata-only") {
@@ -245,8 +275,94 @@ fn required_reads(plan: &ProofPlanMetadata, reads: &[&str]) -> Vec<String> {
     reads.iter().filter(|read| plan.reads.iter().any(|actual| actual == **read)).map(|read| format!("{}:*", read)).collect()
 }
 
+fn enrich_manifest_bound_spawn_target_assumptions(assumptions: &mut [BuilderAssumptionMetadata], metadata: &CompileMetadata) {
+    let Some(ckb) = metadata.constraints.ckb.as_ref() else {
+        return;
+    };
+    let spawn_references = ckb
+        .script_references
+        .iter()
+        .filter(|reference| {
+            reference.purpose == "spawn-target"
+                && reference.status == "builder-required-manifest-bound-cell-dep"
+                && reference.dep_source.starts_with("CellDep#")
+        })
+        .collect::<Vec<_>>();
+    if spawn_references.is_empty() {
+        return;
+    }
+
+    for assumption in assumptions.iter_mut().filter(|assumption| assumption.kind == "spawn_target_cell_dep_binding") {
+        let reference = spawn_references
+            .iter()
+            .find(|reference| assumption.detail.contains(&format!("'{}'", reference.name)))
+            .copied()
+            .or_else(|| (spawn_references.len() == 1).then_some(spawn_references[0]));
+        let Some(reference) = reference else {
+            continue;
+        };
+        let Some(index) = parse_cell_dep_source_index(&reference.dep_source) else {
+            continue;
+        };
+        let dep = ckb.dep_group_manifest.declared_cell_deps.get(index);
+        let dep_type = dep.map(|dep| dep.dep_type.as_str()).unwrap_or("code");
+        let mut required = format!("{}:name={}:dep_type={}", reference.dep_source, reference.name, dep_type);
+        if let Some(tx_hash) = dep.and_then(|dep| dep.tx_hash.as_deref()) {
+            required.push_str(&format!(":tx_hash={tx_hash}"));
+        }
+        if let Some(out_index) = dep.and_then(|dep| dep.index) {
+            required.push_str(&format!(":out_index={out_index}"));
+        }
+        if let Some(hash_type) = dep.and_then(|dep| dep.hash_type.as_deref()) {
+            required.push_str(&format!(":hash_type={hash_type}"));
+        }
+        if let Some(data_hash) = dep.and_then(|dep| dep.data_hash.as_deref()) {
+            required.push_str(&format!(":data_hash={data_hash}"));
+        }
+        if let Some(type_id) = dep.and_then(|dep| dep.type_id.as_deref()) {
+            required.push_str(&format!(":type_id={type_id}"));
+        }
+        assumption.required_cell_deps = vec![required];
+        if !assumption.detail.contains("builder_assumption_evidence must identify") {
+            assumption.detail.push_str(&format!(
+                "; builder_assumption_evidence must identify {} name={} dep_type={}",
+                reference.dep_source, reference.name, dep_type
+            ));
+        }
+    }
+}
+
+fn parse_cell_dep_source_index(dep_source: &str) -> Option<usize> {
+    dep_source.strip_prefix("CellDep#")?.parse().ok()
+}
+
 fn json_array_len(tx: &Value, key: &str) -> usize {
     tx.get(key).and_then(Value::as_array).map_or(0, Vec::len)
+}
+
+fn validate_spawn_target_cell_dep_in_tx(
+    tx: &Value,
+    assumption: &BuilderAssumptionMetadata,
+    expected: &ExpectedCellDepBinding,
+    violations: &mut Vec<TxValidationViolation>,
+) {
+    let Some(cell_dep) = tx.get("cell_deps").and_then(Value::as_array).and_then(|cell_deps| cell_deps.get(expected.index)) else {
+        return;
+    };
+    let Some(object) = cell_dep.as_object() else {
+        push_violation(
+            violations,
+            assumption,
+            &format!("transaction {} must be an object carrying the manifest-bound spawn target identity", expected.dep_source),
+        );
+        return;
+    };
+
+    let mut mismatches = Vec::new();
+    validate_cell_dep_identity_fields(object, expected, "transaction cell_dep", false, &mut mismatches);
+    if !mismatches.is_empty() {
+        push_violation(violations, assumption, &mismatches.join("; "));
+    }
 }
 
 fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
@@ -331,11 +447,14 @@ fn validate_evidence_object(
             .push(format!("proof_plan_status must be '{}' for assumption {}", assumption.proof_plan_status, assumption.assumption_id));
     }
 
-    let has_payload = object.get("evidence").is_some_and(non_empty_evidence_payload)
-        || object.get("payload").is_some_and(non_empty_evidence_payload);
+    let payload = object.get("evidence").or_else(|| object.get("payload"));
+    let has_payload = payload.is_some_and(non_empty_evidence_payload);
     if !has_payload {
         mismatches
             .push(format!("builder_assumption_evidence for {} must include non-empty evidence or payload", assumption.assumption_id));
+    }
+    if let Some(payload) = payload {
+        validate_spawn_target_evidence_payload(payload, assumption, &mut mismatches);
     }
 
     if mismatches.is_empty() {
@@ -362,6 +481,148 @@ fn non_empty_evidence_payload(value: &Value) -> bool {
     }
 }
 
+fn validate_spawn_target_evidence_payload(payload: &Value, assumption: &BuilderAssumptionMetadata, mismatches: &mut Vec<String>) {
+    let Some(expected) = expected_spawn_cell_dep_binding(assumption) else {
+        return;
+    };
+    let Some(object) = spawn_target_payload_object(payload) else {
+        mismatches.push("spawn_target_cell_dep_binding evidence must be an object identifying the required CellDep".to_string());
+        return;
+    };
+
+    validate_cell_dep_identity_fields(object, &expected, "spawn_target_cell_dep_binding evidence", true, mismatches);
+}
+
+fn spawn_target_payload_object(payload: &Value) -> Option<&serde_json::Map<String, Value>> {
+    let object = payload.as_object()?;
+    object.get("cell_dep").and_then(Value::as_object).or(Some(object))
+}
+
+fn evidence_dep_source_matches(object: &serde_json::Map<String, Value>, dep_source: &str, index: usize) -> bool {
+    let mut saw_locator = false;
+    let mut matches = true;
+    if let Some(actual) = object.get("dep_source").and_then(Value::as_str) {
+        saw_locator = true;
+        matches &= actual == dep_source;
+    }
+    match object.get("cell_dep_index") {
+        Some(Value::Number(number)) => {
+            saw_locator = true;
+            matches &= number.as_u64() == Some(index as u64);
+        }
+        Some(Value::String(text)) => {
+            saw_locator = true;
+            matches &= text.parse::<usize>().ok() == Some(index);
+        }
+        _ => {}
+    }
+    saw_locator && matches
+}
+
+fn first_string_field<'a>(object: &'a serde_json::Map<String, Value>, fields: &[&str]) -> Option<&'a str> {
+    fields.iter().find_map(|field| object.get(*field).and_then(Value::as_str))
+}
+
+fn first_u64_field(object: &serde_json::Map<String, Value>, fields: &[&str]) -> Option<u64> {
+    fields.iter().find_map(|field| match object.get(*field) {
+        Some(Value::Number(number)) => number.as_u64(),
+        Some(Value::String(text)) => text.parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+fn validate_cell_dep_identity_fields(
+    object: &serde_json::Map<String, Value>,
+    expected: &ExpectedCellDepBinding,
+    context: &str,
+    require_dep_source: bool,
+    mismatches: &mut Vec<String>,
+) {
+    if require_dep_source && !evidence_dep_source_matches(object, &expected.dep_source, expected.index) {
+        mismatches.push(format!("{context} must identify {} with cell_dep_index {}", expected.dep_source, expected.index));
+    }
+    if let Some(name) = expected.name.as_deref() {
+        match first_string_field(object, &["cell_dep_name", "name"]) {
+            Some(actual) if actual == name => {}
+            _ => mismatches.push(format!("{context} cell_dep_name must be '{name}'")),
+        }
+    }
+    if let Some(dep_type) = expected.dep_type.as_deref() {
+        match object.get("dep_type").and_then(Value::as_str) {
+            Some(actual) if actual == dep_type => {}
+            _ => mismatches.push(format!("{context} dep_type must be '{dep_type}'")),
+        }
+    }
+    if let Some(tx_hash) = expected.tx_hash.as_deref() {
+        match object.get("tx_hash").and_then(Value::as_str) {
+            Some(actual) if actual == tx_hash => {}
+            _ => mismatches.push(format!("{context} tx_hash must be '{tx_hash}'")),
+        }
+    }
+    if let Some(out_index) = expected.out_index {
+        match first_u64_field(object, &["out_index", "out_point_index", "index"]) {
+            Some(actual) if actual == u64::from(out_index) => {}
+            _ => mismatches.push(format!("{context} out_index must be '{out_index}'")),
+        }
+    }
+    if let Some(hash_type) = expected.hash_type.as_deref() {
+        match object.get("hash_type").and_then(Value::as_str) {
+            Some(actual) if actual == hash_type => {}
+            _ => mismatches.push(format!("{context} hash_type must be '{hash_type}'")),
+        }
+    }
+    if let Some(data_hash) = expected.data_hash.as_deref() {
+        match object.get("data_hash").and_then(Value::as_str) {
+            Some(actual) if actual == data_hash => {}
+            _ => mismatches.push(format!("{context} data_hash must be '{data_hash}'")),
+        }
+    }
+    if let Some(type_id) = expected.type_id.as_deref() {
+        match object.get("type_id").and_then(Value::as_str) {
+            Some(actual) if actual == type_id => {}
+            _ => mismatches.push(format!("{context} type_id must be '{type_id}'")),
+        }
+    }
+}
+
+fn expected_spawn_cell_dep_binding(assumption: &BuilderAssumptionMetadata) -> Option<ExpectedCellDepBinding> {
+    if assumption.kind != "spawn_target_cell_dep_binding" {
+        return None;
+    }
+    assumption.required_cell_deps.iter().find_map(|required| parse_expected_cell_dep_binding(required))
+}
+
+fn parse_expected_cell_dep_binding(required: &str) -> Option<ExpectedCellDepBinding> {
+    let mut parts = required.split(':');
+    let dep_source = parts.next()?.to_string();
+    let index = parse_cell_dep_source_index(&dep_source)?;
+    let mut name = None;
+    let mut dep_type = None;
+    let mut tx_hash = None;
+    let mut out_index = None;
+    let mut hash_type = None;
+    let mut data_hash = None;
+    let mut type_id = None;
+    for part in parts {
+        if let Some(value) = part.strip_prefix("name=") {
+            name = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("dep_type=") {
+            dep_type = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("tx_hash=") {
+            tx_hash = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("out_index=") {
+            out_index = value.parse::<u32>().ok();
+        } else if let Some(value) = part.strip_prefix("hash_type=") {
+            hash_type = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("data_hash=") {
+            data_hash = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("type_id=") {
+            type_id = Some(value.to_string());
+        }
+    }
+    Some(ExpectedCellDepBinding { dep_source, index, name, dep_type, tx_hash, out_index, hash_type, data_hash, type_id })
+}
+
 fn requires_explicit_evidence(kind: &str) -> bool {
     matches!(
         kind,
@@ -369,6 +630,7 @@ fn requires_explicit_evidence(kind: &str) -> bool {
             | "type_id_builder_plan"
             | "metadata_only_gap"
             | "runtime_required_proof_plan"
+            | "spawn_target_cell_dep_binding"
             | "lock_group_transaction_scope"
             | "capacity_policy"
     )

@@ -1,3 +1,4 @@
+use camino::Utf8Path;
 use cellscript::{compile, BuilderAssumptionMetadata, CompileOptions};
 use serde_json::json;
 use std::process::Command;
@@ -66,16 +67,49 @@ where
 "#;
 
 fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {
+    let evidence_payload = if assumption.kind == "spawn_target_cell_dep_binding" {
+        let required = assumption.required_cell_deps.first().expect("spawn target assumption should name a required CellDep");
+        let mut parts = required.split(':');
+        let dep_source = parts.next().expect("dep source");
+        let cell_dep_index = dep_source.strip_prefix("CellDep#").and_then(|value| value.parse::<usize>().ok()).unwrap();
+        let mut payload = json!({
+            "source": "unit-test-fixture",
+            "checked": true,
+            "dep_source": dep_source,
+            "cell_dep_index": cell_dep_index
+        });
+        let object = payload.as_object_mut().expect("payload object");
+        for part in parts {
+            if let Some(value) = part.strip_prefix("name=") {
+                object.insert("cell_dep_name".to_string(), json!(value));
+            } else if let Some(value) = part.strip_prefix("dep_type=") {
+                object.insert("dep_type".to_string(), json!(value));
+            } else if let Some(value) = part.strip_prefix("tx_hash=") {
+                object.insert("tx_hash".to_string(), json!(value));
+            } else if let Some(value) = part.strip_prefix("out_index=") {
+                object.insert("out_index".to_string(), json!(value.parse::<u32>().expect("out_index")));
+            } else if let Some(value) = part.strip_prefix("hash_type=") {
+                object.insert("hash_type".to_string(), json!(value));
+            } else if let Some(value) = part.strip_prefix("data_hash=") {
+                object.insert("data_hash".to_string(), json!(value));
+            } else if let Some(value) = part.strip_prefix("type_id=") {
+                object.insert("type_id".to_string(), json!(value));
+            }
+        }
+        payload
+    } else {
+        json!({
+            "source": "unit-test-fixture",
+            "checked": true
+        })
+    };
     json!({
         "assumption_id": assumption.assumption_id,
         "kind": assumption.kind,
         "origin": assumption.origin,
         "feature": assumption.feature,
         "proof_plan_status": assumption.proof_plan_status,
-        "evidence": {
-            "source": "unit-test-fixture",
-            "checked": true
-        }
+        "evidence": evidence_payload
     })
 }
 
@@ -242,6 +276,393 @@ fn validate_tx_checks_builder_assumption_evidence() {
     });
     let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_evidence);
     assert_eq!(report.status, "ok", "{:#?}", report);
+}
+
+#[test]
+fn strict_0_16_rejects_unbound_spawn_target_cell_dep() {
+    let err = compile(
+        r#"
+module v016::spawn_unbound
+
+action delegate() -> u64
+where
+    return spawn("secp256k1_verifier")
+"#,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn strict_0_16_accepts_manifest_bound_spawn_target_cell_dep() {
+    let dir = tempdir().unwrap();
+    let root = Utf8Path::from_path(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "spawn_bound"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[[deploy.ckb.cell_deps]]
+name = "secp256k1_verifier"
+out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:1"
+dep_type = "code"
+hash_type = "data1"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cell"),
+        r#"
+module spawn_bound::main
+
+action delegate() -> u64
+where
+    return spawn("secp256k1_verifier")
+"#,
+    )
+    .unwrap();
+
+    let result = cellscript::compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let spawn_plan =
+        result.metadata.runtime.proof_plan.iter().find(|plan| plan.category == "spawn-target").expect("spawn target ProofPlan record");
+    assert!(spawn_plan.feature.starts_with("spawn-target:CellDep#0@0x"), "{spawn_plan:#?}");
+    assert_eq!(spawn_plan.status, "builder-required");
+    assert_eq!(spawn_plan.codegen_coverage_status, "builder-required");
+    assert!(spawn_plan.detail.contains("secp256k1_verifier"), "{spawn_plan:#?}");
+    assert!(spawn_plan.builder_assumptions.iter().all(|assumption| !assumption.contains("runtime-required")));
+
+    let ckb = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
+    assert!(ckb.script_references.iter().any(|reference| {
+        reference.purpose == "spawn-target"
+            && reference.name == "secp256k1_verifier"
+            && reference.dep_source == "CellDep#0"
+            && reference.status == "builder-required-manifest-bound-cell-dep"
+    }));
+
+    let spawn_assumption = result
+        .metadata
+        .runtime
+        .builder_assumptions
+        .iter()
+        .find(|assumption| assumption.kind == "spawn_target_cell_dep_binding")
+        .expect("spawn target builder assumption");
+    assert_eq!(spawn_assumption.proof_plan_status, "builder-required");
+    assert_eq!(
+        spawn_assumption.required_cell_deps,
+        vec![
+            "CellDep#0:name=secp256k1_verifier:dep_type=code:tx_hash=0x3333333333333333333333333333333333333333333333333333333333333333:out_index=1:hash_type=data1"
+        ],
+        "{spawn_assumption:#?}"
+    );
+
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let no_cell_dep = json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &no_cell_dep);
+    assert_eq!(report.status, "failed");
+    assert!(report.violations.iter().any(|violation| violation.kind == "spawn_target_cell_dep_binding"), "{report:#?}");
+
+    let wrong_spawn_evidence = result
+        .metadata
+        .runtime
+        .builder_assumptions
+        .iter()
+        .map(|assumption| {
+            if assumption.kind == "spawn_target_cell_dep_binding" {
+                json!({
+                    "assumption_id": assumption.assumption_id,
+                    "kind": assumption.kind,
+                    "origin": assumption.origin,
+                    "feature": assumption.feature,
+                    "proof_plan_status": assumption.proof_plan_status,
+                    "evidence": {
+                        "source": "unit-test-fixture",
+                        "checked": true,
+                        "dep_source": "CellDep#0",
+                        "cell_dep_index": 0,
+                        "cell_dep_name": "wrong_verifier",
+                        "dep_type": "code"
+                    }
+                })
+            } else {
+                evidence_for(assumption)
+            }
+        })
+        .collect::<Vec<_>>();
+    let wrong_identity = json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [{
+            "name": "secp256k1_verifier",
+            "dep_type": "code",
+            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "index": 1,
+            "hash_type": "data1"
+        }],
+        "witnesses": [],
+        "builder_assumption_evidence": wrong_spawn_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_identity);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("cell_dep_name")),
+        "{report:#?}"
+    );
+
+    let wrong_spawn_index_evidence = result
+        .metadata
+        .runtime
+        .builder_assumptions
+        .iter()
+        .map(|assumption| {
+            if assumption.kind == "spawn_target_cell_dep_binding" {
+                json!({
+                    "assumption_id": assumption.assumption_id,
+                    "kind": assumption.kind,
+                    "origin": assumption.origin,
+                    "feature": assumption.feature,
+                    "proof_plan_status": assumption.proof_plan_status,
+                    "evidence": {
+                        "source": "unit-test-fixture",
+                        "checked": true,
+                        "dep_source": "CellDep#0",
+                        "cell_dep_index": 1,
+                        "cell_dep_name": "secp256k1_verifier",
+                        "dep_type": "code",
+                        "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                        "out_index": 1,
+                        "hash_type": "data1"
+                    }
+                })
+            } else {
+                evidence_for(assumption)
+            }
+        })
+        .collect::<Vec<_>>();
+    let wrong_evidence_locator = json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [{
+            "name": "secp256k1_verifier",
+            "dep_type": "code",
+            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "index": 1,
+            "hash_type": "data1"
+        }],
+        "witnesses": [],
+        "builder_assumption_evidence": wrong_spawn_index_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_evidence_locator);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("cell_dep_index 0")),
+        "{report:#?}"
+    );
+
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let wrong_tx_cell_dep = json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [{
+            "name": "secp256k1_verifier",
+            "dep_type": "code",
+            "tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "index": 1,
+            "hash_type": "data1"
+        }],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_tx_cell_dep);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("tx_hash")),
+        "{report:#?}"
+    );
+
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let with_cell_dep_and_evidence = json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [{
+            "name": "secp256k1_verifier",
+            "dep_type": "code",
+            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "index": 1,
+            "hash_type": "data1"
+        }],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_cell_dep_and_evidence);
+    assert_eq!(report.status, "ok", "{report:#?}");
+
+    let mut solve = cellc_command();
+    solve.arg("solve-tx").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
+    let solve_json = run_success_json(solve);
+    let requirements = solve_json["transaction_plan"]["builder_assumption_evidence_requirements"]
+        .as_array()
+        .expect("builder assumption evidence requirements");
+    assert!(
+        requirements.iter().any(|requirement| {
+            requirement["kind"] == "spawn_target_cell_dep_binding"
+                && requirement["evidence_schema"]["required_cell_deps"]
+                    .as_array()
+                    .is_some_and(|deps| deps.iter().any(|dep| dep.as_str().is_some_and(|dep| dep.contains("tx_hash=0x333333"))))
+        }),
+        "{solve_json:#?}"
+    );
+    let cell_deps = solve_json["transaction_plan"]["cell_deps"].as_array().expect("solver cell_deps");
+    assert!(
+        cell_deps.iter().any(|dep| {
+            dep["name"] == "secp256k1_verifier"
+                && dep["dep_type"] == "code"
+                && dep["tx_hash"] == "0x3333333333333333333333333333333333333333333333333333333333333333"
+                && dep["index"] == 1
+                && dep["hash_type"] == "data1"
+        }),
+        "{solve_json:#?}"
+    );
+}
+
+#[test]
+fn strict_0_16_rejects_spawn_target_manifest_binding_outside_cell_dep_zero() {
+    let dir = tempdir().unwrap();
+    let root = Utf8Path::from_path(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "spawn_bound_second"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[[deploy.ckb.cell_deps]]
+name = "other_verifier"
+out_point = "0x1111111111111111111111111111111111111111111111111111111111111111:0"
+dep_type = "code"
+hash_type = "data1"
+
+[[deploy.ckb.cell_deps]]
+name = "secp256k1_verifier"
+out_point = "0x2222222222222222222222222222222222222222222222222222222222222222:0"
+dep_type = "code"
+hash_type = "data1"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cell"),
+        r#"
+module spawn_bound_second::main
+
+action delegate() -> u64
+where
+    return spawn("secp256k1_verifier")
+"#,
+    )
+    .unwrap();
+
+    let err = cellscript::compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn strict_0_16_rejects_spawn_target_manifest_dep_group_binding() {
+    let dir = tempdir().unwrap();
+    let root = Utf8Path::from_path(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "spawn_bound_dep_group"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[[deploy.ckb.cell_deps]]
+name = "secp256k1_verifier"
+out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:0"
+dep_type = "dep_group"
+hash_type = "data1"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cell"),
+        r#"
+module spawn_bound_dep_group::main
+
+action delegate() -> u64
+where
+    return spawn("secp256k1_verifier")
+"#,
+    )
+    .unwrap();
+
+    let err = cellscript::compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
 }
 
 #[test]

@@ -273,6 +273,10 @@ Add validation APIs:
 - `cellc explain-assumptions`
 - `cellc validate-tx --against metadata.json tx.json`
 
+For manifest-bound spawn targets, `required_cell_deps` carries the required
+CellDep slot and manifest identity. `validate-tx` checks both the transaction
+`cell_deps[index]` object and the matching `builder_assumption_evidence`.
+
 **Acceptance**
 
 - every builder assumption has a stable schema record

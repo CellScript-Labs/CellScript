@@ -10,7 +10,7 @@ use crate::ir::*;
 use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
-use super::runtime::{is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
+use super::runtime::{ckb_checked_runtime_status_reg, is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
 use super::schema::{fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
 use super::CodeGenerator;
 
@@ -121,9 +121,10 @@ impl CodeGenerator {
 
     fn emit_checked_runtime_status(&mut self, func: &str) {
         let ok_label = self.fresh_label("runtime_helper_ok");
-        self.emit(format!("# cellscript abi: {} returns status in a1; fail closed on nonzero", func));
-        self.emit(format!("beqz a1, {}", ok_label));
-        self.emit("mv a0, a1");
+        let status_reg = ckb_checked_runtime_status_reg(func);
+        self.emit(format!("# cellscript abi: {} returns status in {}; fail closed on nonzero", func, status_reg));
+        self.emit(format!("beqz {}, {}", status_reg, ok_label));
+        self.emit(format!("mv a0, {}", status_reg));
         self.emit_epilogue();
         self.emit_label(&ok_label);
     }

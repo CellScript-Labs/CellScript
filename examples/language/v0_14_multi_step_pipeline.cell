@@ -10,7 +10,7 @@ where
 
     pipe_write(write_fd, value)
     let pid = spawn("hash_checker")
-    let status = wait()
+    let status = wait(pid)
     let echoed = pipe_read(read_fd)
 
     close(read_fd)

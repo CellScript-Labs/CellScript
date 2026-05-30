@@ -2795,7 +2795,11 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "source": "metadata-script-reference",
                 "name": dep.name,
                 "dep_type": dep.dep_type,
+                "tx_hash": dep.tx_hash,
+                "index": dep.index,
                 "hash_type": dep.hash_type,
+                "data_hash": dep.data_hash,
+                "type_id": dep.type_id,
             }));
         }
         for script_ref in &ckb_constraints.script_references {
@@ -2804,6 +2808,8 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "name": script_ref.name,
                 "scope": script_ref.scope,
                 "purpose": script_ref.purpose,
+                "dep_source": script_ref.dep_source,
+                "status": script_ref.status,
             }));
         }
     }
@@ -2832,11 +2838,26 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                     | "type_id_builder_plan"
                     | "metadata_only_gap"
                     | "runtime_required_proof_plan"
+                    | "spawn_target_cell_dep_binding"
                     | "lock_group_transaction_scope"
                     | "capacity_policy"
             )
         })
         .map(|assumption| {
+            let evidence_schema = if assumption.kind == "spawn_target_cell_dep_binding" {
+                serde_json::json!({
+                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "evidence_required_fields": ["dep_source", "cell_dep_index", "cell_dep_name", "dep_type"],
+                    "optional_manifest_identity_fields": ["tx_hash", "out_index", "hash_type", "data_hash", "type_id"],
+                    "required_cell_deps": assumption.required_cell_deps,
+                    "note": "builder must provide the same manifest-bound CellDep identity in transaction_plan.cell_deps and builder_assumption_evidence before validate-tx can pass"
+                })
+            } else {
+                serde_json::json!({
+                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
+                })
+            };
             serde_json::json!({
                 "assumption_id": assumption.assumption_id,
                 "kind": assumption.kind,
@@ -2844,10 +2865,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "feature": assumption.feature,
                 "proof_plan_status": assumption.proof_plan_status,
                 "detail": assumption.detail,
-                "evidence_schema": {
-                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
-                    "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
-                },
+                "evidence_schema": evidence_schema,
             })
         })
         .collect::<Vec<_>>();
