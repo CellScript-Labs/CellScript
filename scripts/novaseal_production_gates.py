@@ -72,7 +72,7 @@ def placeholder_hash(value: str | None) -> bool:
     if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", value):
         return True
     raw = value[2:].lower()
-    return len(set(raw)) == 1
+    return raw == "0" * 64
 
 
 def live_verifier_facts(path: Path) -> dict[str, Any]:
@@ -244,7 +244,7 @@ def build_report() -> dict[str, Any]:
             external_review,
         ),
     ]
-    local_gates = [row for row in gates if row["status"] != "external_required" and not row["name"].startswith("public_shared") and not row["name"].startswith("external_bip340")]
+    local_gates = [row for row in gates if row["status"] != "external_required"]
     local_ready = all(row["status"] == "passed" for row in local_gates)
     production_ready = all(row["status"] == "passed" for row in gates)
     if production_ready:

@@ -7924,27 +7924,36 @@ fn metadata_asserted_guarded_value_vars(
     let mut guarded_by_var: HashMap<usize, BTreeSet<usize>> = HashMap::new();
     for block in &body.blocks {
         for instruction in &block.instructions {
-            if let ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } = instruction {
-                if left == right {
-                    continue;
+            match instruction {
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } => {
+                    if left == right {
+                        continue;
+                    }
+                    let mut left_aliases = BTreeSet::new();
+                    let mut right_aliases = BTreeSet::new();
+                    metadata_collect_alias_keys_from_operand(left, aliases, u64_sources, derived_alias_sources, &mut left_aliases);
+                    metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, &mut right_aliases);
+                    if left_aliases.is_empty() && right_aliases.is_empty() {
+                        continue;
+                    }
+                    let mut vars = BTreeSet::new();
+                    if !right_aliases.is_empty() {
+                        metadata_collect_unaliased_direct_var_ids(left, aliases, &mut vars);
+                    }
+                    if !left_aliases.is_empty() {
+                        metadata_collect_unaliased_direct_var_ids(right, aliases, &mut vars);
+                    }
+                    if !vars.is_empty() {
+                        guarded_by_var.insert(dest.id, vars);
+                    }
                 }
-                let mut left_aliases = BTreeSet::new();
-                let mut right_aliases = BTreeSet::new();
-                metadata_collect_alias_keys_from_operand(left, aliases, u64_sources, derived_alias_sources, &mut left_aliases);
-                metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, &mut right_aliases);
-                if left_aliases.is_empty() && right_aliases.is_empty() {
-                    continue;
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) }
+                | ir::IrInstruction::Cast { dest, src: ir::IrOperand::Var(src) } => {
+                    if let Some(vars) = guarded_by_var.get(&src.id).cloned() {
+                        guarded_by_var.insert(dest.id, vars);
+                    }
                 }
-                let mut vars = BTreeSet::new();
-                if !right_aliases.is_empty() {
-                    metadata_collect_unaliased_direct_var_ids(left, aliases, &mut vars);
-                }
-                if !left_aliases.is_empty() {
-                    metadata_collect_unaliased_direct_var_ids(right, aliases, &mut vars);
-                }
-                if !vars.is_empty() {
-                    guarded_by_var.insert(dest.id, vars);
-                }
+                _ => {}
             }
         }
     }

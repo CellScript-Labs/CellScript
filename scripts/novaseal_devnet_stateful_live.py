@@ -48,7 +48,51 @@ G = (
 
 
 class LiveAcceptanceError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, rpc_error: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.rpc_error = rpc_error
+
+
+SCRIPT_ERROR_CODE_KEYS = {
+    "error_code",
+    "errorCode",
+    "exit_code",
+    "exitCode",
+    "script_error_code",
+    "scriptErrorCode",
+}
+
+
+def _script_error_code_from_rpc_error(value: Any) -> int | None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key in SCRIPT_ERROR_CODE_KEYS:
+                try:
+                    return int(nested)
+                except (TypeError, ValueError):
+                    continue
+            found = _script_error_code_from_rpc_error(nested)
+            if found is not None:
+                return found
+    if isinstance(value, list):
+        for nested in value:
+            found = _script_error_code_from_rpc_error(nested)
+            if found is not None:
+                return found
+    return None
+
+
+def script_error_code_matches(reason: str, expected: int, rpc_error: dict[str, Any] | None = None) -> bool:
+    if _script_error_code_from_rpc_error(rpc_error) == expected:
+        return True
+    patterns = [
+        rf"\berror code\s*[:#]?\s*{expected}\b",
+        rf"\berror_code\s*[:=]\s*{expected}\b",
+        rf"\bexit[_ ]?code\s*[:=]\s*{expected}\b",
+        rf"\bExitCode\(\s*{expected}\s*\)",
+        rf"#{expected}\b",
+    ]
+    return any(re.search(pattern, reason, re.IGNORECASE) for pattern in patterns)
 
 
 def sha256_hex(data: bytes) -> str:
@@ -57,6 +101,13 @@ def sha256_hex(data: bytes) -> str:
 
 def file_sha256_hex(path: pathlib.Path) -> str:
     return sha256_hex(path.read_bytes())
+
+
+def display_path(path: pathlib.Path, repo_root: pathlib.Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def git_commit(repo_root: pathlib.Path) -> str | None:
@@ -84,7 +135,7 @@ def source_tree_hash(repo_root: pathlib.Path, paths: list[pathlib.Path]) -> dict
     h = hashlib.sha256()
     rows = []
     for path in sorted(set(files)):
-        rel = path.relative_to(repo_root).as_posix()
+        rel = display_path(path, repo_root)
         digest = hashlib.sha256(path.read_bytes()).digest()
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
@@ -99,7 +150,7 @@ def stateful_provenance(repo_root: pathlib.Path, source_paths: list[pathlib.Path
         "source_tree": source_tree_hash(repo_root, source_paths),
         "artifacts": {
             name: {
-                "path": str(path.relative_to(repo_root) if path.is_relative_to(repo_root) else path),
+                "path": display_path(path, repo_root),
                 "sha256": file_sha256_hex(path),
                 "ckb_data_hash": ckb_hash_hex(path.read_bytes()),
                 "size_bytes": path.stat().st_size,
@@ -603,7 +654,7 @@ class CkbDevnet:
         else:
             raise LiveAcceptanceError(f"RPC {method} failed: {last_error}")
         if payload.get("error"):
-            raise LiveAcceptanceError(f"RPC {method} returned error: {payload['error']}")
+            raise LiveAcceptanceError(f"RPC {method} returned error: {payload['error']}", rpc_error=payload["error"])
         return payload.get("result")
 
     def get_block(self, block_hash: str) -> dict[str, Any]:
@@ -725,7 +776,7 @@ class CkbDevnet:
             if expected_data_hash is not None:
                 checks["data_hash"] = expected_data_hash.lower().removeprefix("0x") in reason.lower()
             if expected_error_code is not None:
-                checks["error_code"] = f"error code {expected_error_code}" in reason or f"#{expected_error_code}" in reason
+                checks["error_code"] = script_error_code_matches(reason, expected_error_code, error.rpc_error)
             matched = all(checks.values()) if checks else True
             if not matched:
                 raise LiveAcceptanceError(f"{label} rejected for unexpected reason: checks={checks} reason={reason}") from error
