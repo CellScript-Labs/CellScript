@@ -531,11 +531,15 @@ path dependencies、lockfile 刷新，以及 package build/check/doc/fmt 流程
 
 **Registry resolver 边界：**
 
+- Registry discovery 未来可以覆盖 CellScript package、verifier artifact、
+  deployed artifact record、reproducible artifact，以及外部 CKB tooling
+  artifact。Dependency resolution 必须比 discovery 更窄。
 - 所有能通过 `cellc add` 进入项目的对象，都必须能安全参与 build、
   verification、deployment 或显式 TCB identity chain。
 - Source library、runtime verifier package、deployable script package 和
-  deployed artifact record 只有在 source/build/ABI/artifact/deployment
-  identity 都能 fail-closed 校验时，才可以成为 resolver-safe 对象。
+  deployed / reproducible artifact record 只有在
+  source/build/ABI/artifact/deployment identity 都能 fail-closed 校验时，才可以
+  成为 resolver-safe 对象。
 - Template、cookbook example、protocol skeleton 和 scaffold-only project
   是 `cellc new --template` 或 cookbook tooling 的 copy-only 素材，不能通过
   `cellc add` 做 dependency resolution。

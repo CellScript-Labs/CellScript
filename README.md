@@ -657,11 +657,15 @@ registry dependency resolution remain experimental and fail-closed.
 
 **Registry resolver boundary:**
 
+- Registry discovery may grow to include CellScript packages, verifier
+  artifacts, deployed artifact records, reproducible artifacts, and external
+  CKB tooling artifacts. Dependency resolution stays narrower than discovery.
 - Anything reachable by `cellc add` must be safe to participate in the build,
   verification, deployment, or declared TCB identity chain.
 - Source libraries, runtime verifier packages, deployable script packages, and
-  deployed artifact records may become resolver-safe only when their source,
-  build, ABI, artifact, and deployment identities can be checked fail-closed.
+  deployed or reproducible artifact records may become resolver-safe only when
+  their source, build, ABI, artifact, and deployment identities can be checked
+  fail-closed.
 - Templates, cookbook examples, protocol skeletons, and scaffold-only projects
   are copy-only material for `cellc new --template` or cookbook tooling; they
   must not be dependency-resolved through `cellc add`.

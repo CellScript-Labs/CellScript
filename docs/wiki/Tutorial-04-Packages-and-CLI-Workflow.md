@@ -224,8 +224,14 @@ model:
 - deployment identity answers which CKB Cell, CellDep, or runtime artifact is
   being used.
 
-That means registry resolution is stricter than example discovery. The future
-resolver path should accept only objects that can be checked fail-closed:
+Registry discovery can be broad. It may index CellScript source packages,
+runtime verifiers, deployed CKB artifacts, reproducible artifacts, and even
+external CKB tooling artifacts such as bootstrapper outputs. Resolver profiles
+must stay narrower: an object can be discovered without being installable by
+`cellc add`.
+
+That means registry resolution is stricter than discovery. The future resolver
+path should accept only objects that can be checked fail-closed:
 
 | Kind | `cellc add` | Boundary |
 | --- | --- | --- |
@@ -233,12 +239,15 @@ resolver path should accept only objects that can be checked fail-closed:
 | `runtime_verifier` / `spawn-verifier` | yes | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
 | `deployable_contract` | yes | Must expose build/audit/deployment identity, not just source text. |
 | `deployed_artifact_record` | yes | Must bind network, OutPoint, dep type, code/data hash, and status. |
+| `reproducible_artifact` | yes, if artifact-safe | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
 | `protocol_profile_library` | yes, if resolver-safe | Must be a real package with checkable source/schema/API semantics. |
 | `template`, `cookbook`, `protocol_skeleton`, scaffold | no | Copy-only starting material; after copying, it becomes local project code. |
 
 The rule is intentionally blunt:
 
 ```text
+Discovery can be broad; dependency resolution is narrow.
+
 Anything reachable by cellc add must be dependency-safe, artifact-safe,
 deployment-fact-safe, or declared-TCB-safe.
 
