@@ -655,6 +655,20 @@ registry dependency resolution remain experimental and fail-closed.
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
+**Registry resolver boundary:**
+
+- Anything reachable by `cellc add` must be safe to participate in the build,
+  verification, deployment, or declared TCB identity chain.
+- Source libraries, runtime verifier packages, deployable script packages, and
+  deployed artifact records may become resolver-safe only when their source,
+  build, ABI, artifact, and deployment identities can be checked fail-closed.
+- Templates, cookbook examples, protocol skeletons, and scaffold-only projects
+  are copy-only material for `cellc new --template` or cookbook tooling; they
+  must not be dependency-resolved through `cellc add`.
+- Runtime verifier packages are allowed to have no business parameters, but
+  production use must still pin `verifier_id`, `ipc_abi`, artifact identity,
+  build profile, TCB/security status, and deployment CellDep facts.
+
 ### CLI Commands
 
 | Command | Purpose |
