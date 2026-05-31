@@ -51,14 +51,15 @@ party rejects, and wrong-settlement rejects.
 `harness/ckb_vm` executes the compiled `originate_agreement`,
 `repay_before_expiry`, and `claim_after_expiry` action ELFs in `ckb-vm`. It
 covers the action/type-script layer for time guards, party guards, nonce
-increments, receipt-root binding, receipt output fields, and preserved-field
-checks.
+increments, receipt-root binding, receipt output fields, typed payout output
+fields, terms-hash output binding, and preserved-field checks.
 
 `novaseal_agreement_tx_harness` constructs deterministic resolved transactions
 and runs them through `ckb-script` plus the CKB non-contextual/contextual
 verification stack. It uses a local always-success lock so that terminal input
-transactions can reach the Agreement Profile type/action script.
+transactions can reach the Agreement Profile type/action script. All fixture
+files are now covered by this layer.
 
 These are still local evidence layers. They do not replace live-chain deployment
 evidence, real CellDep liveness, production authority locks, concrete
-payout-cell binding, or canonical hash preimage checks.
+payout wallet plumbing, or full Molecule/wallet signing preimage alignment.

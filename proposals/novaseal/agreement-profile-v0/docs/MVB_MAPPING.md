@@ -24,9 +24,9 @@ The current package includes a local transaction-shape harness for native CKB
 output capacities and modeled settlement amounts, an action CKB VM harness for
 the compiled CellScript terminal-path guards, and a resolved
 `ckb-verification` transaction harness over deterministic in-memory
-transactions. Payout-cell settlement remains local-shape-only until the
-CellScript profile binds concrete payout outputs on-chain.
+transactions. Payout intent is now bound by typed `NativeCkbPayoutV0` outputs,
+and the resolved transaction harness covers wrong settlement amount rejection.
 
 It is still not live deployment evidence: real CellDep liveness, mempool/miner
-acceptance, production locks, canonical terms hashing, and canonical receipt
-hashing remain future work.
+acceptance, production locks, and full Molecule/wallet signing vectors remain
+future work.

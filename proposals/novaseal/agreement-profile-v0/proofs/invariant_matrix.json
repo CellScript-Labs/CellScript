@@ -40,18 +40,16 @@
       "coverage": "generated-audit-covered"
     },
     {
-      "id": "canonical_terms_hash",
-      "claim": "Wrong terms preimage is rejected by an on-chain canonical hash computation.",
-      "location": "not implemented",
-      "coverage": "blocked",
-      "blocker": "Need frozen Molecule preimage hashing or generated field-by-field terms commitment helper."
+      "id": "terms_hash_output_binding",
+      "claim": "Wrong terms_hash output binding is rejected by Agreement Profile scripts.",
+      "location": "originate_agreement output field checks",
+      "coverage": "action-ckb-vm-covered + resolved-transaction-covered"
     },
     {
-      "id": "canonical_receipt_hash",
-      "claim": "Wrong receipt preimage is rejected by an on-chain canonical hash computation.",
-      "location": "not implemented",
-      "coverage": "blocked",
-      "blocker": "Need frozen receipt preimage hashing or generated receipt commitment helper."
+      "id": "receipt_hash_output_binding",
+      "claim": "Wrong receipt_hash output binding is rejected by Agreement Profile scripts.",
+      "location": "NovaAgreementReceiptV0.new_receipt_root output field checks",
+      "coverage": "action-ckb-vm-covered + resolved-transaction-covered"
     },
     {
       "id": "native_capacity_settlement",
@@ -79,10 +77,9 @@
     },
     {
       "id": "payout_cell_binding",
-      "claim": "Repayment and default payout cells are bound on-chain to the terminal receipt amount.",
-      "location": "not implemented",
-      "coverage": "blocked",
-      "blocker": "Current profile records terminal_amount and local shape checks model payout cells, but CellScript actions do not yet load and bind concrete payout outputs."
+      "claim": "Repayment and default payout outputs are bound by typed NativeCkbPayoutV0 output data.",
+      "location": "NativeCkbPayoutV0 create statements",
+      "coverage": "action-ckb-vm-covered + resolved-transaction-covered"
     }
   ]
 }

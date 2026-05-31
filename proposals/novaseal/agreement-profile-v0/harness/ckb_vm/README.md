@@ -13,7 +13,8 @@ The default binary executes the three compiled Agreement Profile action ELFs in
 The harness supplies deterministic `LOAD_WITNESS`, `LOAD_CELL_DATA`, and
 `LOAD_HEADER_BY_FIELD` syscall responses. It covers action/type-script guards
 for valid terminal paths, time rejects, party rejects, nonce mismatch,
-receipt-root mismatch, and preserved-field mutation.
+receipt-root mismatch, receipt output mismatch, terms hash output mismatch,
+wrong settlement payout, and preserved-field mutation.
 
 `novaseal_agreement_tx_harness` constructs deterministic in-memory resolved CKB
 transactions and runs both `ckb-script` and the CKB non-contextual/contextual
@@ -28,8 +29,8 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 
 The transaction harness covers resolved originate, repay, claim, time rejects,
 party rejects, nonce mismatch, receipt-root mismatch, preserved-field mutation,
-and occupied-capacity rejection. It also fails if the fixtures outside tx-harness
-coverage differ from the known blocker set: canonical terms hash, canonical
-receipt hash, and payout-cell settlement binding. It still does not prove
-live-chain deployment, native CKB payout-cell binding, canonical terms/receipt
-hash preimages, or borrower/lender cryptographic authority locks.
+typed payout output binding, receipt hash output binding, terms hash output
+binding, and occupied-capacity rejection. It now fails unless every fixture file
+is covered by tx-harness evidence. It still does not prove live-chain
+deployment, production wallet payout plumbing, full Molecule/wallet signing
+preimage alignment, or borrower/lender cryptographic authority locks.

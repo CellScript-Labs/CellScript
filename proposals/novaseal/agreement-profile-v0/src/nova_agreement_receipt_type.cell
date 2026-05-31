@@ -21,3 +21,15 @@ receipt NovaAgreementReceiptV0 has store, create, consume {
     nonce: u64,
     timepoint: u64,
 }
+
+receipt NativeCkbPayoutV0 has store, create, consume {
+    action: u8,
+    agreement_id: Hash,
+    role: u8,
+    recipient_authority_hash: Hash,
+    asset_kind: u8,
+    asset_hash: Hash,
+    amount: u64,
+    terms_hash: Hash,
+    nonce: u64,
+}

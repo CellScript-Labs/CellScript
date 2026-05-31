@@ -30,9 +30,10 @@ Implemented in this slice:
 | Action CKB VM harness | implemented | action-ckb-vm-covered |
 | Resolved transaction harness | implemented | resolved-transaction-covered |
 | Native CKB occupied-capacity rejection | implemented | resolved-transaction-covered |
-| Native CKB payout-cell settlement binding | local harness only | local-transaction-shape-covered |
-| Canonical terms hash preimage | not implemented | blocked |
-| Canonical receipt hash preimage | not implemented | blocked |
+| Native CKB payout output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Terms hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Receipt hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Full Molecule/wallet hash preimage alignment | not implemented | future work |
 | BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
 
 Do not call this "trustless borrowing". Better names:
@@ -51,6 +52,7 @@ Do not call this "trustless borrowing". Better names:
 - checks positive collateral/principal
 - checks start/expiry window
 - checks borrower-originated actor hash
+- creates a typed borrower principal payout output
 - creates a `NovaAgreementReceiptV0`
 
 `repay_before_expiry`
@@ -59,6 +61,7 @@ Do not call this "trustless borrowing". Better names:
 - requires `now <= expiry`
 - requires borrower actor hash
 - creates a terminal `Repaid` agreement
+- creates typed lender repayment and borrower collateral-return payout outputs
 - creates a receipt with `terminal_amount = principal + fixed_fee`
 
 `claim_after_expiry`
@@ -67,6 +70,7 @@ Do not call this "trustless borrowing". Better names:
 - requires `now > expiry`
 - requires lender actor hash
 - creates a terminal `Defaulted` agreement
+- creates a typed lender default-claim payout output
 - creates a receipt with `terminal_amount = collateral`
 
 The default path intentionally does not add `fixed_fee` on top of collateral.
@@ -76,12 +80,14 @@ imply extra CKB is minted or supplied by the claimant.
 ## Receipt Semantics
 
 Receipts are runtime-relevant because the actions materialize
-`NovaAgreementReceiptV0` outputs. The actions also update `receipt_root` from the
-witness `receipt_hash`.
+`NovaAgreementReceiptV0` outputs. The actions also update `receipt_root` from
+the witness `receipt_hash`, and the materialized receipt output must carry the
+same new receipt root.
 
-This slice does **not** yet compute a canonical hash of the full receipt fields
-inside CellScript. `receipt_hash_mismatch_reject.json` is therefore marked
-`blocked`, not `fixture-covered`.
+Native CKB settlement intent is materialized as `NativeCkbPayoutV0` outputs.
+The local transaction harness also checks that the CKB capacity/value shape
+matches those typed payout amounts. Full Molecule/wallet signing preimage
+alignment remains future work.
 
 ## Commands
 
@@ -100,12 +106,12 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 ```
 
 Latest local result: all CellScript commands pass. The generated audit bundle
-reports 3 actions, 0 locks, 2 source units, 63 ProofPlan records, and 17 builder
+reports 3 actions, 0 locks, 2 source units, 71 ProofPlan records, and 21 builder
 assumptions. The local transaction-shape harness reports 8/8 fixture
 expectations matched: 3 accepted shapes and 5 rejected shapes. The action CKB VM
-harness reports 11/11 expectations matched: 3 accepted action executions and 8
-rejected action executions. The resolved transaction harness reports 12/12
-script-layer expectations matched and 12/12 node-verifier expectations matched.
+harness reports 14/14 expectations matched: 3 accepted action executions and 11
+rejected action executions. The resolved transaction harness reports 15/15
+script-layer expectations matched and 15/15 node-verifier expectations matched.
 
 ## Harness Boundary
 
@@ -115,22 +121,21 @@ amount and occupied-capacity shapes.
 `harness/ckb_vm` executes the compiled action ELFs in `ckb-vm` with harnessed
 `LOAD_WITNESS`, `LOAD_CELL_DATA`, and `LOAD_HEADER_BY_FIELD` syscalls. It covers
 origination, repayment, default claim, time rejects, party rejects, nonce
-mismatch, receipt-root mismatch, and preserved-field mutation.
+mismatch, receipt-root mismatch, receipt output mismatch, terms hash output
+mismatch, wrong settlement payout, and preserved-field mutation.
 
 `harness/ckb_vm` also contains `novaseal_agreement_tx_harness`, which constructs
 deterministic resolved CKB transactions and runs both `ckb-script` and
 `ckb-verification` over them. It uses a local always-success lock only so the
 terminal input transactions can reach the Agreement Profile type/action script.
-It fails if the fixtures outside resolved transaction coverage are anything
-other than the current explicit blocker set.
+All fixture files are now covered by the resolved transaction harness.
 
-These harnesses are still not live-chain evidence. Deployment wiring, canonical
-terms hash, canonical receipt hash, cryptographic authority locks, and live
-CellDep liveness remain future work.
+These harnesses are still not live-chain evidence. Deployment wiring,
+Molecule/wallet signing preimage alignment, cryptographic authority locks, and
+live CellDep liveness remain future work.
 
 ## Honest Next Slice
 
-The next conservative slice should add canonical terms/receipt hash preimage
-checks and replace the local always-success lock with real borrower/lender
-authority locks. Only after that should we consider BTC authority hooks or
-iCKB/xUDT variants.
+The next conservative slice should freeze Molecule/wallet signing vectors and
+replace the local always-success lock with real borrower/lender authority locks.
+Only after that should we consider BTC authority hooks or iCKB/xUDT variants.

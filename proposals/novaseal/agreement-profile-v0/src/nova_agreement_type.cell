@@ -23,6 +23,11 @@ const PATH_REPAY_BEFORE_EXPIRY: u8 = 1
 const PATH_CLAIM_AFTER_EXPIRY: u8 = 2
 const PATH_CANCEL_BEFORE_FUNDING: u8 = 3
 
+const PAYOUT_BORROWER_PRINCIPAL: u8 = 0
+const PAYOUT_LENDER_REPAYMENT: u8 = 1
+const PAYOUT_BORROWER_COLLATERAL_RETURN: u8 = 2
+const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3
+
 struct NovaAgreementTermsV0 {
     version: u16,
     agreement_id: Hash,
@@ -78,7 +83,19 @@ receipt NovaAgreementReceiptV0 has store, create, consume {
     timepoint: u64,
 }
 
-action originate_agreement(witness terms: NovaAgreementTermsV0, witness originator_authority_hash: Hash, witness receipt_hash: Hash) -> (agreement: NovaAgreementCellV0, receipt: NovaAgreementReceiptV0)
+receipt NativeCkbPayoutV0 has store, create, consume {
+    action: u8,
+    agreement_id: Hash,
+    role: u8,
+    recipient_authority_hash: Hash,
+    asset_kind: u8,
+    asset_hash: Hash,
+    amount: u64,
+    terms_hash: Hash,
+    nonce: u64,
+}
+
+action originate_agreement(witness terms: NovaAgreementTermsV0, witness originator_authority_hash: Hash, witness receipt_hash: Hash) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
     require terms.version == AGREEMENT_VERSION
@@ -113,6 +130,18 @@ where
         nonce: 0
     }
 
+    create principal_payout = NativeCkbPayoutV0 {
+        action: PATH_ORIGINATE,
+        agreement_id: terms.agreement_id,
+        role: PAYOUT_BORROWER_PRINCIPAL,
+        recipient_authority_hash: terms.borrower_authority_hash,
+        asset_kind: terms.principal_asset_kind,
+        asset_hash: terms.principal_asset_hash,
+        amount: terms.principal_amount,
+        terms_hash: terms.terms_hash,
+        nonce: 0
+    }
+
     create receipt = NovaAgreementReceiptV0 {
         action: PATH_ORIGINATE,
         agreement_id: terms.agreement_id,
@@ -131,7 +160,7 @@ where
         timepoint: now
     }
 
-action repay_before_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, receipt: NovaAgreementReceiptV0)
+action repay_before_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
     let repayment_amount = active.principal_amount + active.fixed_fee_amount
@@ -159,6 +188,30 @@ where
     require closed.receipt_root == receipt_hash
     require closed.nonce == active.nonce + 1
 
+    create lender_repayment = NativeCkbPayoutV0 {
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_LENDER_REPAYMENT,
+        recipient_authority_hash: active.lender_authority_hash,
+        asset_kind: active.principal_asset_kind,
+        asset_hash: active.principal_asset_hash,
+        amount: repayment_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
+
+    create borrower_collateral_return = NativeCkbPayoutV0 {
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_BORROWER_COLLATERAL_RETURN,
+        recipient_authority_hash: active.borrower_authority_hash,
+        asset_kind: active.collateral_asset_kind,
+        asset_hash: active.collateral_asset_hash,
+        amount: active.collateral_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
+
     create receipt = NovaAgreementReceiptV0 {
         action: PATH_REPAY_BEFORE_EXPIRY,
         agreement_id: active.agreement_id,
@@ -177,7 +230,7 @@ where
         timepoint: now
     }
 
-action claim_after_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, receipt: NovaAgreementReceiptV0)
+action claim_after_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
     let claim_amount = active.collateral_amount
@@ -204,6 +257,18 @@ where
     require closed.status == STATUS_DEFAULTED
     require closed.receipt_root == receipt_hash
     require closed.nonce == active.nonce + 1
+
+    create lender_default_claim = NativeCkbPayoutV0 {
+        action: PATH_CLAIM_AFTER_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_LENDER_DEFAULT_CLAIM,
+        recipient_authority_hash: active.lender_authority_hash,
+        asset_kind: active.collateral_asset_kind,
+        asset_hash: active.collateral_asset_hash,
+        amount: claim_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
 
     create receipt = NovaAgreementReceiptV0 {
         action: PATH_CLAIM_AFTER_EXPIRY,

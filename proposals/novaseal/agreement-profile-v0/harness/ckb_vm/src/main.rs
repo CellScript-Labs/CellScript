@@ -49,6 +49,7 @@ const EXPIRY_TIMEPOINT: u64 = 200;
 const TERMS_LEN: usize = 237;
 const AGREEMENT_CELL_LEN: usize = 269;
 const AGREEMENT_RECEIPT_LEN: usize = 243;
+const PAYOUT_LEN: usize = 147;
 
 const AGREEMENT_VERSION: u16 = 0;
 const ASSET_KIND_CKB: u8 = 0;
@@ -60,6 +61,10 @@ const STATUS_DEFAULTED: u8 = 3;
 const PATH_ORIGINATE: u8 = 0;
 const PATH_REPAY_BEFORE_EXPIRY: u8 = 1;
 const PATH_CLAIM_AFTER_EXPIRY: u8 = 2;
+const PAYOUT_BORROWER_PRINCIPAL: u8 = 0;
+const PAYOUT_LENDER_REPAYMENT: u8 = 1;
+const PAYOUT_BORROWER_COLLATERAL_RETURN: u8 = 2;
+const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3;
 
 const ZERO_HASH: [u8; 32] = [0x00; 32];
 const AGREEMENT_ID: [u8; 32] = [0xaa; 32];
@@ -70,6 +75,7 @@ const STRANGER_AUTHORITY: [u8; 32] = [0x33; 32];
 const OLD_RECEIPT_ROOT: [u8; 32] = [0x44; 32];
 const NEW_RECEIPT_ROOT: [u8; 32] = [0x55; 32];
 const OTHER_RECEIPT_ROOT: [u8; 32] = [0x66; 32];
+const OTHER_TERMS_HASH: [u8; 32] = [0xcc; 32];
 
 type HarnessMachine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
 
@@ -420,9 +426,22 @@ fn build_cases() -> Vec<AgreementCase> {
     let originated = encode_agreement_cell(&terms, STATUS_ACTIVE, NEW_RECEIPT_ROOT, 0);
     let repaid = encode_agreement_cell(&terms, STATUS_REPAID, NEW_RECEIPT_ROOT, 1);
     let defaulted = encode_agreement_cell(&terms, STATUS_DEFAULTED, NEW_RECEIPT_ROOT, 1);
+    let mut bad_terms = terms.clone();
+    bad_terms.terms_hash = OTHER_TERMS_HASH;
+    let bad_terms_bytes = encode_terms(&bad_terms);
 
     let originate_receipt =
         encode_receipt(&terms, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, ZERO_HASH, NEW_RECEIPT_ROOT, 0, 120);
+    let originate_payout = encode_payout(
+        &terms,
+        PATH_ORIGINATE,
+        PAYOUT_BORROWER_PRINCIPAL,
+        BORROWER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        PRINCIPAL_AMOUNT,
+        0,
+    );
     let repay_receipt = encode_receipt(
         &terms,
         PATH_REPAY_BEFORE_EXPIRY,
@@ -434,6 +453,26 @@ fn build_cases() -> Vec<AgreementCase> {
         1,
         180,
     );
+    let lender_repayment = encode_payout(
+        &terms,
+        PATH_REPAY_BEFORE_EXPIRY,
+        PAYOUT_LENDER_REPAYMENT,
+        LENDER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+        1,
+    );
+    let borrower_collateral_return = encode_payout(
+        &terms,
+        PATH_REPAY_BEFORE_EXPIRY,
+        PAYOUT_BORROWER_COLLATERAL_RETURN,
+        BORROWER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        COLLATERAL_AMOUNT,
+        1,
+    );
     let claim_receipt = encode_receipt(
         &terms,
         PATH_CLAIM_AFTER_EXPIRY,
@@ -444,6 +483,29 @@ fn build_cases() -> Vec<AgreementCase> {
         NEW_RECEIPT_ROOT,
         1,
         220,
+    );
+    let lender_default_claim = encode_payout(
+        &terms,
+        PATH_CLAIM_AFTER_EXPIRY,
+        PAYOUT_LENDER_DEFAULT_CLAIM,
+        LENDER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        COLLATERAL_AMOUNT,
+        1,
+    );
+    let mut wrong_repayment_amount = lender_repayment.clone();
+    overwrite_u64(&mut wrong_repayment_amount, 99, PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT - CKB);
+    let receipt_output_mismatch = encode_receipt(
+        &terms,
+        PATH_REPAY_BEFORE_EXPIRY,
+        STATUS_ACTIVE,
+        STATUS_REPAID,
+        PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+        OLD_RECEIPT_ROOT,
+        OTHER_RECEIPT_ROOT,
+        1,
+        180,
     );
 
     let mut bad_nonce = repaid.clone();
@@ -462,7 +524,18 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 120,
             witness: build_originate_witness(&terms_bytes, &BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![],
-            output_cell_data: vec![originated, originate_receipt],
+            output_cell_data: vec![originated.clone(), originate_payout.clone(), originate_receipt.clone()],
+        },
+        AgreementCase {
+            fixture: "wrong_terms_hash_reject",
+            variant: "originate_wrong_terms_hash",
+            action: ActionKind::Originate,
+            expected: "rejected",
+            expected_reason: "created agreement, payout, and receipt outputs must bind the witness terms_hash",
+            current_timepoint: 120,
+            witness: build_originate_witness(&bad_terms_bytes, &BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            input_cell_data: vec![],
+            output_cell_data: vec![originated.clone(), originate_payout.clone(), originate_receipt.clone()],
         },
         AgreementCase {
             fixture: "wrong_originator_reject",
@@ -475,6 +548,7 @@ fn build_cases() -> Vec<AgreementCase> {
             input_cell_data: vec![],
             output_cell_data: vec![
                 encode_agreement_cell(&terms, STATUS_ACTIVE, NEW_RECEIPT_ROOT, 0),
+                originate_payout,
                 encode_receipt(&terms, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, ZERO_HASH, NEW_RECEIPT_ROOT, 0, 120),
             ],
         },
@@ -487,7 +561,12 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![repaid.clone(), repay_receipt.clone()],
+            output_cell_data: vec![
+                repaid.clone(),
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                repay_receipt.clone(),
+            ],
         },
         AgreementCase {
             fixture: "expired_repay_reject",
@@ -498,7 +577,12 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 220,
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![repaid.clone(), repay_receipt.clone()],
+            output_cell_data: vec![
+                repaid.clone(),
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                repay_receipt.clone(),
+            ],
         },
         AgreementCase {
             fixture: "wrong_party_reject",
@@ -509,7 +593,12 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&STRANGER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![repaid.clone(), repay_receipt.clone()],
+            output_cell_data: vec![
+                repaid.clone(),
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                repay_receipt.clone(),
+            ],
         },
         AgreementCase {
             fixture: "nonce_mismatch_reject",
@@ -520,7 +609,7 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![bad_nonce, repay_receipt.clone()],
+            output_cell_data: vec![bad_nonce, lender_repayment.clone(), borrower_collateral_return.clone(), repay_receipt.clone()],
         },
         AgreementCase {
             fixture: "preserved_field_mutation_reject",
@@ -531,7 +620,12 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![mutated_principal, repay_receipt.clone()],
+            output_cell_data: vec![
+                mutated_principal,
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                repay_receipt.clone(),
+            ],
         },
         AgreementCase {
             fixture: "receipt_root_mismatch_reject",
@@ -542,7 +636,39 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![receipt_root_mismatch, repay_receipt],
+            output_cell_data: vec![
+                receipt_root_mismatch,
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                repay_receipt.clone(),
+            ],
+        },
+        AgreementCase {
+            fixture: "receipt_hash_mismatch_reject",
+            variant: "repay_receipt_output_mismatch",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "materialized receipt output must bind the witness receipt_hash",
+            current_timepoint: 180,
+            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            input_cell_data: vec![active.clone()],
+            output_cell_data: vec![
+                repaid.clone(),
+                lender_repayment.clone(),
+                borrower_collateral_return.clone(),
+                receipt_output_mismatch,
+            ],
+        },
+        AgreementCase {
+            fixture: "wrong_settlement_amount_reject",
+            variant: "repay_wrong_settlement_amount",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "typed lender repayment output must equal principal plus fixed fee",
+            current_timepoint: 180,
+            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            input_cell_data: vec![active.clone()],
+            output_cell_data: vec![repaid.clone(), wrong_repayment_amount, borrower_collateral_return.clone(), repay_receipt],
         },
         AgreementCase {
             fixture: "claim_after_expiry_valid",
@@ -553,7 +679,7 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 220,
             witness: build_terminal_witness(&LENDER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![defaulted.clone(), claim_receipt.clone()],
+            output_cell_data: vec![defaulted.clone(), lender_default_claim.clone(), claim_receipt.clone()],
         },
         AgreementCase {
             fixture: "early_claim_reject",
@@ -564,7 +690,7 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 180,
             witness: build_terminal_witness(&LENDER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active.clone()],
-            output_cell_data: vec![defaulted.clone(), claim_receipt.clone()],
+            output_cell_data: vec![defaulted.clone(), lender_default_claim.clone(), claim_receipt.clone()],
         },
         AgreementCase {
             fixture: "wrong_party_reject",
@@ -575,7 +701,7 @@ fn build_cases() -> Vec<AgreementCase> {
             current_timepoint: 220,
             witness: build_terminal_witness(&STRANGER_AUTHORITY, &NEW_RECEIPT_ROOT),
             input_cell_data: vec![active],
-            output_cell_data: vec![defaulted, claim_receipt],
+            output_cell_data: vec![defaulted, lender_default_claim, claim_receipt],
         },
     ]
 }
@@ -685,8 +811,8 @@ fn build_report(
         limits: vec![
             "Executes the three compiled Agreement Profile action ELFs in ckb-vm with harnessed LOAD_WITNESS, LOAD_CELL_DATA, and LOAD_HEADER_BY_FIELD syscalls.",
             "This is action/type-script evidence only; it does not run ckb-verification or a full resolved transaction.",
-            "Native CKB capacity and payout-cell settlement remain covered by the local transaction-shape harness, not by this action VM harness.",
-            "Canonical terms_hash and receipt_hash preimage computation is still not implemented.",
+            "Typed payout, terms_hash, and receipt_hash output bindings are executed at action/type scope; native CKB capacity remains transaction-layer evidence.",
+            "Full Molecule/wallet signing preimage alignment is still not implemented.",
             "Cryptographic borrower/lender authority locks are still not implemented in this Agreement Profile slice.",
             "The transaction context is deterministic harness data, not live-chain RPC, mempool, miner, or deployment evidence.",
         ],
@@ -765,6 +891,30 @@ fn encode_receipt(
     push_u64(&mut out, nonce);
     push_u64(&mut out, timepoint);
     debug_assert_eq!(out.len(), AGREEMENT_RECEIPT_LEN);
+    out
+}
+
+fn encode_payout(
+    fields: &AgreementFields,
+    action: u8,
+    role: u8,
+    recipient: [u8; 32],
+    asset_kind: u8,
+    asset_hash: [u8; 32],
+    amount: u64,
+    nonce: u64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(PAYOUT_LEN);
+    out.push(action);
+    push_hash(&mut out, &fields.agreement_id);
+    out.push(role);
+    push_hash(&mut out, &recipient);
+    out.push(asset_kind);
+    push_hash(&mut out, &asset_hash);
+    push_u64(&mut out, amount);
+    push_hash(&mut out, &fields.terms_hash);
+    push_u64(&mut out, nonce);
+    debug_assert_eq!(out.len(), PAYOUT_LEN);
     out
 }
 

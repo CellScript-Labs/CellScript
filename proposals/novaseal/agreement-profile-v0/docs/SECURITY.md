@@ -13,6 +13,10 @@
 - Status moves from `Active` to a terminal status.
 - Nonce increments on terminal paths.
 - Receipt output is materialized on every implemented path.
+- Typed native CKB payout outputs are materialized for principal payout,
+  repayment, collateral return, and default claim paths.
+- Terms hash and receipt hash output mismatches reject in action VM and resolved
+  transaction evidence.
 - Local transaction-shape harness checks output occupied-capacity floors and
   CKB economic amounts for origination, repayment, and default claim.
 - Action CKB VM harness executes the compiled action ELFs and checks that time,
@@ -25,8 +29,8 @@
 
 - Canonical terms hash preimage verification.
 - Canonical receipt hash preimage verification.
-- On-chain binding from terminal receipt amounts to concrete payout output
-  cells.
+- Wallet/builder plumbing that maps typed payout outputs to production CKB
+  recipient locks and change handling.
 - Cryptographic borrower/lender authority locks.
 - BTC UTXO mirror, SPV, OP_RETURN, or BTC finality.
 - iCKB, xUDT, Fiber, or channel execution.

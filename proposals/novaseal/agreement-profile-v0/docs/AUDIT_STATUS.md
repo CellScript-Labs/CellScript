@@ -15,16 +15,16 @@ evidence, and resolved transaction verifier evidence.
 | `cellc explain-assumptions --target-profile ckb` | passed; ProofPlan soundness passed |
 | `cellc check --target-profile ckb --primitive-strict 0.16` | passed |
 | `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
-| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty` | passed; 11/11 expectations matched |
-| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 12/12 script-layer and node-verifier expectations matched |
+| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty` | passed; 14/14 expectations matched |
+| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 15/15 script-layer and node-verifier expectations matched |
 
 Generated audit surface:
 
 - actions: 3
 - locks: 0
 - source units: 2
-- ProofPlan records: 63
-- builder assumptions: 17
+- ProofPlan records: 71
+- builder assumptions: 21
 
 ## Commands
 
@@ -57,35 +57,35 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 | Action CKB VM fixture harness | implemented | action-ckb-vm-covered |
 | Resolved transaction verifier harness | implemented | resolved-transaction-covered |
 | Native CKB occupied-capacity rejection | implemented | resolved-transaction-covered |
-| Native CKB payout-cell settlement binding | local model only | local-transaction-shape-covered |
-| Canonical terms hash | missing | blocked |
-| Canonical receipt hash | missing | blocked |
+| Native CKB payout output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Terms hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Receipt hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Full Molecule/wallet hash preimage alignment | missing | future work |
 | BTC collateral support | out of scope | not implemented |
 
 ## Fixture Honesty
 
 The local harness executes the builder-visible transaction shapes for
 origination, repayment, default claim, time rejects, party rejects,
-under-capacity reject, and wrong-settlement reject. The hash preimage fixtures
-remain blocked because canonical terms/receipt hashing is not implemented.
+under-capacity reject, and wrong-settlement reject.
 
 The action CKB VM harness executes the three compiled action ELFs and covers
 origination, repayment, default claim, time rejects, party rejects, nonce
-mismatch, receipt-root mismatch, and preserved-field mutation. It deliberately
-does not claim capacity/payout-cell settlement or canonical hash preimage
-coverage.
+mismatch, receipt-root mismatch, receipt output mismatch, terms hash output
+mismatch, wrong settlement payout, and preserved-field mutation. It deliberately
+does not claim live deployment or wallet signing preimage coverage.
 
 The resolved transaction harness constructs deterministic CKB transactions,
 loads action code and a local always-success lock through CellDeps, and runs both
 `ckb-script` and `ckb-verification`. It covers the same terminal-path cases plus
-the transaction-layer under-capacity reject. The wrong-settlement fixture remains
-local-shape-only because this profile does not yet bind payout cells on-chain.
-The harness fails if the not-executed fixture partition differs from the known
-blocker set: canonical terms hash, canonical receipt hash, and payout-cell
-settlement binding.
+the transaction-layer under-capacity reject. The wrong-settlement fixture is now
+resolved-transaction-covered through a typed `NativeCkbPayoutV0` output mismatch.
+The harness now fails unless every fixture file is covered by resolved
+transaction evidence.
 
 ## Receipt Honesty
 
 Receipts are materialized as outputs. The `receipt_hash`/`receipt_root` value is
-carried through state and receipt fields. The profile does not yet compute the
-canonical receipt hash preimage on-chain.
+carried through state and receipt fields, and receipt output mismatches are
+covered in action VM plus resolved transaction evidence. Full Molecule/wallet
+signing preimage alignment remains future work.

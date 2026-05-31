@@ -33,8 +33,7 @@ const DEFAULT_CLAIM_ELF: &str = "target/nova-agreement-claim-action.elf";
 const DEFAULT_LOCK_ELF: &str = "target/nova-agreement-always-success-lock.elf";
 const DEFAULT_FIXTURES_DIR: &str = "fixtures";
 const DEFAULT_OUTPUT: &str = "target/nova-agreement-ckb-tx-report.json";
-const EXPECTED_TX_HARNESS_LIMIT_FIXTURES: &[&str] =
-    &["receipt_hash_mismatch_reject", "wrong_settlement_amount_reject", "wrong_terms_hash_reject"];
+const EXPECTED_TX_HARNESS_LIMIT_FIXTURES: &[&str] = &[];
 
 const VERIFY_MAX_CYCLES: u64 = 800_000_000;
 const VM2_ENABLED_EPOCH: u64 = 10;
@@ -54,6 +53,7 @@ const EXPIRY_TIMEPOINT: u64 = 200;
 const TERMS_LEN: usize = 237;
 const AGREEMENT_CELL_LEN: usize = 269;
 const AGREEMENT_RECEIPT_LEN: usize = 243;
+const PAYOUT_LEN: usize = 147;
 
 const AGREEMENT_VERSION: u16 = 0;
 const ASSET_KIND_CKB: u8 = 0;
@@ -65,6 +65,10 @@ const STATUS_DEFAULTED: u8 = 3;
 const PATH_ORIGINATE: u8 = 0;
 const PATH_REPAY_BEFORE_EXPIRY: u8 = 1;
 const PATH_CLAIM_AFTER_EXPIRY: u8 = 2;
+const PAYOUT_BORROWER_PRINCIPAL: u8 = 0;
+const PAYOUT_LENDER_REPAYMENT: u8 = 1;
+const PAYOUT_BORROWER_COLLATERAL_RETURN: u8 = 2;
+const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3;
 
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
 const ZERO_HASH: [u8; 32] = [0x00; 32];
@@ -76,6 +80,7 @@ const STRANGER_AUTHORITY: [u8; 32] = [0x33; 32];
 const OLD_RECEIPT_ROOT: [u8; 32] = [0x44; 32];
 const NEW_RECEIPT_ROOT: [u8; 32] = [0x55; 32];
 const OTHER_RECEIPT_ROOT: [u8; 32] = [0x66; 32];
+const OTHER_TERMS_HASH: [u8; 32] = [0xcc; 32];
 
 #[derive(Debug, Error)]
 enum HarnessError {
@@ -200,6 +205,7 @@ struct AgreementCase {
 struct PayoutOutput {
     role: &'static str,
     capacity: u64,
+    data: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -419,8 +425,21 @@ fn build_cases() -> Vec<AgreementCase> {
     let originated = encode_agreement_cell(&fields, STATUS_ACTIVE, NEW_RECEIPT_ROOT, 0);
     let repaid = encode_agreement_cell(&fields, STATUS_REPAID, NEW_RECEIPT_ROOT, 1);
     let defaulted = encode_agreement_cell(&fields, STATUS_DEFAULTED, NEW_RECEIPT_ROOT, 1);
+    let mut bad_terms = fields.clone();
+    bad_terms.terms_hash = OTHER_TERMS_HASH;
+    let bad_terms_bytes = encode_terms(&bad_terms);
     let originate_receipt =
         encode_receipt(&fields, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, ZERO_HASH, NEW_RECEIPT_ROOT, 0, 120);
+    let originate_payout = encode_payout(
+        &fields,
+        PATH_ORIGINATE,
+        PAYOUT_BORROWER_PRINCIPAL,
+        BORROWER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        PRINCIPAL_AMOUNT,
+        0,
+    );
     let repay_receipt = encode_receipt(
         &fields,
         PATH_REPAY_BEFORE_EXPIRY,
@@ -431,6 +450,26 @@ fn build_cases() -> Vec<AgreementCase> {
         NEW_RECEIPT_ROOT,
         1,
         180,
+    );
+    let lender_repayment = encode_payout(
+        &fields,
+        PATH_REPAY_BEFORE_EXPIRY,
+        PAYOUT_LENDER_REPAYMENT,
+        LENDER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+        1,
+    );
+    let borrower_collateral_return = encode_payout(
+        &fields,
+        PATH_REPAY_BEFORE_EXPIRY,
+        PAYOUT_BORROWER_COLLATERAL_RETURN,
+        BORROWER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        COLLATERAL_AMOUNT,
+        1,
     );
     let claim_receipt = encode_receipt(
         &fields,
@@ -443,11 +482,34 @@ fn build_cases() -> Vec<AgreementCase> {
         1,
         220,
     );
+    let lender_default_claim = encode_payout(
+        &fields,
+        PATH_CLAIM_AFTER_EXPIRY,
+        PAYOUT_LENDER_DEFAULT_CLAIM,
+        LENDER_AUTHORITY,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        COLLATERAL_AMOUNT,
+        1,
+    );
     let mut bad_nonce = repaid.clone();
     overwrite_u64(&mut bad_nonce, 261, 2);
     let mut mutated_principal = repaid.clone();
     overwrite_u64(&mut mutated_principal, 204, PRINCIPAL_AMOUNT - CKB);
     let receipt_root_mismatch = encode_agreement_cell(&fields, STATUS_REPAID, OTHER_RECEIPT_ROOT, 1);
+    let receipt_output_mismatch = encode_receipt(
+        &fields,
+        PATH_REPAY_BEFORE_EXPIRY,
+        STATUS_ACTIVE,
+        STATUS_REPAID,
+        PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+        OLD_RECEIPT_ROOT,
+        OTHER_RECEIPT_ROOT,
+        1,
+        180,
+    );
+    let mut wrong_repayment_amount = lender_repayment.clone();
+    overwrite_u64(&mut wrong_repayment_amount, 99, PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT - CKB);
 
     vec![
         AgreementCase {
@@ -464,6 +526,25 @@ fn build_cases() -> Vec<AgreementCase> {
             payout_outputs: vec![PayoutOutput {
                 role: "borrower_principal_payout",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                data: originate_payout.clone(),
+            }],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "wrong_terms_hash_reject",
+            variant: "originate_wrong_terms_hash",
+            action: ActionKind::Originate,
+            expected: "rejected",
+            expected_reason: "created agreement, payout, and receipt outputs must bind the witness terms_hash",
+            current_timepoint: 120,
+            witness: build_originate_witness(&bad_terms_bytes, &BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            active_cell_data: None,
+            agreement_output_data: originated.clone(),
+            receipt_output_data: originate_receipt.clone(),
+            payout_outputs: vec![PayoutOutput {
+                role: "borrower_principal_payout",
+                capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                data: originate_payout.clone(),
             }],
             under_capacity_agreement_output: false,
         },
@@ -481,6 +562,7 @@ fn build_cases() -> Vec<AgreementCase> {
             payout_outputs: vec![PayoutOutput {
                 role: "borrower_principal_payout",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                data: originate_payout,
             }],
             under_capacity_agreement_output: false,
         },
@@ -496,8 +578,16 @@ fn build_cases() -> Vec<AgreementCase> {
             agreement_output_data: repaid.clone(),
             receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -513,8 +603,16 @@ fn build_cases() -> Vec<AgreementCase> {
             agreement_output_data: repaid.clone(),
             receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -530,8 +628,16 @@ fn build_cases() -> Vec<AgreementCase> {
             agreement_output_data: repaid.clone(),
             receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -547,8 +653,16 @@ fn build_cases() -> Vec<AgreementCase> {
             agreement_output_data: bad_nonce,
             receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -564,8 +678,16 @@ fn build_cases() -> Vec<AgreementCase> {
             agreement_output_data: mutated_principal,
             receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -579,10 +701,68 @@ fn build_cases() -> Vec<AgreementCase> {
             witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
             active_cell_data: Some(active.clone()),
             agreement_output_data: receipt_root_mismatch,
-            receipt_output_data: repay_receipt,
+            receipt_output_data: repay_receipt.clone(),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
+            ],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "receipt_hash_mismatch_reject",
+            variant: "repay_receipt_output_mismatch",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "materialized receipt output must bind the witness receipt_hash",
+            current_timepoint: 180,
+            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            active_cell_data: Some(active.clone()),
+            agreement_output_data: repaid.clone(),
+            receipt_output_data: receipt_output_mismatch,
+            payout_outputs: vec![
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
+            ],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "wrong_settlement_amount_reject",
+            variant: "repay_wrong_settlement_amount",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "typed lender repayment output must equal principal plus fixed fee",
+            current_timepoint: 180,
+            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            active_cell_data: Some(active.clone()),
+            agreement_output_data: repaid.clone(),
+            receipt_output_data: repay_receipt.clone(),
+            payout_outputs: vec![
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: wrong_repayment_amount,
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return.clone(),
+                },
             ],
             under_capacity_agreement_output: false,
         },
@@ -600,6 +780,7 @@ fn build_cases() -> Vec<AgreementCase> {
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                data: lender_default_claim.clone(),
             }],
             under_capacity_agreement_output: false,
         },
@@ -617,6 +798,7 @@ fn build_cases() -> Vec<AgreementCase> {
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                data: lender_default_claim.clone(),
             }],
             under_capacity_agreement_output: false,
         },
@@ -634,6 +816,7 @@ fn build_cases() -> Vec<AgreementCase> {
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                data: lender_default_claim,
             }],
             under_capacity_agreement_output: false,
         },
@@ -659,8 +842,16 @@ fn build_cases() -> Vec<AgreementCase> {
                 180,
             ),
             payout_outputs: vec![
-                PayoutOutput { role: "lender_repayment", capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT },
-                PayoutOutput { role: "borrower_collateral_return", capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT },
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    data: borrower_collateral_return,
+                },
             ],
             under_capacity_agreement_output: true,
         },
@@ -814,12 +1005,9 @@ fn build_transaction_context(action_elf: &[u8], lock_elf: &[u8], case: &Agreemen
     };
     let receipt_capacity = receipt_occupied;
 
-    let mut outputs = vec![
-        agreement_output_without_capacity.as_builder().capacity(Capacity::shannons(agreement_capacity).pack()).build(),
-        receipt_output_without_capacity.as_builder().capacity(Capacity::shannons(receipt_capacity).pack()).build(),
-    ];
-    let mut outputs_data =
-        vec![CkbBytes::from(case.agreement_output_data.clone()).pack(), CkbBytes::from(case.receipt_output_data.clone()).pack()];
+    let mut outputs =
+        vec![agreement_output_without_capacity.as_builder().capacity(Capacity::shannons(agreement_capacity).pack()).build()];
+    let mut outputs_data = vec![CkbBytes::from(case.agreement_output_data.clone()).pack()];
     let mut output_capacity = agreement_capacity + receipt_capacity;
     let mut output_occupied_capacity = agreement_occupied + receipt_occupied;
 
@@ -833,8 +1021,10 @@ fn build_transaction_context(action_elf: &[u8], lock_elf: &[u8], case: &Agreemen
             .checked_add(PAYOUT_OCCUPIED_CAPACITY)
             .ok_or_else(|| HarnessError::Message("occupied capacity overflow".to_string()))?;
         outputs.push(payout_output);
-        outputs_data.push(CkbBytes::new().pack());
+        outputs_data.push(CkbBytes::from(payout.data.clone()).pack());
     }
+    outputs.push(receipt_output_without_capacity.as_builder().capacity(Capacity::shannons(receipt_capacity).pack()).build());
+    outputs_data.push(CkbBytes::from(case.receipt_output_data.clone()).pack());
 
     let required_input_capacity = output_capacity
         .checked_add(BUILDER_FEE_SHANNONS)
@@ -986,9 +1176,9 @@ fn build_report(
         limits: vec![
             "Runs ckb-script TransactionScriptsVerifier and ckb-verification NonContextualTransactionVerifier/ContextualTransactionVerifier over deterministic in-memory resolved transactions.",
             "Uses a local always-success lock only to let terminal transaction inputs reach the Agreement Profile type/action script. This lock is not part of the deployed protocol surface.",
-            "Covers Agreement Profile action/type guards plus CKB occupied-capacity rejection for the under-capacity fixture.",
-            "Wrong settlement payout remains local-shape-only because the current CellScript profile records terminal_amount but does not yet bind concrete payout cells on-chain.",
-            "Canonical terms_hash and receipt_hash preimage computation is still not implemented.",
+            "Covers Agreement Profile action/type guards, typed payout output binding, receipt_hash output binding, terms_hash output binding, and CKB occupied-capacity rejection for the under-capacity fixture.",
+            "Native CKB economic settlement is represented by typed payout outputs plus transaction capacity/value shape evidence; production wallet/builder integration still must preserve that mapping.",
+            "Full Molecule/wallet signing preimage alignment is still not implemented.",
             "Cryptographic borrower/lender authority locks are still not implemented in this Agreement Profile slice.",
             "No live-chain RPC submission, mempool propagation, miner acceptance, or deployed CellDep liveness is proven.",
         ],
@@ -1067,6 +1257,30 @@ fn encode_receipt(
     push_u64(&mut out, nonce);
     push_u64(&mut out, timepoint);
     debug_assert_eq!(out.len(), AGREEMENT_RECEIPT_LEN);
+    out
+}
+
+fn encode_payout(
+    fields: &AgreementFields,
+    action: u8,
+    role: u8,
+    recipient: [u8; 32],
+    asset_kind: u8,
+    asset_hash: [u8; 32],
+    amount: u64,
+    nonce: u64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(PAYOUT_LEN);
+    out.push(action);
+    push_hash(&mut out, &fields.agreement_id);
+    out.push(role);
+    push_hash(&mut out, &recipient);
+    out.push(asset_kind);
+    push_hash(&mut out, &asset_hash);
+    push_u64(&mut out, amount);
+    push_hash(&mut out, &fields.terms_hash);
+    push_u64(&mut out, nonce);
+    debug_assert_eq!(out.len(), PAYOUT_LEN);
     out
 }
 

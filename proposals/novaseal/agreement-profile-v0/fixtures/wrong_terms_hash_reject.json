@@ -3,7 +3,7 @@
   "fixture": "wrong_terms_hash_reject",
   "action": "originate_agreement / terminal paths",
   "expected": "rejected",
-  "coverage": "blocked",
-  "description": "Full canonical terms_hash preimage validation is not implemented in CellScript in this slice. The terms_hash is carried and preserved, but a wrong preimage is not yet computed/rejected on-chain.",
-  "blocker": "Need frozen Molecule preimage hashing or a generated field-by-field terms commitment helper."
+  "coverage": "action-ckb-vm-covered + resolved-transaction-covered",
+  "reject_guard": "created agreement, payout, and receipt outputs must bind the witness terms_hash",
+  "description": "Origination with a witness terms_hash that does not match the materialized agreement, payout, and receipt outputs must reject."
 }

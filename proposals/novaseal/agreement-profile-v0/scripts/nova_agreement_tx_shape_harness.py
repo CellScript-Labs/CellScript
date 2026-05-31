@@ -441,9 +441,9 @@ def build_report(fixtures_dir: Path) -> dict[str, Any]:
             "Does not execute generated CellScript in CKB VM.",
             "Does not call ckb-verification.",
             "Does not prove live-chain RPC, deployment, mempool, or miner acceptance.",
-            "Does not compute canonical terms_hash or receipt_hash preimages.",
+            "Does not check typed payout, terms_hash, or receipt_hash output bindings; those are covered by the action VM and resolved transaction harnesses.",
             "Cryptographic borrower/lender authority locks are not implemented in this profile slice.",
-            "Native CKB settlement is checked as local builder-shape evidence, not as generated CellScript enforcement.",
+            "Native CKB settlement capacity/value shape is checked here as local builder evidence.",
         ],
     }
 

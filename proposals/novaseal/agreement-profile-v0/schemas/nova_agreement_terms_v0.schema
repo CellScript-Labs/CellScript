@@ -28,7 +28,6 @@ expiry_timepoint: u64
 early_close_policy: u8          # 0 = fixed fee
 
 # Important boundary:
-# The profile checks these fields in CellScript and has a local transaction
-# shape harness for native CKB output amounts. It does not yet prove CKB VM
-# transaction execution, wallet signatures, or a canonical Molecule terms_hash
-# preimage.
+# The profile checks these fields in CellScript and has action CKB VM plus
+# resolved transaction evidence for terms_hash output binding. Full
+# Molecule/wallet signing preimage alignment remains future work.

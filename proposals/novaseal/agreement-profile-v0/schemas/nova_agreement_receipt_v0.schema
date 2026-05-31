@@ -2,8 +2,7 @@
 #
 # The receipt is materialised as a first-class output by the current .cell
 # actions. The new_receipt_root/receipt_hash value is checked as a transition
-# field, but this first slice does not yet compute a canonical hash of all
-# receipt fields inside CellScript.
+# field and as output data in action VM plus resolved transaction evidence.
 
 action: u8                      # 0 originate, 1 repay_before_expiry, 2 claim_after_expiry
 agreement_id: Byte32
