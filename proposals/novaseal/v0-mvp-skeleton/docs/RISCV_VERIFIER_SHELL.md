@@ -8,7 +8,7 @@
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Status**: RISC-V ELF shell exists; inherited-fd spawn input adapter uses the official VM2 buffer/length ABI; no-std BIP340 verification is wired; child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group execution, and official full transaction script-verifier execution exist.
 
-This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all eight fixtures with both lock and type/action ScriptGroups present. The remaining gap is public/shared deployment pinning.
+This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all eight fixtures with both lock and type/action ScriptGroups present. The remaining production gaps are public/shared deployment attestation and external TCB review.
 
 ## Current Behaviour
 
@@ -46,7 +46,7 @@ core_unit_tests=4
 shell_lib_unit_tests=5
 riscv_binary_build=passed
 riscv_debug_elf_size_bytes=3360424
-riscv_release_elf_size_bytes=187768
+riscv_release_elf_size_bytes=190040
 shell_vectors_total=77
 parse_ok=72
 parse_rejected=5
@@ -56,7 +56,7 @@ accepted=32
 rejected=45
 matched_expected=77
 all_expected_matched=true
-staged_release_elf_sha256=d0d1c14c811728c680d8646283cf7961dd850eebea856ac0e281fb493c4bc58d
+staged_release_elf_sha256=036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82
 child_vm_executed=true
 child_vm_matched_expected=77
 child_vm_max_cycles=3552601
@@ -79,6 +79,6 @@ This still does not prove criterion 6 on chain:
 - `nova_btc_authority_lock.cell` now spawns this binary through `spawn_with_fd`, and the parent-lock CKB VM harness executes that parent/child path,
 - the current CellScript VM2 `spawn_with_fd` helper emits executable `ecall`, but only first-CellDep `code` target binding is modelled (see `docs/SPAWN_BACKEND_BLOCKER.md`),
 - the generated `btc_authority` lock surface covers Script.args binding and spawn/IPC shell wiring, while the crypto decision is evidenced by verifier vectors, RISC-V build/tests, child-verifier CKB VM execution, parent-lock CKB VM execution, official resolved lock-group execution, and official full transaction script-verifier execution,
-- the parent-lock harness now records transaction-shape occupied-capacity, transaction-size, under-capacity checks, resolved lock-group cycles, and full transaction script-verifier cycles, but this is not public/shared deployment pinning.
+- the parent-lock harness now records transaction-shape occupied-capacity, transaction-size, under-capacity checks, resolved lock-group cycles, and full transaction script-verifier cycles, but this is not public/shared deployment attestation.
 
-The next shell slice should extend the full transaction script-verifier layer into public/shared deployment pinning evidence while preserving strict-mode honesty.
+The next shell slice should attach real public/shared CellDep attestation and external TCB review to the production gate while preserving strict-mode honesty.

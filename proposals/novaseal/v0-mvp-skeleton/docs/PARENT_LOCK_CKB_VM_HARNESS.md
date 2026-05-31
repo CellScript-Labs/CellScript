@@ -80,7 +80,7 @@ The parent lock now parses the same 398-byte `CSARGv1` witness payload shape as 
 
 It is still not production acceptance evidence:
 
-- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a public/shared deployment pinning flow,
+- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a public/shared deployment attestation flow,
 - the resolved transaction is harness-constructed and not yet produced by a production builder,
 - capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements,
 - the eight transition fixtures are still model-level, not full parent-lock transaction runs.

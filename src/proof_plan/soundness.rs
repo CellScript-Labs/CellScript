@@ -143,7 +143,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if strict && !plan.lock_args_fields.is_empty() && !plan.reads.iter().any(|read| read == "lock_args") {
+    if strict && has_executing_script_args_fields(plan) && !plan.reads.iter().any(|read| read == "lock_args") {
         push_issue(
             issues,
             "error",
@@ -180,6 +180,10 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
             "on-chain checked ProofPlan record carries unchecked runtime/metadata-only builder assumptions",
         );
     }
+}
+
+fn has_executing_script_args_fields(plan: &ProofPlanMetadata) -> bool {
+    plan.lock_args_fields.iter().any(|field| field.starts_with("lock_args.") || field.starts_with("ScriptArgs#"))
 }
 
 fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut Vec<ProofPlanSoundnessIssue>) {
@@ -354,6 +358,41 @@ mod tests {
         assert!(
             issues.iter().any(|issue| issue.code == "PP0103"),
             "checked-runtime without on_chain_checked must remain a strict soundness error: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn strict_pp0201_only_applies_to_executing_script_args() {
+        let mut output_lock_args = plan_with_status("checked-runtime", true, "covered");
+        output_lock_args.lock_args_fields.push("Output#0.lock_args".to_string());
+        let mut issues = Vec::new();
+
+        check_plan_record(&output_lock_args, true, &mut issues);
+
+        assert!(
+            !issues.iter().any(|issue| issue.code == "PP0201"),
+            "target cell lock args must not require reads=lock_args: {issues:?}"
+        );
+
+        let mut script_args = plan_with_status("checked-runtime", true, "covered");
+        script_args.lock_args_fields.push("ScriptArgs#0".to_string());
+        let mut issues = Vec::new();
+
+        check_plan_record(&script_args, true, &mut issues);
+
+        assert!(
+            issues.iter().any(|issue| issue.code == "PP0201"),
+            "executing Script.args must still require reads=lock_args: {issues:?}"
+        );
+
+        script_args.reads.push("lock_args".to_string());
+        let mut issues = Vec::new();
+
+        check_plan_record(&script_args, true, &mut issues);
+
+        assert!(
+            !issues.iter().any(|issue| issue.code == "PP0201"),
+            "declared reads=lock_args should satisfy executing Script.args strictness: {issues:?}"
         );
     }
 }

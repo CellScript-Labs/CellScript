@@ -28,41 +28,43 @@ FIELD_GUARDS = [
         "criterion": 3,
         "field": "state_hash",
         "source_snippets": [
-            "require intent.old_state_hash == old_cell.state_hash",
-            "let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)",
+            "require intent.core.old_state_hash == old_cell.state_hash",
+            "let actual_state_hash_commitment = hash_blake2b(intent.core.new_state_hash)",
             "require actual_state_hash_commitment == state_hash_commitment",
-            "state_hash: intent.new_state_hash",
+            "state_hash: intent.core.new_state_hash",
         ],
     },
     {
         "criterion": 4,
         "field": "nonce",
         "source_snippets": [
-            "require intent.nonce == old_cell.nonce + 1",
-            "nonce: intent.nonce",
+            "require intent.core.old_nonce == old_cell.nonce",
+            "require intent.core.new_nonce == old_cell.nonce + 1",
+            "nonce: intent.core.new_nonce",
         ],
     },
     {
         "criterion": 5,
         "field": "expiry",
         "source_snippets": [
-            "require now <= intent.expiry",
-            "expiry: intent.expiry",
+            "require now <= intent.core.expiry",
+            "expiry: intent.core.expiry",
         ],
     },
     {
         "criterion": 7,
         "field": "policy_hash",
         "source_snippets": [
-            "require intent.policy_hash == old_cell.policy_hash",
+            "require intent.core.policy_hash == old_cell.policy_hash",
             "policy_hash: old_cell.policy_hash",
         ],
     },
     {
         "criterion": 8,
-        "field": "receipt_hash",
+        "field": "latest_receipt_hash",
         "source_snippets": [
-            "require receipt_hash == intent.receipt_hash",
+            "require intent.expected_receipt_hash == materialized_receipt_hash",
+            "latest_receipt_hash: materialized_receipt_hash",
         ],
     },
 ]

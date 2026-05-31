@@ -5,7 +5,7 @@
 **No-std core**: `verifier/novaseal_btc_verifier_core`
 **RISC-V shell**: `verifier/novaseal_btc_verifier_riscv`
 **Report**: `target/novaseal-btc-verifier-ipc-vectors.json`
-**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence; no public/shared deployment pinning evidence yet.
+**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, official full transaction script-verifier evidence, live local devnet pinning, and local TCB review bundle; no public/shared deployment attestation or external TCB review yet.
 
 This document freezes the first v0 binary request shape that `nova_btc_authority_lock.cell` must eventually pass to `novaseal_btc_verifier`.
 
@@ -100,7 +100,7 @@ This is still not criterion 6 on chain:
 - the current RISC-V verifier binary shell reads inherited fd index `0` as 18 little-endian `u64` words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
 - the no-std core currently covers both the envelope parser and BIP340 verification,
 - child-verifier and parent-lock CKB VM harness evidence exists, and the parent-lock harness now records transaction-shape tx-size/capacity facts plus official resolved lock-group verifier success and full transaction script-verifier success,
-- no public/shared deployment pinning evidence exists yet,
+- no public/shared deployment attestation exists yet,
 - the generated `btc_authority` lock surface proves Script.args binding and spawn/IPC wiring, while crypto execution remains external harness evidence.
 
-This contract is deliberately small so the next slice can turn the current full transaction script-verifier evidence into public/shared deployment pinning evidence without changing the signed message or public vector set.
+This contract is deliberately small so the next slice can attach public/shared CellDep attestation and external TCB review without changing the signed message or public vector set.

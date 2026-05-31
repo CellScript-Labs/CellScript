@@ -564,7 +564,7 @@ generic BTC helper.
 Acceptance:
 
 - `cellc check --target-profile ckb` passes;
-- `cellc check --target-profile ckb --primitive-strict 0.16` does not claim package readiness until the current generated output/resource ProofPlan gaps are closed;
+- `cellc check --target-profile ckb --primitive-strict 0.16` passes for the current NovaSeal core package;
 - NovaSeal audit bundle shows `verifier:btc-bip340:*` ProofPlan records;
 - combined eight-fixture lock+type harness still accepts 1 and rejects 7;
 - max cycle regression is recorded and explained.
@@ -617,8 +617,8 @@ Internalization is not production readiness. Production claims still require:
 
 1. live/full-node or accepted dry-run evidence;
 2. deployment identity for the BTC verifier cell dep;
-3. stable Molecule/wallet signing vectors;
-4. public/shared deployment pinning evidence for the materialised receipt output
+3. stable fixed-width wallet signing vectors;
+4. public/shared deployment attestation for the materialised receipt output
    shape;
 5. artifact hash and source hash provenance;
 6. external review of the BTC verifier TCB;

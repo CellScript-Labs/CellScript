@@ -30,7 +30,7 @@ Implemented in this slice:
 | `claim_after_expiry` | compiles | source-guard-present |
 | `nova_agreement_lifecycle` stable type entry | compiles | source-guard-present |
 | Receipt output materialization | implemented | resolved-transaction-covered + live-devnet-covered |
-| Primitive-strict 0.16 | fails on generated ProofPlan strictness | strict-generated-gap |
+| Primitive-strict 0.16 | passes | generated-strict-covered |
 | Fixture shape harness | implemented | local-transaction-shape-covered |
 | Legacy per-action CKB VM harness | superseded | legacy-action-harness-superseded |
 | Resolved transaction harness | implemented | resolved-transaction-covered |
@@ -38,7 +38,7 @@ Implemented in this slice:
 | Native CKB payout output binding | implemented | resolved-transaction-covered + live-devnet-covered |
 | Terms hash output binding | implemented | resolved-transaction-covered |
 | Receipt hash output binding | implemented | resolved-transaction-covered |
-| Full Molecule/wallet hash preimage alignment | not implemented | future work |
+| Fixed-width wallet signing vectors | implemented | production-gate-covered |
 | BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
 
 Do not call this "trustless borrowing". Better names:
@@ -91,8 +91,9 @@ same latest receipt hash.
 
 Native CKB settlement intent is materialized as `NativeCkbPayoutV0` outputs.
 The local transaction harness also checks that the CKB capacity/value shape
-matches those typed payout amounts. Full Molecule/wallet signing preimage
-alignment remains future work.
+matches those typed payout amounts. Fixed-width wallet signing vectors for the
+Agreement terminal intents are generated in
+`/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json`.
 
 ## Commands
 
@@ -100,7 +101,6 @@ alignment remains future work.
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
 /home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
 /home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
-# Expected to fail until generated ProofPlan strict gaps are closed:
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
 python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
@@ -109,13 +109,15 @@ python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_lifecycle_type.cell --target riscv64-elf --target-profile ckb --entry-action nova_agreement_lifecycle -o target/nova-agreement-lifecycle-type.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
 /home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only
 ```
 
-Latest local result: non-strict CellScript commands pass; primitive-strict 0.16
-currently fails on generated ProofPlan strictness around output/runtime records.
-The generated audit bundle reports 3 actions, 0 locks, 3 source units, 140 ProofPlan records, and 85 builder
-assumptions. The local transaction-shape harness reports 8/8 fixture
+Latest local result: non-strict and primitive-strict CellScript commands pass.
+The generated audit bundle reports 3 actions, 0 locks, 3 source units, 170
+ProofPlan records, 78 builder assumptions, and zero runtime gaps. The local
+transaction-shape harness reports 8/8 fixture
 expectations matched: 3 accepted shapes and 5 rejected shapes. The resolved
 transaction harness reports 20/20 script-layer expectations matched and 20/20
 node-verifier expectations matched. The older per-action CKB VM harness is a
@@ -147,11 +149,13 @@ terminal input transactions can reach the Agreement Profile type/action script.
 All fixture files are now covered by the resolved transaction harness.
 
 These harnesses remain local verifier evidence, distinct from the live devnet
-runner. Deployment wiring, Molecule/wallet signing preimage alignment, and
-mainnet/testnet CellDep publication remain future work.
+runner. Local devnet deployment pinning and wallet vectors are now gate-checked.
+Public/shared CellDep publication and external BIP340 TCB review remain
+production attestations, not local facts.
 
 ## Honest Next Slice
 
-The next conservative slice should freeze Molecule/wallet signing vectors and
-replace the local always-success lock with real borrower/lender authority locks.
-Only after that should we consider BTC authority hooks or iCKB/xUDT variants.
+The next conservative slice should replace the local always-success lock with
+real borrower/lender authority locks, then add public/shared CellDep attestation
+and external BIP340 TCB review. Only after that should we consider BTC
+authority hooks or iCKB/xUDT variants.

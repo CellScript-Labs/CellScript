@@ -11,7 +11,7 @@
 **IPC report**: `target/novaseal-btc-verifier-ipc-vectors.json`
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Parent VM report**: `target/novaseal-parent-lock-ckb-vm-report.json`
-**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, and official full transaction script-verifier execution; no public/shared deployment pinning evidence yet.
+**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, official full transaction script-verifier execution, local devnet pinning, and local TCB review; no public/shared deployment attestation or external TCB review yet.
 
 This spec fixes the v0 MVP verifier shape to a single-key BIP340 Schnorr profile. ECDSA and multisig descriptors remain out of scope for this strict MVP slice.
 
@@ -122,6 +122,6 @@ This does not yet prove criterion 6 on chain:
 - the current CellScript VM2 spawn helper emits executable VM2 `ecall` wrappers and static spawn targets have a strict first-CellDep `code` manifest-bound builder model; the NovaSeal lock uses `spawn_with_fd` and the fixed 18-word IPC envelope,
 - the Rust verifier is implemented in the shared no-std core and reused by the host verifier and RISC-V shell; the staged child ELF now executes in CKB VM with harness-provided inherited-fd input,
 - resolved lock-group and full transaction script-verifier evidence now record `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles for the three parent authority cases,
-- no public/shared deployment pinning exists; eight-fixture combined transaction verifier evidence is harness-level only.
+- no public/shared deployment attestation or external TCB review exists; eight-fixture combined transaction verifier evidence is harness-level only.
 
-The next implementation slice should turn the current full transaction script-verifier execution into public/shared deployment pinning evidence without pretending that harness-level VM success alone is production coverage.
+The next implementation slice should attach real public/shared CellDep attestation and external TCB review without pretending that harness-level VM success alone is production coverage.

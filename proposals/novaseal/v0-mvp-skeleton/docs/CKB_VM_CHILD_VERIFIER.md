@@ -41,8 +41,8 @@ The staged ELF used by this run is:
 
 ```text
 target/novaseal-btc-verifier-riscv-shell-release.elf
-size_bytes=187768
-sha256=d0d1c14c811728c680d8646283cf7961dd850eebea856ac0e281fb493c4bc58d
+size_bytes=190040
+sha256=036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82
 ```
 
 ## Evidence Level
@@ -76,4 +76,5 @@ It does not prove:
 ## Closure Path
 
 The child harness now remains a lower-level oracle under the parent-lock
-harness. The remaining production path is public/shared deployment pinning after the current eight-fixture transaction coverage.
+harness. The remaining production path is public/shared CellDep attestation and
+external TCB review after the current eight-fixture transaction coverage.

@@ -1,0 +1,29 @@
+{
+  "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+  "status": "attested",
+  "network": "testnet-or-mainnet",
+  "attested_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "attestor": "REPLACE_WITH_DEPLOYER_OR_RELEASE_SIGNER",
+  "release": {
+    "package": "novaseal",
+    "version": "0.0.1-v0-mvp",
+    "manifest_commit": "REPLACE_WITH_GIT_COMMIT"
+  },
+  "runtime_verifier": {
+    "name": "cellscript_btc_bip340_verifier_riscv",
+    "role": "runtime_verifier",
+    "verifier_id": "btc.bip340.v0",
+    "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+    "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
+    "dep_type": "code",
+    "hash_type": "data1",
+    "data_hash": "0xREPLACE_WITH_64_HEX_DATA_HASH",
+    "artifact_hash": "0x036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82",
+    "artifact_hash_algorithm": "sha256"
+  },
+  "notes": [
+    "This file is a template, not an attestation.",
+    "A real attestation must describe a public/shared deployment, not a local devnet CellDep.",
+    "The production gate rejects missing or placeholder out_point/data_hash/artifact_hash fields."
+  ]
+}

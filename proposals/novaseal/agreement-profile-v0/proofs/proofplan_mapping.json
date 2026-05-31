@@ -9,12 +9,13 @@
     "check": "passed",
     "audit_bundle": "passed",
     "explain_assumptions": "passed",
-    "primitive_strict_0_16": "fails_on_generated_proofplan_strictness",
+    "primitive_strict_0_16": "passed",
     "actions": 3,
     "locks": 0,
     "source_units": 3,
-    "proof_plan_records": 140,
-    "builder_assumptions": 85,
+    "proof_plan_records": 170,
+    "builder_assumptions": 78,
+    "runtime_gaps": 0,
     "tx_shape_harness": "passed",
     "tx_shape_cases": 8,
     "tx_shape_matched_expected": 8,
@@ -29,7 +30,10 @@
     "resolved_tx_fixture_partition_matches_expected": true,
     "resolved_tx_max_script_cycles": 7601060,
     "resolved_tx_max_node_cycles": 7601060,
-    "resolved_tx_max_tx_size_bytes": 2050
+    "resolved_tx_max_tx_size_bytes": 2050,
+    "wallet_signing_vectors": "passed",
+    "wallet_signing_vector_count": 3,
+    "production_gate": "local_production_prep_ready_external_attestation_required"
   },
   "claims": [
     {
@@ -45,12 +49,12 @@
     {
       "claim": "Receipts are materialized as outputs by implemented actions.",
       "classification": "resolved-transaction-covered + live-devnet-covered",
-      "evidence": "resolved transaction harness and live devnet lifecycle runner materialize receipt outputs; generated ProofPlan strictness still has runtime-required records"
+      "evidence": "resolved transaction harness and live devnet lifecycle runner materialize receipt outputs; primitive-strict generated ProofPlan is clean"
     },
     {
       "claim": "Terminal AgreementCell resource transitions are strict-mode sound.",
-      "classification": "source_and_runtime_covered_strict_generated_gap",
-      "evidence": "non-strict check, resolved transaction harness, and live devnet lifecycle pass; primitive-strict 0.16 still fails on generated ProofPlan output/runtime records"
+      "classification": "source_generated_strict_resolved_tx_and_live_devnet_covered",
+      "evidence": "non-strict check, primitive-strict 0.16, resolved transaction harness, and live devnet lifecycle pass"
     },
     {
       "claim": "Fixture semantics are executable.",
@@ -81,9 +85,16 @@
       "claim": "Payout output settlement amounts are enforced by Agreement Profile scripts.",
       "classification": "resolved-transaction-covered + live-devnet-covered",
       "evidence": "wrong_settlement_amount_reject mutates the typed NativeCkbPayoutV0 lender repayment output and is rejected by the resolved transaction harness; the live devnet runner also dry-runs a wrong payout amount rejection"
+    },
+    {
+      "claim": "Agreement terminal intents have fixed-width wallet signing vectors.",
+      "classification": "production-gate-covered",
+      "evidence": "/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json includes originate_valid, repay_before_expiry_valid, and claim_after_expiry_valid"
     }
   ],
   "current_status": {
-    "primitive_strict_0_16": "fails_on_generated_proofplan_strictness"
+    "primitive_strict_0_16": "passed",
+    "runtime_gaps": 0,
+    "production_gate": "local_production_prep_ready_external_attestation_required"
   }
 }

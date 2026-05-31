@@ -117,7 +117,7 @@ This harness is useful because it makes the fixture set executable and repeatabl
 It does **not** prove:
 
 - public/shared devnet or testnet CellDep publication pins the staged verifier shell,
-- Molecule/wallet signing encoders are aligned with the `.schema` and `.cell` intent layout,
+- external BIP340 TCB review has accepted the staged verifier shell,
 - production/public deployment capacity and fee policy are final.
 
 It does prove:
@@ -140,12 +140,9 @@ It does prove:
 
 The next harness slice should promote the current harness evidence toward production one step at a time:
 
-1. Generate canonical Molecule bytes from the schema files.
-2. Keep the receipt commitment rule from `docs/CANONICAL_VECTORS.md` aligned with those Molecule bytes.
-3. Compare real Molecule bytes against `target/novaseal-schema-layout.json`.
-4. Build real entry witnesses from each fixture.
-5. Keep the live local devnet RPC runner aligned with the combined eight-fixture transaction harness.
-6. Record production-style cycles, transaction size, occupied capacity, and under-capacity rejection.
-7. Record valid and invalid authority-lock runs against the same staged ELF hash.
-8. Keep the resolved `NovaSealIntentCoreV0.old_cell: OutPoint` schema/.cell alignment covered by Molecule and wallet signing vectors.
-9. Extend local devnet stateful evidence into public/shared deployment pinning once Molecule and wallet signing vectors are frozen.
+1. Keep fixed-width wallet signing vectors aligned with `docs/CANONICAL_VECTORS.md`.
+2. Keep the live local devnet RPC runner aligned with the combined eight-fixture transaction harness.
+3. Record production-style cycles, transaction size, occupied capacity, and under-capacity rejection.
+4. Record valid and invalid authority-lock runs against the same staged ELF hash.
+5. Keep the resolved `NovaSealIntentCoreV0.old_cell: OutPoint` schema/.cell alignment covered by wallet signing vectors.
+6. Attach public/shared CellDep attestation and external BIP340 TCB review before any production claim.

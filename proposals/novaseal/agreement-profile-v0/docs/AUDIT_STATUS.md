@@ -4,7 +4,8 @@
 
 NovaSeal Agreement Profile v0 is a reviewable CKB-native agreement skeleton with
 audited terminal-path structure, local transaction-shape evidence, resolved
-transaction verifier evidence, and live devnet lifecycle evidence.
+transaction verifier evidence, live devnet lifecycle evidence, and fixed-width
+wallet signing vectors.
 
 ## Latest Results
 
@@ -12,25 +13,27 @@ transaction verifier evidence, and live devnet lifecycle evidence.
 | --- | --- |
 | `cellc check --target-profile ckb` | passed |
 | `cellc audit-bundle --target-profile ckb --json` | passed |
-| `cellc explain-assumptions --target-profile ckb` | passed; runtime-required ProofPlan records remain visible |
-| `cellc check --target-profile ckb --primitive-strict 0.16` | fails on generated ProofPlan strictness |
+| `cellc explain-assumptions --target-profile ckb` | passed |
+| `cellc check --target-profile ckb --primitive-strict 0.16` | passed |
 | `cellc src/nova_agreement_lifecycle_type.cell --target riscv64-asm --target-profile ckb --entry-action nova_agreement_lifecycle` | passed |
 | `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
 | `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 20/20 script-layer and node-verifier expectations matched |
 | `scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo ../ckb --ckb-bin ../ckb/target/debug/ckb` | passed; originate -> repay, originate -> claim, and live negative dry-runs |
+| `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty` | passed; includes 3 Agreement vectors |
+| `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty` | passed local gates; external production attestations still required |
 
 Generated audit surface:
 
 - actions: 3
 - locks: 0
 - source units: 3
-- ProofPlan records: 140
-- builder assumptions: 85
+- ProofPlan records: 170
+- builder assumptions: 78
+- runtime gaps: 0
 
-Primitive-strict 0.16 is not clean for this profile yet. The strict failure is
-generated-audit hygiene around runtime-required output/verifier records, not a
-live devnet lifecycle failure. Current executable evidence is the resolved
-transaction harness plus the live devnet lifecycle runner.
+Primitive-strict 0.16 is clean for the current Agreement Profile bundle. Current
+executable evidence is the resolved transaction harness plus the live devnet
+lifecycle runner.
 
 ## Commands
 
@@ -38,7 +41,6 @@ transaction harness plus the live devnet lifecycle runner.
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
 /home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
 /home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
-# Expected to fail until generated ProofPlan strict gaps are closed:
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
 python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
@@ -60,7 +62,7 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_agreement_devnet_stateful
 | Claim after expiry | implemented | source-guard-present |
 | Stable lifecycle type-script identity | implemented | source-guard-present |
 | Receipt output materialization | implemented | resolved-transaction-covered + live-devnet-covered |
-| Terminal AgreementCell resource transition soundness | implemented | source + resolved transaction + live devnet; strict generated gap remains |
+| Terminal AgreementCell resource transition soundness | implemented | source + generated strict + resolved transaction + live devnet |
 | Executable fixture shape harness | implemented | local-transaction-shape-covered |
 | Legacy per-action CKB VM fixture harness | superseded | legacy-action-harness-superseded |
 | Resolved transaction verifier harness | implemented | resolved-transaction-covered |
@@ -68,7 +70,7 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_agreement_devnet_stateful
 | Native CKB payout output binding | implemented | resolved-transaction-covered + live-devnet-covered |
 | Terms hash output binding | implemented | resolved-transaction-covered |
 | Receipt hash output binding | implemented | resolved-transaction-covered |
-| Full Molecule/wallet hash preimage alignment | missing | future work |
+| Fixed-width wallet signing vectors | implemented | production-gate-covered |
 | BTC collateral support | out of scope | not implemented |
 
 ## Fixture Honesty
@@ -95,4 +97,7 @@ transaction evidence.
 Receipts are materialized as outputs. The `receipt_hash`/`latest_receipt_hash` value is
 carried through state and receipt fields, and receipt output mismatches are
 covered by resolved transaction evidence plus the live devnet lifecycle runner.
-Full Molecule/wallet signing preimage alignment remains future work.
+Fixed-width wallet signing vectors are generated by
+`/home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py` and
+checked by the production gate. Public/shared CellDep attestation and external
+BIP340 TCB review remain production blockers.

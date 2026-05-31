@@ -2,7 +2,8 @@
 
 **Date of this snapshot**: 2026-05-31
 **Package**: `proposals/novaseal/v0-mvp-skeleton`
-**Status**: production-prep evidence exists, but production readiness is still blocked.
+**Status**: local production-prep evidence is gate-checked; production readiness
+is still blocked by external/public facts.
 
 This document is the current evidence ledger for NovaSeal core. It intentionally
 separates generated audit evidence, local verifier harness evidence, live local
@@ -13,10 +14,14 @@ devnet stateful evidence, and remaining TCB/deployment gaps.
 Package and script checks:
 
 - `cellc check --target-profile ckb` passes.
+- `cellc check --target-profile ckb --primitive-strict 0.16` passes.
 - `cellc src/nova_state_type.cell --target-profile ckb` passes.
 - `cellc src/nova_state_lifecycle_type.cell --target-profile ckb --entry-action novaseal_lifecycle` passes.
 - `cellc src/nova_btc_authority_lock.cell --target-profile ckb` passes.
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
+- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
+- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
+- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty` reports `local_production_prep_ready_external_attestation_required`.
 
 Live local devnet:
 
@@ -47,10 +52,10 @@ the derived audit surface reports:
 actions=1
 locks=1
 source_units=4
-proof_plan_records=52
-builder_assumptions=48
-runtime_gaps=3
-strict_prediction_errors=3
+proof_plan_records=55
+builder_assumptions=43
+runtime_gaps=0
+strict_prediction_errors=0
 classification=non_production_audit_surface
 ```
 
@@ -67,18 +72,9 @@ The generated bundle exposes:
 - manifest-bound spawn target obligations for the runtime verifier
 - checked IPC envelope and child exit-status records
 
-The generated bundle still leaves three strict ProofPlan gaps:
-
-```text
-create-output:NovaSealCellV0:new_cell
-create-output:ProofReceiptV0:receipt
-resource-conservation:NovaSealCellV0
-```
-
-This means `cellc check --target-profile ckb --primitive-strict 0.16` currently
-fails with `PP0150` for those three records. The local transaction harness and
-live devnet evidence are stronger runtime evidence, but they do not turn those
-generated ProofPlan records into strict generated audit coverage.
+The generated bundle no longer leaves primitive-strict `PP0150` gaps for the
+NovaSeal core transition. Output materialisation and `NovaSealCellV0` resource
+transition coverage are visible to generated ProofPlan strict mode.
 
 ## Schema And Vectors
 
@@ -163,16 +159,46 @@ for it includes:
 - resolved lock-group and full transaction script-verifier evidence,
 - combined eight-fixture local CKB contextual verifier evidence,
 - live local devnet key-auth transition evidence.
+- a local TCB review bundle at
+  `/home/arthur/a19q3/CellScript/target/novaseal-bip340-tcb-review.json`.
 
-This is a strong local evidence stack, but it is not a substitute for publishing
-and pinning production/testnet CellDeps with audited artifact hashes.
+This is a strong local evidence stack, but it is not a substitute for an
+external reviewer attesting the exact runtime verifier artifact hash.
+
+## Production Gate
+
+The current production gate is:
+
+```bash
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+```
+
+Current status:
+
+```text
+local_production_prep_ready_external_attestation_required
+```
+
+Passed local gates:
+
+- core manifest pins the local devnet verifier CellDep and artifact hash
+- Agreement manifest pins the same local devnet verifier CellDep and artifact hash
+- fixed-width Molecule-equivalent wallet signing vectors exist for core and Agreement
+- local BIP340 runtime-verifier TCB review bundle passes
+- live local devnet stateful core and Agreement reports pass
+
+External gates still required:
+
+- `proofs/public_shared_cell_dep_attestation.json`
+- `proofs/bip340_external_tcb_review_attestation.json`
+
+Templates exist next to those expected files. They are templates only and are
+not counted as production facts.
 
 ## Remaining Production Blockers
 
-- Strict generated ProofPlan still has the three runtime-required gaps listed above.
-- Molecule/reference encoding and wallet signing vectors are not frozen.
-- Public/shared devnet or testnet CellDep publication is not pinned in the release manifest.
-- The runtime BIP340 verifier binary still needs external review as TCB.
+- Public/shared devnet, testnet, or mainnet CellDep publication is not yet attested.
+- The runtime BIP340 verifier binary still needs an external TCB review attestation.
 - v0 has only `latest_receipt_hash`; it does not provide a historical receipt accumulator.
 
 Any claim of "production ready", "mainnet ready", or "fully audited" is false

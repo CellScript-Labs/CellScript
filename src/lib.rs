@@ -7576,6 +7576,7 @@ fn resource_conservation_guarded_transition_classification(
     let u64_sources = metadata_u64_sources(body);
     let derived_alias_sources = metadata_derived_alias_sources(body, &aliases, &u64_sources);
     let guarded_aliases = metadata_asserted_guarded_aliases(body, &aliases, &u64_sources, &derived_alias_sources);
+    let guarded_value_vars = metadata_asserted_guarded_value_vars(body, &aliases, &u64_sources, &derived_alias_sources);
     let mut classification = ResourceTransitionFieldClassification::default();
 
     for (field, operand) in &created.fields {
@@ -7587,7 +7588,14 @@ fn resource_conservation_guarded_transition_classification(
             classification.allowed_fresh.push(field.clone());
             continue;
         }
-        if resource_transition_operand_is_guarded(operand, &aliases, &guarded_aliases, &u64_sources, &derived_alias_sources) {
+        if resource_transition_operand_is_guarded(
+            operand,
+            &aliases,
+            &guarded_aliases,
+            &guarded_value_vars,
+            &u64_sources,
+            &derived_alias_sources,
+        ) {
             classification.guarded.push(field.clone());
             continue;
         }
@@ -7620,9 +7628,15 @@ fn resource_transition_operand_is_guarded(
     operand: &ir::IrOperand,
     aliases: &HashMap<usize, MetadataFieldAlias>,
     guarded_aliases: &BTreeSet<(usize, String)>,
+    guarded_value_vars: &BTreeSet<usize>,
     u64_sources: &HashMap<usize, MetadataU64Source>,
     derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
 ) -> bool {
+    if let ir::IrOperand::Var(var) = operand {
+        if guarded_value_vars.contains(&var.id) {
+            return true;
+        }
+    }
     let mut operand_aliases = BTreeSet::new();
     metadata_collect_alias_keys_from_operand(operand, aliases, u64_sources, derived_alias_sources, &mut operand_aliases);
     !operand_aliases.is_empty() && operand_aliases.iter().all(|alias| guarded_aliases.contains(alias))
@@ -7901,6 +7915,67 @@ fn metadata_asserted_guarded_aliases(
     asserted
 }
 
+fn metadata_asserted_guarded_value_vars(
+    body: &ir::IrBody,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+) -> BTreeSet<usize> {
+    let mut guarded_by_var: HashMap<usize, BTreeSet<usize>> = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            if let ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } = instruction {
+                if left == right {
+                    continue;
+                }
+                let mut left_aliases = BTreeSet::new();
+                let mut right_aliases = BTreeSet::new();
+                metadata_collect_alias_keys_from_operand(left, aliases, u64_sources, derived_alias_sources, &mut left_aliases);
+                metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, &mut right_aliases);
+                if left_aliases.is_empty() && right_aliases.is_empty() {
+                    continue;
+                }
+                let mut vars = BTreeSet::new();
+                if !right_aliases.is_empty() {
+                    metadata_collect_unaliased_direct_var_ids(left, aliases, &mut vars);
+                }
+                if !left_aliases.is_empty() {
+                    metadata_collect_unaliased_direct_var_ids(right, aliases, &mut vars);
+                }
+                if !vars.is_empty() {
+                    guarded_by_var.insert(dest.id, vars);
+                }
+            }
+        }
+    }
+
+    let mut asserted = BTreeSet::new();
+    for block in &body.blocks {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            continue;
+        };
+        if !block_returns_error(body, *else_block) {
+            continue;
+        }
+        if let Some(vars) = guarded_by_var.get(&cond.id) {
+            asserted.extend(vars.iter().copied());
+        }
+    }
+    asserted
+}
+
+fn metadata_collect_unaliased_direct_var_ids(
+    operand: &ir::IrOperand,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    output: &mut BTreeSet<usize>,
+) {
+    if let ir::IrOperand::Var(var) = operand {
+        if !aliases.contains_key(&var.id) {
+            output.insert(var.id);
+        }
+    }
+}
+
 fn metadata_const_vars(body: &ir::IrBody) -> BTreeSet<usize> {
     let mut const_vars = BTreeSet::new();
     for block in &body.blocks {
@@ -8032,7 +8107,14 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } => {
-                    aliases.insert(dest.id, MetadataFieldAlias { root_id: obj.id, field: field.clone() });
+                    let alias = aliases.get(&obj.id).cloned().map_or_else(
+                        || MetadataFieldAlias { root_id: obj.id, field: field.clone() },
+                        |parent: MetadataFieldAlias| MetadataFieldAlias {
+                            root_id: parent.root_id,
+                            field: format!("{}.{}", parent.field, field),
+                        },
+                    );
+                    aliases.insert(dest.id, alias);
                 }
                 ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => {
                     if let Some(alias) = aliases.get(&src.id).cloned() {
@@ -8048,11 +8130,14 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
 
 fn metadata_u64_sources(body: &ir::IrBody) -> HashMap<usize, MetadataU64Source> {
     let mut sources = HashMap::new();
+    let aliases = metadata_field_aliases(body);
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } if dest.ty == ir::IrType::U64 => {
-                    sources.insert(dest.id, MetadataU64Source::Field(MetadataFieldAlias { root_id: obj.id, field: field.clone() }));
+                    let alias =
+                        aliases.get(&dest.id).cloned().unwrap_or_else(|| MetadataFieldAlias { root_id: obj.id, field: field.clone() });
+                    sources.insert(dest.id, MetadataU64Source::Field(alias));
                 }
                 ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Add, left, right } if dest.ty == ir::IrType::U64 => {
                     if let (Some(left), Some(right)) =
@@ -11706,6 +11791,16 @@ fn metadata_prelude_availability(
                 ir::IrInstruction::Call { dest: Some(dest), .. } if matches!(dest.ty, ir::IrType::Tuple(_)) => {
                     availability.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
                 }
+                ir::IrInstruction::Tuple { dest, fields } => {
+                    let fixed_width = metadata_ir_type_fixed_width(&dest.ty, type_layouts)
+                        .or_else(|| metadata_fixed_byte_width(&dest.ty, type_static_length(&dest.ty)));
+                    if fixed_width.is_some()
+                        && fields.iter().all(|field| metadata_fixed_value_available_for_packed(field, &availability, type_layouts))
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
+                }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. } if pure_const_returns.contains_key(func) => {
                     let value = pure_const_returns.get(func).expect("guarded pure const return");
                     if metadata_fixed_scalar_const_value(value).is_some() {
@@ -11800,6 +11895,11 @@ fn metadata_prelude_availability(
                     };
                     if metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_some() && layout.ty == dest.ty {
                         availability.fixed_value_vars.insert(dest.id);
+                        if matches!(layout.ty, ir::IrType::Named(_) | ir::IrType::Tuple(_) | ir::IrType::Array(_, _)) {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: layout.ty.clone() });
+                        }
                     }
                     if metadata_layout_fixed_scalar_width(&layout).is_some() && layout.ty == dest.ty {
                         availability.scalar_vars.insert(dest.id);

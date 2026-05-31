@@ -132,6 +132,91 @@ lock guard(
 }
 
 #[test]
+fn nested_packed_receipt_hash_guards_resource_transition_in_strict_mode() {
+    let result = compile(
+        r#"
+module nested_receipt_transition
+
+resource Cell has store, create, consume {
+    owner: Hash,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+}
+
+struct IntentCore {
+    new_nonce: u64,
+}
+
+struct Intent {
+    core: IntentCore,
+    expected_receipt_hash: Hash,
+}
+
+struct ReceiptCommitment {
+    old_nonce: u64,
+    new_nonce: u64,
+}
+
+receipt Receipt has store, create, consume {
+    receipt_hash: Hash,
+    signed_intent_hash: Hash,
+}
+
+action advance(old_cell: Cell, witness intent: Intent) -> (new_cell: Cell, receipt: Receipt)
+where
+    let expected_nonce = old_cell.nonce + 1
+    let receipt_commitment = ReceiptCommitment {
+        old_nonce: old_cell.nonce,
+        new_nonce: intent.core.new_nonce
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    require intent.core.new_nonce == expected_nonce
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    let owner = old_cell.owner
+    consume old_cell
+    create new_cell = Cell {
+        owner: owner,
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: intent.core.new_nonce
+    }
+    create receipt = Receipt {
+        receipt_hash: materialized_receipt_hash,
+        signed_intent_hash: signed_intent_hash
+    }
+"#,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("strict mode should accept nested packed receipt/resource guards");
+
+    let action = result.metadata.actions.iter().find(|action| action.name == "advance").expect("advance action metadata");
+    let resource_plan =
+        action.proof_plan.iter().find(|plan| plan.feature == "resource-conservation:Cell").expect("resource conservation proof plan");
+
+    assert_eq!(resource_plan.status, "checked-runtime");
+    assert_eq!(resource_plan.codegen_coverage_status, "covered");
+    assert!(resource_plan.on_chain_checked, "{resource_plan:?}");
+    for expected in ["resource-field:owner=preserved", "resource-field:latest_receipt_hash=guarded", "resource-field:nonce=guarded"] {
+        assert!(
+            resource_plan.input_output_relation_checks.iter().any(|check| check == expected),
+            "missing generated relation check {expected}: {:?}",
+            resource_plan.input_output_relation_checks
+        );
+    }
+
+    for feature in ["create-output:Cell:new_cell", "create-output:Receipt:receipt"] {
+        let plan = action.proof_plan.iter().find(|plan| plan.feature == feature).expect("create-output proof plan");
+        assert_eq!(plan.status, "checked-runtime", "{plan:?}");
+        assert_eq!(plan.codegen_coverage_status, "covered", "{plan:?}");
+        assert!(plan.on_chain_checked, "{plan:?}");
+    }
+}
+
+#[test]
 fn hash_and_byte32_equality_is_allowed_for_authority_binding() {
     let result = compile(
         r#"
