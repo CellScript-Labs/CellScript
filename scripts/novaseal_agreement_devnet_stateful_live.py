@@ -29,6 +29,7 @@ from novaseal_devnet_stateful_live import (
     packed_hash,
     resolve_ckb_bin,
     schnorr_sign,
+    stateful_provenance,
     transaction,
     u8,
     u16,
@@ -807,9 +808,33 @@ def submit_origin(
     )
     dry_run = devnet.rpc("dry_run_transaction", [tx])
     commit = devnet.submit_and_commit(tx, label)
-    active_live = devnet.wait_live_cell(commit["tx_hash"], 0)
-    principal_payout_live = devnet.wait_live_cell(commit["tx_hash"], 1)
-    receipt_live = devnet.wait_live_cell(commit["tx_hash"], 2)
+    active_live = devnet.assert_live_cell(
+        commit["tx_hash"],
+        0,
+        label=f"{label} active",
+        expected_capacity=STATE_CAPACITY,
+        expected_lock=always_success_lock(),
+        expected_type=lifecycle_type(lifecycle_data_hash),
+        expected_data=material["active_data"],
+    )
+    principal_payout_live = devnet.assert_live_cell(
+        commit["tx_hash"],
+        1,
+        label=f"{label} principal payout",
+        expected_capacity=LIVE_NATIVE_CKB_PAYOUT_CAPACITY_BASE + terms["principal_amount"],
+        expected_lock=always_success_lock(hex0x(terms["borrower_authority_hash"])),
+        expected_type=None,
+        expected_data=material["payout_data"],
+    )
+    receipt_live = devnet.assert_live_cell(
+        commit["tx_hash"],
+        2,
+        label=f"{label} receipt",
+        expected_capacity=RECEIPT_CAPACITY,
+        expected_lock=always_success_lock(),
+        expected_type=None,
+        expected_data=material["receipt_data"],
+    )
     return {
         "header": header,
         "timepoint": now,
@@ -855,6 +880,18 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_elf.read_bytes(), always_dep)
         lifecycle = deploy_code_cell(devnet, "nova_agreement_lifecycle_type", lifecycle_elf.read_bytes(), always_dep)
         cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/agreement-profile-v0/Cell.toml"),
+                pathlib.Path("proposals/novaseal/agreement-profile-v0/src"),
+                pathlib.Path("proposals/novaseal/agreement-profile-v0/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_agreement_devnet_stateful_live.py"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
 
         stage = "negative originate wrong lender signature"
         negative_origin_header = devnet.rpc("get_tip_header")
@@ -880,7 +917,13 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             wrong_lender_terms,
             wrong_lender_origin_material,
         )
-        wrong_lender_origin_reject = devnet.dry_run_rejects(wrong_lender_origin_tx, "wrong lender signature originate")
+        wrong_lender_origin_reject = devnet.dry_run_rejects(
+            wrong_lender_origin_tx,
+            "wrong lender signature originate",
+            expected_source="Outputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
 
         stage = "negative originate non-CKB asset kind"
         non_ckb_terms = make_terms(negative_origin_now, "non-ckb-asset-kind")
@@ -895,7 +938,13 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             non_ckb_terms,
             non_ckb_origin_material,
         )
-        non_ckb_asset_kind_reject = devnet.dry_run_rejects(non_ckb_origin_tx, "non-CKB asset kind originate")
+        non_ckb_asset_kind_reject = devnet.dry_run_rejects(
+            non_ckb_origin_tx,
+            "non-CKB asset kind originate",
+            expected_source="Outputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
 
         stage = "valid repay-path originate"
         repay_seed_header = devnet.rpc("get_tip_header")
@@ -936,7 +985,13 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             terms=repay_terms,
             material=negative_material,
         )
-        wrong_borrower_signature_reject = devnet.dry_run_rejects(negative_tx, "wrong borrower signature repay")
+        wrong_borrower_signature_reject = devnet.dry_run_rejects(
+            negative_tx,
+            "wrong borrower signature repay",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
 
         stage = "negative repay payout capacity short"
         repay_capacity_material = build_repay_material(
@@ -959,6 +1014,9 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         repay_payout_capacity_short_reject = devnet.dry_run_rejects(
             repay_capacity_short_tx,
             "repay payout capacity short",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
         )
 
         stage = "negative repay payout lock args mismatch"
@@ -976,6 +1034,9 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         repay_payout_lock_args_mismatch_reject = devnet.dry_run_rejects(
             repay_lock_args_mismatch_tx,
             "repay payout lock args mismatch",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
         )
 
         stage = "negative repay wrong payout amount"
@@ -995,8 +1056,19 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         repay_wrong_payout_amount_reject = devnet.dry_run_rejects(
             repay_wrong_payout_amount_tx,
             "repay wrong payout amount",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
         )
-        active_still_live = devnet.wait_live_cell(active_ref["tx_hash"], active_ref["index"])
+        active_still_live = devnet.assert_live_cell(
+            active_ref["tx_hash"],
+            active_ref["index"],
+            label="post-negative repay active",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=origin_material["active_data"],
+        )
 
         stage = "valid repay"
         repay_header = devnet.rpc("get_tip_header")
@@ -1015,10 +1087,42 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         repay_dry_run = devnet.rpc("dry_run_transaction", [repay_tx])
         repay_commit = devnet.submit_and_commit(repay_tx, "agreement repay before expiry")
         active_dead = devnet.wait_dead_cell(active_ref["tx_hash"], active_ref["index"])
-        closed_live = devnet.wait_live_cell(repay_commit["tx_hash"], 0)
-        lender_repayment_live = devnet.wait_live_cell(repay_commit["tx_hash"], 1)
-        borrower_collateral_return_live = devnet.wait_live_cell(repay_commit["tx_hash"], 2)
-        repay_receipt_live = devnet.wait_live_cell(repay_commit["tx_hash"], 3)
+        closed_live = devnet.assert_live_cell(
+            repay_commit["tx_hash"],
+            0,
+            label="repay closed agreement",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=repay_material["closed_data"],
+        )
+        lender_repayment_live = devnet.assert_live_cell(
+            repay_commit["tx_hash"],
+            1,
+            label="repay lender repayment",
+            expected_capacity=LIVE_NATIVE_CKB_PAYOUT_CAPACITY_BASE + repay_material["repayment_amount"],
+            expected_lock=always_success_lock(hex0x(repay_terms["lender_authority_hash"])),
+            expected_type=None,
+            expected_data=repay_material["lender_payout_data"],
+        )
+        borrower_collateral_return_live = devnet.assert_live_cell(
+            repay_commit["tx_hash"],
+            2,
+            label="repay borrower collateral return",
+            expected_capacity=LIVE_NATIVE_CKB_PAYOUT_CAPACITY_BASE + repay_terms["collateral_amount"],
+            expected_lock=always_success_lock(hex0x(repay_terms["borrower_authority_hash"])),
+            expected_type=None,
+            expected_data=repay_material["borrower_payout_data"],
+        )
+        repay_receipt_live = devnet.assert_live_cell(
+            repay_commit["tx_hash"],
+            3,
+            label="repay receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=repay_material["receipt_data"],
+        )
 
         stage = "valid claim-path originate"
         claim_seed_header = devnet.rpc("get_tip_header")
@@ -1053,7 +1157,13 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             terms=claim_terms,
             material=early_claim_material,
         )
-        early_claim_reject = devnet.dry_run_rejects(early_claim_tx, "early claim before expiry")
+        early_claim_reject = devnet.dry_run_rejects(
+            early_claim_tx,
+            "early claim before expiry",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
 
         stage = "wait claim expiry"
         claim_header = wait_epoch_after(devnet, claim_terms["expiry_timepoint"])
@@ -1076,8 +1186,22 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             terms=claim_terms,
             material=wrong_lender_claim_material,
         )
-        wrong_lender_claim_reject = devnet.dry_run_rejects(wrong_lender_claim_tx, "wrong lender signature claim")
-        claim_active_still_live = devnet.wait_live_cell(claim_active_ref["tx_hash"], claim_active_ref["index"])
+        wrong_lender_claim_reject = devnet.dry_run_rejects(
+            wrong_lender_claim_tx,
+            "wrong lender signature claim",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        claim_active_still_live = devnet.assert_live_cell(
+            claim_active_ref["tx_hash"],
+            claim_active_ref["index"],
+            label="post-negative claim active",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=claim_origin_material["active_data"],
+        )
 
         stage = "valid claim"
         claim_material = build_claim_material(
@@ -1099,9 +1223,33 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         claim_dry_run = devnet.rpc("dry_run_transaction", [claim_tx])
         claim_commit = devnet.submit_and_commit(claim_tx, "agreement claim after expiry")
         claim_active_dead = devnet.wait_dead_cell(claim_active_ref["tx_hash"], claim_active_ref["index"])
-        claim_closed_live = devnet.wait_live_cell(claim_commit["tx_hash"], 0)
-        lender_default_claim_live = devnet.wait_live_cell(claim_commit["tx_hash"], 1)
-        claim_receipt_live = devnet.wait_live_cell(claim_commit["tx_hash"], 2)
+        claim_closed_live = devnet.assert_live_cell(
+            claim_commit["tx_hash"],
+            0,
+            label="claim closed agreement",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=claim_material["closed_data"],
+        )
+        lender_default_claim_live = devnet.assert_live_cell(
+            claim_commit["tx_hash"],
+            1,
+            label="claim lender default claim",
+            expected_capacity=LIVE_NATIVE_CKB_PAYOUT_CAPACITY_BASE + claim_material["claim_amount"],
+            expected_lock=always_success_lock(hex0x(claim_terms["lender_authority_hash"])),
+            expected_type=None,
+            expected_data=claim_material["claim_payout_data"],
+        )
+        claim_receipt_live = devnet.assert_live_cell(
+            claim_commit["tx_hash"],
+            2,
+            label="claim receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=claim_material["receipt_data"],
+        )
 
         report.update(
             {
@@ -1114,6 +1262,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
                     "verifier": verifier,
                     "lifecycle": lifecycle,
                 },
+                "provenance": provenance,
                 "repay_terms": {
                     "agreement_id": hex0x(repay_terms["agreement_id"]),
                     "terms_hash": hex0x(repay_terms["terms_hash"]),

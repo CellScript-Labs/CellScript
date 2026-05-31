@@ -26,6 +26,7 @@ CORE_MANIFEST = CORE_ROOT / "Cell.toml"
 AGREEMENT_MANIFEST = AGREEMENT_ROOT / "Cell.toml"
 CORE_LIVE = TARGET / "novaseal-devnet-stateful-live.json"
 AGREEMENT_LIVE = TARGET / "novaseal-agreement-devnet-stateful-live.json"
+STATEFUL_ACCEPTANCE = TARGET / "novaseal-devnet-stateful-acceptance.json"
 WALLET_VECTORS = TARGET / "novaseal-wallet-signing-vectors.json"
 TCB_REVIEW = TARGET / "novaseal-bip340-tcb-review.json"
 PUBLIC_CELLDEP_ATTESTATION = CORE_ROOT / "proofs/public_shared_cell_dep_attestation.json"
@@ -168,6 +169,7 @@ def build_report() -> dict[str, Any]:
     agreement_live = live_verifier_facts(AGREEMENT_LIVE)
     wallet = json_load(WALLET_VECTORS)
     tcb = json_load(TCB_REVIEW)
+    stateful_acceptance = json_load(STATEFUL_ACCEPTANCE)
     artifact_hash = normalize_hex(tcb.get("runtime_artifact", {}).get("artifact_hash"))
 
     core_manifest = compare_manifest_dep(CORE_MANIFEST, core_live, artifact_hash)
@@ -207,13 +209,27 @@ def build_report() -> dict[str, Any]:
         gate(
             "live_local_devnet_stateful_core_and_agreement",
             "passed"
-            if core_live.get("status") == "passed"
-            and core_live.get("live_devnet_rpc_executed") is True
-            and agreement_live.get("status") == "passed"
-            and agreement_live.get("live_devnet_rpc_executed") is True
+            if stateful_acceptance.get("status") == "passed"
+            and stateful_acceptance.get("blocker_count") == 0
+            and stateful_acceptance.get("live_devnet_rpc_executed") is True
+            and stateful_acceptance.get("stateful_lifecycle_executed") is True
             else "failed",
-            "target/novaseal-devnet-stateful-live.json + target/novaseal-agreement-devnet-stateful-live.json",
-            {"core": core_live, "agreement": agreement_live},
+            (
+                "target/novaseal-devnet-stateful-acceptance.json + "
+                "target/novaseal-devnet-stateful-live.json + "
+                "target/novaseal-agreement-devnet-stateful-live.json"
+            ),
+            {
+                "acceptance": {
+                    "status": stateful_acceptance.get("status"),
+                    "blocker_count": stateful_acceptance.get("blocker_count"),
+                    "live_devnet_rpc_executed": stateful_acceptance.get("live_devnet_rpc_executed"),
+                    "stateful_lifecycle_executed": stateful_acceptance.get("stateful_lifecycle_executed"),
+                    "missing": stateful_acceptance.get("missing"),
+                },
+                "core": core_live,
+                "agreement": agreement_live,
+            },
         ),
         gate(
             "public_shared_cell_dep_pinning_attestation",

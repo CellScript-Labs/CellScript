@@ -37,6 +37,7 @@ OP_KEY_AUTH_TRANSITION = 1
 TEST_SECRET_KEY = bytes.fromhex("3e7490680639a2f7bbe8361dd3f34eb6429a9c924d8b342c015e555e628f94e5")
 TEST_AUX_RAND = bytes([0x42]) * 32
 ZERO_HASH = bytes(32)
+_UNSET = object()
 
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
 N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -48,6 +49,64 @@ G = (
 
 class LiveAcceptanceError(RuntimeError):
     pass
+
+
+def sha256_hex(data: bytes) -> str:
+    return "0x" + hashlib.sha256(data).hexdigest()
+
+
+def file_sha256_hex(path: pathlib.Path) -> str:
+    return sha256_hex(path.read_bytes())
+
+
+def git_commit(repo_root: pathlib.Path) -> str | None:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def source_tree_hash(repo_root: pathlib.Path, paths: list[pathlib.Path]) -> dict[str, Any]:
+    files: list[pathlib.Path] = []
+    for raw_path in paths:
+        path = raw_path if raw_path.is_absolute() else repo_root / raw_path
+        if path.is_file():
+            files.append(path)
+            continue
+        if path.is_dir():
+            for child in path.rglob("*"):
+                if not child.is_file():
+                    continue
+                if any(part in {"target", "build", ".git", "__pycache__"} for part in child.relative_to(path).parts):
+                    continue
+                if child.suffix in {".cell", ".schema", ".toml", ".py", ".json", ".rs"} or child.name == "Cargo.lock":
+                    files.append(child)
+    h = hashlib.sha256()
+    rows = []
+    for path in sorted(set(files)):
+        rel = path.relative_to(repo_root).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).digest()
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(digest)
+        rows.append(rel)
+    return {"sha256": "0x" + h.hexdigest(), "files": rows, "file_count": len(rows)}
+
+
+def stateful_provenance(repo_root: pathlib.Path, source_paths: list[pathlib.Path], artifacts: dict[str, pathlib.Path]) -> dict[str, Any]:
+    return {
+        "repo_commit": git_commit(repo_root),
+        "source_tree": source_tree_hash(repo_root, source_paths),
+        "artifacts": {
+            name: {
+                "path": str(path.relative_to(repo_root) if path.is_relative_to(repo_root) else path),
+                "sha256": file_sha256_hex(path),
+                "ckb_data_hash": ckb_hash_hex(path.read_bytes()),
+                "size_bytes": path.stat().st_size,
+            }
+            for name, path in artifacts.items()
+        },
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -570,6 +629,36 @@ class CkbDevnet:
             time.sleep(0.05)
         raise LiveAcceptanceError(f"cell is not live: {tx_hash}:{index}; last={last}")
 
+    def assert_live_cell(
+        self,
+        tx_hash: str,
+        index: int,
+        *,
+        label: str,
+        expected_capacity: int | None = None,
+        expected_lock: dict[str, Any] | None = None,
+        expected_type: Any = _UNSET,
+        expected_data: bytes | None = None,
+    ) -> dict[str, Any]:
+        live = self.wait_live_cell(tx_hash, index)
+        cell = live.get("cell") or {}
+        output = cell.get("output") or {}
+        data = cell.get("data") or {}
+        if expected_capacity is not None and int(output.get("capacity", "0x0"), 16) != expected_capacity:
+            raise LiveAcceptanceError(f"{label} capacity mismatch: {output.get('capacity')} != {hex(expected_capacity)}")
+        if expected_lock is not None and output.get("lock") != expected_lock:
+            raise LiveAcceptanceError(f"{label} lock mismatch: {output.get('lock')} != {expected_lock}")
+        if expected_type is not _UNSET and output.get("type") != expected_type:
+            raise LiveAcceptanceError(f"{label} type mismatch: {output.get('type')} != {expected_type}")
+        if expected_data is not None:
+            expected_content = hex0x(expected_data)
+            expected_hash = ckb_hash_hex(expected_data)
+            if data.get("content") != expected_content:
+                raise LiveAcceptanceError(f"{label} data content mismatch")
+            if data.get("hash") != expected_hash:
+                raise LiveAcceptanceError(f"{label} data hash mismatch: {data.get('hash')} != {expected_hash}")
+        return live
+
     def wait_dead_cell(self, tx_hash: str, index: int) -> dict[str, Any]:
         last = None
         for _ in range(40):
@@ -617,11 +706,40 @@ class CkbDevnet:
             time.sleep(0.05)
         raise LiveAcceptanceError(f"{label} not committed: {tx_hash}; last_status={last_status}")
 
-    def dry_run_rejects(self, tx: dict[str, Any], label: str) -> dict[str, Any]:
+    def dry_run_rejects(
+        self,
+        tx: dict[str, Any],
+        label: str,
+        *,
+        expected_source: str | None = None,
+        expected_data_hash: str | None = None,
+        expected_error_code: int | None = None,
+    ) -> dict[str, Any]:
         try:
             result = self.rpc("dry_run_transaction", [tx])
         except LiveAcceptanceError as error:
-            return {"status": "rejected", "label": label, "reason": str(error)}
+            reason = str(error)
+            checks: dict[str, bool] = {}
+            if expected_source is not None:
+                checks["source"] = expected_source in reason
+            if expected_data_hash is not None:
+                checks["data_hash"] = expected_data_hash.lower().removeprefix("0x") in reason.lower()
+            if expected_error_code is not None:
+                checks["error_code"] = f"error code {expected_error_code}" in reason or f"#{expected_error_code}" in reason
+            matched = all(checks.values()) if checks else True
+            if not matched:
+                raise LiveAcceptanceError(f"{label} rejected for unexpected reason: checks={checks} reason={reason}") from error
+            return {
+                "status": "rejected",
+                "label": label,
+                "reason": reason,
+                "expected": {
+                    "source": expected_source,
+                    "data_hash": expected_data_hash,
+                    "error_code": expected_error_code,
+                },
+                "matched_expected": matched,
+            }
         raise LiveAcceptanceError(f"{label} unexpectedly passed dry-run: {result}")
 
 
@@ -672,7 +790,15 @@ def deploy_code_cell(devnet: CkbDevnet, name: str, artifact: bytes, always_dep: 
         [],
     )
     commit = devnet.submit_and_commit(tx, f"deploy {name}")
-    devnet.wait_live_cell(commit["tx_hash"], 0)
+    devnet.assert_live_cell(
+        commit["tx_hash"],
+        0,
+        label=f"deploy {name}",
+        expected_capacity=funding["total_capacity"],
+        expected_lock=always_success_lock(),
+        expected_type=None,
+        expected_data=artifact,
+    )
     return {
         "name": name,
         "artifact_size_bytes": len(artifact),
@@ -814,6 +940,17 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_artifact, always_dep)
         lifecycle = deploy_code_cell(devnet, "novaseal_lifecycle_type", lifecycle_artifact, always_dep)
         cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/Cell.toml"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/src"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
 
         header_hash = devnet.rpc("get_tip_header")["hash"]
         authority_hash = xonly_pubkey(TEST_SECRET_KEY)
@@ -830,7 +967,15 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         bootstrap_tx = build_bootstrap_tx(bootstrap_funding, lifecycle["data_hash"], cell_deps, header_hash, initial_cell_data)
         bootstrap_dry_run = devnet.rpc("dry_run_transaction", [bootstrap_tx])
         bootstrap_commit = devnet.submit_and_commit(bootstrap_tx, "novaseal bootstrap")
-        bootstrap_live = devnet.wait_live_cell(bootstrap_commit["tx_hash"], 0)
+        bootstrap_live = devnet.assert_live_cell(
+            bootstrap_commit["tx_hash"],
+            0,
+            label="bootstrap state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type={"code_hash": lifecycle["data_hash"], "hash_type": "data2", "args": "0x"},
+            expected_data=initial_cell_data,
+        )
 
         state_ref = {"tx_hash": bootstrap_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY}
         transition_header = devnet.rpc("get_tip_header")["hash"]
@@ -847,8 +992,24 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         transition_dry_run = devnet.rpc("dry_run_transaction", [transition_tx])
         transition_commit = devnet.submit_and_commit(transition_tx, "novaseal key-auth transition")
         bootstrap_dead = devnet.wait_dead_cell(bootstrap_commit["tx_hash"], 0)
-        new_state_live = devnet.wait_live_cell(transition_commit["tx_hash"], 0)
-        receipt_live = devnet.wait_live_cell(transition_commit["tx_hash"], 1)
+        new_state_live = devnet.assert_live_cell(
+            transition_commit["tx_hash"],
+            0,
+            label="transition new state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type={"code_hash": lifecycle["data_hash"], "hash_type": "data2", "args": "0x"},
+            expected_data=transition_material["material"]["new_cell_data"],
+        )
+        receipt_live = devnet.assert_live_cell(
+            transition_commit["tx_hash"],
+            1,
+            label="transition receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=transition_material["material"]["receipt_data"],
+        )
 
         negative_header = devnet.rpc("get_tip_header")["hash"]
         negative_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
@@ -863,8 +1024,22 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             new_state_hash=ckb_hash(b"novaseal devnet rejected state"),
             mutate_signature=True,
         )
-        wrong_signature_reject = devnet.dry_run_rejects(negative_tx, "wrong signature transition")
-        still_live = devnet.wait_live_cell(transition_commit["tx_hash"], 0)
+        wrong_signature_reject = devnet.dry_run_rejects(
+            negative_tx,
+            "wrong signature transition",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        still_live = devnet.assert_live_cell(
+            transition_commit["tx_hash"],
+            0,
+            label="post-negative state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type={"code_hash": lifecycle["data_hash"], "hash_type": "data2", "args": "0x"},
+            expected_data=transition_material["material"]["new_cell_data"],
+        )
 
         report.update(
             {
@@ -877,6 +1052,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
                     "verifier": verifier,
                     "lifecycle": lifecycle,
                 },
+                "provenance": provenance,
                 "bootstrap": {
                     "dry_run_cycles": bootstrap_dry_run.get("cycles"),
                     "commit": bootstrap_commit,

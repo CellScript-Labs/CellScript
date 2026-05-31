@@ -16,9 +16,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from novaseal_devnet_stateful_live import file_sha256_hex, git_commit, source_tree_hash
+
 
 CORE_ROOT = Path("proposals/novaseal/v0-mvp-skeleton")
 AGREEMENT_ROOT = Path("proposals/novaseal/agreement-profile-v0")
+VERIFIER_ROOT = CORE_ROOT / "verifier/novaseal_btc_verifier"
+CORE_STATEFUL_SOURCE_PATHS = [
+    CORE_ROOT / "Cell.toml",
+    CORE_ROOT / "src",
+    CORE_ROOT / "schemas",
+    VERIFIER_ROOT,
+    Path("scripts/novaseal_devnet_stateful_live.py"),
+]
+AGREEMENT_STATEFUL_SOURCE_PATHS = [
+    AGREEMENT_ROOT / "Cell.toml",
+    AGREEMENT_ROOT / "src",
+    AGREEMENT_ROOT / "schemas",
+    VERIFIER_ROOT,
+    Path("scripts/novaseal_agreement_devnet_stateful_live.py"),
+    Path("scripts/novaseal_devnet_stateful_live.py"),
+]
 
 
 @dataclass(frozen=True)
@@ -120,19 +138,78 @@ def summary_from_report(report: dict[str, Any] | None, summary_keys: list[str]) 
     return out
 
 
-def live_core_summary(report: dict[str, Any] | None) -> dict[str, Any]:
+def provenance_summary(report: dict[str, Any] | None, repo_root: Path, source_paths: list[Path]) -> dict[str, Any]:
+    if report is None:
+        return {"present": False, "freshness_matched": False}
+    if "_invalid_json" in report:
+        return {"present": False, "freshness_matched": False, "error": report["_invalid_json"]}
+    provenance = report.get("provenance")
+    if not isinstance(provenance, dict):
+        return {"present": False, "freshness_matched": False}
+
+    recorded_source = provenance.get("source_tree") if isinstance(provenance.get("source_tree"), dict) else {}
+    current_source = source_tree_hash(repo_root, source_paths)
+    source_hash_matches = recorded_source.get("sha256") == current_source.get("sha256")
+
+    artifact_checks: dict[str, Any] = {}
+    recorded_artifacts = provenance.get("artifacts") if isinstance(provenance.get("artifacts"), dict) else {}
+    for name in ("verifier", "lifecycle"):
+        artifact = recorded_artifacts.get(name) if isinstance(recorded_artifacts.get(name), dict) else {}
+        raw_path = artifact.get("path")
+        path = Path(raw_path) if isinstance(raw_path, str) else None
+        if path is not None and not path.is_absolute():
+            path = repo_root / path
+        exists = path.is_file() if path is not None else False
+        current_sha = file_sha256_hex(path) if exists and path is not None else None
+        artifact_checks[name] = {
+            "present": bool(artifact),
+            "path": raw_path,
+            "exists": exists,
+            "sha256_matches": current_sha == artifact.get("sha256"),
+            "recorded_sha256": artifact.get("sha256"),
+            "current_sha256": current_sha,
+        }
+    artifact_hashes_match = all(row["present"] and row["exists"] and row["sha256_matches"] for row in artifact_checks.values())
+
+    return {
+        "present": True,
+        "freshness_matched": source_hash_matches and artifact_hashes_match,
+        "repo_commit": provenance.get("repo_commit"),
+        "current_repo_commit": git_commit(repo_root),
+        "repo_commit_matches": provenance.get("repo_commit") == git_commit(repo_root),
+        "source_hash_matches": source_hash_matches,
+        "recorded_source_hash": recorded_source.get("sha256"),
+        "current_source_hash": current_source.get("sha256"),
+        "recorded_file_count": recorded_source.get("file_count"),
+        "current_file_count": current_source.get("file_count"),
+        "artifact_hashes_match": artifact_hashes_match,
+        "artifacts": artifact_checks,
+    }
+
+
+def negative_case_matched(report: dict[str, Any], key: str) -> bool | None:
+    negative = report.get("negative_cases") if isinstance(report.get("negative_cases"), dict) else {}
+    row = negative.get(key) if isinstance(negative.get(key), dict) else None
+    if row is None:
+        return None
+    return row.get("status") == "rejected" and row.get("matched_expected") is True
+
+
+def live_core_summary(report: dict[str, Any] | None, repo_root: Path) -> dict[str, Any]:
     if report is None:
         return {"present": False}
     if "_invalid_json" in report:
         return {"present": True, "valid_json": False, "error": report["_invalid_json"]}
     transition = report.get("transition") if isinstance(report.get("transition"), dict) else {}
-    negative = report.get("negative_cases") if isinstance(report.get("negative_cases"), dict) else {}
+    provenance = provenance_summary(report, repo_root, CORE_STATEFUL_SOURCE_PATHS)
     return {
         "present": True,
         "valid_json": True,
         "status": report.get("status"),
         "live_devnet_rpc_executed": report.get("live_devnet_rpc_executed") is True,
         "stateful_lifecycle_executed": report.get("stateful_lifecycle_executed") is True,
+        "provenance": provenance,
+        "provenance_freshness_matched": provenance.get("freshness_matched") is True,
         "bootstrap_tx_hash": ((report.get("bootstrap") or {}).get("commit") or {}).get("tx_hash")
         if isinstance(report.get("bootstrap"), dict)
         else None,
@@ -140,13 +217,11 @@ def live_core_summary(report: dict[str, Any] | None) -> dict[str, Any]:
         "old_state_not_live": transition.get("old_state_not_live"),
         "new_state_live": transition.get("new_state_live"),
         "receipt_live": transition.get("receipt_live"),
-        "wrong_signature_rejected": (negative.get("wrong_signature_dry_run") or {}).get("status") == "rejected"
-        if isinstance(negative.get("wrong_signature_dry_run"), dict)
-        else None,
+        "wrong_signature_rejected": negative_case_matched(report, "wrong_signature_dry_run"),
     }
 
 
-def live_agreement_summary(report: dict[str, Any] | None) -> dict[str, Any]:
+def live_agreement_summary(report: dict[str, Any] | None, repo_root: Path) -> dict[str, Any]:
     if report is None:
         return {"present": False}
     if "_invalid_json" in report:
@@ -155,13 +230,15 @@ def live_agreement_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     claim_originate = report.get("claim_originate") if isinstance(report.get("claim_originate"), dict) else {}
     repay = report.get("repay") if isinstance(report.get("repay"), dict) else {}
     claim = report.get("claim") if isinstance(report.get("claim"), dict) else {}
-    negative = report.get("negative_cases") if isinstance(report.get("negative_cases"), dict) else {}
+    provenance = provenance_summary(report, repo_root, AGREEMENT_STATEFUL_SOURCE_PATHS)
     return {
         "present": True,
         "valid_json": True,
         "status": report.get("status"),
         "live_devnet_rpc_executed": report.get("live_devnet_rpc_executed") is True,
         "stateful_lifecycle_executed": report.get("stateful_lifecycle_executed") is True,
+        "provenance": provenance,
+        "provenance_freshness_matched": provenance.get("freshness_matched") is True,
         "originate_tx_hash": (originate.get("commit") or {}).get("tx_hash")
         if isinstance(originate.get("commit"), dict)
         else None,
@@ -185,42 +262,25 @@ def live_agreement_summary(report: dict[str, Any] | None) -> dict[str, Any]:
         "claim_closed_live": claim.get("closed_live"),
         "claim_lender_default_claim_live": claim.get("lender_default_claim_live"),
         "claim_receipt_live": claim.get("receipt_live"),
-        "wrong_lender_signature_rejected": (negative.get("wrong_lender_signature_dry_run") or {}).get("status")
-        == "rejected"
-        if isinstance(negative.get("wrong_lender_signature_dry_run"), dict)
+        "wrong_lender_signature_rejected": negative_case_matched(report, "wrong_lender_signature_dry_run"),
+        "non_ckb_asset_kind_rejected": negative_case_matched(report, "non_ckb_asset_kind_dry_run"),
+        "wrong_borrower_signature_rejected": negative_case_matched(report, "wrong_borrower_signature_dry_run"),
+        "repay_payout_capacity_short_rejected": negative_case_matched(report, "repay_payout_capacity_short_dry_run"),
+        "repay_payout_lock_args_mismatch_rejected": negative_case_matched(
+            report,
+            "repay_payout_lock_args_mismatch_dry_run",
+        ),
+        "repay_wrong_payout_amount_rejected": negative_case_matched(report, "repay_wrong_payout_amount_dry_run"),
+        "early_claim_rejected": negative_case_matched(report, "early_claim_dry_run"),
+        "wrong_lender_claim_signature_rejected": negative_case_matched(report, "wrong_lender_claim_signature_dry_run"),
+        "post_negative_active_still_live": (report.get("negative_cases") or {}).get("post_negative_active_still_live")
+        if isinstance(report.get("negative_cases"), dict)
         else None,
-        "non_ckb_asset_kind_rejected": (negative.get("non_ckb_asset_kind_dry_run") or {}).get("status") == "rejected"
-        if isinstance(negative.get("non_ckb_asset_kind_dry_run"), dict)
+        "post_claim_negative_active_still_live": (report.get("negative_cases") or {}).get(
+            "post_claim_negative_active_still_live"
+        )
+        if isinstance(report.get("negative_cases"), dict)
         else None,
-        "wrong_borrower_signature_rejected": (negative.get("wrong_borrower_signature_dry_run") or {}).get("status")
-        == "rejected"
-        if isinstance(negative.get("wrong_borrower_signature_dry_run"), dict)
-        else None,
-        "repay_payout_capacity_short_rejected": (negative.get("repay_payout_capacity_short_dry_run") or {}).get("status")
-        == "rejected"
-        if isinstance(negative.get("repay_payout_capacity_short_dry_run"), dict)
-        else None,
-        "repay_payout_lock_args_mismatch_rejected": (
-            negative.get("repay_payout_lock_args_mismatch_dry_run") or {}
-        ).get("status")
-        == "rejected"
-        if isinstance(negative.get("repay_payout_lock_args_mismatch_dry_run"), dict)
-        else None,
-        "repay_wrong_payout_amount_rejected": (negative.get("repay_wrong_payout_amount_dry_run") or {}).get("status")
-        == "rejected"
-        if isinstance(negative.get("repay_wrong_payout_amount_dry_run"), dict)
-        else None,
-        "early_claim_rejected": (negative.get("early_claim_dry_run") or {}).get("status") == "rejected"
-        if isinstance(negative.get("early_claim_dry_run"), dict)
-        else None,
-        "wrong_lender_claim_signature_rejected": (
-            negative.get("wrong_lender_claim_signature_dry_run") or {}
-        ).get("status")
-        == "rejected"
-        if isinstance(negative.get("wrong_lender_claim_signature_dry_run"), dict)
-        else None,
-        "post_negative_active_still_live": negative.get("post_negative_active_still_live"),
-        "post_claim_negative_active_still_live": negative.get("post_claim_negative_active_still_live"),
     }
 
 
@@ -237,12 +297,16 @@ def build_report(repo_root: Path) -> dict[str, Any]:
     agreement_actions = find_actions(agreement_source)
     core_combined = load_json(core_root / "target/novaseal-combined-tx-report.json")
     agreement_tx = load_json(agreement_root / "target/nova-agreement-ckb-tx-report.json")
-    live_core = live_core_summary(load_json(repo_root / "target/novaseal-devnet-stateful-live.json"))
-    live_agreement = live_agreement_summary(load_json(repo_root / "target/novaseal-agreement-devnet-stateful-live.json"))
+    live_core = live_core_summary(load_json(repo_root / "target/novaseal-devnet-stateful-live.json"), repo_root)
+    live_agreement = live_agreement_summary(
+        load_json(repo_root / "target/novaseal-agreement-devnet-stateful-live.json"),
+        repo_root,
+    )
     core_live_passed = (
         live_core.get("status") == "passed"
         and live_core.get("live_devnet_rpc_executed") is True
         and live_core.get("stateful_lifecycle_executed") is True
+        and live_core.get("provenance_freshness_matched") is True
         and live_core.get("old_state_not_live") is True
         and live_core.get("new_state_live") is True
         and live_core.get("receipt_live") is True
@@ -252,6 +316,7 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         live_agreement.get("status") == "passed"
         and live_agreement.get("live_devnet_rpc_executed") is True
         and live_agreement.get("stateful_lifecycle_executed") is True
+        and live_agreement.get("provenance_freshness_matched") is True
         and live_agreement.get("origin_active_live") is True
         and live_agreement.get("origin_principal_payout_live") is True
         and live_agreement.get("origin_receipt_live") is True
@@ -372,13 +437,15 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         "classification": "live_devnet_stateful_release_gate",
         "status": status,
         "production_ready": False,
-        "live_devnet_rpc_executed": any(scenario["live_devnet_rpc_executed"] for scenario in scenarios),
-        "stateful_lifecycle_executed": any(scenario["stateful_lifecycle_executed"] for scenario in scenarios),
+        "live_devnet_rpc_executed": all(scenario["live_devnet_rpc_executed"] for scenario in scenarios),
+        "stateful_lifecycle_executed": all(scenario["stateful_lifecycle_executed"] for scenario in scenarios),
         "repo_root": str(repo_root),
         "requirements": [
             "deploy runtime verifier and protocol artifacts as live CellDeps",
             "submit transactions through CKB RPC, not only in-memory ResolvedTransaction",
             "commit each valid step and verify old inputs are dead plus new state/receipt/payout outputs are live",
+            "verify live output capacity/lock/type/data and reject stale source/artifact provenance",
+            "prove negative dry-runs fail from the expected lifecycle script and artifact hash",
             "use one stable type-script identity for a lifecycle, or an explicitly audited dispatcher/bootstrap surface",
             "run negative cases as dry-run/send-test rejections without mutating live state",
         ],
@@ -386,10 +453,11 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         "blocker_count": len(all_blockers),
         "blockers": all_blockers,
         "next_engineering_step": (
-            "Implement the Agreement Profile live originate -> repay/claim RPC runner and attach it to this gate."
-            if core_live_passed
-            else "Wire this gate to the existing CKB integration devnet RPC helpers for deploy -> submit -> commit -> "
-            "get_live_cell checks; do not mark passed until live_devnet_rpc_executed and stateful_lifecycle_executed are true."
+            "Stateful live-devnet acceptance is complete; production readiness is now governed by public CellDep "
+            "pinning, wallet/Molecule vectors, and external verifier TCB attestation."
+            if status == "passed"
+            else "Re-run the live core/agreement devnet runners after source or artifact changes; this gate fails closed "
+            "until both reports have fresh provenance, strict output checks, and matched negative dry-run errors."
         ),
     }
 
