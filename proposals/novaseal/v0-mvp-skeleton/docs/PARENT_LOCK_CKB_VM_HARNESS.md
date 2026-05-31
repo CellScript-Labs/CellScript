@@ -83,4 +83,6 @@ It is still not production acceptance evidence:
 - official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a public/shared deployment attestation flow,
 - the resolved transaction is harness-constructed and not yet produced by a production builder,
 - capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements,
-- the eight transition fixtures are still model-level, not full parent-lock transaction runs.
+- this parent-lock harness covers the three authority cases; full lock+type
+  transaction evidence for all eight transition fixtures is recorded in
+  `docs/COMBINED_TX_HARNESS.md` and `target/novaseal-combined-tx-report.json`.

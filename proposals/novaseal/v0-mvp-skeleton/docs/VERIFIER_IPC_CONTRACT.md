@@ -91,7 +91,7 @@ The malformed set covers wrong magic, unsupported version, unsupported scheme, n
 
 ## Current Limits
 
-This is still not criterion 6 on chain:
+This is still not production/public/shared criterion 6 evidence:
 
 - `nova_btc_authority_lock.cell` constructs this envelope and sends it through `spawn_with_fd`,
 - lock-level verifier spawn is generated and points at the BIP340 shell; the parent-lock CKB VM harness now executes parent spawn plus nested child verification,
@@ -100,7 +100,8 @@ This is still not criterion 6 on chain:
 - the current RISC-V verifier binary shell reads inherited fd index `0` as 18 little-endian `u64` words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
 - the no-std core currently covers both the envelope parser and BIP340 verification,
 - child-verifier and parent-lock CKB VM harness evidence exists, and the parent-lock harness now records transaction-shape tx-size/capacity facts plus official resolved lock-group verifier success and full transaction script-verifier success,
-- no public/shared deployment attestation exists yet,
+- no public/shared CellDep attestation exists yet,
+- no external BIP340 TCB review exists yet,
 - the generated `btc_authority` lock surface proves Script.args binding and spawn/IPC wiring, while crypto execution remains external harness evidence.
 
 This contract is deliberately small so the next slice can attach public/shared CellDep attestation and external TCB review without changing the signed message or public vector set.

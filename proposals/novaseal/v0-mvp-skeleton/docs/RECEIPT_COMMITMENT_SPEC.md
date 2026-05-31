@@ -108,9 +108,11 @@ receipt_commitment_status=split_intent_and_explicit_receipt_commitment
 This is still packed-reference evidence:
 
 - not Molecule output,
-- not final wallet signing material,
-- not a public/shared devnet deployment pin,
-- not a historical receipt accumulator.
+- fixed-width wallet signing material now exists and is included in the local
+  production gate,
+- not a public/shared deployment attestation,
+- not a historical receipt accumulator,
+- not real wallet UX/PSBT integration.
 
 Before production, the same preimage rule must be adopted by wallet tooling,
 Molecule/reference encoders, deployment manifests, and any external signer UX.

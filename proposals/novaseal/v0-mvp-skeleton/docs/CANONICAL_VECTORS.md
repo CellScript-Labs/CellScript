@@ -9,7 +9,11 @@ This slice produces deterministic packed-reference byte vectors from the eight
 current fixture JSON files and `target/novaseal-schema-layout.json`.
 
 It is not Molecule output, not CKB VM witness encoding, and not BTC wallet
-signing material.
+signing material. Fixed-width wallet signing vectors are generated separately
+by `/home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py`
+into `/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json`.
+These canonical vectors are the input/foundation layer, not the final signing
+layer.
 
 ## Current Result
 

@@ -2,7 +2,9 @@
 
 **Status**: reviewable CKB-native agreement skeleton with audited terminal-path
 structure, local transaction-shape evidence, resolved transaction verifier
-evidence, and live devnet lifecycle evidence.
+evidence, live devnet lifecycle evidence, fixed-width wallet signing vectors,
+and local production-gate checks. Public/shared CellDep attestation and external
+BIP340 TCB review are still required before production claims.
 
 **Roadmap position**: this package is the current NovaSeal **v0.2 Agreement
 Profile** stage. The package/schema name remains `agreement-profile-v0` because

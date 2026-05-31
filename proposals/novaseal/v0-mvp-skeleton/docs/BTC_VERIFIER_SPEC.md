@@ -11,6 +11,8 @@
 **IPC report**: `target/novaseal-btc-verifier-ipc-vectors.json`
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Parent VM report**: `target/novaseal-parent-lock-ckb-vm-report.json`
+**TCB review bundle**: `target/novaseal-bip340-tcb-review.json`
+**Production gate report**: `target/novaseal-production-gates.json`
 **Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, official full transaction script-verifier execution, local devnet pinning, and local TCB review; no public/shared deployment attestation or external TCB review yet.
 
 This spec fixes the v0 MVP verifier shape to a single-key BIP340 Schnorr profile. ECDSA and multisig descriptors remain out of scope for this strict MVP slice.
@@ -47,6 +49,8 @@ cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --ta
 python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
 ```
 
 Current summary:
@@ -115,13 +119,15 @@ It should return:
 
 ## Current Limits
 
-This does not yet prove criterion 6 on chain:
+Criterion 6 now has local and local-devnet evidence, not public/shared production
+attestation or external BIP340 TCB acceptance:
 
 - the `.cell` lock delegates to the RISC-V BIP340 shell and the parent-lock CKB VM harness now executes parent spawn plus nested child verification,
 - the generated audit bundle exposes `btc_authority` lock-args binding and spawn/IPC shell wiring, while cryptographic execution evidence remains harness-level rather than generated ProofPlan transaction coverage,
 - the current CellScript VM2 spawn helper emits executable VM2 `ecall` wrappers and static spawn targets have a strict first-CellDep `code` manifest-bound builder model; the NovaSeal lock uses `spawn_with_fd` and the fixed 18-word IPC envelope,
 - the Rust verifier is implemented in the shared no-std core and reused by the host verifier and RISC-V shell; the staged child ELF now executes in CKB VM with harness-provided inherited-fd input,
 - resolved lock-group and full transaction script-verifier evidence now record `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles for the three parent authority cases,
-- no public/shared deployment attestation or external TCB review exists; eight-fixture combined transaction verifier evidence is harness-level only.
+- the local TCB review bundle is written to `target/novaseal-bip340-tcb-review.json`, and the local production gate report is written to `target/novaseal-production-gates.json`,
+- no public/shared deployment attestation or external TCB review exists; eight-fixture combined transaction verifier evidence is local node-verification-stack evidence.
 
 The next implementation slice should attach real public/shared CellDep attestation and external TCB review without pretending that harness-level VM success alone is production coverage.

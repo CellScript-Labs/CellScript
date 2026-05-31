@@ -46,7 +46,7 @@ This skeleton deliberately **excludes**:
 
 ## Strict v0 Acceptance Criteria (This Skeleton Only)
 
-The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. This skeleton records the target and currently proves only the parts surfaced by `cellc audit-bundle`.
+The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. This skeleton records the target and now has strict 0.16 closure, combined lock+type transaction harness evidence, live local devnet evidence, fixed-width wallet signing vectors, local BIP340 TCB review, and a local production gate. Local production-prep evidence passes. Production claims remain blocked on public/shared CellDep attestation and external BIP340 TCB review.
 
 1. `old NovaSealCell` is consumed exactly once in a valid transition.
 2. `new NovaSealCell` is created exactly once in the same transition.
@@ -121,10 +121,14 @@ novaseal-v0-mvp-skeleton/
 │   ├── policy_hash_mismatch_reject.json
 │   └── receipt_hash_mismatch_reject.json
 └── proofs/
+    ├── bip340_external_tcb_review_attestation.template.json
     ├── proofplan.json
     ├── proofplan_mapping.json   # generated-audit vs target-criteria mapping
+    ├── public_shared_cell_dep_attestation.template.json
     └── invariant_matrix.json
 ```
+
+Repository-root NovaSeal scripts such as `scripts/novaseal_wallet_signing_vectors.py`, `scripts/novaseal_bip340_tcb_review.py`, and `scripts/novaseal_production_gates.py` are outside this package's `scripts/` directory.
 
 ---
 
@@ -145,17 +149,17 @@ The `nova_btc_authority_lock` delegates to a dedicated verifier binary via `spaw
 
 **This verifier binary is NOT a minor plugin.** It is a first-class security root for v0.
 
-For any real implementation the following MUST be specified before the verifier is written:
+For any real implementation the following verifier inputs MUST stay frozen:
 
-- Signature scheme: ECDSA (secp256k1) or BIP340 Schnorr (Taproot)?
-- Encoding: DER or compact 64-byte?
-- Low-S rule enforcement?
-- Message: raw `blake2b(intent)` or tagged hash (e.g. `BIP340/Tag || intent_hash`)?
-- Pubkey format: compressed 33-byte, x-only 32-byte?
-- Malleability rejection rules?
-- Test vectors (at minimum 20 positive + 20 negative, including edge cases for low-S, high-S, wrong parity, etc.)
+- Signature scheme: BIP340 Schnorr over secp256k1.
+- Encoding: compact 64-byte `r || s` signature.
+- Low-S rule: not applicable to BIP340; reject `s >= n`.
+- Message: 32-byte `signed_intent_hash_after_resolved_receipt`.
+- Pubkey format: x-only 32-byte BIP340 pubkey.
+- Malleability rejection rules: reject `r >= p`, reject `s >= n`, lift x-only pubkey to even-y point, and require reconstructed `R` to have even y.
+- Test vectors: 32 positives, 40 negatives, plus malformed IPC vectors.
 
-Until the above is frozen in `schemas/` + a separate `novaseal_btc_verifier` spec, no production claim can be made.
+The BIP340 verifier profile, IPC envelope, RISC-V shell, and local TCB review now exist. Local evidence is frozen for this slice; external TCB attestation is still required before production claims.
 
 The `.cell` lock and state action now call `verifier::btc::bip340::require_signature(...)`; the compiler expands that generic verifier capability into the fixed 18-word spawn/IPC envelope and delegates to the `cellscript_btc_bip340_verifier_riscv` spawn verifier. The host verifier, no-std core, RISC-V shell, child-verifier `ckb-vm` harness, parent-lock `ckb-vm` harness, official resolved lock-group verifier, official full transaction script verifier, and local CKB contextual transaction verifier all check the same frozen BIP340 vector contract for the parent authority cases. The lock and state action also parse one shared witness ABI, and the combined harness now runs all eight fixtures through both verifier layers with lock and type/action groups present, `Output#1` receipt materialisation, and fee/capacity/tx-size checks. Core live devnet RPC evidence, fixed-width wallet signing vectors, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle now exist; the remaining production work is public/shared CellDep attestation and external BIP340 TCB review. The actual crypto still lives in the delegated verifier binary, so that binary remains a first-class TCB item.
 
@@ -271,7 +275,19 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_h
 # 17. Run the deterministic fixture harness (source-model plus attached evidence)
 python3 scripts/novaseal_fixture_harness.py --pretty
 
-# 18. Inspect obligations
+# 18. Generate fixed-width wallet signing vectors from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
+
+# 19. Generate the local BIP340 TCB review bundle from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
+
+# 20. Run the local production-prep gate from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+
+# 21. Check strict 0.16 primitive closure
+cellc check --target-profile ckb --primitive-strict 0.16
+
+# 22. Inspect obligations
 cellc constraints --target-profile ckb
 cellc explain-assumptions --target-profile ckb
 cellc profile --target-profile ckb
@@ -304,7 +320,7 @@ Do **not** add SPV, OP_RETURN, Fiber channel semantics, or any new protocol feat
 
 This skeleton is **not** a declaration that "NovaSeal exists". It is an engineering artifact that lets the community evaluate whether the CellScript + explicit schema-backed CKB Cell state + ProofPlan model is a good host for Bitcoin-authorised CKB objects.
 
-If the 9 criteria can be met cleanly, then the design thesis has survived its first serious implementation filter.
+The 9 criteria are met at the local evidence level. Production claims still require the external/public facts identified above: public/shared CellDep attestation and external BIP340 TCB review.
 
 **Author of this skeleton**: Grok (acting on tightened feedback from human review, 2026-05-30)
 
